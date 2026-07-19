@@ -91,6 +91,34 @@ describe("LogcatCollector", () => {
       .toEqual(["start", "end"]);
   });
 
+  it("starts before launch and scopes buffered and future lines to the App PID", () => {
+    const adb = adbPort();
+    const collector = new LogcatCollector(adb, new FakeClock());
+    collector.start({ deviceSerial: "device" });
+    const options = captureOptions(adb);
+    options.onStdoutLine(
+      "07-19 15:00:00.100  41  41 D Other: ignore"
+    );
+    options.onStdoutLine(
+      "07-19 15:00:00.101  42  42 D App: startup"
+    );
+
+    collector.scopeToPid(42);
+    options.onStdoutLine(
+      "07-19 15:00:00.102  41  41 D Other: ignore later"
+    );
+    options.onStdoutLine(
+      "07-19 15:00:00.103  42  42 D App: ready"
+    );
+
+    expect(collector.metadata()).toEqual({
+      deviceSerial: "device",
+      pid: 42
+    });
+    expect(collector.lines().map((line) => line.message))
+      .toEqual(["startup", "ready"]);
+  });
+
   it("stops the underlying stream idempotently", () => {
     const adb = adbPort();
     const collector = new LogcatCollector(adb, new FakeClock());

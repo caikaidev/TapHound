@@ -101,4 +101,27 @@ describe("AdbAdapter", () => {
       ]
     }, { onStdoutLine });
   });
+
+  it("starts unscoped Logcat before the App PID is known", () => {
+    const runner = processRunner();
+    vi.mocked(runner.start).mockReturnValue(runningCommand());
+    const adapter = new AdbAdapter(runner);
+    const onStdoutLine = vi.fn();
+
+    adapter.startLogcat({
+      deviceSerial: "emulator-5554",
+      onStdoutLine
+    });
+
+    expect(vi.mocked(runner.start)).toHaveBeenCalledWith({
+      executable: "adb",
+      args: [
+        "-s",
+        "emulator-5554",
+        "logcat",
+        "-v",
+        "threadtime"
+      ]
+    }, { onStdoutLine });
+  });
 });

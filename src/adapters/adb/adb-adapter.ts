@@ -168,7 +168,9 @@ export class AdbAdapter implements AdbPort {
         "logcat",
         "-v",
         "threadtime",
-        `--pid=${String(options.pid)}`
+        ...(options.pid === undefined
+          ? []
+          : [`--pid=${String(options.pid)}`])
       ],
       ...(options.signal === undefined ? {} : { signal: options.signal })
     }, {

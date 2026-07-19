@@ -17,7 +17,7 @@ export interface AppIdentity {
 
 export interface LogcatOptions {
   deviceSerial: string;
-  pid: number;
+  pid?: number | undefined;
   onStdoutLine: (line: string) => void;
   onStderrLine?: ((line: string) => void) | undefined;
   signal?: AbortSignal | undefined;

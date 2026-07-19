@@ -1,0 +1,214 @@
+import { describe, expect, it, vi } from "vitest";
+
+import {
+  VerifyRuntime,
+  type StepRunnerLike,
+  type VerifyInput
+} from "../../../src/application/runtime/verify-runtime.js";
+import type { StepRunner } from "../../../src/application/runtime/step-runner.js";
+import type { CommandResult } from "../../../src/ports/process-runner.js";
+import {
+  runtimeConfig,
+  runtimeFixture,
+  runtimeJourney
+} from "../../fakes/runtime-fixture.js";
+import { commandResult } from "../../fakes/process-runner.js";
+
+function input(signal?: AbortSignal): VerifyInput {
+  return {
+    config: runtimeConfig,
+    journey: runtimeJourney,
+    projectRoot: "/project",
+    deviceSerial: "emulator-5554",
+    toolVersions: { node: "24.3.0", adb: "1.0.41", android: "1.0.0" },
+    ...(signal === undefined ? {} : { signal })
+  };
+}
+
+describe("VerifyRuntime", () => {
+  it("orchestrates the full deterministic verification order", async () => {
+    const test = runtimeFixture();
+
+    const result = await new VerifyRuntime(test.dependencies).verify(input());
+
+    expect(result).toMatchObject({
+      status: "passed",
+      exitCode: 0,
+      report: {
+        status: "passed",
+        layers: {
+          build: "passed",
+          run: "passed",
+          structural: "passed",
+          activityCheckpoint: "passed",
+          explicitExpect: "passed",
+          collection: "passed"
+        },
+        artifacts: {
+          screenshot: "screenshot.png",
+          logcat: "logcat.txt",
+          stepLogs: ["steps/001-logcat.txt"]
+        }
+      }
+    });
+    expect(test.order).toEqual([
+      "build",
+      "describe",
+      "logcat-start",
+      "run",
+      "pid",
+      "activity-main",
+      "baseline",
+      "activity-main",
+      "step-layout",
+      "action",
+      "idle",
+      "pid",
+      "activity-search",
+      "screenshot",
+      "logcat-stop",
+      "report"
+    ]);
+    expect(test.artifacts.session.text.has("logcat.txt")).toBe(true);
+    expect(test.artifacts.session.published).toBe(true);
+  });
+
+  it("fails fast at build but still finalizes best-effort evidence", async () => {
+    const test = runtimeFixture();
+    test.dependencies.gradle = {
+      build: (): Promise<CommandResult> => {
+        test.order.push("build");
+        return Promise.resolve(commandResult({
+          exitCode: 1,
+          stderr: "Gradle failed"
+        }));
+      }
+    };
+
+    const result = await new VerifyRuntime(test.dependencies).verify(input());
+
+    expect(result).toMatchObject({
+      status: "failed",
+      exitCode: 1,
+      report: {
+        primaryFailure: { code: "BUILD_FAILED", message: "Gradle failed" },
+        layers: { build: "failed", run: "notRun" }
+      }
+    });
+    expect(test.order).toEqual(["build", "screenshot", "report"]);
+  });
+
+  it("finalizes Logcat when App launch fails", async () => {
+    const test = runtimeFixture();
+    vi.mocked(test.androidCli.runApp).mockImplementation(() => {
+      test.order.push("run");
+      return Promise.resolve(commandResult({ exitCode: 1, stderr: "launch failed" }));
+    });
+
+    const result = await new VerifyRuntime(test.dependencies).verify(input());
+
+    expect(result.report.primaryFailure?.code).toBe("APP_LAUNCH_FAILED");
+    expect(test.order).toEqual([
+      "build",
+      "describe",
+      "logcat-start",
+      "run",
+      "screenshot",
+      "logcat-stop",
+      "report"
+    ]);
+  });
+
+  it("preserves a step failure when screenshot collection also fails", async () => {
+    const test = runtimeFixture();
+    vi.mocked(test.androidCli.layout)
+      .mockImplementationOnce(() => {
+        test.order.push("baseline");
+        return Promise.resolve([]);
+      })
+      .mockImplementationOnce(() => {
+        test.order.push("step-layout");
+        return Promise.resolve([]);
+      });
+    vi.mocked(test.androidCli.captureScreen).mockImplementation(() => {
+      test.order.push("screenshot");
+      return Promise.resolve(commandResult({ exitCode: 1, stderr: "capture failed" }));
+    });
+
+    const result = await new VerifyRuntime(test.dependencies).verify(input());
+
+    expect(result).toMatchObject({
+      status: "failed",
+      report: {
+        primaryFailure: { code: "LOCATOR_NOT_FOUND" },
+        secondaryErrors: [{ code: "COLLECTION_FAILED", message: "capture failed" }],
+        layers: { structural: "failed", collection: "failed" }
+      }
+    });
+  });
+
+  it("continues verification when Logcat collection cannot start", async () => {
+    const test = runtimeFixture();
+    vi.mocked(test.adb.startLogcat).mockImplementation(() => {
+      test.order.push("logcat-start");
+      throw new Error("logcat unavailable");
+    });
+
+    const result = await new VerifyRuntime(test.dependencies).verify(input());
+
+    expect(result).toMatchObject({
+      status: "failed",
+      report: {
+        primaryFailure: {
+          code: "COLLECTION_FAILED",
+          message: "logcat unavailable"
+        },
+        steps: [{ status: "passed" }]
+      }
+    });
+    expect(test.order).toContain("action");
+  });
+
+  it("maps readiness command errors to APP_LAUNCH_FAILED", async () => {
+    const test = runtimeFixture();
+    vi.mocked(test.adb.pid).mockRejectedValue(new Error("ADB disconnected"));
+
+    const result = await new VerifyRuntime(test.dependencies).verify(input());
+
+    expect(result).toMatchObject({
+      status: "failed",
+      report: {
+        primaryFailure: {
+          code: "APP_LAUNCH_FAILED",
+          message: "ADB disconnected"
+        }
+      }
+    });
+  });
+
+  it("maps cancellation to a stable INTERNAL_ERROR result and finalizes", async () => {
+    const test = runtimeFixture();
+    test.dependencies.createStepRunner = (): StepRunnerLike => ({
+      run: vi.fn<StepRunner["run"]>(() => Promise.resolve({
+        status: "cancelled",
+        report: {
+          index: 0,
+          action: "click",
+          status: "notRun",
+          startedAtMs: 0,
+          finishedAtMs: 0,
+          durationMs: 0
+        }
+      }))
+    });
+
+    const result = await new VerifyRuntime(test.dependencies).verify(input());
+
+    expect(result).toMatchObject({
+      status: "error",
+      exitCode: 4,
+      report: { primaryFailure: { code: "INTERNAL_ERROR" } }
+    });
+    expect(test.order.at(-1)).toBe("report");
+  });
+});

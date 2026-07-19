@@ -22,10 +22,12 @@ export interface LogcatLine {
 
 export interface LogcatMetadata {
   deviceSerial: string;
-  pid: number;
+  pid?: number | undefined;
 }
 
-export interface StartLogcatOptions extends LogcatMetadata {
+export interface StartLogcatOptions {
+  deviceSerial: string;
+  pid?: number | undefined;
   signal?: AbortSignal | undefined;
 }
 
@@ -77,19 +79,32 @@ export class LogcatCollector {
 
     const logcatOptions: LogcatOptions = {
       deviceSerial: options.deviceSerial,
-      pid: options.pid,
       onStdoutLine: (line): void => {
         this.collected.push(parseLine(line, this.clock.now()));
       },
       onStderrLine: (line): void => {
         this.stderr.push(line);
       },
+      ...(options.pid === undefined ? {} : { pid: options.pid }),
       ...(options.signal === undefined ? {} : { signal: options.signal })
     };
     this.running = this.adb.startLogcat(logcatOptions);
     this.streamMetadata = {
       deviceSerial: options.deviceSerial,
-      pid: options.pid
+      ...(options.pid === undefined ? {} : { pid: options.pid })
+    };
+  }
+
+  public scopeToPid(pid: number): void {
+    if (this.streamMetadata === undefined) {
+      throw new Error("Logcat collector has not started");
+    }
+    if (!Number.isInteger(pid) || pid <= 0) {
+      throw new Error("Logcat PID must be a positive integer");
+    }
+    this.streamMetadata = {
+      ...this.streamMetadata,
+      pid
     };
   }
 
@@ -101,7 +116,10 @@ export class LogcatCollector {
   }
 
   public lines(): readonly LogcatLine[] {
-    return [...this.collected];
+    const pid = this.streamMetadata?.pid;
+    return this.collected.filter(
+      (line) => pid === undefined || line.pid === undefined || line.pid === pid
+    );
   }
 
   public diagnosticLines(): readonly string[] {
@@ -109,7 +127,7 @@ export class LogcatCollector {
   }
 
   public linesBetween(startedAt: number, finishedAt: number): LogcatLine[] {
-    return this.collected.filter(
+    return this.lines().filter(
       (line) => line.receivedAt >= startedAt && line.receivedAt <= finishedAt
     );
   }

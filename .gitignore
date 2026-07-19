@@ -1,2 +1,6 @@
 .worktrees/
 
+.apr/
+coverage/
+dist/
+node_modules/

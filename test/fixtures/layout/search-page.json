@@ -1,0 +1,26 @@
+{
+  "id": "root",
+  "enabled": true,
+  "bounds": {
+    "left": 0,
+    "top": 0,
+    "right": 1080,
+    "bottom": 2400
+  },
+  "children": [
+    {
+      "id": "root/0",
+      "resourceId": "search_input",
+      "text": "hello world",
+      "clickable": true,
+      "enabled": true,
+      "bounds": {
+        "left": 32,
+        "top": 80,
+        "right": 1048,
+        "bottom": 200
+      },
+      "children": []
+    }
+  ]
+}

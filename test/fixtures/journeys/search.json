@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "name": "Search",
+  "steps": [
+    {
+      "action": "click",
+      "locator": {
+        "resourceId": "toolbar_search"
+      },
+      "activity": {
+        "before": "com.example.app.MainActivity",
+        "after": "com.example.app.SearchActivity"
+      },
+      "expect": {
+        "type": "element",
+        "locator": {
+          "resourceId": "search_input"
+        },
+        "timeoutMs": 3000
+      }
+    },
+    {
+      "action": "inputText",
+      "text": "hello world",
+      "activity": {
+        "before": "com.example.app.SearchActivity",
+        "after": "com.example.app.SearchActivity"
+      },
+      "expect": {
+        "type": "logcat",
+        "tag": "SearchViewModel",
+        "level": "D",
+        "pattern": "query=hello world",
+        "match": "literal",
+        "timeoutMs": 3000
+      }
+    },
+    {
+      "action": "swipe",
+      "locator": {
+        "resourceId": "search_results"
+      },
+      "direction": "up",
+      "distancePercent": 0.6,
+      "durationMs": 300,
+      "activity": {
+        "before": "com.example.app.SearchActivity",
+        "after": "com.example.app.SearchActivity"
+      }
+    },
+    {
+      "action": "longClick",
+      "locator": {
+        "text": "hello world"
+      },
+      "durationMs": 800,
+      "activity": {
+        "before": "com.example.app.SearchActivity",
+        "after": "com.example.app.SearchActivity"
+      }
+    },
+    {
+      "action": "back",
+      "activity": {
+        "before": "com.example.app.SearchActivity",
+        "after": "com.example.app.MainActivity"
+      }
+    },
+    {
+      "action": "wait",
+      "activity": {
+        "before": "com.example.app.MainActivity",
+        "after": "com.example.app.MainActivity"
+      }
+    }
+  ]
+}

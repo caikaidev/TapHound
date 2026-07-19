@@ -12,7 +12,7 @@ export type DoctorCheckName =
 
 export interface DoctorCheck {
   name: DoctorCheckName;
-  status: "passed" | "failed";
+  status: "passed" | "failed" | "notRun";
   version?: string | undefined;
   message?: string | undefined;
 }
@@ -32,6 +32,13 @@ export interface DoctorDependencies {
   adb: AdbPort;
   nodeVersion: string;
   checkGradleWrapper: (projectRoot: string) => Promise<boolean>;
+  checkAndroidPermissions: (
+    deviceSerial: string,
+    signal?: AbortSignal
+  ) => Promise<{
+    status: "passed" | "failed";
+    message?: string | undefined;
+  }>;
 }
 
 function firstLine(value: string): string {
@@ -61,7 +68,7 @@ export class DoctorService {
   ): Promise<DoctorReport> {
     const checks: DoctorCheck[] = [nodeCheck(this.dependencies.nodeVersion)];
     const tool = async (
-      name: Extract<DoctorCheckName, "adb" | "android" | "permissions">,
+      name: Extract<DoctorCheckName, "adb" | "android">,
       executable: string,
       args: readonly string[]
     ): Promise<DoctorCheck> => {
@@ -119,13 +126,8 @@ export class DoctorService {
         message: error instanceof Error ? error.message : String(error)
       });
     }
-    checks.push(await tool(
-      "permissions",
-      "android",
-      ["doctor", "--json"]
-    ));
-
     let deviceSerial: string | undefined;
+    let deviceCheck: DoctorCheck;
     try {
       const devices = (await this.dependencies.adb.devices(signal)).filter(
         (device) => device.status === "device"
@@ -135,27 +137,56 @@ export class DoctorService {
         : devices.find((device) => device.serial === requestedDevice);
       if (selected !== undefined) {
         deviceSerial = selected.serial;
-        checks.push({
+        deviceCheck = {
           name: "device",
           status: "passed",
           message: deviceSerial
-        });
+        };
       } else {
-        checks.push({
+        deviceCheck = {
           name: "device",
           status: "failed",
           message: requestedDevice === undefined
             ? `Expected exactly one online device, found ${String(devices.length)}`
             : `Requested device is not online: ${requestedDevice}`
-        });
+        };
       }
     } catch (error) {
-      checks.push({
+      deviceCheck = {
         name: "device",
         status: "failed",
         message: error instanceof Error ? error.message : String(error)
-      });
+      };
     }
+
+    if (deviceSerial === undefined) {
+      checks.push({
+        name: "permissions",
+        status: "notRun",
+        message: "Permission probe requires an online selected device"
+      });
+    } else {
+      try {
+        const permission = await this.dependencies.checkAndroidPermissions(
+          deviceSerial,
+          signal
+        );
+        checks.push({
+          name: "permissions",
+          status: permission.status,
+          ...(permission.message === undefined
+            ? {}
+            : { message: permission.message })
+        });
+      } catch (error) {
+        checks.push({
+          name: "permissions",
+          status: "failed",
+          message: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+    checks.push(deviceCheck);
 
     const environmentFailed = checks.some(
       (check) => check.name !== "device" && check.status === "failed"

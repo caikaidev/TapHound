@@ -151,7 +151,10 @@ export class RecorderService {
         message: "App did not reach the configured launch Activity"
       };
     }
-    await this.dependencies.androidCli.layout(input.signal);
+    await this.dependencies.androidCli.layout({
+      deviceSerial: input.deviceSerial,
+      ...(input.signal === undefined ? {} : { signal: input.signal })
+    });
 
     const steps: JourneyStep[] = [];
     const executor = new ActionExecutor(
@@ -160,11 +163,15 @@ export class RecorderService {
     );
     const idleWaiter = new IdleWaiter(
       this.dependencies.androidCli,
-      this.dependencies.clock
+      this.dependencies.clock,
+      input.deviceSerial
     );
 
     for (;;) {
-      const layout = await this.dependencies.androidCli.layout(input.signal);
+      const layout = await this.dependencies.androidCli.layout({
+        deviceSerial: input.deviceSerial,
+        ...(input.signal === undefined ? {} : { signal: input.signal })
+      });
       const action = await this.dependencies.prompt.selectAction();
       if (action === "cancel") {
         return { status: "cancelled", stepsRecorded: steps.length };
@@ -278,11 +285,12 @@ export class RecorderService {
 
     let fallback: { type: "annotatedLabel"; label: string } | undefined;
     const screenshotPath = annotatedPath(input.outputPath);
-    const capture = await this.dependencies.androidCli.captureScreen(
-      screenshotPath,
-      true,
-      input.signal
-    );
+    const capture = await this.dependencies.androidCli.captureScreen({
+      outputPath: screenshotPath,
+      annotate: true,
+      deviceSerial: input.deviceSerial,
+      ...(input.signal === undefined ? {} : { signal: input.signal })
+    });
     if (!failedCommand(capture)) {
       const label = await this.dependencies.prompt.selectFallbackLabel(screenshotPath);
       if (label !== undefined) {

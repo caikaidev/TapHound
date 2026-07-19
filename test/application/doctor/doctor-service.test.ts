@@ -9,8 +9,12 @@ function fixture(overrides: {
   nodeVersion?: string;
   devices?: Array<{ serial: string; status: string }>;
   gradle?: boolean;
+  permissions?: boolean;
   failures?: Record<string, string>;
-} = {}): DoctorService {
+} = {}): {
+  service: DoctorService;
+  checkPermissions: ReturnType<typeof vi.fn>;
+} {
   const failures = overrides.failures ?? {};
   const runner: ProcessRunner = {
     run: vi.fn((spec: CommandSpec) => {
@@ -44,17 +48,27 @@ function fixture(overrides: {
     inputText: vi.fn(),
     startLogcat: vi.fn()
   };
-  return new DoctorService({
-    runner,
-    adb,
-    nodeVersion: overrides.nodeVersion ?? "v24.3.0",
-    checkGradleWrapper: vi.fn(() => Promise.resolve(overrides.gradle ?? true))
-  });
+  const checkPermissions = vi.fn(() => Promise.resolve(
+    overrides.permissions === false
+      ? { status: "failed" as const, message: "Screen capture denied" }
+      : { status: "passed" as const }
+  ));
+  return {
+    checkPermissions,
+    service: new DoctorService({
+      runner,
+      adb,
+      nodeVersion: overrides.nodeVersion ?? "v24.3.0",
+      checkGradleWrapper: vi.fn(() => Promise.resolve(overrides.gradle ?? true)),
+      checkAndroidPermissions: checkPermissions
+    })
+  };
 }
 
 describe("DoctorService", () => {
   it("reports Node, ADB, Android CLI, Gradle, permissions, and one device", async () => {
-    const report = await fixture().run("/project");
+    const test = fixture();
+    const report = await test.service.run("/project");
 
     expect(report).toMatchObject({
       status: "passed",
@@ -68,13 +82,17 @@ describe("DoctorService", () => {
         { name: "device", status: "passed" }
       ]
     });
+    expect(test.checkPermissions).toHaveBeenCalledWith(
+      "emulator-5554",
+      undefined
+    );
   });
 
   it("rejects unsupported Node and missing tools as an environment failure", async () => {
     const report = await fixture({
       nodeVersion: "v20.0.0",
       failures: { "android --version": "command not found" }
-    }).run("/project");
+    }).service.run("/project");
 
     expect(report).toMatchObject({
       status: "failed",
@@ -87,14 +105,14 @@ describe("DoctorService", () => {
   });
 
   it("requires exactly one online device", async () => {
-    const none = await fixture({ devices: [] }).run("/project");
+    const none = await fixture({ devices: [] }).service.run("/project");
     const many = await fixture({ devices: [
       { serial: "one", status: "device" },
       { serial: "two", status: "device" }
-    ] }).run("/project");
+    ] }).service.run("/project");
     const offline = await fixture({
       devices: [{ serial: "one", status: "offline" }]
-    }).run("/project");
+    }).service.run("/project");
 
     expect(none.failureCode).toBe("DEVICE_UNAVAILABLE");
     expect(many.failureCode).toBe("DEVICE_UNAVAILABLE");
@@ -104,8 +122,8 @@ describe("DoctorService", () => {
   it("reports Gradle wrapper and Android permission diagnostic failures", async () => {
     const report = await fixture({
       gradle: false,
-      failures: { "android doctor --json": "Screen Recording denied" }
-    }).run("/project");
+      permissions: false
+    }).service.run("/project");
 
     expect(report.failureCode).toBe("ENVIRONMENT_MISSING_TOOL");
     expect(report.checks).toEqual(expect.arrayContaining([

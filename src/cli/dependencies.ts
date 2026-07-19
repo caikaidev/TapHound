@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { access, readFile } from "node:fs/promises";
+import {
+  access,
+  mkdtemp,
+  readFile,
+  rm
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { AdbAdapter } from "../adapters/adb/adb-adapter.js";
@@ -63,6 +69,38 @@ export function createProductionDependencies(): CliDependencies {
           return true;
         } catch {
           return false;
+        }
+      },
+      checkAndroidPermissions: async (
+        deviceSerial,
+        signal
+      ): Promise<{
+        status: "passed" | "failed";
+        message?: string | undefined;
+      }> => {
+        const directory = await mkdtemp(join(tmpdir(), "apr-doctor-"));
+        try {
+          const result = await androidCli.captureScreen({
+            outputPath: join(directory, "screen.png"),
+            deviceSerial,
+            ...(signal === undefined ? {} : { signal })
+          });
+          if (
+            result.exitCode !== 0
+            || result.spawnError !== undefined
+            || result.cancelled
+            || result.timedOut
+          ) {
+            return {
+              status: "failed" as const,
+              message: result.stderr.trim()
+                || result.spawnError
+                || "Android screen capture permission probe failed"
+            };
+          }
+          return { status: "passed" as const };
+        } finally {
+          await rm(directory, { recursive: true, force: true });
         }
       }
     }),

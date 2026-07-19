@@ -38,7 +38,7 @@ describe("FallbackResolver", () => {
     "resolves the recorded annotated label for %s",
     async (action) => {
       const cli = androidCli();
-      const resolver = new FallbackResolver(cli);
+      const resolver = new FallbackResolver(cli, "emulator-5554");
       const step: JourneyStep = action === "click"
         ? {
             action,
@@ -64,9 +64,11 @@ describe("FallbackResolver", () => {
         annotatedScreenshotPath: "/tmp/step-annotated.png"
       });
       expect(vi.mocked(cli.captureScreen)).toHaveBeenCalledWith(
-        "/tmp/step-annotated.png",
-        true,
-        undefined
+        {
+          outputPath: "/tmp/step-annotated.png",
+          annotate: true,
+          deviceSerial: "emulator-5554"
+        }
       );
       expect(vi.mocked(cli.resolveScreen)).toHaveBeenCalledWith(
         "/tmp/step-annotated.png",
@@ -78,7 +80,7 @@ describe("FallbackResolver", () => {
 
   it("reports unavailable when the step has no explicit fallback", async () => {
     const cli = androidCli();
-    const resolver = new FallbackResolver(cli);
+    const resolver = new FallbackResolver(cli, "emulator-5554");
 
     await expect(resolver.resolve({
       action: "click",
@@ -92,7 +94,7 @@ describe("FallbackResolver", () => {
   });
 
   it("returns a typed failure when annotated capture fails", async () => {
-    const resolver = new FallbackResolver(androidCli(1));
+    const resolver = new FallbackResolver(androidCli(1), "emulator-5554");
 
     await expect(resolver.resolve({
       action: "click",

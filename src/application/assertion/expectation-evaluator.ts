@@ -146,7 +146,10 @@ export class ExpectationEvaluator {
           }
           break;
         case "element":
-          if (hasElement(await this.androidCli.layout(signal), expectation.locator)) {
+          if (hasElement(await this.androidCli.layout({
+            deviceSerial: context.deviceSerial,
+            ...(signal === undefined ? {} : { signal })
+          }), expectation.locator)) {
             return {
               status: "passed",
               type: expectation.type,

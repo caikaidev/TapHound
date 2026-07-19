@@ -55,8 +55,15 @@ export class StepRunner {
 
   public constructor(private readonly options: StepRunnerOptions) {
     this.actionExecutor = new ActionExecutor(options.adb, options.deviceSerial);
-    this.fallbackResolver = new FallbackResolver(options.androidCli);
-    this.idleWaiter = new IdleWaiter(options.androidCli, options.clock);
+    this.fallbackResolver = new FallbackResolver(
+      options.androidCli,
+      options.deviceSerial
+    );
+    this.idleWaiter = new IdleWaiter(
+      options.androidCli,
+      options.clock,
+      options.deviceSerial
+    );
     this.expectationEvaluator = new ExpectationEvaluator(
       options.adb,
       options.androidCli,
@@ -149,7 +156,10 @@ export class StepRunner {
       );
     }
 
-    const layout = await this.options.androidCli.layout(signal);
+    const layout = await this.options.androidCli.layout({
+      deviceSerial: this.options.deviceSerial,
+      ...(signal === undefined ? {} : { signal })
+    });
     let target: ActionTarget | undefined;
     if (
       step.action === "click"

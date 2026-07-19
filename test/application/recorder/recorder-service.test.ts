@@ -133,9 +133,11 @@ describe("RecorderService", () => {
       fallback: { type: "annotatedLabel", label: "#7" }
     });
     expect(runtime.androidCli.captureScreen).toHaveBeenCalledWith(
-      "/project/fallback.annotated.png",
-      true,
-      undefined
+      {
+        outputPath: "/project/fallback.annotated.png",
+        annotate: true,
+        deviceSerial: "emulator-5554"
+      }
     );
   });
 

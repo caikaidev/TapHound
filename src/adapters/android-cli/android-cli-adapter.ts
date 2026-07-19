@@ -3,7 +3,9 @@ import { readFile } from "node:fs/promises";
 import type {
   AndroidCliPort,
   ArtifactDescription,
+  CaptureScreenOptions,
   DescribeProjectOptions,
+  DeviceCommandOptions,
   Point,
   RunAppOptions
 } from "../../ports/android-cli.js";
@@ -88,35 +90,36 @@ export class AndroidCliAdapter implements AndroidCliPort {
   }
 
   public async layout(
-    signal?: AbortSignal
+    options: DeviceCommandOptions
   ): Promise<ReturnType<typeof parseLayout>> {
-    const result = await this.runner.run(commandSpec(["layout"], signal));
+    const result = await this.runner.run(commandSpec([
+      "layout",
+      `--device=${options.deviceSerial}`
+    ], options.signal));
     assertSuccess(result, "layout");
     return parseLayout(result.stdout);
   }
 
   public async layoutDiff(
-    signal?: AbortSignal
+    options: DeviceCommandOptions
   ): Promise<ReturnType<typeof parseLayoutDiff>> {
     const result = await this.runner.run(commandSpec([
       "layout",
-      "--diff"
-    ], signal));
+      "--diff",
+      `--device=${options.deviceSerial}`
+    ], options.signal));
     assertSuccess(result, "layout --diff");
     return parseLayoutDiff(result.stdout);
   }
 
-  public captureScreen(
-    outputPath: string,
-    annotate = false,
-    signal?: AbortSignal
-  ): Promise<CommandResult> {
+  public captureScreen(options: CaptureScreenOptions): Promise<CommandResult> {
     return this.runner.run(commandSpec([
       "screen",
       "capture",
-      `--output=${outputPath}`,
-      ...(annotate ? ["--annotate"] : [])
-    ], signal));
+      `--output=${options.outputPath}`,
+      ...(options.annotate === true ? ["--annotate"] : []),
+      `--device=${options.deviceSerial}`
+    ], options.signal));
   }
 
   public async resolveScreen(

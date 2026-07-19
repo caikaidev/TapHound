@@ -34,7 +34,8 @@ function isAborted(signal?: AbortSignal): boolean {
 export class IdleWaiter {
   public constructor(
     private readonly androidCli: AndroidCliPort,
-    private readonly clock: Clock
+    private readonly clock: Clock,
+    private readonly deviceSerial: string
   ) {}
 
   public async waitUntilIdle(
@@ -55,7 +56,10 @@ export class IdleWaiter {
         };
       }
 
-      const diff = await this.androidCli.layoutDiff(signal);
+      const diff = await this.androidCli.layoutDiff({
+        deviceSerial: this.deviceSerial,
+        ...(signal === undefined ? {} : { signal })
+      });
       polls += 1;
       if (diff.length === 0) {
         consecutiveEmpty += 1;

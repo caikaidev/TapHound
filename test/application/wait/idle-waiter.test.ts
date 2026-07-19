@@ -31,7 +31,11 @@ describe("IdleWaiter", () => {
       .mockResolvedValueOnce([]);
     const clock = new FakeClock();
 
-    const result = await new IdleWaiter(cli, clock).waitUntilIdle(config);
+    const result = await new IdleWaiter(
+      cli,
+      clock,
+      "emulator-5554"
+    ).waitUntilIdle(config);
 
     expect(result).toEqual({
       status: "stable",
@@ -50,7 +54,11 @@ describe("IdleWaiter", () => {
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
 
-    await expect(new IdleWaiter(cli, new FakeClock()).waitUntilIdle(config))
+    await expect(new IdleWaiter(
+      cli,
+      new FakeClock(),
+      "emulator-5554"
+    ).waitUntilIdle(config))
       .resolves.toMatchObject({ status: "stable", polls: 4 });
   });
 
@@ -61,7 +69,11 @@ describe("IdleWaiter", () => {
     ]));
     const clock = new FakeClock();
 
-    const result = await new IdleWaiter(cli, clock).waitUntilIdle({
+    const result = await new IdleWaiter(
+      cli,
+      clock,
+      "emulator-5554"
+    ).waitUntilIdle({
       ...config,
       timeoutMs: 250
     });
@@ -80,7 +92,11 @@ describe("IdleWaiter", () => {
     const controller = new AbortController();
     controller.abort();
 
-    await expect(new IdleWaiter(cli, new FakeClock()).waitUntilIdle(
+    await expect(new IdleWaiter(
+      cli,
+      new FakeClock(),
+      "emulator-5554"
+    ).waitUntilIdle(
       config,
       controller.signal
     )).resolves.toEqual({
@@ -100,7 +116,11 @@ describe("IdleWaiter", () => {
       controller.abort();
     };
 
-    await expect(new IdleWaiter(cli, clock).waitUntilIdle(
+    await expect(new IdleWaiter(
+      cli,
+      clock,
+      "emulator-5554"
+    ).waitUntilIdle(
       config,
       controller.signal
     )).resolves.toMatchObject({

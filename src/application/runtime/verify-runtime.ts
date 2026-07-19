@@ -78,6 +78,25 @@ function commandMessage(
   return result.stderr.trim() || result.spawnError || fallback;
 }
 
+function logcatStopFailed(result: {
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
+  timedOut: boolean;
+  cancelled: boolean;
+  spawnError?: string | undefined;
+}): boolean {
+  if (
+    result.timedOut
+    || result.cancelled
+    || result.spawnError !== undefined
+  ) {
+    return true;
+  }
+  return result.exitCode !== 0
+    && result.signal !== "SIGTERM"
+    && result.signal !== "SIGKILL";
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -248,7 +267,10 @@ export class VerifyRuntime {
                   "readiness"
                 );
               } else {
-                await this.dependencies.androidCli.layout(input.signal);
+                await this.dependencies.androidCli.layout({
+                  deviceSerial: input.deviceSerial,
+                  ...(input.signal === undefined ? {} : { signal: input.signal })
+                });
                 layers.run = "passed";
                 layers.structural = "passed";
                 layers.activityCheckpoint = "passed";
@@ -312,11 +334,11 @@ export class VerifyRuntime {
     const screenshotPath = "screenshot.png";
     let screenshotCollected = false;
     try {
-      const screenshot = await this.dependencies.androidCli.captureScreen(
-        session.path(screenshotPath),
-        false,
-        input.signal
-      );
+      const screenshot = await this.dependencies.androidCli.captureScreen({
+        outputPath: session.path(screenshotPath),
+        deviceSerial: input.deviceSerial,
+        ...(input.signal === undefined ? {} : { signal: input.signal })
+      });
       if (commandFailed(screenshot)) {
         collectionFailure(commandMessage(screenshot, "Screen capture failed"));
       } else {
@@ -330,7 +352,7 @@ export class VerifyRuntime {
     if (logcatStarted) {
       try {
         const stopped = await logcat.stop();
-        if (commandFailed(stopped)) {
+        if (logcatStopFailed(stopped)) {
           collectionFailure(commandMessage(stopped, "Logcat stop failed"));
         }
         await session.writeText(

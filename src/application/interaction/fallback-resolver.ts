@@ -18,7 +18,10 @@ export type FallbackResolution =
     };
 
 export class FallbackResolver {
-  public constructor(private readonly androidCli: AndroidCliPort) {}
+  public constructor(
+    private readonly androidCli: AndroidCliPort,
+    private readonly deviceSerial: string
+  ) {}
 
   public async resolve(
     step: JourneyStep,
@@ -32,11 +35,12 @@ export class FallbackResolver {
       return { status: "unavailable" };
     }
 
-    const capture = await this.androidCli.captureScreen(
-      annotatedScreenshotPath,
-      true,
-      signal
-    );
+    const capture = await this.androidCli.captureScreen({
+      outputPath: annotatedScreenshotPath,
+      annotate: true,
+      deviceSerial: this.deviceSerial,
+      ...(signal === undefined ? {} : { signal })
+    });
     if (capture.exitCode !== 0) {
       return {
         status: "failed",

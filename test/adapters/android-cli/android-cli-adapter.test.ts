@@ -36,17 +36,19 @@ describe("AndroidCliAdapter", () => {
     }));
     const adapter = new AndroidCliAdapter(runner);
 
-    await expect(adapter.layout()).resolves.toHaveLength(1);
+    await expect(adapter.layout({ deviceSerial: "emulator-5554" }))
+      .resolves.toHaveLength(1);
     vi.mocked(runner.run).mockResolvedValueOnce(commandResult({ stdout: "[]" }));
-    await expect(adapter.layoutDiff()).resolves.toEqual([]);
+    await expect(adapter.layoutDiff({ deviceSerial: "emulator-5554" }))
+      .resolves.toEqual([]);
 
     expect(vi.mocked(runner.run)).toHaveBeenNthCalledWith(1, {
       executable: "android",
-      args: ["layout"]
+      args: ["layout", "--device=emulator-5554"]
     });
     expect(vi.mocked(runner.run)).toHaveBeenNthCalledWith(2, {
       executable: "android",
-      args: ["layout", "--diff"]
+      args: ["layout", "--diff", "--device=emulator-5554"]
     });
   });
 
@@ -54,12 +56,24 @@ describe("AndroidCliAdapter", () => {
     const runner = processRunner();
     const adapter = new AndroidCliAdapter(runner);
 
-    await adapter.captureScreen("/tmp/final.png");
-    await adapter.captureScreen("/tmp/annotated.png", true);
+    await adapter.captureScreen({
+      outputPath: "/tmp/final.png",
+      deviceSerial: "emulator-5554"
+    });
+    await adapter.captureScreen({
+      outputPath: "/tmp/annotated.png",
+      annotate: true,
+      deviceSerial: "emulator-5554"
+    });
 
     expect(vi.mocked(runner.run)).toHaveBeenNthCalledWith(1, {
       executable: "android",
-      args: ["screen", "capture", "--output=/tmp/final.png"]
+      args: [
+        "screen",
+        "capture",
+        "--output=/tmp/final.png",
+        "--device=emulator-5554"
+      ]
     });
     expect(vi.mocked(runner.run)).toHaveBeenNthCalledWith(2, {
       executable: "android",
@@ -67,7 +81,8 @@ describe("AndroidCliAdapter", () => {
         "screen",
         "capture",
         "--output=/tmp/annotated.png",
-        "--annotate"
+        "--annotate",
+        "--device=emulator-5554"
       ]
     });
   });

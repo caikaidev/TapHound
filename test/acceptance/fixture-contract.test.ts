@@ -1,4 +1,6 @@
-import { readFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { createHash } from "node:crypto";
+import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -17,6 +19,24 @@ async function json(relativePath: string): Promise<unknown> {
 }
 
 describe("APR Android acceptance fixture", () => {
+  it("includes a pinned, executable Gradle Wrapper", async () => {
+    const wrapperScript = join(root, "gradlew");
+    const wrapperProperties = await text(
+      "gradle/wrapper/gradle-wrapper.properties"
+    );
+    const wrapperJar = await readFile(
+      join(root, "gradle", "wrapper", "gradle-wrapper.jar")
+    );
+
+    await expect(access(wrapperScript, constants.X_OK)).resolves.toBeUndefined();
+    expect(wrapperProperties).toContain("gradle-8.9-bin.zip");
+    expect(wrapperProperties).toContain(
+      "distributionSha256Sum=d725d707bfabd4dfdc958c624003b3c80accc03f7037b5122c4b1d0ef15cecab"
+    );
+    expect(createHash("sha256").update(wrapperJar).digest("hex"))
+      .toBe("498495120a03b9a6ab5d155f5de3c8f0d986a449153702fb80fc80e134484f17");
+  });
+
   it("keeps Package and Activity identities aligned", async () => {
     const config = AprConfigSchema.parse(await json("apr.config.json"));
     const journey = JourneySchema.parse(await json("journeys/search.json"));

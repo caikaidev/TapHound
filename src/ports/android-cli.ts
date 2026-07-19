@@ -25,17 +25,29 @@ export interface RunAppOptions {
   signal?: AbortSignal | undefined;
 }
 
+export interface DeviceCommandOptions {
+  deviceSerial: string;
+  signal?: AbortSignal | undefined;
+}
+
+export interface CaptureScreenOptions extends DeviceCommandOptions {
+  outputPath: string;
+  annotate?: boolean | undefined;
+}
+
 export interface AndroidCliPort {
   describeProject: (
     options: DescribeProjectOptions
   ) => Promise<ArtifactDescription>;
   runApp: (options: RunAppOptions) => Promise<CommandResult>;
-  layout: (signal?: AbortSignal) => Promise<readonly LayoutElement[]>;
-  layoutDiff: (signal?: AbortSignal) => Promise<readonly unknown[]>;
+  layout: (
+    options: DeviceCommandOptions
+  ) => Promise<readonly LayoutElement[]>;
+  layoutDiff: (
+    options: DeviceCommandOptions
+  ) => Promise<readonly unknown[]>;
   captureScreen: (
-    outputPath: string,
-    annotate?: boolean,
-    signal?: AbortSignal
+    options: CaptureScreenOptions
   ) => Promise<CommandResult>;
   resolveScreen: (
     screenshotPath: string,

@@ -25,10 +25,10 @@ export interface StreamHandlers {
 
 export interface RunningCommand {
   readonly completion: Promise<CommandResult>;
-  stop(): Promise<CommandResult>;
+  stop: () => Promise<CommandResult>;
 }
 
 export interface ProcessRunner {
-  run(spec: CommandSpec): Promise<CommandResult>;
-  start(spec: CommandSpec, handlers?: StreamHandlers): RunningCommand;
+  run: (spec: CommandSpec) => Promise<CommandResult>;
+  start: (spec: CommandSpec, handlers?: StreamHandlers) => RunningCommand;
 }

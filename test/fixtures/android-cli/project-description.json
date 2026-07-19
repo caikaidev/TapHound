@@ -1,0 +1,27 @@
+{
+  "modules": [
+    {
+      "name": "app",
+      "variants": [
+        {
+          "name": "debug",
+          "artifacts": [
+            {
+              "type": "APK",
+              "path": "app/build/outputs/apk/debug/app-debug.apk"
+            }
+          ]
+        },
+        {
+          "name": "release",
+          "artifacts": [
+            {
+              "type": "APK",
+              "path": "app/build/outputs/apk/release/app-release.apk"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

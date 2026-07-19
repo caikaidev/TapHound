@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "name": "Search flow",
+  "steps": [
+    {
+      "action": "click",
+      "locator": {
+        "resourceId": "toolbar_search"
+      },
+      "fallback": {
+        "type": "annotatedLabel",
+        "label": "#7"
+      },
+      "activity": {
+        "before": "com.example.app.MainActivity",
+        "after": "com.example.app.SearchActivity"
+      },
+      "expect": {
+        "type": "element",
+        "locator": {
+          "resourceId": "search_input"
+        },
+        "timeoutMs": 3000
+      }
+    },
+    {
+      "action": "inputText",
+      "text": "hello world",
+      "activity": {
+        "before": "com.example.app.SearchActivity",
+        "after": "com.example.app.SearchActivity"
+      },
+      "expect": {
+        "type": "logcat",
+        "tag": "SearchViewModel",
+        "level": "I",
+        "pattern": "query changed",
+        "match": "literal",
+        "timeoutMs": 3000
+      }
+    }
+  ]
+}

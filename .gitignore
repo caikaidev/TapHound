@@ -1,6 +1,11 @@
 .worktrees/
 
 .apr/
+.gradle/
+.env
+.env.*
+**/build/
 coverage/
 dist/
+local.properties
 node_modules/

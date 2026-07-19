@@ -15,6 +15,8 @@ export type FallbackResolution =
       status: "failed";
       code: Extract<FailureCode, "LOCATOR_NOT_FOUND">;
       message: string;
+      label?: string | undefined;
+      annotatedScreenshotPath?: string | undefined;
     };
 
 export class FallbackResolver {
@@ -68,7 +70,9 @@ export class FallbackResolver {
         code: "LOCATOR_NOT_FOUND",
         message: error instanceof Error
           ? error.message
-          : "Annotated label resolution failed"
+          : "Annotated label resolution failed",
+        label: step.fallback.label,
+        annotatedScreenshotPath
       };
     }
   }

@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { ActionExecutor } from "../../../src/application/interaction/action-executor.js";
+import {
+  ActionExecutor,
+  type ActionTarget
+} from "../../../src/application/interaction/action-executor.js";
 import type { AdbPort } from "../../../src/ports/adb.js";
 import type { CommandResult } from "../../../src/ports/process-runner.js";
 import type { JourneyStep } from "../../../src/domain/journey.js";
@@ -113,6 +116,31 @@ describe("ActionExecutor", () => {
       "emulator-5554",
       undefined
     );
+  });
+
+  it("rejects swipe when Android CLI only exposes a center point", async () => {
+    const adb = adbPort();
+    const executor = new ActionExecutor(adb, "emulator-5554");
+    const centerOnly = {
+      point: { x: 540, y: 1200 }
+    } as ActionTarget;
+
+    const execution = await executor.execute({
+      action: "swipe",
+      locator: { resourceId: "button" },
+      direction: "up",
+      distancePercent: 0.6,
+      durationMs: 300,
+      activity: checkpoint
+    }, centerOnly);
+
+    expect(execution).toMatchObject({
+      status: "failed",
+      code: "ACTION_FAILED"
+    });
+    expect(execution.status === "failed" ? execution.message : "")
+      .toMatch(/bounds/i);
+    expect(vi.mocked(adb.swipe)).not.toHaveBeenCalled();
   });
 
   it("performs no ADB command for wait", async () => {

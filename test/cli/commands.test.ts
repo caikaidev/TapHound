@@ -103,6 +103,8 @@ describe("APR CLI commands", () => {
 
   it("applies verify Package, Activity, device, and report overrides", async () => {
     const test = dependencies();
+    const signal = new AbortController().signal;
+    Object.assign(test.value, { signal });
 
     await createProgram(test.value).parseAsync([
       "node", "apr", "verify",
@@ -117,7 +119,7 @@ describe("APR CLI commands", () => {
 
     expect(test.value.doctor.run).toHaveBeenCalledWith(
       "/project",
-      undefined,
+      signal,
       "pixel-1"
     );
     const verifyInput = vi.mocked(test.value.verifier.verify).mock.calls[0]?.[0];
@@ -134,5 +136,6 @@ describe("APR CLI commands", () => {
       },
       journey: runtimeJourney
     });
+    expect(verifyInput?.signal).toBe(signal);
   });
 });

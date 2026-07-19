@@ -1,6 +1,11 @@
+import { EventEmitter } from "node:events";
+
 import { describe, expect, it } from "vitest";
 
-import { runMain } from "../../src/cli/main.js";
+import {
+  runMain,
+  withTerminationSignal
+} from "../../src/cli/main.js";
 import type { CliDependencies, TextOutput } from "../../src/cli/dependencies.js";
 import { runtimeConfig, runtimeJourney } from "../fakes/runtime-fixture.js";
 
@@ -29,6 +34,21 @@ function dependencies(exitCodes: number[]): CliDependencies {
 }
 
 describe("runMain", () => {
+  it("turns SIGINT into an AbortSignal and removes process listeners", async () => {
+    const events = new EventEmitter();
+    let observed: AbortSignal | undefined;
+
+    await withTerminationSignal((signal) => {
+      observed = signal;
+      events.emit("SIGINT");
+      return Promise.resolve();
+    }, events);
+
+    expect(observed?.aborted).toBe(true);
+    expect(events.listenerCount("SIGINT")).toBe(0);
+    expect(events.listenerCount("SIGTERM")).toBe(0);
+  });
+
   it("maps Commander usage errors to CONFIG_INVALID exit 2", async () => {
     const exitCodes: number[] = [];
     const test = dependencies(exitCodes);

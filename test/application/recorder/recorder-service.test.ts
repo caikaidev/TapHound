@@ -107,6 +107,42 @@ describe("RecorderService", () => {
     expect(journeyWriter.journeys[0]?.steps).toHaveLength(1);
   });
 
+  it("stops recording when a successful Action leaves the device in an unverified state", async () => {
+    const runtime = runtimeFixture();
+    vi.mocked(runtime.androidCli.layoutDiff).mockResolvedValue([
+      { changed: "text" }
+    ]);
+    const recorderPrompt = prompt(["click", "finish"]);
+    const journeyWriter = writer();
+    const service = new RecorderService({
+      gradle: runtime.gradle,
+      androidCli: runtime.androidCli,
+      adb: runtime.adb,
+      clock: runtime.dependencies.clock,
+      prompt: recorderPrompt,
+      journeyWriter
+    });
+
+    const result = await service.record({
+      config: {
+        ...runtimeConfig,
+        idle: { pollIntervalMs: 100, stablePolls: 2, timeoutMs: 100 }
+      },
+      projectRoot: "/project",
+      deviceSerial: "emulator-5554",
+      journeyName: "Unstable",
+      outputPath: "/project/unstable.json"
+    });
+
+    expect(result).toEqual({
+      status: "failed",
+      stepsRecorded: 0,
+      message: "Layout did not become stable before timeout"
+    });
+    expect(recorderPrompt.selectAction).toHaveBeenCalledTimes(1);
+    expect(journeyWriter.write).not.toHaveBeenCalled();
+  });
+
   it("records an explicitly selected annotated fallback label", async () => {
     const runtime = runtimeFixture();
     const recorderPrompt = prompt(["click", "finish"]);
@@ -136,7 +172,8 @@ describe("RecorderService", () => {
       {
         outputPath: "/project/fallback.annotated.png",
         annotate: true,
-        deviceSerial: "emulator-5554"
+        deviceSerial: "emulator-5554",
+        timeoutMs: 500
       }
     );
   });

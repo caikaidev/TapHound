@@ -48,7 +48,7 @@ export function createRecordCommand(dependencies: CliDependencies): Command {
       try {
         const doctor = await dependencies.doctor.run(
           options.project,
-          undefined,
+          dependencies.signal,
           options.device
         );
         if (doctor.status === "failed") {
@@ -75,7 +75,10 @@ export function createRecordCommand(dependencies: CliDependencies): Command {
           projectRoot: options.project,
           deviceSerial,
           journeyName: options.name,
-          outputPath: resolve(options.project, options.output)
+          outputPath: resolve(options.project, options.output),
+          ...(dependencies.signal === undefined
+            ? {}
+            : { signal: dependencies.signal })
         });
         if (options.json === true) {
           writeJson(dependencies.stdout, result);

@@ -211,7 +211,18 @@ export class VerifyRuntime {
             variant: input.config.artifact.variant,
             ...(input.signal === undefined ? {} : { signal: input.signal })
           });
-          apkPath = description.apkPath;
+          if (
+            description.packageName !== undefined
+            && description.packageName !== input.config.run.packageName
+          ) {
+            setPrimary(
+              "CONFIG_INVALID",
+              `Configured Package ${input.config.run.packageName} conflicts with Android metadata ${description.packageName}`,
+              "describe"
+            );
+          } else {
+            apkPath = description.apkPath;
+          }
         } catch (error) {
           setPrimary("BUILD_FAILED", errorMessage(error), "describe");
         }
@@ -225,60 +236,67 @@ export class VerifyRuntime {
           });
           logcatStarted = true;
         } catch (error) {
-          collectionFailure(errorMessage(error));
+          layers.collection = "failed";
+          setPrimary(
+            "COLLECTION_FAILED",
+            errorMessage(error),
+            "collection"
+          );
         }
 
-        const run = await this.dependencies.androidCli.runApp({
-          apkPath,
-          activity: launchActivity,
-          deviceSerial: input.deviceSerial,
-          ...(input.signal === undefined ? {} : { signal: input.signal })
-        });
-        if (commandFailed(run)) {
-          layers.run = "failed";
-          setPrimary(
-            "APP_LAUNCH_FAILED",
-            commandMessage(run, "App launch failed"),
-            "run"
-          );
-        } else {
-          try {
-            const identity = {
-              packageName: input.config.run.packageName,
-              deviceSerial: input.deviceSerial,
-              ...(input.signal === undefined ? {} : { signal: input.signal })
-            };
-            const pid = await this.dependencies.adb.pid(identity);
-            if (pid === null) {
-              setPrimary(
-                "APP_LAUNCH_FAILED",
-                "App process was not found after launch",
-                "readiness"
-              );
-            } else {
-              if (logcatStarted) {
-                logcat.scopeToPid(pid);
-              }
-              const activity = await this.dependencies.adb.currentActivity(identity);
-              if (activity !== launchActivity) {
+        if (logcatStarted) {
+          const run = await this.dependencies.androidCli.runApp({
+            apkPath,
+            activity: launchActivity,
+            deviceSerial: input.deviceSerial,
+            ...(input.signal === undefined ? {} : { signal: input.signal })
+          });
+          if (commandFailed(run)) {
+            layers.run = "failed";
+            setPrimary(
+              "APP_LAUNCH_FAILED",
+              commandMessage(run, "App launch failed"),
+              "run"
+            );
+          } else {
+            try {
+              const identity = {
+                packageName: input.config.run.packageName,
+                deviceSerial: input.deviceSerial,
+                ...(input.signal === undefined ? {} : { signal: input.signal }),
+                timeoutMs: input.config.idle.timeoutMs
+              };
+              const pid = await this.dependencies.adb.pid(identity);
+              if (pid === null) {
                 setPrimary(
                   "APP_LAUNCH_FAILED",
-                  `Expected launch Activity ${launchActivity}, found ${activity}`,
+                  "App process was not found after launch",
                   "readiness"
                 );
               } else {
-                await this.dependencies.androidCli.layout({
-                  deviceSerial: input.deviceSerial,
-                  ...(input.signal === undefined ? {} : { signal: input.signal })
-                });
-                layers.run = "passed";
-                layers.structural = "passed";
-                layers.activityCheckpoint = "passed";
-                layers.explicitExpect = "passed";
+                logcat.scopeToPid(pid);
+                const activity = await this.dependencies.adb.currentActivity(identity);
+                if (activity !== launchActivity) {
+                  setPrimary(
+                    "APP_LAUNCH_FAILED",
+                    `Expected launch Activity ${launchActivity}, found ${activity}`,
+                    "readiness"
+                  );
+                } else {
+                  await this.dependencies.androidCli.layout({
+                    deviceSerial: input.deviceSerial,
+                    ...(input.signal === undefined ? {} : { signal: input.signal }),
+                    timeoutMs: input.config.idle.timeoutMs
+                  });
+                  layers.run = "passed";
+                  layers.structural = "passed";
+                  layers.activityCheckpoint = "passed";
+                  layers.explicitExpect = "passed";
+                }
               }
+            } catch (error) {
+              setPrimary("APP_LAUNCH_FAILED", errorMessage(error), "readiness");
             }
-          } catch (error) {
-            setPrimary("APP_LAUNCH_FAILED", errorMessage(error), "readiness");
           }
         }
       }
@@ -376,7 +394,12 @@ export class VerifyRuntime {
     const failure = primaryFailure;
     const status: AprReport["status"] = failure === undefined
       ? "passed"
-      : failure.code === "INTERNAL_ERROR"
+      : [
+          "CONFIG_INVALID",
+          "ENVIRONMENT_MISSING_TOOL",
+          "DEVICE_UNAVAILABLE",
+          "INTERNAL_ERROR"
+        ].includes(failure.code)
         ? "error"
         : "failed";
     const report: AprReport = {

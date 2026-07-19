@@ -48,6 +48,32 @@ describe("AdbAdapter", () => {
     });
   });
 
+  it("ignores historical tasks before the resumed Activity", async () => {
+    const runner = processRunner(commandResult({
+      stdout: [
+        "Task{123 #1 type=standard A=com.example.app/.OldActivity}",
+        "  Hist #0: ActivityRecord{11 u0 com.example.app/.OldActivity t1}",
+        "mResumedActivity: ActivityRecord{42 u0 com.example.app/.SearchActivity t9}"
+      ].join("\n")
+    }));
+
+    await expect(new AdbAdapter(runner).currentActivity({
+      packageName: "com.example.app",
+      deviceSerial: "emulator-5554"
+    })).resolves.toBe("com.example.app.SearchActivity");
+  });
+
+  it("reports a resumed Activity from another Package for mismatch diagnostics", async () => {
+    const runner = processRunner(commandResult({
+      stdout: "topResumedActivity=ActivityRecord{42 u0 com.android.settings/.Settings t9}"
+    }));
+
+    await expect(new AdbAdapter(runner).currentActivity({
+      packageName: "com.example.app",
+      deviceSerial: "emulator-5554"
+    })).resolves.toBe("com.android.settings.Settings");
+  });
+
   it("reads the Package PID", async () => {
     const runner = processRunner(commandResult({ stdout: "1234\n" }));
 
@@ -57,7 +83,7 @@ describe("AdbAdapter", () => {
     })).resolves.toBe(1234);
   });
 
-  it("executes tap, long click, swipe, Back, and encoded text", async () => {
+  it("executes tap, long click, swipe, Back, and remote-shell-safe text", async () => {
     const runner = processRunner();
     const adapter = new AdbAdapter(runner);
     const deviceSerial = "emulator-5554";
@@ -67,13 +93,16 @@ describe("AdbAdapter", () => {
     await adapter.swipe({ x: 10, y: 20 }, { x: 10, y: 100 }, 300, deviceSerial);
     await adapter.back(deviceSerial);
     await adapter.inputText("hello world", deviceSerial);
+    await adapter.inputText("a;$(id)&'中%s", deviceSerial);
 
     expect(vi.mocked(runner.run).mock.calls.map(([spec]) => spec.args)).toEqual([
       ["-s", deviceSerial, "shell", "input", "tap", "10", "20"],
       ["-s", deviceSerial, "shell", "input", "swipe", "10", "20", "10", "20", "800"],
       ["-s", deviceSerial, "shell", "input", "swipe", "10", "20", "10", "100", "300"],
       ["-s", deviceSerial, "shell", "input", "keyevent", "BACK"],
-      ["-s", deviceSerial, "shell", "input", "text", "hello%sworld"]
+      ["-s", deviceSerial, "shell", "input", "text", "'hello world'"],
+      ["-s", deviceSerial, "shell", "input", "text", "'a;$(id)&'\\''中%'"],
+      ["-s", deviceSerial, "shell", "input", "text", "'s'"]
     ]);
   });
 

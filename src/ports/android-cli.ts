@@ -16,6 +16,7 @@ export interface DescribeProjectOptions {
 export interface ArtifactDescription {
   apkPath: string;
   metadataPaths: readonly string[];
+  packageName?: string | undefined;
 }
 
 export interface RunAppOptions {
@@ -28,6 +29,7 @@ export interface RunAppOptions {
 export interface DeviceCommandOptions {
   deviceSerial: string;
   signal?: AbortSignal | undefined;
+  timeoutMs?: number | undefined;
 }
 
 export interface CaptureScreenOptions extends DeviceCommandOptions {

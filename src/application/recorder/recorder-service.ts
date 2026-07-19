@@ -88,12 +88,18 @@ function actionTarget(target?: RecorderTarget): ActionTarget | undefined {
     return undefined;
   }
   const bounds = target.element.bounds;
+  const point = target.element.center ?? (bounds === undefined
+    ? undefined
+    : {
+        x: Math.round((bounds.left + bounds.right) / 2),
+        y: Math.round((bounds.top + bounds.bottom) / 2)
+      });
+  if (point === undefined) {
+    return undefined;
+  }
   return {
-    bounds,
-    point: {
-      x: Math.round((bounds.left + bounds.right) / 2),
-      y: Math.round((bounds.top + bounds.bottom) / 2)
-    }
+    point,
+    ...(bounds === undefined ? {} : { bounds })
   };
 }
 
@@ -140,7 +146,8 @@ export class RecorderService {
     const identity = {
       packageName: input.config.run.packageName,
       deviceSerial: input.deviceSerial,
-      ...(input.signal === undefined ? {} : { signal: input.signal })
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      timeoutMs: input.config.idle.timeoutMs
     };
     const pid = await this.dependencies.adb.pid(identity);
     const initialActivity = await this.dependencies.adb.currentActivity(identity);
@@ -153,7 +160,8 @@ export class RecorderService {
     }
     await this.dependencies.androidCli.layout({
       deviceSerial: input.deviceSerial,
-      ...(input.signal === undefined ? {} : { signal: input.signal })
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      timeoutMs: input.config.idle.timeoutMs
     });
 
     const steps: JourneyStep[] = [];
@@ -170,7 +178,8 @@ export class RecorderService {
     for (;;) {
       const layout = await this.dependencies.androidCli.layout({
         deviceSerial: input.deviceSerial,
-        ...(input.signal === undefined ? {} : { signal: input.signal })
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+        timeoutMs: input.config.idle.timeoutMs
       });
       const action = await this.dependencies.prompt.selectAction();
       if (action === "cancel") {
@@ -212,19 +221,21 @@ export class RecorderService {
       }
       const idle = await idleWaiter.waitUntilIdle(input.config.idle, input.signal);
       if (idle.status !== "stable") {
-        await this.dependencies.prompt.notifyFailure(
-          idle.status === "timeout"
-            ? "Layout did not become stable before timeout"
-            : "Recording was cancelled"
-        );
         if (idle.status === "cancelled") {
           return { status: "cancelled", stepsRecorded: steps.length };
         }
-        continue;
+        return {
+          status: "failed",
+          stepsRecorded: steps.length,
+          message: "Layout did not become stable before timeout"
+        };
       }
       if (await this.dependencies.adb.pid(identity) === null) {
-        await this.dependencies.prompt.notifyFailure("App process crashed");
-        continue;
+        return {
+          status: "failed",
+          stepsRecorded: steps.length,
+          message: "App process crashed after the recorded Action"
+        };
       }
       const after = normalizeActivity(
         input.config.run.packageName,
@@ -251,7 +262,7 @@ export class RecorderService {
       return { draft: { action } };
     }
 
-    const targets = listRecorderTargets(layout);
+    const targets = listRecorderTargets(layout, action);
     if (targets.length === 0) {
       await this.dependencies.prompt.notifyFailure(
         "No enabled element has a unique deterministic Locator"
@@ -289,7 +300,8 @@ export class RecorderService {
       outputPath: screenshotPath,
       annotate: true,
       deviceSerial: input.deviceSerial,
-      ...(input.signal === undefined ? {} : { signal: input.signal })
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      timeoutMs: input.config.idle.timeoutMs
     });
     if (!failedCommand(capture)) {
       const label = await this.dependencies.prompt.selectFallbackLabel(screenshotPath);

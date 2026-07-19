@@ -31,8 +31,13 @@ function flushLine(buffer: LineBuffer): void {
 }
 
 export class NodeProcessRunner implements ProcessRunner {
+  public constructor(private readonly defaultTimeoutMs = 15 * 60 * 1000) {}
+
   public run(spec: CommandSpec): Promise<CommandResult> {
-    return this.start(spec).completion;
+    return this.start({
+      ...spec,
+      timeoutMs: spec.timeoutMs ?? this.defaultTimeoutMs
+    }).completion;
   }
 
   public start(

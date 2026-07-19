@@ -25,7 +25,7 @@ export function createDoctorCommand(dependencies: CliDependencies): Command {
       try {
         const report = await dependencies.doctor.run(
           options.project,
-          undefined,
+          dependencies.signal,
           options.device
         );
         if (options.json === true) {

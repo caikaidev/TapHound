@@ -16,6 +16,29 @@ interface CommanderFailure {
   exitCode: number;
 }
 
+export interface TerminationSignalSource {
+  once: (event: "SIGINT" | "SIGTERM", listener: () => void) => unknown;
+  off: (event: "SIGINT" | "SIGTERM", listener: () => void) => unknown;
+}
+
+export async function withTerminationSignal<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+  source: TerminationSignalSource = process
+): Promise<T> {
+  const controller = new AbortController();
+  const abort = (): void => {
+    controller.abort(new Error("APR was interrupted"));
+  };
+  source.once("SIGINT", abort);
+  source.once("SIGTERM", abort);
+  try {
+    return await operation(controller.signal);
+  } finally {
+    source.off("SIGINT", abort);
+    source.off("SIGTERM", abort);
+  }
+}
+
 function asCommanderFailure(error: unknown): CommanderFailure | undefined {
   if (error instanceof CommanderError) {
     return error;
@@ -69,5 +92,8 @@ if (
   entryPath !== undefined
   && import.meta.url === pathToFileURL(resolve(entryPath)).href
 ) {
-  await runMain(process.argv);
+  await withTerminationSignal((signal) => runMain(
+    process.argv,
+    createProductionDependencies(signal)
+  ));
 }

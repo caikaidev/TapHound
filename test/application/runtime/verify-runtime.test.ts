@@ -98,6 +98,32 @@ describe("VerifyRuntime", () => {
     expect(test.order).toEqual(["build", "screenshot", "report"]);
   });
 
+  it("rejects a configured Package that conflicts with Android project metadata", async () => {
+    const test = runtimeFixture();
+    const conflictingDescription = {
+      apkPath: "/project/app-debug.apk",
+      metadataPaths: ["/project/AndroidProject.json"],
+      packageName: "com.other.app"
+    };
+    vi.mocked(test.androidCli.describeProject)
+      .mockResolvedValue(conflictingDescription);
+
+    const result = await new VerifyRuntime(test.dependencies).verify(input());
+
+    expect(result).toMatchObject({
+      status: "error",
+      exitCode: 2,
+      report: {
+        primaryFailure: {
+          code: "CONFIG_INVALID",
+          phase: "describe"
+        }
+      }
+    });
+    expect(result.report.primaryFailure?.message).toContain("com.other.app");
+    expect(test.order).not.toContain("run");
+  });
+
   it("finalizes Logcat when App launch fails", async () => {
     const test = runtimeFixture();
     vi.mocked(test.androidCli.runApp).mockImplementation(() => {
@@ -147,7 +173,7 @@ describe("VerifyRuntime", () => {
     });
   });
 
-  it("continues verification when Logcat collection cannot start", async () => {
+  it("preserves Logcat startup as primary and stops replay when collection cannot start", async () => {
     const test = runtimeFixture();
     vi.mocked(test.adb.startLogcat).mockImplementation(() => {
       test.order.push("logcat-start");
@@ -163,10 +189,11 @@ describe("VerifyRuntime", () => {
           code: "COLLECTION_FAILED",
           message: "logcat unavailable"
         },
-        steps: [{ status: "passed" }]
+        steps: []
       }
     });
-    expect(test.order).toContain("action");
+    expect(test.order).not.toContain("run");
+    expect(test.order).not.toContain("action");
   });
 
   it("accepts SIGTERM when APR intentionally stops the Logcat stream", async () => {

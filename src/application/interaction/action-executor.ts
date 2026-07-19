@@ -7,7 +7,7 @@ import type { CommandResult } from "../../ports/process-runner.js";
 
 export interface ActionTarget {
   point: Point;
-  bounds: Bounds;
+  bounds?: Bounds | undefined;
 }
 
 export type ActionExecutionResult =
@@ -120,6 +120,9 @@ export class ActionExecutor {
       case "swipe": {
         if (target === undefined) {
           return failed("swipe requires a resolved target");
+        }
+        if (target.bounds === undefined) {
+          return failed("swipe requires target bounds from a scrollable element");
         }
         const points = swipePoints(
           target.bounds,

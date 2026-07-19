@@ -27,6 +27,10 @@ export interface LocatorFailure {
 
 export type LocatorResolution = LocatedTarget | LocatorFailure;
 
+export interface LocatorResolutionOptions {
+  requireEnabled?: boolean | undefined;
+}
+
 function flatten(elements: readonly LayoutElement[]): LayoutElement[] {
   return elements.flatMap((element) => [
     element,
@@ -35,15 +39,23 @@ function flatten(elements: readonly LayoutElement[]): LayoutElement[] {
 }
 
 function center(element: LayoutElement): Point {
+  if (element.center !== undefined) {
+    return element.center;
+  }
+  const bounds = element.bounds;
+  if (bounds === undefined) {
+    throw new Error(`Layout element ${element.id} has no center or bounds`);
+  }
   return {
-    x: Math.round((element.bounds.left + element.bounds.right) / 2),
-    y: Math.round((element.bounds.top + element.bounds.bottom) / 2)
+    x: Math.round((bounds.left + bounds.right) / 2),
+    y: Math.round((bounds.top + bounds.bottom) / 2)
   };
 }
 
 export function resolveLocator(
   roots: readonly LayoutElement[],
-  locator: Locator
+  locator: Locator,
+  options: LocatorResolutionOptions = {}
 ): LocatorResolution {
   const elements = flatten(roots);
   let candidates: LayoutElement[] | undefined;
@@ -103,7 +115,7 @@ export function resolveLocator(
       message: "No Layout element matches the Locator"
     };
   }
-  if (!element.enabled) {
+  if (options.requireEnabled !== false && !element.enabled) {
     return {
       status: "failed",
       code: "ACTION_FAILED",

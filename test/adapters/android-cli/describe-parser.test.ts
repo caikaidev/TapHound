@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   extractDescriptionPaths,
+  selectApplicationId,
   selectApkArtifact
 } from "../../../src/adapters/android-cli/describe-parser.js";
 
@@ -54,5 +55,25 @@ describe("selectApkArtifact", () => {
       target: "app",
       variant: "debug"
     })).toThrow(/artifact/i);
+  });
+});
+
+describe("selectApplicationId", () => {
+  it("selects the Application ID for the configured target and variant", async () => {
+    const metadata: unknown = JSON.parse(await readFile(fixture, "utf8"));
+
+    expect(selectApplicationId([metadata], {
+      projectDir: "/project",
+      target: "app",
+      variant: "debug"
+    })).toBe("com.example.app");
+  });
+
+  it("returns undefined when Android metadata does not expose an Application ID", () => {
+    expect(selectApplicationId([{ module: "app", variant: "debug" }], {
+      projectDir: "/project",
+      target: "app",
+      variant: "debug"
+    })).toBeUndefined();
   });
 });

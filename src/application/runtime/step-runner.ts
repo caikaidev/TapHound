@@ -141,7 +141,8 @@ export class StepRunner {
     const identity = {
       packageName: this.options.packageName,
       deviceSerial: this.options.deviceSerial,
-      ...(signal === undefined ? {} : { signal })
+      ...(signal === undefined ? {} : { signal }),
+      timeoutMs: this.options.idle.timeoutMs
     };
     const before = await this.options.adb.currentActivity(identity);
     activityReport.before = {
@@ -158,7 +159,8 @@ export class StepRunner {
 
     const layout = await this.options.androidCli.layout({
       deviceSerial: this.options.deviceSerial,
-      ...(signal === undefined ? {} : { signal })
+      ...(signal === undefined ? {} : { signal }),
+      timeoutMs: this.options.idle.timeoutMs
     });
     let target: ActionTarget | undefined;
     if (
@@ -170,7 +172,9 @@ export class StepRunner {
       if (resolution.status === "found") {
         target = {
           point: resolution.point,
-          bounds: resolution.element.bounds
+          ...(resolution.element.bounds === undefined
+            ? {}
+            : { bounds: resolution.element.bounds })
         };
         report.locator = {
           status: "found",
@@ -193,7 +197,16 @@ export class StepRunner {
             : resolution.message;
           report.locator = {
             status: "failed",
-            fallbackUsed: false,
+            fallbackUsed: fallback.status === "failed"
+              && fallback.label !== undefined
+              && fallback.annotatedScreenshotPath !== undefined,
+            ...(fallback.status === "failed" && fallback.label !== undefined
+              ? { fallbackLabel: fallback.label }
+              : {}),
+            ...(fallback.status === "failed"
+              && fallback.annotatedScreenshotPath !== undefined
+              ? { annotatedScreenshotPath: annotatedPath }
+              : {}),
             message
           };
           return fail(code, message);

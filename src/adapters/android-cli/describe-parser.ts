@@ -5,6 +5,11 @@ interface ArtifactCandidate {
   context: Set<string>;
 }
 
+interface MetadataValueCandidate {
+  value: string;
+  context: Set<string>;
+}
+
 export interface ArtifactSelector {
   projectDir: string;
   target: string;
@@ -73,6 +78,32 @@ function collectCandidates(
   }
 }
 
+function collectApplicationIds(
+  value: unknown,
+  context: readonly string[],
+  candidates: MetadataValueCandidate[]
+): void {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      collectApplicationIds(item, [...context, String(index)], candidates);
+    });
+    return;
+  }
+  if (value === null || typeof value !== "object") {
+    return;
+  }
+
+  const record = value as Record<string, unknown>;
+  const localContext = [...context, ...scalarContext(record)];
+  for (const [key, item] of Object.entries(record)) {
+    const normalizedKey = key.toLowerCase().replaceAll(/[-_]/g, "");
+    if (normalizedKey === "applicationid" && typeof item === "string") {
+      candidates.push({ value: item, context: new Set(localContext) });
+    }
+    collectApplicationIds(item, [...localContext, key.toLowerCase()], candidates);
+  }
+}
+
 export function selectApkArtifact(
   documents: readonly unknown[],
   selector: ArtifactSelector
@@ -106,4 +137,27 @@ export function selectApkArtifact(
   return isAbsolute(artifactPath)
     ? artifactPath
     : resolve(selector.projectDir, artifactPath);
+}
+
+export function selectApplicationId(
+  documents: readonly unknown[],
+  selector: ArtifactSelector
+): string | undefined {
+  const candidates: MetadataValueCandidate[] = [];
+  for (const document of documents) {
+    collectApplicationIds(document, [], candidates);
+  }
+  const target = selector.target.toLowerCase();
+  const variant = selector.variant.toLowerCase();
+  const matches = [...new Set(candidates
+    .filter((candidate) => (
+      candidate.context.has(target) && candidate.context.has(variant)
+    ))
+    .map((candidate) => candidate.value))];
+  if (matches.length > 1) {
+    throw new Error(
+      `Ambiguous Application ID for target ${selector.target} and variant ${selector.variant}`
+    );
+  }
+  return matches[0];
 }

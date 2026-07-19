@@ -68,6 +68,17 @@ describe("NodeProcessRunner", () => {
     expect(result.cancelled).toBe(false);
   });
 
+  it("applies a default timeout to finite run commands", async () => {
+    const runner = new NodeProcessRunner(25);
+
+    const result = await runner.run({
+      executable: process.execPath,
+      args: [fixture, "sleep"]
+    });
+
+    expect(result.timedOut).toBe(true);
+  });
+
   it("terminates a command when its AbortSignal is cancelled", async () => {
     const runner = new NodeProcessRunner();
     const controller = new AbortController();

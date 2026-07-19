@@ -195,6 +195,34 @@ describe("StepRunner", () => {
     );
   });
 
+  it("keeps annotated fallback evidence when label resolution fails", async () => {
+    const cli = androidCli();
+    vi.mocked(cli.layout).mockResolvedValue([]);
+    vi.mocked(cli.resolveScreen).mockRejectedValue(
+      new Error("label is missing from the annotated screen")
+    );
+    const test = fixture({ androidCli: cli });
+    const step: JourneyStep = {
+      ...clickStep(),
+      fallback: { type: "annotatedLabel", label: "#7" }
+    };
+
+    const result = await test.runner.run(step, 0);
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { code: "LOCATOR_NOT_FOUND" },
+      report: {
+        locator: {
+          status: "failed",
+          fallbackUsed: true,
+          fallbackLabel: "#7",
+          annotatedScreenshotPath: "steps/001-fallback-annotated.png"
+        }
+      }
+    });
+  });
+
   it("stops at an Action failure", async () => {
     const adb = adbPort();
     vi.mocked(adb.tap).mockResolvedValue(commandResult({

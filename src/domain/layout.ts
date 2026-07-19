@@ -15,6 +15,13 @@ export const BoundsSchema = z.strictObject({
 
 export type Bounds = z.infer<typeof BoundsSchema>;
 
+export const LayoutPointSchema = z.strictObject({
+  x: z.number().int().nonnegative(),
+  y: z.number().int().nonnegative()
+});
+
+export type LayoutPoint = z.infer<typeof LayoutPointSchema>;
+
 export const LocatorSchema = z.strictObject({
   resourceId: z.string().trim().min(1).optional(),
   text: z.string().min(1).optional(),
@@ -36,8 +43,11 @@ export interface LayoutElement {
   text?: string | undefined;
   contentDescription?: string | undefined;
   clickable?: boolean | undefined;
+  longClickable?: boolean | undefined;
+  scrollable?: boolean | undefined;
   enabled: boolean;
-  bounds: Bounds;
+  center?: LayoutPoint | undefined;
+  bounds?: Bounds | undefined;
   children: LayoutElement[];
 }
 
@@ -48,8 +58,14 @@ export const LayoutElementSchema: z.ZodType<LayoutElement> = z.lazy(
     text: z.string().optional(),
     contentDescription: z.string().optional(),
     clickable: z.boolean().optional(),
+    longClickable: z.boolean().optional(),
+    scrollable: z.boolean().optional(),
     enabled: z.boolean(),
-    bounds: BoundsSchema,
+    center: LayoutPointSchema.optional(),
+    bounds: BoundsSchema.optional(),
     children: z.array(LayoutElementSchema).default([])
-  })
+  }).refine(
+    ({ bounds, center }) => bounds !== undefined || center !== undefined,
+    { message: "Layout element requires center or bounds" }
+  )
 );

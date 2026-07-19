@@ -16,6 +16,7 @@ const elements: LayoutElement[] = [{
     text: "Search",
     contentDescription: "Open search",
     clickable: true,
+    longClickable: true,
     enabled: true,
     bounds: { left: 10, top: 10, right: 100, bottom: 60 },
     children: []
@@ -41,15 +42,22 @@ const elements: LayoutElement[] = [{
     enabled: false,
     bounds: { left: 10, top: 200, right: 100, bottom: 250 },
     children: []
+  }, {
+    id: "results",
+    resourceId: "results",
+    scrollable: true,
+    enabled: true,
+    bounds: { left: 0, top: 260, right: 300, bottom: 600 },
+    children: []
   }]
 }];
 
 describe("Recorder locator selection", () => {
   it("uses the first nonempty unique identity in protocol priority order", () => {
-    const search = listRecorderTargets(elements).find(
+    const search = listRecorderTargets(elements, "click").find(
       (choice) => choice.element.id === "search"
     );
-    const second = listRecorderTargets(elements).find(
+    const second = listRecorderTargets(elements, "click").find(
       (choice) => choice.element.id === "duplicate-b"
     );
     if (search === undefined || second === undefined) {
@@ -62,9 +70,18 @@ describe("Recorder locator selection", () => {
   });
 
   it("lists only enabled elements that have a deterministic Locator", () => {
-    expect(listRecorderTargets(elements).map((choice) => choice.element.id))
+    expect(listRecorderTargets(elements, "click").map((choice) => choice.element.id))
       .toEqual(["search", "duplicate-b"]);
-    expect(listRecorderTargets(elements)[0]?.label)
+    expect(listRecorderTargets(elements, "click")[0]?.label)
       .toContain("search_button");
+  });
+
+  it("filters targets by the selected Action interaction", () => {
+    expect(listRecorderTargets(elements, "longClick").map(
+      (choice) => choice.element.id
+    )).toEqual(["search"]);
+    expect(listRecorderTargets(elements, "swipe").map(
+      (choice) => choice.element.id
+    )).toEqual(["results"]);
   });
 });

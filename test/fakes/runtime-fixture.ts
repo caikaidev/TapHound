@@ -87,6 +87,9 @@ export function runtimeFixture(): RuntimeFixture {
       return Promise.resolve([{
         id: "search",
         resourceId: "search",
+        clickable: true,
+        longClickable: true,
+        scrollable: true,
         enabled: true,
         bounds: { left: 0, top: 0, right: 100, bottom: 50 },
         children: []

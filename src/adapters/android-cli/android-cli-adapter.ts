@@ -15,6 +15,7 @@ import type {
 } from "../../ports/process-runner.js";
 import {
   extractDescriptionPaths,
+  selectApplicationId,
   selectApkArtifact
 } from "./describe-parser.js";
 import {
@@ -26,16 +27,19 @@ type ReadTextFile = (path: string) => Promise<string>;
 
 function commandSpec(
   args: readonly string[],
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  timeoutMs?: number
 ): {
   executable: string;
   args: readonly string[];
   signal?: AbortSignal | undefined;
+  timeoutMs?: number | undefined;
 } {
   return {
     executable: "android",
     args,
-    ...(signal === undefined ? {} : { signal })
+    ...(signal === undefined ? {} : { signal }),
+    ...(timeoutMs === undefined ? {} : { timeoutMs })
   };
 }
 
@@ -74,9 +78,11 @@ export class AndroidCliAdapter implements AndroidCliPort {
         return document;
       })
     );
+    const packageName = selectApplicationId(documents, options);
     return {
       apkPath: selectApkArtifact(documents, options),
-      metadataPaths
+      metadataPaths,
+      ...(packageName === undefined ? {} : { packageName })
     };
   }
 
@@ -95,7 +101,7 @@ export class AndroidCliAdapter implements AndroidCliPort {
     const result = await this.runner.run(commandSpec([
       "layout",
       `--device=${options.deviceSerial}`
-    ], options.signal));
+    ], options.signal, options.timeoutMs));
     assertSuccess(result, "layout");
     return parseLayout(result.stdout);
   }
@@ -107,7 +113,7 @@ export class AndroidCliAdapter implements AndroidCliPort {
       "layout",
       "--diff",
       `--device=${options.deviceSerial}`
-    ], options.signal));
+    ], options.signal, options.timeoutMs));
     assertSuccess(result, "layout --diff");
     return parseLayoutDiff(result.stdout);
   }
@@ -119,7 +125,7 @@ export class AndroidCliAdapter implements AndroidCliPort {
       `--output=${options.outputPath}`,
       ...(options.annotate === true ? ["--annotate"] : []),
       `--device=${options.deviceSerial}`
-    ], options.signal));
+    ], options.signal, options.timeoutMs));
   }
 
   public async resolveScreen(

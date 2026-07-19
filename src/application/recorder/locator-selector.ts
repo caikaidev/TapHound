@@ -10,6 +10,8 @@ export interface RecorderTarget {
   label: string;
 }
 
+export type RecorderTargetAction = "click" | "longClick" | "swipe";
+
 function flatten(elements: readonly LayoutElement[]): LayoutElement[] {
   return elements.flatMap((element) => [
     element,
@@ -47,10 +49,16 @@ function targetLabel(element: LayoutElement, locator: Locator): string {
 }
 
 export function listRecorderTargets(
-  roots: readonly LayoutElement[]
+  roots: readonly LayoutElement[],
+  action: RecorderTargetAction
 ): RecorderTarget[] {
   return flatten(roots).flatMap((element) => {
-    if (!element.enabled) {
+    const supportsAction = action === "click"
+      ? element.clickable === true
+      : action === "longClick"
+        ? element.longClickable === true
+        : element.scrollable === true && element.bounds !== undefined;
+    if (!element.enabled || !supportsAction) {
       return [];
     }
     const locator = selectUniqueLocator(element, roots);

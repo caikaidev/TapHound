@@ -13,6 +13,7 @@ export interface AppIdentity {
   packageName: string;
   deviceSerial: string;
   signal?: AbortSignal | undefined;
+  timeoutMs?: number | undefined;
 }
 
 export interface LogcatOptions {

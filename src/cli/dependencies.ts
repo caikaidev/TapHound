@@ -28,6 +28,7 @@ export interface TextOutput {
 }
 
 export interface CliDependencies {
+  signal?: AbortSignal | undefined;
   doctor: {
     run: (
       projectRoot: string,
@@ -52,13 +53,16 @@ function runId(): string {
   return `${new Date().toISOString().replaceAll(":", "-")}-${randomUUID()}`;
 }
 
-export function createProductionDependencies(): CliDependencies {
+export function createProductionDependencies(
+  signal?: AbortSignal
+): CliDependencies {
   const runner = new NodeProcessRunner();
   const adb = new AdbAdapter(runner);
   const androidCli = new AndroidCliAdapter(runner);
   const gradle = new GradleAdapter(runner);
   const clock = new SystemClock();
   return {
+    ...(signal === undefined ? {} : { signal }),
     doctor: new DoctorService({
       runner,
       adb,

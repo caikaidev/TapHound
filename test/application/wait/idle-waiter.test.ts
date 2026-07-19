@@ -43,6 +43,9 @@ describe("IdleWaiter", () => {
       durationMs: 200
     });
     expect(cli.layoutDiff).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(cli.layoutDiff).mock.calls.map(([options]) => (
+      options.timeoutMs
+    ))).toEqual([500, 400, 300]);
     expect(clock.sleeps).toEqual([100, 100]);
   });
 
@@ -84,6 +87,30 @@ describe("IdleWaiter", () => {
       polls: 4,
       durationMs: 300,
       lastDiff: [{ id: "still-changing" }]
+    });
+  });
+
+  it("maps a hung Layout command deadline to IDLE_TIMEOUT", async () => {
+    const cli = androidCli();
+    const clock = new FakeClock();
+    vi.mocked(cli.layoutDiff).mockImplementation(() => {
+      clock.currentTime = 250;
+      return Promise.reject(new Error("layout command timed out"));
+    });
+
+    await expect(new IdleWaiter(
+      cli,
+      clock,
+      "emulator-5554"
+    ).waitUntilIdle({
+      ...config,
+      timeoutMs: 250
+    })).resolves.toEqual({
+      status: "timeout",
+      code: "IDLE_TIMEOUT",
+      polls: 1,
+      durationMs: 250,
+      lastDiff: []
     });
   });
 

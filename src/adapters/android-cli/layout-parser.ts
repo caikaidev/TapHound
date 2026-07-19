@@ -1,6 +1,8 @@
 import {
   BoundsSchema,
-  type LayoutElement
+  LayoutPointSchema,
+  type LayoutElement,
+  type LayoutPoint
 } from "../../domain/layout.js";
 
 function parseJson(stdout: string, label: string): unknown {
@@ -49,6 +51,9 @@ function optionalBoolean(
 }
 
 function parseBounds(value: unknown): LayoutElement["bounds"] {
+  if (value === undefined) {
+    return undefined;
+  }
   if (typeof value === "string") {
     const match = /^\[(\d+),(\d+)]\[(\d+),(\d+)]$/.exec(value);
     if (match === null) {
@@ -64,8 +69,46 @@ function parseBounds(value: unknown): LayoutElement["bounds"] {
   return BoundsSchema.parse(value);
 }
 
-function parseElement(value: unknown, path: string): LayoutElement {
+function parseCenter(value: unknown): LayoutPoint | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value === "string") {
+    const match = /^\(\s*(\d+)\s*,\s*(\d+)\s*\)$/.exec(value);
+    if (match === null) {
+      throw new Error("Invalid Android Layout center");
+    }
+    return LayoutPointSchema.parse({
+      x: Number(match[1]),
+      y: Number(match[2])
+    });
+  }
+  return LayoutPointSchema.parse(value);
+}
+
+function stringSet(record: Record<string, unknown>, key: string): Set<string> {
+  const value = record[key];
+  if (value === undefined) {
+    return new Set();
+  }
+  if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
+    throw new Error(`Invalid Android Layout ${key}`);
+  }
+  return new Set(value);
+}
+
+function elementId(record: Record<string, unknown>, path: string): string {
+  const value = record.id ?? record.key;
+  return typeof value === "string" || typeof value === "number"
+    ? String(value)
+    : path;
+}
+
+function parseElement(value: unknown, path: string): LayoutElement | undefined {
   const record = asRecord(value);
+  if (optionalBoolean(record, "off-screen") === true) {
+    return undefined;
+  }
   const childrenValue = record.children ?? [];
   if (!Array.isArray(childrenValue)) {
     throw new Error("Invalid Android Layout children");
@@ -78,28 +121,57 @@ function parseElement(value: unknown, path: string): LayoutElement {
     "contentDescription",
     "content-desc"
   );
-  const clickable = optionalBoolean(record, "clickable");
+  const interactions = stringSet(record, "interactions");
+  const clickable = optionalBoolean(record, "clickable")
+    ?? (interactions.has("clickable") ? true : undefined);
+  const longClickable = optionalBoolean(record, "longClickable")
+    ?? optionalBoolean(record, "long-clickable")
+    ?? (interactions.has("long-clickable") ? true : undefined);
+  const scrollable = optionalBoolean(record, "scrollable")
+    ?? (interactions.has("scrollable") ? true : undefined);
+  const bounds = parseBounds(record.bounds);
+  const parsedCenter = parseCenter(record.center);
+  const center = parsedCenter ?? (bounds === undefined
+    ? undefined
+    : {
+        x: Math.round((bounds.left + bounds.right) / 2),
+        y: Math.round((bounds.top + bounds.bottom) / 2)
+      });
+  if (center === undefined) {
+    throw new Error("Android Layout element has no visible center or bounds");
+  }
+
+  const children = childrenValue.flatMap((child, index) => {
+    const parsed = parseElement(child, `${path}/${String(index)}`);
+    return parsed === undefined ? [] : [parsed];
+  });
 
   return {
-    id: optionalString(record, "id") ?? path,
+    id: elementId(record, path),
     ...(resourceId === undefined ? {} : { resourceId }),
     ...(text === undefined ? {} : { text }),
     ...(contentDescription === undefined ? {} : { contentDescription }),
     ...(clickable === undefined ? {} : { clickable }),
+    ...(longClickable === undefined ? {} : { longClickable }),
+    ...(scrollable === undefined ? {} : { scrollable }),
     enabled: optionalBoolean(record, "enabled") ?? true,
-    bounds: parseBounds(record.bounds),
-    children: childrenValue.map((child, index) => (
-      parseElement(child, `${path}/${String(index)}`)
-    ))
+    center,
+    ...(bounds === undefined ? {} : { bounds }),
+    children
   };
 }
 
 export function parseLayout(stdout: string): readonly LayoutElement[] {
   const parsed = parseJson(stdout, "Layout");
   try {
-    return Array.isArray(parsed)
-      ? parsed.map((element, index) => parseElement(element, String(index)))
-      : [parseElement(parsed, "0")];
+    if (Array.isArray(parsed)) {
+      return parsed.flatMap((element, index) => {
+        const normalized = parseElement(element, String(index));
+        return normalized === undefined ? [] : [normalized];
+      });
+    }
+    const normalized = parseElement(parsed, "0");
+    return normalized === undefined ? [] : [normalized];
   } catch (error) {
     throw new Error("Invalid Android Layout structure", { cause: error });
   }

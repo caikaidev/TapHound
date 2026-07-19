@@ -76,7 +76,7 @@ export function createVerifyCommand(dependencies: CliDependencies): Command {
       try {
         const doctor = await dependencies.doctor.run(
           options.project,
-          undefined,
+          dependencies.signal,
           options.device
         );
         if (doctor.status === "failed") {
@@ -104,7 +104,10 @@ export function createVerifyCommand(dependencies: CliDependencies): Command {
           journey,
           projectRoot: options.project,
           deviceSerial,
-          toolVersions: toolVersions(doctor.checks)
+          toolVersions: toolVersions(doctor.checks),
+          ...(dependencies.signal === undefined
+            ? {}
+            : { signal: dependencies.signal })
         });
         if (options.json === true) {
           writeJson(dependencies.stdout, result);

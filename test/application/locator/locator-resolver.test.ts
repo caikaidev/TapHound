@@ -99,6 +99,19 @@ describe("resolveLocator", () => {
     });
   });
 
+  it("uses the explicit center emitted for a non-scrollable Android CLI element", () => {
+    expect(resolveLocator([
+      element({
+        resourceId: "search",
+        bounds: undefined,
+        center: { x: 540, y: 1200 }
+      })
+    ], { resourceId: "search" })).toMatchObject({
+      status: "found",
+      point: { x: 540, y: 1200 }
+    });
+  });
+
   it("searches nested Layout elements", () => {
     const root = element({
       id: "root",

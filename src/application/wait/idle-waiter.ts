@@ -56,11 +56,31 @@ export class IdleWaiter {
         };
       }
 
-      const diff = await this.androidCli.layoutDiff({
-        deviceSerial: this.deviceSerial,
-        ...(signal === undefined ? {} : { signal })
-      });
+      const elapsedBeforePoll = this.clock.now() - startedAt;
       polls += 1;
+      let diff: readonly unknown[];
+      try {
+        diff = await this.androidCli.layoutDiff({
+          deviceSerial: this.deviceSerial,
+          ...(signal === undefined ? {} : { signal }),
+          timeoutMs: Math.max(1, config.timeoutMs - elapsedBeforePoll)
+        });
+      } catch (error) {
+        const elapsed = this.clock.now() - startedAt;
+        if (isAborted(signal)) {
+          return { status: "cancelled", polls, durationMs: elapsed };
+        }
+        if (elapsed >= config.timeoutMs) {
+          return {
+            status: "timeout",
+            code: "IDLE_TIMEOUT",
+            polls,
+            durationMs: elapsed,
+            lastDiff
+          };
+        }
+        throw error;
+      }
       if (diff.length === 0) {
         consecutiveEmpty += 1;
       } else {

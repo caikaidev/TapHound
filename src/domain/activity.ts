@@ -60,3 +60,26 @@ export function normalizeActivity(
   assertBelongsToPackage(packageName, value);
   return value;
 }
+
+export function normalizeObservedActivityComponent(component: string): string {
+  const value = component.trim();
+  const parts = value.split("/");
+  if (parts.length !== 2) {
+    throw new Error(`Invalid Activity component: ${value}`);
+  }
+  const [componentPackage, componentActivity] = parts;
+  if (
+    componentPackage === undefined
+    || componentActivity === undefined
+    || !PACKAGE_NAME.test(componentPackage)
+  ) {
+    throw new Error(`Invalid Activity component: ${value}`);
+  }
+  const normalized = componentActivity.startsWith(".")
+    ? `${componentPackage}${componentActivity}`
+    : componentActivity;
+  if (!QUALIFIED_ACTIVITY.test(normalized)) {
+    throw new Error(`Invalid Activity component: ${value}`);
+  }
+  return normalized;
+}

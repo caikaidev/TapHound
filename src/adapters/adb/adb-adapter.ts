@@ -1,4 +1,4 @@
-import { normalizeActivity } from "../../domain/activity.js";
+import { normalizeObservedActivityComponent } from "../../domain/activity.js";
 import type {
   AdbPort,
   AppIdentity,
@@ -16,10 +16,21 @@ function deviceArgs(deviceSerial?: string): string[] {
   return deviceSerial === undefined ? [] : ["-s", deviceSerial];
 }
 
-function encodeInputText(text: string): string {
-  return text
-    .replaceAll("%", "%25")
-    .replaceAll(" ", "%s");
+function quoteRemoteShellArgument(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+function inputTextChunks(text: string): string[] {
+  const chunks: string[] = [];
+  let start = 0;
+  for (let index = 0; index < text.length - 1; index += 1) {
+    if (text[index] === "%" && text[index + 1] === "s") {
+      chunks.push(text.slice(start, index + 1));
+      start = index + 1;
+    }
+  }
+  chunks.push(text.slice(start));
+  return chunks;
 }
 
 export class AdbAdapter implements AdbPort {
@@ -27,12 +38,14 @@ export class AdbAdapter implements AdbPort {
 
   private run(
     args: readonly string[],
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    timeoutMs?: number
   ): Promise<CommandResult> {
     return this.runner.run({
       executable: "adb",
       args,
-      ...(signal === undefined ? {} : { signal })
+      ...(signal === undefined ? {} : { signal }),
+      ...(timeoutMs === undefined ? {} : { timeoutMs })
     });
   }
 
@@ -59,14 +72,18 @@ export class AdbAdapter implements AdbPort {
       "dumpsys",
       "activity",
       "activities"
-    ], identity.signal);
-    const component = /\b([A-Za-z_$][\w.$]*)\/(\.?[A-Za-z_$][\w.$]*)\b/
-      .exec(result.stdout);
+    ], identity.signal, identity.timeoutMs);
+    const resumed = result.stdout.split(/\r?\n/).find(
+      (line) => /\b(?:mResumedActivity|topResumedActivity|ResumedActivity)\s*[:=]/
+        .test(line)
+    );
+    const component = resumed === undefined
+      ? null
+      : /\b([A-Za-z_$][\w.$]*)\/(\.?[A-Za-z_$][\w.$]*)\b/.exec(resumed);
     if (component?.[1] === undefined || component[2] === undefined) {
       throw new Error("ADB did not report a resumed Activity");
     }
-    return normalizeActivity(
-      identity.packageName,
+    return normalizeObservedActivityComponent(
       `${component[1]}/${component[2]}`
     );
   }
@@ -77,7 +94,7 @@ export class AdbAdapter implements AdbPort {
       "shell",
       "pidof",
       identity.packageName
-    ], identity.signal);
+    ], identity.signal, identity.timeoutMs);
     const value = result.stdout.trim();
     if (value.length === 0) {
       return null;
@@ -146,18 +163,33 @@ export class AdbAdapter implements AdbPort {
     ], signal);
   }
 
-  public inputText(
+  public async inputText(
     text: string,
     deviceSerial: string,
     signal?: AbortSignal
   ): Promise<CommandResult> {
-    return this.run([
-      ...deviceArgs(deviceSerial),
-      "shell",
-      "input",
-      "text",
-      encodeInputText(text)
-    ], signal);
+    let result: CommandResult | undefined;
+    for (const chunk of inputTextChunks(text)) {
+      result = await this.run([
+        ...deviceArgs(deviceSerial),
+        "shell",
+        "input",
+        "text",
+        quoteRemoteShellArgument(chunk)
+      ], signal);
+      if (
+        result.exitCode !== 0
+        || result.timedOut
+        || result.cancelled
+        || result.spawnError !== undefined
+      ) {
+        return result;
+      }
+    }
+    if (result === undefined) {
+      throw new Error("ADB input text produced no command");
+    }
+    return result;
   }
 
   public startLogcat(options: LogcatOptions): RunningCommand {

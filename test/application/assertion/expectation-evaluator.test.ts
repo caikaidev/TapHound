@@ -73,6 +73,9 @@ describe("ExpectationEvaluator", () => {
       type: "activity",
       durationMs: 100
     });
+    expect(vi.mocked(adb.currentActivity).mock.calls.map(([identity]) => (
+      identity.timeoutMs
+    ))).toEqual([300, 200]);
   });
 
   it("returns the Activity failure code at timeout", async () => {
@@ -96,6 +99,31 @@ describe("ExpectationEvaluator", () => {
       status: "failed",
       code: "EXPECT_ACTIVITY_FAILED",
       actual: "com.example.app.MainActivity",
+      durationMs: 200
+    });
+  });
+
+  it("maps a hung Activity command deadline to the Expect failure", async () => {
+    const adb = adbPort();
+    const clock = new FakeClock();
+    vi.mocked(adb.currentActivity).mockImplementation(() => {
+      clock.currentTime = 200;
+      return Promise.reject(new Error("ADB command timed out"));
+    });
+    const evaluator = new ExpectationEvaluator(
+      adb,
+      androidCli(),
+      new LogcatCollector(adb, clock),
+      clock
+    );
+
+    await expect(evaluator.evaluate({
+      type: "activity",
+      value: "com.example.app.SearchActivity",
+      timeoutMs: 200
+    }, context)).resolves.toMatchObject({
+      status: "failed",
+      code: "EXPECT_ACTIVITY_FAILED",
       durationMs: 200
     });
   });
@@ -125,6 +153,46 @@ describe("ExpectationEvaluator", () => {
     }, context)).resolves.toMatchObject({
       status: "passed",
       type: "element"
+    });
+  });
+
+  it("does not pass an Element Expect when its Locator is ambiguous", async () => {
+    const adb = adbPort();
+    const cli = androidCli();
+    vi.mocked(cli.layout).mockResolvedValue([
+      {
+        id: "first",
+        resourceId: "result",
+        text: "First",
+        enabled: true,
+        center: { x: 10, y: 10 },
+        children: []
+      },
+      {
+        id: "second",
+        resourceId: "result",
+        text: "Second",
+        enabled: true,
+        center: { x: 20, y: 20 },
+        children: []
+      }
+    ]);
+    const clock = new FakeClock();
+    const evaluator = new ExpectationEvaluator(
+      adb,
+      cli,
+      new LogcatCollector(adb, clock),
+      clock,
+      100
+    );
+
+    await expect(evaluator.evaluate({
+      type: "element",
+      locator: { resourceId: "result" },
+      timeoutMs: 100
+    }, context)).resolves.toMatchObject({
+      status: "failed",
+      code: "EXPECT_ELEMENT_FAILED"
     });
   });
 

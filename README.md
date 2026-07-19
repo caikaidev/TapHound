@@ -114,6 +114,7 @@ apr verify --project . --journey journeys/search.json --json
 - 只支持 Android 与单个明确选择的设备。
 - Recorder 是 APR 介导的交互流程，不观察用户在设备上的任意触摸。
 - Action 仅包括 click、longClick、inputText、swipe、back 和 wait。
+- Recorder 只为 Android CLI 返回了 bounds 的 scrollable 元素提供 swipe；Replay 不会为缺失 bounds 的元素猜测滑动区域。
 - 标注截图回退只适用于 click 与 longClick，且必须显式保存 `#编号`。
 - Replay 和断言完全确定性，不包含 AI 或视觉推理。
 - Claude Code Skill 或 SubAgent 封装不在 v0.2；当前稳定集成面是 `apr verify --json`。

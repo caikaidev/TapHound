@@ -1,0 +1,34 @@
+[
+  {
+    "text": "Open search",
+    "content-desc": "Open search screen",
+    "interactions": [
+      "clickable",
+      "focusable"
+    ],
+    "center": "(540, 1200)",
+    "resource-id": "open_search",
+    "key": 123456
+  },
+  {
+    "interactions": [
+      "scrollable"
+    ],
+    "state": [
+      "focused"
+    ],
+    "center": "(540, 1400)",
+    "bounds": "[0,200][1080,2200]",
+    "resource-id": "results",
+    "key": 234567
+  },
+  {
+    "text": "Off screen",
+    "interactions": [
+      "clickable"
+    ],
+    "off-screen": true,
+    "resource-id": "off_screen",
+    "key": 345678
+  }
+]

@@ -5,6 +5,9 @@
       "variants": [
         {
           "name": "debug",
+          "mainArtifact": {
+            "applicationId": "com.example.app"
+          },
           "artifacts": [
             {
               "type": "APK",

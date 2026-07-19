@@ -1,10 +1,6 @@
 import type { FailureCode } from "../../domain/failure.js";
 import type { Expectation } from "../../domain/journey.js";
-import {
-  LOCATOR_FIELDS
-} from "../../domain/locator.js";
 import type {
-  LayoutElement,
   Locator
 } from "../../domain/layout.js";
 import type { AdbPort } from "../../ports/adb.js";
@@ -14,6 +10,7 @@ import type {
   LogcatCollector,
   LogcatLine
 } from "../collector/logcat-collector.js";
+import { resolveLocator } from "../locator/locator-resolver.js";
 
 export interface ExpectationContext {
   packageName: string;
@@ -48,28 +45,12 @@ export type ExpectationResult =
       durationMs: number;
     };
 
-function flatten(elements: readonly LayoutElement[]): LayoutElement[] {
-  return elements.flatMap((element) => [
-    element,
-    ...flatten(element.children)
-  ]);
-}
-
 function hasElement(
-  elements: readonly LayoutElement[],
+  elements: Parameters<typeof resolveLocator>[0],
   locator: Locator
 ): boolean {
-  const all = flatten(elements);
-  for (const field of LOCATOR_FIELDS) {
-    const value = locator[field];
-    if (
-      value !== undefined
-      && all.some((element) => element[field] === value)
-    ) {
-      return true;
-    }
-  }
-  return false;
+  return resolveLocator(elements, locator, { requireEnabled: false }).status
+    === "found";
 }
 
 function matchesLogcat(
@@ -129,12 +110,19 @@ export class ExpectationEvaluator {
         };
       }
 
-      switch (expectation.type) {
+      const commandTimeoutMs = Math.max(
+        1,
+        expectation.timeoutMs - (this.clock.now() - startedAt)
+      );
+
+      try {
+        switch (expectation.type) {
         case "activity":
           actual = await this.adb.currentActivity({
             packageName: context.packageName,
             deviceSerial: context.deviceSerial,
-            ...(signal === undefined ? {} : { signal })
+            ...(signal === undefined ? {} : { signal }),
+            timeoutMs: commandTimeoutMs
           });
           if (actual === expectation.value) {
             return {
@@ -148,7 +136,8 @@ export class ExpectationEvaluator {
         case "element":
           if (hasElement(await this.androidCli.layout({
             deviceSerial: context.deviceSerial,
-            ...(signal === undefined ? {} : { signal })
+            ...(signal === undefined ? {} : { signal }),
+            timeoutMs: commandTimeoutMs
           }), expectation.locator)) {
             return {
               status: "passed",
@@ -171,6 +160,32 @@ export class ExpectationEvaluator {
           }
           break;
         }
+        }
+      } catch (error) {
+        const elapsed = this.clock.now() - startedAt;
+        if (isAborted(signal)) {
+          return {
+            status: "cancelled",
+            type: expectation.type,
+            durationMs: elapsed
+          };
+        }
+        if (elapsed >= expectation.timeoutMs) {
+          const codes = {
+            activity: "EXPECT_ACTIVITY_FAILED",
+            element: "EXPECT_ELEMENT_FAILED",
+            logcat: "EXPECT_LOGCAT_FAILED"
+          } as const;
+          return {
+            status: "failed",
+            type: expectation.type,
+            code: codes[expectation.type],
+            message: `${expectation.type} Expect command exceeded its timeout`,
+            durationMs: elapsed,
+            ...(actual === undefined ? {} : { actual })
+          };
+        }
+        throw error;
       }
 
       const elapsed = this.clock.now() - startedAt;

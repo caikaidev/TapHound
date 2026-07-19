@@ -1,3 +1,6 @@
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -5,7 +8,37 @@ import {
   parseLayoutDiff
 } from "../../../src/adapters/android-cli/layout-parser.js";
 
+const realLayoutFixture = fileURLToPath(
+  new URL("../../fixtures/android-cli/layout-output.json", import.meta.url)
+);
+
 describe("parseLayout", () => {
+  it("parses the flat ElementSerializer protocol from Android CLI 1.0", async () => {
+    const elements = parseLayout(await readFile(realLayoutFixture, "utf8"));
+
+    expect(elements).toEqual([
+      {
+        id: "123456",
+        resourceId: "open_search",
+        text: "Open search",
+        contentDescription: "Open search screen",
+        clickable: true,
+        enabled: true,
+        center: { x: 540, y: 1200 },
+        children: []
+      },
+      {
+        id: "234567",
+        resourceId: "results",
+        scrollable: true,
+        enabled: true,
+        center: { x: 540, y: 1400 },
+        bounds: { left: 0, top: 200, right: 1080, bottom: 2200 },
+        children: []
+      }
+    ]);
+  });
+
   it("parses canonical Android CLI Layout JSON", () => {
     const elements = parseLayout(JSON.stringify({
       id: "root",

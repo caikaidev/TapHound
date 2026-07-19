@@ -13,6 +13,7 @@
     "node": ">=22"
   },
   "scripts": {
+    "acceptance:device": "node scripts/acceptance-device.mjs",
     "build": "tsc -p tsconfig.build.json",
     "coverage": "vitest run --coverage",
     "lint": "eslint .",

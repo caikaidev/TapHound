@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "name": "APR demo search",
+  "steps": [
+    {
+      "action": "click",
+      "locator": {
+        "resourceId": "open_search"
+      },
+      "activity": {
+        "before": "dev.apr.demo.MainActivity",
+        "after": "dev.apr.demo.SearchActivity"
+      },
+      "expect": {
+        "type": "element",
+        "locator": {
+          "resourceId": "search_input"
+        },
+        "timeoutMs": 3000
+      }
+    },
+    {
+      "action": "click",
+      "locator": {
+        "resourceId": "search_input"
+      },
+      "activity": {
+        "before": "dev.apr.demo.SearchActivity",
+        "after": "dev.apr.demo.SearchActivity"
+      }
+    },
+    {
+      "action": "inputText",
+      "text": "hello world",
+      "activity": {
+        "before": "dev.apr.demo.SearchActivity",
+        "after": "dev.apr.demo.SearchActivity"
+      }
+    },
+    {
+      "action": "click",
+      "locator": {
+        "resourceId": "submit_search"
+      },
+      "activity": {
+        "before": "dev.apr.demo.SearchActivity",
+        "after": "dev.apr.demo.SearchActivity"
+      },
+      "expect": {
+        "type": "logcat",
+        "tag": "SearchViewModel",
+        "level": "I",
+        "pattern": "submitted query=hello world",
+        "match": "literal",
+        "timeoutMs": 3000
+      }
+    }
+  ]
+}

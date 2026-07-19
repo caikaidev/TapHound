@@ -23,5 +23,9 @@ export default tseslint.config(
     rules: {
       "@typescript-eslint/explicit-function-return-type": "error"
     }
+  },
+  {
+    files: ["scripts/**/*.mjs"],
+    ...tseslint.configs.disableTypeChecked
   }
 );

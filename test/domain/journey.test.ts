@@ -99,6 +99,58 @@ describe("JourneySchema", () => {
     })).toThrow();
   });
 
+  it.each(["click", "longClick"] as const)(
+    "accepts an explicit annotated-label fallback for %s",
+    (action) => {
+      expect(() => JourneySchema.parse({
+        version: 1,
+        name: "Fallback",
+        steps: [{
+          action,
+          locator: { resourceId: "toolbar_search" },
+          fallback: {
+            type: "annotatedLabel",
+            label: "#7"
+          },
+          activity
+        }]
+      })).not.toThrow();
+    }
+  );
+
+  it("rejects annotated-label fallback for unsupported Actions", () => {
+    expect(() => JourneySchema.parse({
+      version: 1,
+      name: "Invalid fallback",
+      steps: [{
+        action: "swipe",
+        locator: { resourceId: "results" },
+        direction: "up",
+        fallback: {
+          type: "annotatedLabel",
+          label: "#7"
+        },
+        activity
+      }]
+    })).toThrow();
+  });
+
+  it("requires an Android CLI annotation label", () => {
+    expect(() => JourneySchema.parse({
+      version: 1,
+      name: "Invalid label",
+      steps: [{
+        action: "click",
+        locator: { resourceId: "toolbar_search" },
+        fallback: {
+          type: "annotatedLabel",
+          label: "search"
+        },
+        activity
+      }]
+    })).toThrow();
+  });
+
   it("requires text for inputText", () => {
     expect(() => JourneySchema.parse({
       version: 1,

@@ -44,9 +44,15 @@ const CommonStepShape = {
   expect: ExpectSchema.optional()
 };
 
+export const AnnotatedLabelFallbackSchema = z.strictObject({
+  type: z.literal("annotatedLabel"),
+  label: z.string().regex(/^#\d+$/, "Fallback label must use Android CLI #number format")
+});
+
 const ClickStepSchema = z.strictObject({
   action: z.literal("click"),
   locator: LocatorSchema,
+  fallback: AnnotatedLabelFallbackSchema.optional(),
   ...CommonStepShape
 });
 
@@ -54,6 +60,7 @@ const LongClickStepSchema = z.strictObject({
   action: z.literal("longClick"),
   locator: LocatorSchema,
   durationMs: z.number().int().positive().default(800),
+  fallback: AnnotatedLabelFallbackSchema.optional(),
   ...CommonStepShape
 });
 
@@ -98,6 +105,9 @@ export const JourneySchema = z.strictObject({
 });
 
 export type ActivityCheckpoint = z.infer<typeof ActivityCheckpointSchema>;
+export type AnnotatedLabelFallback = z.infer<
+  typeof AnnotatedLabelFallbackSchema
+>;
 export type Expectation = z.infer<typeof ExpectSchema>;
 export type JourneyStep = z.infer<typeof JourneyStepSchema>;
 export type Journey = z.infer<typeof JourneySchema>;

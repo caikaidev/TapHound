@@ -24,32 +24,35 @@ export interface LogcatOptions {
 }
 
 export interface AdbPort {
-  devices(signal?: AbortSignal): Promise<readonly DeviceInfo[]>;
-  currentActivity(identity: AppIdentity): Promise<string>;
-  pid(identity: AppIdentity): Promise<number | null>;
-  tap(
+  devices: (signal?: AbortSignal) => Promise<readonly DeviceInfo[]>;
+  currentActivity: (identity: AppIdentity) => Promise<string>;
+  pid: (identity: AppIdentity) => Promise<number | null>;
+  tap: (
     point: Point,
     deviceSerial: string,
     signal?: AbortSignal
-  ): Promise<CommandResult>;
-  longClick(
+  ) => Promise<CommandResult>;
+  longClick: (
     point: Point,
     durationMs: number,
     deviceSerial: string,
     signal?: AbortSignal
-  ): Promise<CommandResult>;
-  swipe(
+  ) => Promise<CommandResult>;
+  swipe: (
     from: Point,
     to: Point,
     durationMs: number,
     deviceSerial: string,
     signal?: AbortSignal
-  ): Promise<CommandResult>;
-  back(deviceSerial: string, signal?: AbortSignal): Promise<CommandResult>;
-  inputText(
+  ) => Promise<CommandResult>;
+  back: (
+    deviceSerial: string,
+    signal?: AbortSignal
+  ) => Promise<CommandResult>;
+  inputText: (
     text: string,
     deviceSerial: string,
     signal?: AbortSignal
-  ): Promise<CommandResult>;
-  startLogcat(options: LogcatOptions): RunningCommand;
+  ) => Promise<CommandResult>;
+  startLogcat: (options: LogcatOptions) => RunningCommand;
 }

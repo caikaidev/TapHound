@@ -31,6 +31,18 @@ const LogcatExpectSchema = z.strictObject({
   pattern: z.string().min(1),
   match: z.enum(["literal", "regex"]).default("literal"),
   timeoutMs: z.number().int().positive()
+}).superRefine((expectation, context) => {
+  if (expectation.match === "regex") {
+    try {
+      new RegExp(expectation.pattern);
+    } catch {
+      context.addIssue({
+        code: "custom",
+        path: ["pattern"],
+        message: "pattern must be a valid regular expression"
+      });
+    }
+  }
 });
 
 export const ExpectSchema = z.discriminatedUnion("type", [

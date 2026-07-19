@@ -167,6 +167,24 @@ describe("JourneySchema", () => {
     })).toThrow();
   });
 
+  it("rejects an invalid regular-expression Logcat Expect", () => {
+    expect(() => JourneySchema.parse({
+      version: 1,
+      name: "Invalid regular expression",
+      steps: [{
+        action: "wait",
+        activity,
+        expect: {
+          type: "logcat",
+          tag: "SearchViewModel",
+          pattern: "[",
+          match: "regex",
+          timeoutMs: 3000
+        }
+      }]
+    })).toThrow(/regular expression/i);
+  });
+
   it("rejects a natural-language official Journey shape", () => {
     expect(() => JourneySchema.parse({
       name: "Search",

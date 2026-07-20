@@ -2,11 +2,11 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Completely rename the unreleased APR codebase to TapHound, keep wire schemas at v1, prepare an Apache-2.0 npm package, connect the existing GitHub repository, and publish only `taphound@0.2.0-dev.1` under the `dev` dist-tag.
+**Goal:** Completely rename the unreleased APR codebase to TapHound, deliver the approved HoundMark brand Icon, keep wire schemas at v1, prepare an Apache-2.0 npm package, connect the existing GitHub repository, and publish only `taphound@0.2.0-dev.1` under the `dev` dist-tag.
 
-**Architecture:** Treat the rebrand as a breaking source and tooling migration with no compatibility aliases. Rename public TypeScript identifiers and every active CLI/config/artifact/demo contract while preserving the deterministic recorder/replay architecture and JSON schema versions. Keep local code changes, GitHub mutation, and irreversible npm publication as separate verified phases with explicit approval gates.
+**Architecture:** Treat the rebrand as a breaking source and tooling migration with no compatibility aliases. Rename public TypeScript identifiers and every active CLI/config/artifact/demo contract while preserving the deterministic recorder/replay architecture and JSON schema versions; keep brand assets isolated under `assets/brand/` with automated structural checks and manual small-size review. Keep local code changes, GitHub mutation, and irreversible npm publication as separate verified phases with explicit approval gates.
 
-**Tech Stack:** TypeScript 6, Node.js 22 ESM, Commander, Zod, Vitest, npm, Git, Android Gradle demo, Apache-2.0.
+**Tech Stack:** TypeScript 6, Node.js 22 ESM, Commander, Zod, Vitest, SVG, PNG, Sharp (development-only export tool), npm, Git, Android Gradle demo, Apache-2.0.
 
 ---
 
@@ -20,6 +20,7 @@
 - Do not publish to GitHub or npm from a feature worktree. Complete local review and integration first.
 - Immediately before the first GitHub push and immediately before `npm publish`, pause for explicit user confirmation. These are two separate gates.
 - Use `superpowers:verification-before-completion` before claiming the source migration is complete, and `superpowers:finishing-a-development-branch` before integrating it.
+- Use `@imagegen` only for HoundMark concept exploration; the reviewed vector SVG remains the source of truth and all PNG files must be rendered from it.
 
 ### Task 1: Lock the npm and CLI brand contract
 
@@ -762,7 +763,286 @@ git add LICENSE package.json package-lock.json test/package-metadata.test.ts
 git commit -m "chore: prepare Apache licensed dev package"
 ```
 
-### Task 8: Prove the packaged binary and complete the local migration gate
+### Task 8: Create and validate the HoundMark brand Icon
+
+**Files:**
+- Create: `assets/brand/README.md`
+- Create: `assets/brand/taphound-icon.svg`
+- Create: `assets/brand/taphound-icon-dark.svg`
+- Create: `assets/brand/taphound-mark.svg`
+- Create: `assets/brand/taphound-mark-mono-dark.svg`
+- Create: `assets/brand/taphound-mark-mono-light.svg`
+- Create: `assets/brand/png/taphound-icon-1024.png`
+- Create: `assets/brand/png/taphound-icon-512.png`
+- Create: `assets/brand/png/taphound-icon-256.png`
+- Create: `assets/brand/png/taphound-icon-128.png`
+- Create: `assets/brand/png/taphound-icon-64.png`
+- Create: `assets/brand/png/taphound-icon-32.png`
+- Create: `scripts/render-brand-assets.mjs`
+- Create: `test/brand/assets.test.ts`
+- Modify: `README.md`
+- Modify: `package.json`
+- Modify: `package-lock.json`
+
+**Step 1: Write the failing brand asset contract test**
+
+Create `test/brand/assets.test.ts`:
+
+```ts
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+
+import { describe, expect, it } from "vitest";
+
+const root = process.cwd();
+const brandRoot = join(root, "assets", "brand");
+const svgFiles = [
+  "taphound-icon.svg",
+  "taphound-icon-dark.svg",
+  "taphound-mark.svg",
+  "taphound-mark-mono-dark.svg",
+  "taphound-mark-mono-light.svg"
+] as const;
+const pngSizes = [1024, 512, 256, 128, 64, 32] as const;
+
+function pngDimensions(content: Buffer): {
+  width: number;
+  height: number;
+} {
+  expect(content.subarray(0, 8)).toEqual(
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
+  );
+  return {
+    width: content.readUInt32BE(16),
+    height: content.readUInt32BE(20)
+  };
+}
+
+describe("TapHound brand assets", () => {
+  it("keeps every SVG standalone and safe", async () => {
+    for (const filename of svgFiles) {
+      const svg = await readFile(join(brandRoot, filename), "utf8");
+
+      expect(svg).toContain('viewBox="0 0 1024 1024"');
+      expect(svg).toMatch(/<title(?:\s[^>]*)?>TapHound/);
+      expect(svg).not.toMatch(
+        /<(?:script|image|filter|text)\b|\bhref=|\burl\(/i
+      );
+    }
+  });
+
+  it("uses only the approved primary palette", async () => {
+    const svg = await readFile(
+      join(brandRoot, "taphound-icon.svg"),
+      "utf8"
+    );
+    const colors = [...new Set(
+      [...svg.matchAll(/#[\dA-F]{6}/g)].map(([color]) => color)
+    )].sort();
+
+    expect(colors).toEqual(["#1B1D21", "#FF5A1F", "#FFF8F2"].sort());
+  });
+
+  it.each(pngSizes)("exports a %d px square PNG", async (size) => {
+    const png = await readFile(join(
+      brandRoot,
+      "png",
+      `taphound-icon-${String(size)}.png`
+    ));
+
+    expect(pngDimensions(png)).toEqual({ width: size, height: size });
+  });
+
+  it("wires the mark into README and npm files", async () => {
+    const readme = await readFile(join(root, "README.md"), "utf8");
+    const packageDocument = JSON.parse(
+      await readFile(join(root, "package.json"), "utf8")
+    ) as { files?: string[] };
+
+    expect(readme).toContain("assets/brand/taphound-mark.svg");
+    expect(packageDocument.files).toContain(
+      "assets/brand/taphound-mark.svg"
+    );
+  });
+});
+```
+
+**Step 2: Run the test to verify the assets are missing**
+
+Run:
+
+```bash
+npm test -- test/brand/assets.test.ts
+```
+
+Expected: FAIL with `ENOENT` for `assets/brand/taphound-icon.svg`.
+
+**Step 3: Generate a HoundMark concept reference**
+
+Use `@imagegen` with this prompt; do not commit the generated raster as a source asset:
+
+```text
+Create a clean vector-logo concept sheet for “HoundMark”, the icon for
+TapHound, a deterministic app journey recording and verification CLI.
+Show three closely related refinements of one concept: an abstract hound
+side profile moving right, its nose precisely aligned with a tap target
+made from a solid dot and one broken ripple. Use bold filled geometric
+shapes, strong negative space, minimal rounded corners, no thin strokes.
+Palette only: charcoal #1B1D21, electric orange #FF5A1F, warm white
+#FFF8F2. No words, letters, paw prints, gradients, shadows, devices,
+Android robots, mascots, photorealism, or mockup backgrounds. The icon
+must remain legible at 16–32 px and survive circular avatar cropping.
+```
+
+Inspect the three refinements and choose the one with the clearest hound muzzle/target separation at thumbnail size. Use it as a proportion reference, not as an auto-traced final file.
+
+**Step 4: Draw the standalone SVG sources**
+
+Create the five SVG files according to `docs/plans/2026-07-20-taphound-brand-icon-design.md`. Every file must start with this structure and use only filled vector geometry:
+
+```svg
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 1024 1024"
+     role="img"
+     aria-labelledby="title">
+  <title id="title">TapHound HoundMark</title>
+  <!-- self-contained rect/path/circle geometry only -->
+</svg>
+```
+
+Implementation requirements:
+
+- Place all important geometry inside the central `768 × 768` safe area.
+- Use one continuous filled charcoal hound silhouette facing right.
+- Build the orange target from a filled center dot plus one broken filled ring; do not use a fragile thin stroke.
+- Keep visible warm-white negative space between nose and target.
+- Copy the reviewed geometry into each standalone variant; do not use external `<use>` links.
+- Default square: warm-white background, charcoal hound, orange target.
+- Dark square: charcoal background, warm-white hound, orange target.
+- Transparent mark: charcoal hound and orange target.
+- Monochrome marks: a single charcoal or warm-white fill while preserving target separation through negative space.
+- Optimize path precision to at most two decimal places after visual approval.
+
+Create `assets/brand/README.md` with the three exact colors, `128 px` safe area, minimum recommended size `32 px`, fixed right-facing orientation, default/dark/monochrome usage, and explicit prohibitions on stretching, recoloring, rotating, mirroring, shadows, and gradients.
+
+**Step 5: Add deterministic PNG rendering**
+
+Install Sharp as a development-only dependency:
+
+```bash
+npm install --save-dev sharp
+```
+
+Add these package entries while preserving existing fields:
+
+```json
+{
+  "files": [
+    "dist",
+    "assets/brand/taphound-mark.svg"
+  ],
+  "scripts": {
+    "brand:render": "node scripts/render-brand-assets.mjs"
+  }
+}
+```
+
+Create `scripts/render-brand-assets.mjs`:
+
+```js
+import { mkdir, readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+
+import sharp from "sharp";
+
+const repositoryRoot = resolve(import.meta.dirname, "..");
+const sourcePath = resolve(
+  repositoryRoot,
+  "assets",
+  "brand",
+  "taphound-icon.svg"
+);
+const outputDirectory = resolve(
+  repositoryRoot,
+  "assets",
+  "brand",
+  "png"
+);
+const sizes = [1024, 512, 256, 128, 64, 32];
+
+await mkdir(outputDirectory, { recursive: true });
+const source = await readFile(sourcePath);
+await Promise.all(sizes.map(async (size) => {
+  await sharp(source, { density: 384 })
+    .resize(size, size, { fit: "fill" })
+    .png({ compressionLevel: 9, palette: false })
+    .toFile(resolve(
+      outputDirectory,
+      `taphound-icon-${String(size)}.png`
+    ));
+}));
+```
+
+**Step 6: Render assets and make the automated contract green**
+
+Run:
+
+```bash
+npm run brand:render
+npm test -- test/brand/assets.test.ts test/package-metadata.test.ts test/docs/examples.test.ts
+npm run typecheck
+npm run lint
+```
+
+Expected: six PNGs are generated; all focused tests PASS; typecheck and lint exit 0.
+
+**Step 7: Perform the visual acceptance review**
+
+Use `view_image` to inspect, at original detail:
+
+- `assets/brand/taphound-icon.svg`
+- `assets/brand/taphound-icon-dark.svg`
+- `assets/brand/taphound-mark-mono-dark.svg`
+- `assets/brand/png/taphound-icon-512.png`
+- `assets/brand/png/taphound-icon-32.png`
+
+Review against the approved design:
+
+- right-facing hound and tap target are both identifiable
+- nose/target negative space remains open at 32 px
+- ear, muzzle, target ripple stay inside circular avatar crop
+- dark and monochrome forms preserve the same silhouette
+- no fox/wolf, pet-store, play-button, Android-only, or generic-arrow reading dominates
+
+If any criterion fails, revise only the master geometry, propagate it to all SVG variants, rerun `npm run brand:render`, and repeat both automated and visual review. Do not hand-edit individual PNG sizes.
+
+**Step 8: Add the mark to README and verify the npm file list**
+
+Place this immediately above the README title:
+
+```html
+<p align="center">
+  <img src="assets/brand/taphound-mark.svg" width="128" alt="TapHound HoundMark">
+</p>
+```
+
+Run:
+
+```bash
+npm pack --dry-run --json
+git status --short
+```
+
+Expected: the package contains `dist`, standard npm metadata files, and only `assets/brand/taphound-mark.svg` from the brand directory. It excludes concept rasters, PNG exports, tests, and the other SVG variants.
+
+**Step 9: Commit**
+
+```bash
+git add assets/brand scripts/render-brand-assets.mjs test/brand/assets.test.ts README.md package.json package-lock.json
+git commit -m "feat: add TapHound HoundMark assets"
+```
+
+### Task 9: Prove the packaged binary and complete the local migration gate
 
 **Files:**
 - Modify only if verification exposes a defect: the smallest relevant source/test file
@@ -777,9 +1057,11 @@ npm test
 npm run typecheck
 npm run lint
 npm run build
+npm run brand:render
+git diff --exit-code -- assets/brand/png
 ```
 
-Expected: all 35+ test files and 211+ tests PASS, then typecheck, lint, and build exit 0. Record exact counts in the audit; do not copy the old counts if they changed.
+Expected: all 35+ test files and 211+ tests PASS, typecheck/lint/build exit 0, and rerendering the PNG set produces no diff. Record exact counts in the audit; do not copy the old counts if they changed.
 
 **Step 2: Verify the built CLI identity**
 
@@ -829,6 +1111,7 @@ Create `docs/verification/taphound-v0.2-dev.1-audit.md` with:
 - doctor result and whether a real device was present
 - exact tarball filename, size, integrity/shasum from `npm pack --json`
 - installed-tarball smoke result and proof that no `apr` bin exists
+- brand SVG/PNG contract result and manual 32 px/circular-crop review result
 - stale-name and secret-scan results
 - GitHub push status: pending explicit gate
 - npm publish status: pending explicit gate
@@ -844,7 +1127,7 @@ git add docs/verification/taphound-v0.2-dev.1-audit.md
 git commit -m "test: audit TapHound dev package readiness"
 ```
 
-### Task 9: Integrate locally and connect the existing GitHub repository
+### Task 10: Integrate locally and connect the existing GitHub repository
 
 **Files:**
 - No product file changes expected
@@ -922,7 +1205,7 @@ git commit -m "docs: record TapHound GitHub publication"
 git push origin main
 ```
 
-### Task 10: Publish only the npm dev prerelease
+### Task 11: Publish only the npm dev prerelease
 
 **Files:**
 - No source changes before publication
@@ -953,7 +1236,7 @@ shasum -a 256 /private/tmp/taphound-pack-smoke/taphound-0.2.0-dev.1.tgz
 git status --short --branch
 ```
 
-Expected: metadata and file list match Task 8, tarball digest matches the audit, installed binary works, and local `main` is clean and pushed.
+Expected: metadata and file list match Task 9, tarball digest matches the audit, installed binary works, and local `main` is clean and pushed.
 
 **Step 3: Pause for the irreversible npm gate**
 
@@ -1039,6 +1322,7 @@ Expected: all gates PASS, local `main` is clean and synchronized, GitHub contain
 - TapHound Journey and Report retain schema version `1` and unchanged machine semantics.
 - Android demo uses `examples/taphound-android-demo` and package `dev.taphound.demo`.
 - Original APR material is recoverably tracked under `docs/archive/apr-v0.2/` with matching source digest.
+- HoundMark SVG variants and 32–1024 px PNG exports pass automated checks and manual small-size/circular-crop review.
 - Package metadata identifies `taphound@0.2.0-dev.1`, Apache-2.0, and `caikaidev/TapHound`.
 - The exact npm tarball passes local install and CLI smoke tests.
 - GitHub first push occurs only after its explicit gate and never uses force.

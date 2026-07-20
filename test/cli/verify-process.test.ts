@@ -44,7 +44,7 @@ beforeAll(() => {
     encoding: "utf8"
   });
   if (build.status !== 0) {
-    throw new Error(build.stderr || build.stdout || "APR build failed");
+    throw new Error(build.stderr || build.stdout || "TapHound build failed");
   }
 });
 
@@ -145,14 +145,14 @@ function jsonOutput(result: CliProcessResult): Record<string, unknown> {
   return JSON.parse(result.stdout) as Record<string, unknown>;
 }
 
-describe("built apr verify --json process contract", () => {
+describe("built taphound verify --json process contract", () => {
   it("returns exit 0 with machine-only stdout and a published report", async () => {
     const test = await fixture();
     const result = runVerify(test);
 
     expect(result.status).toBe(0);
     expect(jsonOutput(result)).toMatchObject({ status: "passed", exitCode: 0 });
-    expect(result.stderr).toContain("APR: verifying Process contract");
+    expect(result.stderr).toContain("TapHound: verifying Process contract");
     const output = jsonOutput(result);
     const reportPath = output.reportPath;
     expect(typeof reportPath).toBe("string");

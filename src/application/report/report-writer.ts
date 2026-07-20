@@ -14,7 +14,7 @@ export interface PublishedReport {
 
 function renderSummary(report: TapHoundReport): string {
   const lines = [
-    `APR run ${report.runId}: ${report.status.toUpperCase()}`,
+    `TapHound run ${report.runId}: ${report.status.toUpperCase()}`,
     `Journey: ${report.journey.name}`,
     `Package: ${report.project.packageName}`,
     `Device: ${report.environment.deviceSerial}`,

@@ -1,6 +1,6 @@
 .worktrees/
 
-.apr/
+.taphound/
 .gradle/
 .env
 .env.*

@@ -27,7 +27,7 @@ export async function withTerminationSignal<T>(
 ): Promise<T> {
   const controller = new AbortController();
   const abort = (): void => {
-    controller.abort(new Error("APR was interrupted"));
+    controller.abort(new Error("TapHound was interrupted"));
   };
   source.once("SIGINT", abort);
   source.once("SIGTERM", abort);

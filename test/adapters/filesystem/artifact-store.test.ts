@@ -21,7 +21,7 @@ afterEach(async () => {
 });
 
 async function temporaryRoot(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "apr-artifacts-test-"));
+  const root = await mkdtemp(join(tmpdir(), "taphound-artifacts-test-"));
   roots.push(root);
   return root;
 }

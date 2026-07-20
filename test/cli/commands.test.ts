@@ -66,12 +66,29 @@ function dependencies(): {
   };
 }
 
-describe("APR CLI commands", () => {
+describe("TapHound CLI commands", () => {
+  it("uses TapHound config defaults", () => {
+    const program = createProgram(dependencies().value);
+    const recordCommand = program.commands.find(
+      (command) => command.name() === "record"
+    );
+    const verifyCommand = program.commands.find(
+      (command) => command.name() === "verify"
+    );
+
+    expect(recordCommand?.options.find(
+      (option) => option.long === "--config"
+    )?.defaultValue).toBe("taphound.config.json");
+    expect(verifyCommand?.options.find(
+      (option) => option.long === "--config"
+    )?.defaultValue).toBe("taphound.config.json");
+  });
+
   it("prints a machine-readable doctor result", async () => {
     const test = dependencies();
 
     await createProgram(test.value).parseAsync([
-      "node", "apr", "doctor", "--project", "/project", "--json"
+      "node", "taphound", "doctor", "--project", "/project", "--json"
     ]);
 
     expect(JSON.parse(test.stdout.value)).toMatchObject({ status: "passed" });
@@ -83,9 +100,9 @@ describe("APR CLI commands", () => {
     const test = dependencies();
 
     await createProgram(test.value).parseAsync([
-      "node", "apr", "record",
+      "node", "taphound", "record",
       "--project", "/project",
-      "--config", "/project/apr.config.json",
+      "--config", "/project/taphound.config.json",
       "--name", "Recorded",
       "--output", "/project/journeys/recorded.json"
     ]);
@@ -107,14 +124,14 @@ describe("APR CLI commands", () => {
     Object.assign(test.value, { signal });
 
     await createProgram(test.value).parseAsync([
-      "node", "apr", "verify",
+      "node", "taphound", "verify",
       "--project", "/project",
-      "--config", "/project/apr.config.json",
+      "--config", "/project/taphound.config.json",
       "--journey", "/project/search.journey.json",
       "--device", "pixel-1",
       "--package", "com.override.app",
       "--activity", ".StartActivity",
-      "--reports", "/tmp/apr-reports"
+      "--reports", "/tmp/taphound-reports"
     ]);
 
     expect(test.value.doctor.run).toHaveBeenCalledWith(
@@ -132,7 +149,7 @@ describe("APR CLI commands", () => {
           packageName: "com.override.app",
           activity: ".StartActivity"
         },
-        artifactsDir: "/tmp/apr-reports"
+        artifactsDir: "/tmp/taphound-reports"
       },
       journey: runtimeJourney
     });

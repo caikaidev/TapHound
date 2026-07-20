@@ -17,7 +17,7 @@ interface DoctorOptions {
 
 export function createDoctorCommand(dependencies: CliDependencies): Command {
   return new Command("doctor")
-    .description("Check APR tools, permissions, project, and device")
+    .description("Check TapHound tools, permissions, project, and device")
     .option("--project <path>", "Android project root", dependencies.cwd())
     .option("--device <serial>", "Select an online Android device")
     .option("--json", "Emit machine-readable JSON")

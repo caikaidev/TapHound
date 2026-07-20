@@ -34,10 +34,10 @@ function toolVersions(checks: Awaited<ReturnType<CliDependencies["doctor"]["run"
 
 export function createVerifyCommand(dependencies: CliDependencies): Command {
   return new Command("verify")
-    .description("Deterministically verify an APR Journey")
+    .description("Deterministically verify a TapHound Journey")
     .option("--project <path>", "Android project root", dependencies.cwd())
-    .option("--config <path>", "APR config path", "apr.config.json")
-    .requiredOption("--journey <path>", "APR Journey path")
+    .option("--config <path>", "TapHound config path", "taphound.config.json")
+    .requiredOption("--journey <path>", "TapHound Journey path")
     .option("--device <serial>", "Select an online Android device")
     .option("--package <name>", "Override run.packageName")
     .option("--activity <name>", "Override run.activity")
@@ -84,7 +84,7 @@ export function createVerifyCommand(dependencies: CliDependencies): Command {
             3,
             doctor.failureCode ?? "ENVIRONMENT_MISSING_TOOL",
             doctor.checks.find((check) => check.status === "failed")?.message
-              ?? "APR environment preflight failed"
+              ?? "TapHound environment preflight failed"
           );
           if (options.json === true) {
             writeJson(dependencies.stdout, output);
@@ -98,7 +98,7 @@ export function createVerifyCommand(dependencies: CliDependencies): Command {
         if (deviceSerial === undefined) {
           throw new Error("Doctor did not select a device");
         }
-        writeLine(dependencies.stderr, `APR: verifying ${journey.name}`);
+        writeLine(dependencies.stderr, `TapHound: verifying ${journey.name}`);
         const result = await dependencies.verifier.verify({
           config,
           journey,
@@ -114,7 +114,7 @@ export function createVerifyCommand(dependencies: CliDependencies): Command {
         } else {
           writeLine(
             dependencies.stdout,
-            `APR verify: ${result.status.toUpperCase()}\nReport: ${result.reportPath}`
+            `TapHound verify: ${result.status.toUpperCase()}\nReport: ${result.reportPath}`
           );
         }
         dependencies.setExitCode(result.exitCode);

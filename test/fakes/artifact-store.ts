@@ -4,8 +4,8 @@ import type {
 } from "../../src/ports/artifact-store.js";
 
 export class MemoryArtifactSession implements ArtifactSession {
-  public readonly temporaryDirectory = "/tmp/apr-run";
-  public readonly finalDirectory = "/reports/apr-run";
+  public readonly temporaryDirectory = "/tmp/taphound-run";
+  public readonly finalDirectory = "/reports/taphound-run";
   public readonly text = new Map<string, string>();
   public readonly json = new Map<string, unknown>();
   public published = false;

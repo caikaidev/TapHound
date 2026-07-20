@@ -82,7 +82,7 @@ export function createProductionDependencies(
         status: "passed" | "failed";
         message?: string | undefined;
       }> => {
-        const directory = await mkdtemp(join(tmpdir(), "apr-doctor-"));
+        const directory = await mkdtemp(join(tmpdir(), "taphound-doctor-"));
         try {
           const result = await androidCli.captureScreen({
             outputPath: join(directory, "screen.png"),

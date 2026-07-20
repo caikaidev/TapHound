@@ -204,11 +204,11 @@ describe("VerifyRuntime", () => {
     expect(test.order).not.toContain("action");
   });
 
-  it("accepts SIGTERM when APR intentionally stops the Logcat stream", async () => {
+  it("accepts SIGTERM when TapHound intentionally stops the Logcat stream", async () => {
     const test = runtimeFixture();
     vi.mocked(test.adb.startLogcat).mockImplementation((options) => {
       test.order.push("logcat-start");
-      options.onStdoutLine("07-19 10:00:00.000  42  42 I APR: ready");
+      options.onStdoutLine("07-19 10:00:00.000  42  42 I TapHound: ready");
       const completion = Promise.resolve(commandResult({
         exitCode: null,
         signal: "SIGTERM"

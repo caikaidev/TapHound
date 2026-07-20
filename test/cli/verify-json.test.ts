@@ -49,8 +49,8 @@ function baseDependencies(exitCodes: number[]): CliDependencies {
 
 async function runVerify(dependencies: CliDependencies): Promise<void> {
   await createProgram(dependencies).parseAsync([
-    "node", "apr", "verify",
-    "--config", "/project/apr.config.json",
+    "node", "taphound", "verify",
+    "--config", "/project/taphound.config.json",
     "--journey", "/project/search.journey.json",
     "--json"
   ]);
@@ -71,7 +71,7 @@ describe("verify --json", () => {
       reportPath: "/reports/report.json"
     });
     expect(stdout.trim().split("\n")).toHaveLength(1);
-    expect(stderr).toContain("APR: verifying Search");
+    expect(stderr).toContain("TapHound: verifying Search");
     expect(exitCodes).toEqual([0]);
   });
 

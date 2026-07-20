@@ -22,9 +22,9 @@ interface RecordOptions {
 
 export function createRecordCommand(dependencies: CliDependencies): Command {
   return new Command("record")
-    .description("Interactively record an APR Journey")
+    .description("Interactively record a TapHound Journey")
     .option("--project <path>", "Android project root", dependencies.cwd())
-    .option("--config <path>", "APR config path", "apr.config.json")
+    .option("--config <path>", "TapHound config path", "taphound.config.json")
     .option("--device <serial>", "Select an online Android device")
     .requiredOption("--name <name>", "Journey name")
     .requiredOption("--output <path>", "Journey output path")
@@ -56,7 +56,7 @@ export function createRecordCommand(dependencies: CliDependencies): Command {
             3,
             doctor.failureCode ?? "ENVIRONMENT_MISSING_TOOL",
             doctor.checks.find((check) => check.status === "failed")?.message
-              ?? "APR environment preflight failed"
+              ?? "TapHound environment preflight failed"
           );
           if (options.json === true) {
             writeJson(dependencies.stdout, output);

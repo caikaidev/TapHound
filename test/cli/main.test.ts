@@ -53,7 +53,7 @@ describe("runMain", () => {
     const exitCodes: number[] = [];
     const test = dependencies(exitCodes);
 
-    await runMain(["node", "apr", "verify", "--json"], test);
+    await runMain(["node", "taphound", "verify", "--json"], test);
 
     expect(JSON.parse((test.stdout as BufferOutput).value)).toMatchObject({
       exitCode: 2,
@@ -71,7 +71,7 @@ describe("runMain", () => {
       throw new Error("cwd unavailable");
     };
 
-    await runMain(["node", "apr", "doctor", "--json"], test);
+    await runMain(["node", "taphound", "doctor", "--json"], test);
 
     expect(JSON.parse((test.stdout as BufferOutput).value)).toMatchObject({
       exitCode: 4,

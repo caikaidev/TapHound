@@ -29,7 +29,7 @@ export const runtimeConfig: TapHoundConfig = {
     stablePolls: 1,
     timeoutMs: 500
   },
-  artifactsDir: ".apr/runs"
+  artifactsDir: ".taphound/runs"
 };
 
 export const runtimeJourney: Journey = {
@@ -126,7 +126,7 @@ export function runtimeFixture(): RuntimeFixture {
     inputText: vi.fn(() => Promise.resolve(commandResult())),
     startLogcat: vi.fn((options: LogcatOptions) => {
       order.push("logcat-start");
-      options.onStdoutLine("07-19 10:00:00.000  42  42 I APR: ready");
+      options.onStdoutLine("07-19 10:00:00.000  42  42 I TapHound: ready");
       const completion = Promise.resolve(commandResult());
       return {
         started: Promise.resolve(undefined),

@@ -21,7 +21,7 @@ afterEach(async () => {
 });
 
 async function temporaryRoot(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "apr-report-test-"));
+  const root = await mkdtemp(join(tmpdir(), "taphound-report-test-"));
   roots.push(root);
   return root;
 }
@@ -44,7 +44,7 @@ describe("ReportWriter", () => {
     await expect(readFile(join(result.directory, "report.json"), "utf8"))
       .resolves.toContain('"schemaVersion": 1');
     await expect(readFile(join(result.directory, "summary.txt"), "utf8"))
-      .resolves.toContain("APR run run-123: PASSED");
+      .resolves.toContain("TapHound run run-123: PASSED");
   });
 
   it("includes primary and secondary failures in the summary", async () => {

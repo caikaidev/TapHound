@@ -103,7 +103,7 @@ export class InquirerRecorderPrompt implements RecorderPromptPort {
 
   public async selectAction(): Promise<RecorderAction> {
     const value = await this.prompts.select({
-      message: "Choose the next APR Action",
+      message: "Choose the next TapHound Action",
       choices: ACTIONS.map((action) => ({ name: action, value: action }))
     });
     return selectedString(value, ACTIONS) as RecorderAction;
@@ -187,7 +187,7 @@ export class InquirerRecorderPrompt implements RecorderPromptPort {
   }
 
   public notifyFailure(message: string): Promise<void> {
-    this.diagnostics.write(`APR: ${message}\n`);
+    this.diagnostics.write(`TapHound: ${message}\n`);
     return Promise.resolve();
   }
 }

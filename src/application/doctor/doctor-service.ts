@@ -54,7 +54,7 @@ function nodeCheck(version: string): DoctorCheck {
         name: "node",
         status: "failed",
         version: normalized,
-        message: "APR requires Node.js 22 or newer"
+        message: "TapHound requires Node.js 22 or newer"
       };
 }
 

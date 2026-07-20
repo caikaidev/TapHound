@@ -53,6 +53,6 @@ describe("InquirerRecorderPrompt", () => {
 
     await prompt.notifyFailure("tap failed");
 
-    expect(output.write).toHaveBeenCalledWith("APR: tap failed\n");
+    expect(output.write).toHaveBeenCalledWith("TapHound: tap failed\n");
   });
 });

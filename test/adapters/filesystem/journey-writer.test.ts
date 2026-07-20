@@ -17,7 +17,7 @@ afterEach(async () => {
 
 describe("FileSystemJourneyWriter", () => {
   it("creates parent directories and atomically publishes validated JSON", async () => {
-    const root = await mkdtemp(join(tmpdir(), "apr-journey-"));
+    const root = await mkdtemp(join(tmpdir(), "taphound-journey-"));
     roots.push(root);
     const output = join(root, "nested", "search.json");
 

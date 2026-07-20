@@ -20,7 +20,7 @@ async function json(relativePath: string): Promise<unknown> {
 
 describe("APR documentation examples", () => {
   it("keeps standalone config and Journey examples schema-valid", async () => {
-    const config = TapHoundConfigSchema.parse(await json("examples/apr.config.json"));
+    const config = TapHoundConfigSchema.parse(await json("examples/taphound.config.json"));
     const journey = JourneySchema.parse(await json("examples/search.journey.json"));
 
     expect(config.run.packageName).toBe("com.example.app");
@@ -103,7 +103,7 @@ describe("APR documentation examples", () => {
       "node_modules/",
       "dist/",
       "coverage/",
-      ".apr/",
+      ".taphound/",
       ".gradle/",
       "**/build/",
       "local.properties",

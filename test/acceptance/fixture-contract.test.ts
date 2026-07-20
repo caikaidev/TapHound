@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { TapHoundConfigSchema } from "../../src/domain/config.js";
 import { JourneySchema } from "../../src/domain/journey.js";
 
-const root = join(process.cwd(), "examples", "apr-demo");
+const root = join(process.cwd(), "examples", "taphound-android-demo");
 
 async function text(relativePath: string): Promise<string> {
   return readFile(join(root, relativePath), "utf8");
@@ -18,7 +18,7 @@ async function json(relativePath: string): Promise<unknown> {
   return JSON.parse(await text(relativePath)) as unknown;
 }
 
-describe("APR Android acceptance fixture", () => {
+describe("TapHound Android acceptance fixture", () => {
   it("includes a pinned, executable Gradle Wrapper", async () => {
     const wrapperScript = join(root, "gradlew");
     const wrapperProperties = await text(
@@ -38,34 +38,34 @@ describe("APR Android acceptance fixture", () => {
   });
 
   it("keeps Package and Activity identities aligned", async () => {
-    const config = TapHoundConfigSchema.parse(await json("apr.config.json"));
+    const config = TapHoundConfigSchema.parse(await json("taphound.config.json"));
     const journey = JourneySchema.parse(await json("journeys/search.json"));
     const manifest = await text("app/src/main/AndroidManifest.xml");
     const main = await text(
-      "app/src/main/java/dev/apr/demo/MainActivity.kt"
+      "app/src/main/java/dev/taphound/demo/MainActivity.kt"
     );
     const search = await text(
-      "app/src/main/java/dev/apr/demo/SearchActivity.kt"
+      "app/src/main/java/dev/taphound/demo/SearchActivity.kt"
     );
     const appBuild = await text("app/build.gradle.kts");
 
     expect(config.run).toEqual({
-      packageName: "dev.apr.demo",
+      packageName: "dev.taphound.demo",
       activity: ".MainActivity"
     });
-    expect(appBuild).toContain('namespace = "dev.apr.demo"');
-    expect(appBuild).toContain('applicationId = "dev.apr.demo"');
+    expect(appBuild).toContain('namespace = "dev.taphound.demo"');
+    expect(appBuild).toContain('applicationId = "dev.taphound.demo"');
     expect(manifest).toContain('android:name=".MainActivity"');
     expect(manifest).toContain('android:name=".SearchActivity"');
-    expect(main).toContain("package dev.apr.demo");
-    expect(search).toContain("package dev.apr.demo");
+    expect(main).toContain("package dev.taphound.demo");
+    expect(search).toContain("package dev.taphound.demo");
     expect(journey.steps[0]?.activity).toEqual({
-      before: "dev.apr.demo.MainActivity",
-      after: "dev.apr.demo.SearchActivity"
+      before: "dev.taphound.demo.MainActivity",
+      after: "dev.taphound.demo.SearchActivity"
     });
     expect(journey.steps.every((step) => (
-      step.activity.before.startsWith("dev.apr.demo.")
-      && step.activity.after.startsWith("dev.apr.demo.")
+      step.activity.before.startsWith("dev.taphound.demo.")
+      && step.activity.after.startsWith("dev.taphound.demo.")
     ))).toBe(true);
   });
 
@@ -100,7 +100,7 @@ describe("APR Android acceptance fixture", () => {
   it("matches the deterministic Logcat expectation to App behavior", async () => {
     const journey = JourneySchema.parse(await json("journeys/search.json"));
     const search = await text(
-      "app/src/main/java/dev/apr/demo/SearchActivity.kt"
+      "app/src/main/java/dev/taphound/demo/SearchActivity.kt"
     );
     const logcat = journey.steps.find(
       (step) => step.expect?.type === "logcat"
@@ -116,7 +116,7 @@ describe("APR Android acceptance fixture", () => {
     expect(search).toContain('Log.i("SearchViewModel", "submitted query=$query")');
   });
 
-  it("requires explicit opt-in before the device acceptance runner invokes APR", async () => {
+  it("requires explicit opt-in before the device acceptance runner invokes TapHound", async () => {
     const runner = await readFile(
       join(process.cwd(), "scripts", "acceptance-device.mjs"),
       "utf8"
@@ -128,7 +128,7 @@ describe("APR Android acceptance fixture", () => {
       ? (packageDocument as { scripts?: Record<string, string> }).scripts
       : undefined;
 
-    expect(runner).toContain("APR_ACCEPTANCE_DEVICE");
+    expect(runner).toContain("TAPHOUND_ACCEPTANCE_DEVICE");
     expect(runner).toContain('"dist", "cli", "main.js"');
     expect(runner).toContain("verify");
     expect(runner).toContain("--json");

@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "AprDemo"
+rootProject.name = "TapHoundAndroidDemo"
 include(":app")

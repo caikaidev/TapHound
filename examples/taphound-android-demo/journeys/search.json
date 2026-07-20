@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "name": "APR demo search",
+  "name": "TapHound demo search",
   "steps": [
     {
       "action": "click",
@@ -8,8 +8,8 @@
         "resourceId": "open_search"
       },
       "activity": {
-        "before": "dev.apr.demo.MainActivity",
-        "after": "dev.apr.demo.SearchActivity"
+        "before": "dev.taphound.demo.MainActivity",
+        "after": "dev.taphound.demo.SearchActivity"
       },
       "expect": {
         "type": "element",
@@ -25,16 +25,16 @@
         "resourceId": "search_input"
       },
       "activity": {
-        "before": "dev.apr.demo.SearchActivity",
-        "after": "dev.apr.demo.SearchActivity"
+        "before": "dev.taphound.demo.SearchActivity",
+        "after": "dev.taphound.demo.SearchActivity"
       }
     },
     {
       "action": "inputText",
       "text": "hello world",
       "activity": {
-        "before": "dev.apr.demo.SearchActivity",
-        "after": "dev.apr.demo.SearchActivity"
+        "before": "dev.taphound.demo.SearchActivity",
+        "after": "dev.taphound.demo.SearchActivity"
       }
     },
     {
@@ -43,8 +43,8 @@
         "resourceId": "submit_search"
       },
       "activity": {
-        "before": "dev.apr.demo.SearchActivity",
-        "after": "dev.apr.demo.SearchActivity"
+        "before": "dev.taphound.demo.SearchActivity",
+        "after": "dev.taphound.demo.SearchActivity"
       },
       "expect": {
         "type": "logcat",

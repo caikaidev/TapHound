@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "dev.apr.demo"
+    namespace = "dev.taphound.demo"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "dev.apr.demo"
+        applicationId = "dev.taphound.demo"
         minSdk = 23
         targetSdk = 35
         versionCode = 1

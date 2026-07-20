@@ -8,7 +8,7 @@
     "variant": "debug"
   },
   "run": {
-    "packageName": "com.example.app",
+    "packageName": "dev.taphound.demo",
     "activity": ".MainActivity"
   },
   "idle": {
@@ -16,5 +16,5 @@
     "stablePolls": 2,
     "timeoutMs": 5000
   },
-  "artifactsDir": ".apr/runs"
+  "artifactsDir": ".taphound/runs"
 }

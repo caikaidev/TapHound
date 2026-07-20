@@ -1,4 +1,4 @@
-package dev.apr.demo
+package dev.taphound.demo
 
 import android.app.Activity
 import android.os.Bundle

@@ -7,7 +7,7 @@ switch (mode) {
   case "inspect":
     process.stdout.write(JSON.stringify({
       cwd: process.cwd(),
-      value: process.env.APR_TEST_VALUE
+      value: process.env.TAPHOUND_TEST_VALUE
     }));
     break;
   case "io":

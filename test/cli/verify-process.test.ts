@@ -21,7 +21,7 @@ const fakeTool = join(
   "test",
   "fixtures",
   "bin",
-  "fake-apr-tool.mjs"
+  "fake-taphound-tool.mjs"
 );
 const temporaryRoots: string[] = [];
 
@@ -58,21 +58,21 @@ async function fixture(options: {
   invalidJourney?: boolean;
   blockedReports?: boolean;
 } = {}): Promise<ProcessFixture> {
-  const root = await mkdtemp(join(tmpdir(), "apr-process-test-"));
+  const root = await mkdtemp(join(tmpdir(), "taphound-process-test-"));
   temporaryRoots.push(root);
   const bin = join(root, "bin");
   await mkdir(bin);
   await symlink(fakeTool, join(bin, "adb"));
   await symlink(fakeTool, join(bin, "android"));
   await symlink(fakeTool, join(root, "gradlew"));
-  const configPath = join(root, "apr.config.json");
+  const configPath = join(root, "taphound.config.json");
   const journeyPath = join(root, "journey.json");
   await writeFile(configPath, `${JSON.stringify({
     version: 1,
     build: { task: ":app:assembleDebug" },
     artifact: { target: "app", variant: "debug" },
     run: { packageName: "com.example.app", activity: ".MainActivity" },
-    idle: { pollIntervalMs: 10, stablePolls: 1, timeoutMs: 100 },
+    idle: { pollIntervalMs: 10, stablePolls: 1, timeoutMs: 2000 },
     artifactsDir: options.blockedReports === true
       ? "blocked/reports"
       : "reports"
@@ -126,7 +126,7 @@ function runVerify(
     env: {
       ...process.env,
       PATH: `${test.bin}${delimiter}${process.env.PATH ?? ""}`,
-      APR_FAKE_ROOT: test.root,
+      TAPHOUND_FAKE_ROOT: test.root,
       ...environment
     }
   });
@@ -162,9 +162,9 @@ describe("built taphound verify --json process contract", () => {
   });
 
   it.each([
-    [1, {}, { APR_FAKE_GRADLE_EXIT: "1" }],
+    [1, {}, { TAPHOUND_FAKE_GRADLE_EXIT: "1" }],
     [2, { invalidJourney: true }, {}],
-    [3, {}, { APR_FAKE_DEVICE: "none" }],
+    [3, {}, { TAPHOUND_FAKE_DEVICE: "none" }],
     [4, { blockedReports: true }, {}]
   ] as const)("returns one JSON value with process exit %s", async (
     exitCode,

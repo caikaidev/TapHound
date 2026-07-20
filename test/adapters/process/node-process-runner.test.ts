@@ -28,7 +28,7 @@ describe("NodeProcessRunner", () => {
       executable: process.execPath,
       args: [fixture, "inspect"],
       cwd: process.cwd(),
-      env: { APR_TEST_VALUE: "forwarded" }
+      env: { TAPHOUND_TEST_VALUE: "forwarded" }
     });
 
     expect(JSON.parse(result.stdout)).toEqual({
@@ -148,7 +148,7 @@ describe("NodeProcessRunner", () => {
     const runner = new NodeProcessRunner();
 
     const running = runner.start({
-      executable: "/apr-fixture/missing-executable",
+      executable: "/taphound-fixture/missing-executable",
       args: []
     });
 

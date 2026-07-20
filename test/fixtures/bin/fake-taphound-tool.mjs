@@ -5,7 +5,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 
 const executable = basename(process.argv[1] ?? "");
 const args = process.argv.slice(2);
-const root = process.env.APR_FAKE_ROOT;
+const root = process.env.TAPHOUND_FAKE_ROOT;
 
 function fail(message, code = 2) {
   process.stderr.write(`${message}\n`);
@@ -13,11 +13,11 @@ function fail(message, code = 2) {
 }
 
 if (root === undefined) {
-  fail("APR_FAKE_ROOT is required");
+  fail("TAPHOUND_FAKE_ROOT is required");
 }
 
 if (executable === "gradlew") {
-  if (process.env.APR_FAKE_GRADLE_EXIT === "1") {
+  if (process.env.TAPHOUND_FAKE_GRADLE_EXIT === "1") {
     fail("fixture Gradle build failed", 1);
   }
   process.exit(0);
@@ -66,7 +66,7 @@ if (executable === "adb") {
     process.exit(0);
   }
   if (args[0] === "devices") {
-    process.stdout.write(process.env.APR_FAKE_DEVICE === "none"
+    process.stdout.write(process.env.TAPHOUND_FAKE_DEVICE === "none"
       ? "List of devices attached\n\n"
       : "List of devices attached\nemulator-5554\tdevice\n");
     process.exit(0);
@@ -74,7 +74,7 @@ if (executable === "adb") {
   const command = args[0] === "-s" ? args.slice(2) : args;
   if (command[0] === "logcat") {
     process.stdout.write(
-      "07-19 10:00:00.000  42  42 I APR: process fixture ready\n"
+      "07-19 10:00:00.000  42  42 I TapHound: process fixture ready\n"
     );
     setInterval(() => {}, 1000);
   } else if (command[0] === "shell" && command[1] === "pidof") {

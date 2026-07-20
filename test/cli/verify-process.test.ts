@@ -146,6 +146,21 @@ function jsonOutput(result: CliProcessResult): Record<string, unknown> {
 }
 
 describe("built taphound verify --json process contract", () => {
+  it("runs when invoked through a package-manager symlink", async () => {
+    const root = await mkdtemp(join(tmpdir(), "taphound-bin-test-"));
+    temporaryRoots.push(root);
+    const binary = join(root, "taphound");
+    await symlink(cli, binary);
+
+    const result = spawnSync(process.execPath, [binary, "--help"], {
+      cwd: repositoryRoot,
+      encoding: "utf8"
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Usage: taphound");
+  });
+
   it("returns exit 0 with machine-only stdout and a published report", async () => {
     const test = await fixture();
     const result = runVerify(test);

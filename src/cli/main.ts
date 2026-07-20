@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -90,7 +91,7 @@ export async function runMain(
 const entryPath = process.argv[1];
 if (
   entryPath !== undefined
-  && import.meta.url === pathToFileURL(resolve(entryPath)).href
+  && import.meta.url === pathToFileURL(realpathSync(resolve(entryPath))).href
 ) {
   await withTerminationSignal((signal) => runMain(
     process.argv,

@@ -57,7 +57,7 @@
 执行：
 
 ```text
-node dist/cli/main.js doctor --project examples/taphound-demo --json
+node dist/cli/main.js doctor --project examples/taphound-android-demo --json
 ```
 
 实际结果：

@@ -113,6 +113,13 @@ describe("TapHound documentation examples", () => {
     expect(report).not.toMatch(/\bAPR\b|\bapr\b/);
   });
 
+  it("keeps verification evidence pointed at the runnable Android demo", async () => {
+    const audit = await text("docs/verification/taphound-v0.2-audit.md");
+
+    expect(audit).toContain("examples/taphound-android-demo");
+    expect(audit).not.toContain("examples/taphound-demo");
+  });
+
   it("ignores generated Node, TapHound, Android, and local environment files", async () => {
     const ignore = await text(".gitignore");
 

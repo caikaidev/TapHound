@@ -20,8 +20,8 @@ export function createProgram(
     }
   });
   return new Command()
-    .name("apr")
-    .description("Deterministic Android Journey verification")
+    .name("taphound")
+    .description("Deterministic app journey recording and verification")
     .configureOutput({
       writeOut: (content): void => {
         dependencies.stdout.write(content);

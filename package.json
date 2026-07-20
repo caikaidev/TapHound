@@ -1,10 +1,10 @@
 {
-  "name": "android-project-runtime",
-  "version": "0.2.0",
-  "description": "Deterministic Android Journey recording and verification",
+  "name": "taphound",
+  "version": "0.2.0-dev.1",
+  "description": "Deterministic app journey recording and verification",
   "type": "module",
   "bin": {
-    "apr": "./dist/cli/main.js"
+    "taphound": "./dist/cli/main.js"
   },
   "files": [
     "dist"

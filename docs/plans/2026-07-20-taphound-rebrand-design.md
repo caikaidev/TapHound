@@ -14,6 +14,7 @@ TapHound 是跨平台主品牌；Android 仅作为首个 Adapter 和发布副标
 本次迁移目标：
 
 - 将当前代码树、CLI、协议名称、报告、配置、示例、测试和活跃文档统一为 TapHound。
+- 建立可用于 GitHub、README 和发布展示的 TapHound 核心品牌 Icon。
 - 在正式开源前预留 GitHub 仓库和 npm 包名。
 - 不改变 v0.2 的功能与确定性语义。
 - 不为尚未公开发布的 APR 名称保留兼容层。
@@ -28,8 +29,11 @@ TapHound 是跨平台主品牌；Android 仅作为首个 Adapter 和发布副标
 - 产品描述：`Deterministic app journey recording and verification`
 - 标语：`Follow every tap. Catch every regression.`
 - GitHub Topics：`android`、`testing`、`cli`、`record-replay`、`regression-testing`、`ai-agents`
+- 品牌 Icon：`HoundMark`，抽象猎犬侧脸追踪点击靶心，电光橙 + 深炭黑
 
 未来平台扩展使用同一个 Journey 与报告品牌，并由平台 Adapter 区分，例如 TapHound for Android、TapHound for iOS。首期不创建多包仓库或平台抽象占位代码。
+
+Icon 的构图、色彩、交付文件和验收标准见 [TapHound 品牌 Icon 设计](2026-07-20-taphound-brand-icon-design.md)。本期只交付核心 Icon 套件，不扩展文字 Logo、Banner 或完整视觉系统。
 
 ## 3. 迁移策略
 
@@ -154,6 +158,7 @@ npm publish --tag dev --access public
 - 全库 stale-name 审计；仅迁移说明/归档白名单可以出现 APR。
 - `npm ci`、单元/集成测试、typecheck、lint、build。
 - `npm pack --dry-run`、tarball 文件列表与安装 smoke test。
+- 品牌 Icon 的 SVG 结构、PNG 尺寸、批准色值、圆形裁切和 16–32 px 识别性检查。
 - Git remote、分支和首次 push 目标审计。
 
 ## 10. 完成标准
@@ -163,8 +168,8 @@ npm publish --tag dev --access public
 - 当前发布树的活跃源码、测试、示例和文档无非白名单 APR 残留。
 - 所有既有功能测试继续通过，机器协议行为不变。
 - Apache-2.0 与 npm/GitHub 元数据完整。
+- HoundMark 核心 SVG、深浅/单色变体及 32–1024 px PNG 已交付并通过评审。
 - `origin` 正确指向 `git@github.com:caikaidev/TapHound.git`。
 - npm tarball 可独立安装与运行。
 - `taphound@0.2.0-dev.1` 仅以 `dev` 标签发布；没有 `latest`。
 - GitHub 仓库已安全推送并保持用户指定的可见性。
-

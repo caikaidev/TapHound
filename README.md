@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/brand/taphound-mark.svg" width="128" alt="TapHound HoundMark">
+</p>
+
 # TapHound
 
 > Follow every tap. Catch every regression.

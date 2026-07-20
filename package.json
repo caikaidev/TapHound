@@ -28,13 +28,15 @@
     "taphound": "./dist/cli/main.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "assets/brand/taphound-mark.svg"
   ],
   "engines": {
     "node": ">=22"
   },
   "scripts": {
     "acceptance:device": "node scripts/acceptance-device.mjs",
+    "brand:render": "node scripts/render-brand-assets.mjs",
     "build": "tsc -p tsconfig.build.json",
     "coverage": "vitest run --coverage",
     "lint": "eslint .",
@@ -52,6 +54,7 @@
     "@types/node": "^26.1.1",
     "@vitest/coverage-v8": "^4.1.10",
     "eslint": "^10.7.0",
+    "sharp": "^0.35.3",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.64.0",
     "vitest": "^4.1.10"

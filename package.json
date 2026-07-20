@@ -2,6 +2,27 @@
   "name": "taphound",
   "version": "0.2.0-dev.1",
   "description": "Deterministic app journey recording and verification",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/caikaidev/TapHound.git"
+  },
+  "bugs": {
+    "url": "https://github.com/caikaidev/TapHound/issues"
+  },
+  "homepage": "https://github.com/caikaidev/TapHound#readme",
+  "keywords": [
+    "android",
+    "testing",
+    "regression-testing",
+    "journey",
+    "cli",
+    "ai-agent"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "tag": "dev"
+  },
   "type": "module",
   "bin": {
     "taphound": "./dist/cli/main.js"
@@ -17,6 +38,7 @@
     "build": "tsc -p tsconfig.build.json",
     "coverage": "vitest run --coverage",
     "lint": "eslint .",
+    "prepublishOnly": "npm test && npm run typecheck && npm run lint && npm run build",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

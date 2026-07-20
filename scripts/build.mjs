@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
+import process from "node:process";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const outputDirectory = resolve(repositoryRoot, "dist");

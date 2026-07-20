@@ -37,7 +37,7 @@
   "scripts": {
     "acceptance:device": "node scripts/acceptance-device.mjs",
     "brand:render": "node scripts/render-brand-assets.mjs",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node scripts/build.mjs",
     "coverage": "vitest run --coverage",
     "lint": "eslint .",
     "prepublishOnly": "npm test && npm run typecheck && npm run lint && npm run build",

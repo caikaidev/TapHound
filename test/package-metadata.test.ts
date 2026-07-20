@@ -59,4 +59,16 @@ describe("TapHound package metadata", () => {
     expect(license).toContain("Version 2.0");
     expect(license).toContain("http://www.apache.org/licenses/");
   });
+
+  it("builds publication files without source maps", async () => {
+    const document = JSON.parse(
+      await readFile("package.json", "utf8")
+    ) as PackageDocument;
+    const buildConfig = JSON.parse(
+      await readFile("tsconfig.build.json", "utf8")
+    ) as { compilerOptions?: { sourceMap?: boolean } };
+
+    expect(document.scripts?.build).toBe("node scripts/build.mjs");
+    expect(buildConfig.compilerOptions?.sourceMap).toBe(false);
+  });
 });

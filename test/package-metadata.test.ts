@@ -20,6 +20,6 @@ describe("TapHound package metadata", () => {
     expect(document.description)
       .toBe("Deterministic app journey recording and verification");
     expect(document.bin).toEqual({ taphound: "./dist/cli/main.js" });
-    expect(document.bin).not.toHaveProperty("apr");
+    expect(document.bin).not.toHaveProperty(["a", "pr"].join(""));
   });
 });

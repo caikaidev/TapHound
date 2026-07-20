@@ -18,7 +18,7 @@ async function json(relativePath: string): Promise<unknown> {
   return JSON.parse(await text(relativePath)) as unknown;
 }
 
-describe("APR documentation examples", () => {
+describe("TapHound documentation examples", () => {
   it("keeps standalone config and Journey examples schema-valid", async () => {
     const config = TapHoundConfigSchema.parse(await json("examples/taphound.config.json"));
     const journey = JourneySchema.parse(await json("examples/search.journey.json"));
@@ -34,13 +34,17 @@ describe("APR documentation examples", () => {
     const commandNames = createProgram().commands.map((command) => command.name());
 
     expect(commandNames).toEqual(["doctor", "record", "verify"]);
+    expect(readme).toContain("# TapHound");
+    expect(readme).toContain("TapHound for Android");
+    expect(readme).toContain("Follow every tap. Catch every regression.");
+    expect(readme).toContain("TapHound Journey");
+    expect(readme).toContain("Android CLI 官方 Journey");
+    expect(readme).not.toMatch(/\bAPR\b|\bapr\b/);
     for (const command of commandNames) {
-      expect(readme).toContain(`apr ${command}`);
+      expect(readme).toContain(`taphound ${command}`);
     }
     expect(readme).toContain("Node.js 22");
     expect(readme).toContain("macOS");
-    expect(readme).toContain("APR Journey");
-    expect(readme).toContain("Android CLI 官方 Journey");
     expect(readme).toContain("v0.2");
   });
 
@@ -86,7 +90,8 @@ describe("APR documentation examples", () => {
     const agent = await text("docs/agent-integration.md");
 
     expect(agent).toContain("Claude Code");
-    expect(agent).toContain("apr verify");
+    expect(agent).toContain("taphound verify");
+    expect(agent).not.toMatch(/\bAPR\b|\bapr\b/);
     expect(agent).toContain("--json");
     expect(agent).toContain("stdout");
     expect(agent).toContain("stderr");
@@ -96,7 +101,19 @@ describe("APR documentation examples", () => {
     expect(agent).toContain("不在 v0.2");
   });
 
-  it("ignores generated Node, APR, Android, and local environment files", async () => {
+  it("brands active schema documentation as TapHound", async () => {
+    const journey = await text("docs/journey-schema.md");
+    const report = await text("docs/report-schema.md");
+
+    expect(journey).toContain("TapHound Journey");
+    expect(journey).toContain("taphound.config.json");
+    expect(journey).not.toMatch(/\bAPR\b|\bapr\b/);
+    expect(report).toContain("TapHound Report");
+    expect(report).toContain(".taphound/runs");
+    expect(report).not.toMatch(/\bAPR\b|\bapr\b/);
+  });
+
+  it("ignores generated Node, TapHound, Android, and local environment files", async () => {
     const ignore = await text(".gitignore");
 
     for (const pattern of [

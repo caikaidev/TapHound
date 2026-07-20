@@ -15,7 +15,7 @@ const validConfig = {
     stablePolls: 2,
     timeoutMs: 5000
   },
-  artifactsDir: ".apr/runs"
+  artifactsDir: ".taphound/runs"
 };
 
 describe("TapHoundConfigSchema", () => {

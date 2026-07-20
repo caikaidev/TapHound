@@ -1,11 +1,11 @@
-# 从 Agent CLI 调用 APR
+# 从 Agent CLI 调用 TapHound
 
-APR v0.2 的稳定 Agent 集成面是 `apr verify --json`。典型流程是：开发者使用 Claude Code 或其他 Agent CLI 实现需求，完成后让 Agent 调用 APR Journey 验证代码是否符合预期。
+TapHound v0.2 的稳定 Agent 集成面是 `taphound verify --json`。典型流程是：开发者使用 Claude Code 或其他 Agent CLI 实现需求，完成后让 Agent 调用 TapHound Journey 验证代码是否符合预期。
 
 ```bash
-apr verify \
+taphound verify \
   --project /workspace/android-app \
-  --config /workspace/android-app/apr.config.json \
+  --config /workspace/android-app/taphound.config.json \
   --journey /workspace/android-app/journeys/search.json \
   --device emulator-5554 \
   --json
@@ -16,7 +16,7 @@ apr verify \
 - stdout 恰好输出一个 JSON 值和结尾换行，不包含进度文本。
 - stderr 接收预检、进度和诊断，可由 Agent 单独保存。
 - 进程退出码与 JSON `exitCode` 一致。
-- `0` 表示通过；`1` 是产品验证失败；`2` 是输入无效；`3` 是环境不可用；`4` 是 APR 内部错误。
+- `0` 表示通过；`1` 是产品验证失败；`2` 是输入无效；`3` 是环境不可用；`4` 是 TapHound 内部错误。
 - 有报告时读取 `reportPath`、`report.primaryFailure`、`report.secondaryErrors` 和分层结果。
 - 没有报告时读取顶层 `failure.code` 与 `failure.message`。
 
@@ -27,7 +27,7 @@ apr verify \
 ```js
 import { spawn } from "node:child_process";
 
-const child = spawn("apr", [
+const child = spawn("taphound", [
   "verify",
   "--project", projectRoot,
   "--journey", journeyPath,
@@ -41,7 +41,7 @@ child.stderr.setEncoding("utf8").on("data", chunk => { stderr += chunk; });
 
 child.on("close", code => {
   const result = JSON.parse(stdout);
-  if (code !== result.exitCode) throw new Error("APR exit contract mismatch");
+  if (code !== result.exitCode) throw new Error("TapHound exit contract mismatch");
   // 将 result.report.primaryFailure 反馈给开发 Agent。
 });
 ```
@@ -52,7 +52,7 @@ child.on("close", code => {
 
 ```text
 实现完成后运行：
-apr verify --project . --journey journeys/search.json --json
+taphound verify --project . --journey journeys/search.json --json
 解析 JSON；exitCode=0 才算验收通过。
 若失败，优先报告 report.primaryFailure，并附上 reportPath。
 不要修改 Journey 来掩盖实现缺陷。
@@ -62,4 +62,4 @@ apr verify --project . --journey journeys/search.json --json
 
 ## 安全与确定性
 
-APR Replay 不调用 AI。Agent 只能选择要运行的已有 Journey 和 CLI 覆盖项；Locator、Activity、Layout Diff 与 Expect 的最终判定均由确定性代码完成。Agent 不应在失败后自动放宽断言、替换 Package 或删除步骤。
+TapHound Replay 不调用 AI。Agent 只能选择要运行的已有 Journey 和 CLI 覆盖项；Locator、Activity、Layout Diff 与 Expect 的最终判定均由确定性代码完成。Agent 不应在失败后自动放宽断言、替换 Package 或删除步骤。

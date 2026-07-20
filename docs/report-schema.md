@@ -1,6 +1,6 @@
-# APR Report Schema v1
+# TapHound Report Schema v1
 
-验证报告写入 `<artifactsDir>/<runId>/`：
+TapHound Report 默认写入 `.taphound/runs/<runId>/`，或写入配置的 `<artifactsDir>/<runId>/`：
 
 ```text
 report.json
@@ -57,9 +57,9 @@ steps/001-fallback-annotated.png
 - `1`：被验证项目未满足要求，例如 Build、Replay、Activity 或 Expect 失败。
 - `2`：配置、Journey 或 CLI 参数无效。
 - `3`：工具、权限、Gradle Wrapper 或设备环境不可用。
-- `4`：APR 内部错误或不可分类的取消。
+- `4`：TapHound 内部错误或不可分类的取消。
 
-`apr verify --json` 的 JSON `exitCode` 与进程退出码一致。成功或正常验证失败会包含 `report`、`reportPath` 与 `summaryPath`；报告生成前的配置、环境或内部错误使用 `failure.code` 与 `failure.message`。
+`taphound verify --json` 的 JSON `exitCode` 与进程退出码一致。成功或正常验证失败会包含 `report`、`reportPath` 与 `summaryPath`；报告生成前的配置、环境或内部错误使用 `failure.code` 与 `failure.message`。
 
 ## 步骤失败证据
 

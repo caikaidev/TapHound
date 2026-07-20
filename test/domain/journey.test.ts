@@ -9,7 +9,7 @@ const activity = {
 };
 
 describe("JourneySchema", () => {
-  it("parses a valid APR Journey fixture", () => {
+  it("parses a valid TapHound Journey fixture", () => {
     const journey = JourneySchema.parse(searchJourney);
 
     expect(journey.name).toBe("Search");

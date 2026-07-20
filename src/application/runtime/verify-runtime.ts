@@ -230,7 +230,7 @@ export class VerifyRuntime {
 
       if (primaryFailure === undefined && apkPath !== undefined) {
         try {
-          logcat.start({
+          await logcat.start({
             deviceSerial: input.deviceSerial,
             ...(input.signal === undefined ? {} : { signal: input.signal })
           });

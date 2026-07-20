@@ -120,6 +120,7 @@ describe("NodeProcessRunner", () => {
       }
     );
 
+    await expect(running.started).resolves.toBeUndefined();
     await secondLine;
     const firstStop = running.stop();
     const secondStop = running.stop();
@@ -127,5 +128,32 @@ describe("NodeProcessRunner", () => {
     expect(firstStop).toBe(secondStop);
     await expect(firstStop).resolves.toMatchObject({ exitCode: null });
     expect(lines).toEqual(["first", "second"]);
+  });
+
+  it("reports a streaming command that exits during startup", async () => {
+    const runner = new NodeProcessRunner(15 * 60 * 1000, 500);
+
+    const running = runner.start({
+      executable: process.execPath,
+      args: ["-e", "process.stderr.write('startup failed'); process.exit(7)"]
+    });
+
+    await expect(running.started).resolves.toMatchObject({
+      exitCode: 7,
+      stderr: "startup failed"
+    });
+  });
+
+  it("reports a streaming executable that cannot be spawned", async () => {
+    const runner = new NodeProcessRunner();
+
+    const running = runner.start({
+      executable: "/apr-fixture/missing-executable",
+      args: []
+    });
+
+    const startup = await running.started;
+    expect(startup?.exitCode).toBe(-2);
+    expect(startup?.spawnError).toMatch(/ENOENT/);
   });
 });

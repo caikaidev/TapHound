@@ -200,7 +200,7 @@ describe("ExpectationEvaluator", () => {
     const adb = adbPort();
     const clock = new FakeClock();
     const collector = new LogcatCollector(adb, clock);
-    collector.start({ deviceSerial: context.deviceSerial, pid: 1234 });
+    await collector.start({ deviceSerial: context.deviceSerial, pid: 1234 });
     clock.currentTime = 10;
     logcatOptions(adb).onStdoutLine(
       "07-19 15:00:00.123  1234  1235 D SearchViewModel: query=hello world"
@@ -233,7 +233,7 @@ describe("ExpectationEvaluator", () => {
     const adb = adbPort();
     const clock = new FakeClock();
     const collector = new LogcatCollector(adb, clock);
-    collector.start({ deviceSerial: context.deviceSerial, pid: 1234 });
+    await collector.start({ deviceSerial: context.deviceSerial, pid: 1234 });
     logcatOptions(adb).onStdoutLine(
       "07-19 15:00:00.123  1234  1235 I SearchViewModel: count=42"
     );
@@ -257,7 +257,7 @@ describe("ExpectationEvaluator", () => {
     const adb = adbPort();
     const clock = new FakeClock();
     const collector = new LogcatCollector(adb, clock);
-    collector.start({ deviceSerial: context.deviceSerial, pid: 1234 });
+    await collector.start({ deviceSerial: context.deviceSerial, pid: 1234 });
     logcatOptions(adb).onStdoutLine(
       "07-19 15:00:00.123  1234  1235 D SearchViewModel: stale"
     );

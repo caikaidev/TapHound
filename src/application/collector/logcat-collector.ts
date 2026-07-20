@@ -60,6 +60,16 @@ function parseLine(raw: string, receivedAt: number): LogcatLine {
   };
 }
 
+function startupFailure(result: CommandResult): string {
+  return result.stderr.trim()
+    || result.spawnError
+    || (result.cancelled
+      ? "Logcat startup was cancelled"
+      : result.timedOut
+        ? "Logcat startup timed out"
+        : `Logcat exited during startup with code ${String(result.exitCode)}`);
+}
+
 export class LogcatCollector {
   private readonly collected: LogcatLine[] = [];
   private readonly stderr: string[] = [];
@@ -72,7 +82,7 @@ export class LogcatCollector {
     private readonly clock: Clock
   ) {}
 
-  public start(options: StartLogcatOptions): void {
+  public async start(options: StartLogcatOptions): Promise<void> {
     if (this.running !== undefined) {
       throw new Error("Logcat collector already started");
     }
@@ -93,6 +103,10 @@ export class LogcatCollector {
       deviceSerial: options.deviceSerial,
       ...(options.pid === undefined ? {} : { pid: options.pid })
     };
+    const startupResult = await this.running.started;
+    if (startupResult !== undefined) {
+      throw new Error(startupFailure(startupResult));
+    }
   }
 
   public scopeToPid(pid: number): void {

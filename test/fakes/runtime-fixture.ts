@@ -129,6 +129,7 @@ export function runtimeFixture(): RuntimeFixture {
       options.onStdoutLine("07-19 10:00:00.000  42  42 I APR: ready");
       const completion = Promise.resolve(commandResult());
       return {
+        started: Promise.resolve(undefined),
         completion,
         stop: vi.fn(() => {
           order.push("logcat-stop");

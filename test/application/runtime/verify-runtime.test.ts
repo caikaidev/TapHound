@@ -177,7 +177,15 @@ describe("VerifyRuntime", () => {
     const test = runtimeFixture();
     vi.mocked(test.adb.startLogcat).mockImplementation(() => {
       test.order.push("logcat-start");
-      throw new Error("logcat unavailable");
+      const completion = Promise.resolve(commandResult({
+        exitCode: 1,
+        stderr: "logcat unavailable"
+      }));
+      return {
+        started: completion,
+        completion,
+        stop: (): Promise<CommandResult> => completion
+      };
     });
 
     const result = await new VerifyRuntime(test.dependencies).verify(input());
@@ -206,6 +214,7 @@ describe("VerifyRuntime", () => {
         signal: "SIGTERM"
       }));
       return {
+        started: Promise.resolve(undefined),
         completion,
         stop: (): Promise<CommandResult> => {
           test.order.push("logcat-stop");

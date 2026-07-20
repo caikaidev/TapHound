@@ -18,7 +18,7 @@ describe("parseLayout", () => {
 
     expect(elements).toEqual([
       {
-        id: "123456",
+        id: "123456:0",
         resourceId: "open_search",
         text: "Open search",
         contentDescription: "Open search screen",
@@ -28,8 +28,9 @@ describe("parseLayout", () => {
         children: []
       },
       {
-        id: "234567",
+        id: "123456:1",
         resourceId: "results",
+        clickable: true,
         scrollable: true,
         enabled: true,
         center: { x: 540, y: 1400 },

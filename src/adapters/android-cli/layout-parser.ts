@@ -98,9 +98,13 @@ function stringSet(record: Record<string, unknown>, key: string): Set<string> {
 }
 
 function elementId(record: Record<string, unknown>, path: string): string {
-  const value = record.id ?? record.key;
-  return typeof value === "string" || typeof value === "number"
-    ? String(value)
+  const explicitId = record.id;
+  if (typeof explicitId === "string" || typeof explicitId === "number") {
+    return String(explicitId);
+  }
+  const serializerKey = record.key;
+  return typeof serializerKey === "string" || typeof serializerKey === "number"
+    ? `${String(serializerKey)}:${path}`
     : path;
 }
 

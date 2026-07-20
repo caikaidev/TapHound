@@ -12,6 +12,7 @@
   },
   {
     "interactions": [
+      "clickable",
       "scrollable"
     ],
     "state": [
@@ -20,7 +21,7 @@
     "center": "(540, 1400)",
     "bounds": "[0,200][1080,2200]",
     "resource-id": "results",
-    "key": 234567
+    "key": 123456
   },
   {
     "text": "Off screen",
@@ -29,6 +30,6 @@
     ],
     "off-screen": true,
     "resource-id": "off_screen",
-    "key": 345678
+    "key": 123456
   }
 ]

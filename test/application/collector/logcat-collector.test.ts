@@ -29,13 +29,35 @@ function captureOptions(adb: AdbPort): LogcatOptions {
 }
 
 describe("LogcatCollector", () => {
-  it("starts one PID-scoped stream and parses threadtime lines", () => {
+  it("rejects a stream that exits during asynchronous startup", async () => {
+    const adb = adbPort();
+    const failed = Promise.resolve({
+      exitCode: 1,
+      signal: null,
+      stdout: "",
+      stderr: "logcat unavailable",
+      durationMs: 1,
+      timedOut: false,
+      cancelled: false
+    });
+    vi.mocked(adb.startLogcat).mockReturnValue({
+      started: failed,
+      completion: failed,
+      stop: () => failed
+    });
+    const collector = new LogcatCollector(adb, new FakeClock());
+
+    await expect(collector.start({ deviceSerial: "device" }))
+      .rejects.toThrow("logcat unavailable");
+  });
+
+  it("starts one PID-scoped stream and parses threadtime lines", async () => {
     const adb = adbPort();
     const clock = new FakeClock();
     clock.currentTime = 125;
     const collector = new LogcatCollector(adb, clock);
 
-    collector.start({
+    await collector.start({
       deviceSerial: "emulator-5554",
       pid: 1234
     });
@@ -58,10 +80,10 @@ describe("LogcatCollector", () => {
     }]);
   });
 
-  it("preserves an unparsed line as raw evidence", () => {
+  it("preserves an unparsed line as raw evidence", async () => {
     const adb = adbPort();
     const collector = new LogcatCollector(adb, new FakeClock());
-    collector.start({ deviceSerial: "device", pid: 42 });
+    await collector.start({ deviceSerial: "device", pid: 42 });
 
     captureOptions(adb).onStdoutLine("--------- beginning of main");
 
@@ -71,11 +93,11 @@ describe("LogcatCollector", () => {
     }]);
   });
 
-  it("slices lines using an inclusive monotonic time window", () => {
+  it("slices lines using an inclusive monotonic time window", async () => {
     const adb = adbPort();
     const clock = new FakeClock();
     const collector = new LogcatCollector(adb, clock);
-    collector.start({ deviceSerial: "device", pid: 42 });
+    await collector.start({ deviceSerial: "device", pid: 42 });
     const options = captureOptions(adb);
 
     clock.currentTime = 9;
@@ -91,10 +113,10 @@ describe("LogcatCollector", () => {
       .toEqual(["start", "end"]);
   });
 
-  it("starts before launch and scopes buffered and future lines to the App PID", () => {
+  it("starts before launch and scopes buffered and future lines to the App PID", async () => {
     const adb = adbPort();
     const collector = new LogcatCollector(adb, new FakeClock());
-    collector.start({ deviceSerial: "device" });
+    await collector.start({ deviceSerial: "device" });
     const options = captureOptions(adb);
     options.onStdoutLine(
       "07-19 15:00:00.100  41  41 D Other: ignore"
@@ -119,10 +141,10 @@ describe("LogcatCollector", () => {
       .toEqual(["startup", "ready"]);
   });
 
-  it("stops the underlying stream idempotently", () => {
+  it("stops the underlying stream idempotently", async () => {
     const adb = adbPort();
     const collector = new LogcatCollector(adb, new FakeClock());
-    collector.start({ deviceSerial: "device", pid: 42 });
+    await collector.start({ deviceSerial: "device", pid: 42 });
 
     const first = collector.stop();
     const second = collector.stop();
@@ -130,13 +152,11 @@ describe("LogcatCollector", () => {
     expect(first).toBe(second);
   });
 
-  it("does not allow two streams", () => {
+  it("does not allow two streams", async () => {
     const collector = new LogcatCollector(adbPort(), new FakeClock());
-    collector.start({ deviceSerial: "device", pid: 42 });
+    await collector.start({ deviceSerial: "device", pid: 42 });
 
-    expect((): void => {
-      collector.start({ deviceSerial: "device", pid: 42 });
-    })
-      .toThrow(/already started/i);
+    await expect(collector.start({ deviceSerial: "device", pid: 42 }))
+      .rejects.toThrow(/already started/i);
   });
 });

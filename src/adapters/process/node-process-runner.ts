@@ -31,7 +31,10 @@ function flushLine(buffer: LineBuffer): void {
 }
 
 export class NodeProcessRunner implements ProcessRunner {
-  public constructor(private readonly defaultTimeoutMs = 15 * 60 * 1000) {}
+  public constructor(
+    private readonly defaultTimeoutMs = 15 * 60 * 1000,
+    private readonly streamStartupGraceMs = 250
+  ) {}
 
   public run(spec: CommandSpec): Promise<CommandResult> {
     return this.start({
@@ -53,6 +56,25 @@ export class NodeProcessRunner implements ProcessRunner {
     let settled = false;
     let timeout: NodeJS.Timeout | undefined;
     let forceKillTimeout: NodeJS.Timeout | undefined;
+    let startupTimeout: NodeJS.Timeout | undefined;
+    let startupSettled = false;
+    let resolveStarted: (
+      result: CommandResult | undefined
+    ) => void = (): void => undefined;
+    const started = new Promise<CommandResult | undefined>((resolve) => {
+      resolveStarted = resolve;
+    });
+
+    const settleStarted = (result: CommandResult | undefined): void => {
+      if (startupSettled) {
+        return;
+      }
+      startupSettled = true;
+      if (startupTimeout !== undefined) {
+        clearTimeout(startupTimeout);
+      }
+      resolveStarted(result);
+    };
 
     const stdoutLines: LineBuffer = {
       pending: "",
@@ -87,6 +109,12 @@ export class NodeProcessRunner implements ProcessRunner {
     child.stderr.on("data", (chunk: string) => {
       stderr += chunk;
       consumeLines(stderrLines, chunk);
+    });
+    child.on("spawn", () => {
+      startupTimeout = setTimeout(() => {
+        settleStarted(undefined);
+      }, this.streamStartupGraceMs);
+      startupTimeout.unref();
     });
     child.on("error", (error) => {
       spawnError = error.message;
@@ -131,7 +159,7 @@ export class NodeProcessRunner implements ProcessRunner {
         spec.signal?.removeEventListener("abort", abort);
         flushLine(stdoutLines);
         flushLine(stderrLines);
-        resolve({
+        const result: CommandResult = {
           exitCode,
           signal,
           stdout,
@@ -140,7 +168,9 @@ export class NodeProcessRunner implements ProcessRunner {
           timedOut,
           cancelled,
           ...(spawnError === undefined ? {} : { spawnError })
-        });
+        };
+        settleStarted(result);
+        resolve(result);
       });
     });
 
@@ -153,6 +183,6 @@ export class NodeProcessRunner implements ProcessRunner {
       abort();
     }
 
-    return { completion, stop };
+    return { started, completion, stop };
   }
 }

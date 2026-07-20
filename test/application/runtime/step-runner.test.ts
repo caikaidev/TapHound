@@ -70,7 +70,7 @@ function fixture(overrides: {
   const clock = new FakeClock();
   const artifacts = new MemoryArtifactSession();
   const logcat = new LogcatCollector(adb, clock);
-  logcat.start({ deviceSerial: "emulator-5554" });
+  void logcat.start({ deviceSerial: "emulator-5554" });
   logcat.scopeToPid(42);
   return {
     runner: new StepRunner({

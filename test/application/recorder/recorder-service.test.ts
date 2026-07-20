@@ -1,5 +1,9 @@
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it, vi } from "vitest";
 
+import { parseLayout } from "../../../src/adapters/android-cli/layout-parser.js";
 import { RecorderService } from "../../../src/application/recorder/recorder-service.js";
 import type { Journey } from "../../../src/domain/journey.js";
 import type { RecorderPromptPort } from "../../../src/ports/recorder-prompt.js";
@@ -11,6 +15,10 @@ import {
   runtimeFixture
 } from "../../fakes/runtime-fixture.js";
 import { commandResult } from "../../fakes/process-runner.js";
+
+const realLayoutFixture = fileURLToPath(
+  new URL("../../fixtures/android-cli/layout-output.json", import.meta.url)
+);
 
 function prompt(actions: RecorderAction[]): RecorderPromptPort {
   return {
@@ -40,6 +48,43 @@ function writer(): JourneyWriterPort & { journeys: Journey[] } {
 }
 
 describe("RecorderService", () => {
+  it("executes the second selected element when Android CLI keys repeat", async () => {
+    const runtime = runtimeFixture();
+    const layout = parseLayout(await readFile(realLayoutFixture, "utf8"));
+    vi.mocked(runtime.androidCli.layout).mockResolvedValue(layout);
+    const recorderPrompt = prompt(["click", "finish"]);
+    vi.mocked(recorderPrompt.selectTarget).mockImplementation((choices) => {
+      const second = choices[1];
+      if (second === undefined) {
+        throw new Error("Expected a second Recorder target");
+      }
+      return Promise.resolve(second.id);
+    });
+    const journeyWriter = writer();
+    const service = new RecorderService({
+      gradle: runtime.gradle,
+      androidCli: runtime.androidCli,
+      adb: runtime.adb,
+      clock: runtime.dependencies.clock,
+      prompt: recorderPrompt,
+      journeyWriter
+    });
+
+    const result = await service.record({
+      config: runtimeConfig,
+      projectRoot: "/project",
+      deviceSerial: "emulator-5554",
+      journeyName: "Repeated keys",
+      outputPath: "/project/repeated-keys.json"
+    });
+
+    expect(result).toMatchObject({ status: "completed", stepsRecorded: 1 });
+    expect(journeyWriter.journeys[0]?.steps[0]).toMatchObject({
+      action: "click",
+      locator: { resourceId: "results" }
+    });
+  });
+
   it("launches the App and saves Activity checkpoints for successful Actions", async () => {
     const runtime = runtimeFixture();
     const recorderPrompt = prompt(["click", "finish"]);

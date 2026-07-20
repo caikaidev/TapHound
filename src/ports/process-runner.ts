@@ -24,6 +24,8 @@ export interface StreamHandlers {
 }
 
 export interface RunningCommand {
+  /** Resolves undefined once the stream remains alive through startup. */
+  readonly started: Promise<CommandResult | undefined>;
   readonly completion: Promise<CommandResult>;
   stop: () => Promise<CommandResult>;
 }

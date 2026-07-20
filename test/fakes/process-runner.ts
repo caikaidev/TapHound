@@ -22,10 +22,12 @@ export function commandResult(
 }
 
 export function runningCommand(
-  result: CommandResult = commandResult()
+  result: CommandResult = commandResult(),
+  startupResult?: CommandResult
 ): RunningCommand {
   const completion = Promise.resolve(result);
   return {
+    started: Promise.resolve(startupResult),
     completion,
     stop: vi.fn(() => completion)
   };

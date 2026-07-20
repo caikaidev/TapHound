@@ -101,7 +101,7 @@ const ArtifactsSchema = z.strictObject({
   stepLogs: z.array(z.string().min(1))
 });
 
-export const AprReportSchema = z.strictObject({
+export const TapHoundReportSchema = z.strictObject({
   schemaVersion: z.literal(1),
   runId: z.string().min(1),
   status: RunStatusSchema,
@@ -131,7 +131,7 @@ export const AprReportSchema = z.strictObject({
 
 export type ReportFailure = z.infer<typeof ReportFailureSchema>;
 export type StepReport = z.infer<typeof StepReportSchema>;
-export type AprReport = z.infer<typeof AprReportSchema>;
+export type TapHoundReport = z.infer<typeof TapHoundReportSchema>;
 
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) {

@@ -1,21 +1,21 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  AprReportSchema,
+  TapHoundReportSchema,
   hashJourney
 } from "../../src/domain/report.js";
 import { validReport } from "../fixtures/report.js";
 
-describe("AprReportSchema", () => {
+describe("TapHoundReportSchema", () => {
   it("accepts the layered v1 report contract", () => {
-    expect(AprReportSchema.parse(validReport())).toEqual(validReport());
+    expect(TapHoundReportSchema.parse(validReport())).toEqual(validReport());
   });
 
   it("requires every result layer", () => {
     const report = validReport();
     Reflect.deleteProperty(report.layers, "collection");
 
-    expect(() => AprReportSchema.parse(report)).toThrow();
+    expect(() => TapHoundReportSchema.parse(report)).toThrow();
   });
 
   it("records the primary failure separately from secondary errors", () => {
@@ -42,7 +42,7 @@ describe("AprReportSchema", () => {
       }]
     });
 
-    expect(AprReportSchema.parse(report).primaryFailure?.code)
+    expect(TapHoundReportSchema.parse(report).primaryFailure?.code)
       .toBe("LOCATOR_NOT_FOUND");
   });
 
@@ -64,7 +64,7 @@ describe("AprReportSchema", () => {
       }]
     });
 
-    expect(AprReportSchema.parse(report).steps[0]?.locator)
+    expect(TapHoundReportSchema.parse(report).steps[0]?.locator)
       .toMatchObject({ fallbackUsed: true, fallbackLabel: "#7" });
   });
 });

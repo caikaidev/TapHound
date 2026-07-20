@@ -1,7 +1,7 @@
 import { parse } from "node:path";
 
 import { normalizeActivity } from "../../domain/activity.js";
-import type { AprConfig } from "../../domain/config.js";
+import type { TapHoundConfig } from "../../domain/config.js";
 import {
   JourneySchema,
   JourneyStepSchema,
@@ -32,7 +32,7 @@ export interface RecorderDependencies {
 }
 
 export interface RecordInput {
-  config: AprConfig;
+  config: TapHoundConfig;
   projectRoot: string;
   deviceSerial: string;
   journeyName: string;

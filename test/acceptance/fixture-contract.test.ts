@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { AprConfigSchema } from "../../src/domain/config.js";
+import { TapHoundConfigSchema } from "../../src/domain/config.js";
 import { JourneySchema } from "../../src/domain/journey.js";
 
 const root = join(process.cwd(), "examples", "apr-demo");
@@ -38,7 +38,7 @@ describe("APR Android acceptance fixture", () => {
   });
 
   it("keeps Package and Activity identities aligned", async () => {
-    const config = AprConfigSchema.parse(await json("apr.config.json"));
+    const config = TapHoundConfigSchema.parse(await json("apr.config.json"));
     const journey = JourneySchema.parse(await json("journeys/search.json"));
     const manifest = await text("app/src/main/AndroidManifest.xml");
     const main = await text(

@@ -1,12 +1,12 @@
 import { resolve } from "node:path";
 
 import { normalizeActivity } from "../../domain/activity.js";
-import type { AprConfig } from "../../domain/config.js";
+import type { TapHoundConfig } from "../../domain/config.js";
 import { exitCodeForFailure, type FailureCode } from "../../domain/failure.js";
 import type { Journey } from "../../domain/journey.js";
 import {
   hashJourney,
-  type AprReport,
+  type TapHoundReport,
   type ReportFailure
 } from "../../domain/report.js";
 import type { AdbPort } from "../../ports/adb.js";
@@ -23,7 +23,7 @@ import {
 } from "./step-runner.js";
 
 export interface VerifyInput {
-  config: AprConfig;
+  config: TapHoundConfig;
   journey: Journey;
   projectRoot: string;
   deviceSerial: string;
@@ -54,7 +54,7 @@ export interface VerifyRuntimeDependencies {
 export interface VerifyResult {
   status: "passed" | "failed" | "error";
   exitCode: 0 | 1 | 2 | 3 | 4;
-  report: AprReport;
+  report: TapHoundReport;
   reportPath: string;
   summaryPath: string;
 }
@@ -101,7 +101,7 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function layerForFailure(code: FailureCode): keyof AprReport["layers"] {
+function layerForFailure(code: FailureCode): keyof TapHoundReport["layers"] {
   if (code === "BUILD_FAILED") {
     return "build";
   }
@@ -148,8 +148,8 @@ export class VerifyRuntime {
     let primaryFailure: ReportFailure | undefined;
     const secondaryErrors: ReportFailure[] = [];
     const collectionErrors: ReportFailure[] = [];
-    const steps: AprReport["steps"] = [];
-    const layers: AprReport["layers"] = {
+    const steps: TapHoundReport["steps"] = [];
+    const layers: TapHoundReport["layers"] = {
       build: "notRun",
       run: "notRun",
       structural: "notRun",
@@ -392,7 +392,7 @@ export class VerifyRuntime {
 
     const finishedAt = this.dependencies.now();
     const failure = primaryFailure;
-    const status: AprReport["status"] = failure === undefined
+    const status: TapHoundReport["status"] = failure === undefined
       ? "passed"
       : [
           "CONFIG_INVALID",
@@ -402,7 +402,7 @@ export class VerifyRuntime {
         ].includes(failure.code)
         ? "error"
         : "failed";
-    const report: AprReport = {
+    const report: TapHoundReport = {
       schemaVersion: 1,
       runId,
       status,

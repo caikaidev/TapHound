@@ -19,7 +19,7 @@ export const FAILURE_CODES = [
 ] as const;
 
 export type FailureCode = (typeof FAILURE_CODES)[number];
-export type AprExitCode = 1 | 2 | 3 | 4;
+export type TapHoundExitCode = 1 | 2 | 3 | 4;
 
 const EXIT_CODES = {
   CONFIG_INVALID: 2,
@@ -39,8 +39,8 @@ const EXIT_CODES = {
   EXPECT_LOGCAT_FAILED: 1,
   COLLECTION_FAILED: 1,
   INTERNAL_ERROR: 4
-} as const satisfies Record<FailureCode, AprExitCode>;
+} as const satisfies Record<FailureCode, TapHoundExitCode>;
 
-export function exitCodeForFailure(failure: FailureCode): AprExitCode {
+export function exitCodeForFailure(failure: FailureCode): TapHoundExitCode {
   return EXIT_CODES[failure];
 }

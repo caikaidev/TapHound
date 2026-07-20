@@ -1,8 +1,8 @@
 import { join } from "node:path";
 
 import {
-  AprReportSchema,
-  type AprReport
+  TapHoundReportSchema,
+  type TapHoundReport
 } from "../../domain/report.js";
 import type { ArtifactSession } from "../../ports/artifact-store.js";
 
@@ -12,7 +12,7 @@ export interface PublishedReport {
   summaryPath: string;
 }
 
-function renderSummary(report: AprReport): string {
+function renderSummary(report: TapHoundReport): string {
   const lines = [
     `APR run ${report.runId}: ${report.status.toUpperCase()}`,
     `Journey: ${report.journey.name}`,
@@ -46,9 +46,9 @@ function renderSummary(report: AprReport): string {
 export class ReportWriter {
   public async writeAndPublish(
     session: ArtifactSession,
-    input: AprReport
+    input: TapHoundReport
   ): Promise<PublishedReport> {
-    const report = AprReportSchema.parse(input);
+    const report = TapHoundReportSchema.parse(input);
     try {
       await session.writeJson("report.json", report);
       await session.writeText("summary.txt", renderSummary(report));

@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   FAILURE_CODES,
-  exitCodeForFailure
+  exitCodeForFailure,
+  type TapHoundExitCode
 } from "../../src/domain/failure.js";
 
 describe("exitCodeForFailure", () => {
@@ -35,8 +36,10 @@ describe("exitCodeForFailure", () => {
     expect(exitCodeForFailure(failure)).toBe(3);
   });
 
-  it("maps an APR fault to exit code 4", () => {
-    expect(exitCodeForFailure("INTERNAL_ERROR")).toBe(4);
+  it("maps a TapHound fault to exit code 4", () => {
+    const code: TapHoundExitCode = exitCodeForFailure("INTERNAL_ERROR");
+
+    expect(code).toBe(4);
   });
 
   it("defines exactly the approved failure vocabulary", () => {

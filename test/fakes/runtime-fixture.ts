@@ -4,9 +4,9 @@ import {
   ReportWriter,
   type PublishedReport
 } from "../../src/application/report/report-writer.js";
-import type { AprReport } from "../../src/domain/report.js";
+import type { TapHoundReport } from "../../src/domain/report.js";
 import type { VerifyRuntimeDependencies } from "../../src/application/runtime/verify-runtime.js";
-import type { AprConfig } from "../../src/domain/config.js";
+import type { TapHoundConfig } from "../../src/domain/config.js";
 import type { Journey } from "../../src/domain/journey.js";
 import type { AdbPort, LogcatOptions } from "../../src/ports/adb.js";
 import type { AndroidCliPort } from "../../src/ports/android-cli.js";
@@ -16,7 +16,7 @@ import { MemoryArtifactStore } from "./artifact-store.js";
 import { FakeClock } from "./fake-clock.js";
 import { commandResult } from "./process-runner.js";
 
-export const runtimeConfig: AprConfig = {
+export const runtimeConfig: TapHoundConfig = {
   version: 1,
   build: { task: ":app:assembleDebug" },
   artifact: { target: "app", variant: "debug" },
@@ -154,7 +154,7 @@ export function runtimeFixture(): RuntimeFixture {
       reportWriter: {
         writeAndPublish: async (
           session: ArtifactSession,
-          report: AprReport
+          report: TapHoundReport
         ): Promise<PublishedReport> => {
           order.push("report");
           return writer.writeAndPublish(session, report);

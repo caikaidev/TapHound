@@ -1,8 +1,8 @@
-import type { AprReport } from "../../src/domain/report.js";
+import type { TapHoundReport } from "../../src/domain/report.js";
 
 export function validReport(
-  overrides: Partial<AprReport> = {}
-): AprReport {
+  overrides: Partial<TapHoundReport> = {}
+): TapHoundReport {
   return {
     schemaVersion: 1,
     runId: "run-123",

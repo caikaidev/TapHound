@@ -13,7 +13,7 @@ const ActivityNameSchema = z.string().refine(
   "activity must be relative with a leading dot or fully qualified"
 );
 
-export const AprConfigSchema = z.strictObject({
+export const TapHoundConfigSchema = z.strictObject({
   version: z.literal(1),
   build: z.strictObject({
     task: z.string().trim().min(1)
@@ -34,4 +34,4 @@ export const AprConfigSchema = z.strictObject({
   artifactsDir: z.string().trim().min(1)
 });
 
-export type AprConfig = z.infer<typeof AprConfigSchema>;
+export type TapHoundConfig = z.infer<typeof TapHoundConfigSchema>;

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { createProgram } from "../../src/cli/program.js";
-import { AprConfigSchema } from "../../src/domain/config.js";
+import { TapHoundConfigSchema } from "../../src/domain/config.js";
 import { FAILURE_CODES } from "../../src/domain/failure.js";
 import { JourneySchema } from "../../src/domain/journey.js";
 
@@ -20,7 +20,7 @@ async function json(relativePath: string): Promise<unknown> {
 
 describe("APR documentation examples", () => {
   it("keeps standalone config and Journey examples schema-valid", async () => {
-    const config = AprConfigSchema.parse(await json("examples/apr.config.json"));
+    const config = TapHoundConfigSchema.parse(await json("examples/apr.config.json"));
     const journey = JourneySchema.parse(await json("examples/search.journey.json"));
 
     expect(config.run.packageName).toBe("com.example.app");

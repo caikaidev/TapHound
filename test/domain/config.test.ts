@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { AprConfigSchema } from "../../src/domain/config.js";
+import { TapHoundConfigSchema } from "../../src/domain/config.js";
 
 const validConfig = {
   version: 1,
@@ -18,20 +18,20 @@ const validConfig = {
   artifactsDir: ".apr/runs"
 };
 
-describe("AprConfigSchema", () => {
+describe("TapHoundConfigSchema", () => {
   it("accepts the approved version 1 configuration", () => {
-    expect(AprConfigSchema.parse(validConfig)).toEqual(validConfig);
+    expect(TapHoundConfigSchema.parse(validConfig)).toEqual(validConfig);
   });
 
   it("requires a package name", () => {
     const config = structuredClone(validConfig);
     Reflect.deleteProperty(config.run, "packageName");
 
-    expect(() => AprConfigSchema.parse(config)).toThrow();
+    expect(() => TapHoundConfigSchema.parse(config)).toThrow();
   });
 
   it("rejects unsupported versions", () => {
-    expect(() => AprConfigSchema.parse({ ...validConfig, version: 2 })).toThrow();
+    expect(() => TapHoundConfigSchema.parse({ ...validConfig, version: 2 })).toThrow();
   });
 
   it.each(["pollIntervalMs", "stablePolls", "timeoutMs"] as const)(
@@ -40,11 +40,11 @@ describe("AprConfigSchema", () => {
       const config = structuredClone(validConfig);
       config.idle[field] = 0;
 
-      expect(() => AprConfigSchema.parse(config)).toThrow();
+      expect(() => TapHoundConfigSchema.parse(config)).toThrow();
     }
   );
 
   it("rejects unknown fields instead of silently ignoring them", () => {
-    expect(() => AprConfigSchema.parse({ ...validConfig, device: "first" })).toThrow();
+    expect(() => TapHoundConfigSchema.parse({ ...validConfig, device: "first" })).toThrow();
   });
 });

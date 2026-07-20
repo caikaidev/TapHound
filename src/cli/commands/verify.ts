@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 
 import { Command } from "commander";
 
-import { AprConfigSchema } from "../../domain/config.js";
+import { TapHoundConfigSchema } from "../../domain/config.js";
 import { JourneySchema } from "../../domain/journey.js";
 import type { CliDependencies } from "../dependencies.js";
 import {
@@ -50,8 +50,8 @@ export function createVerifyCommand(dependencies: CliDependencies): Command {
         const rawConfig = await dependencies.readJson(
           resolve(options.project, options.config)
         );
-        const parsed = AprConfigSchema.parse(rawConfig);
-        config = AprConfigSchema.parse({
+        const parsed = TapHoundConfigSchema.parse(rawConfig);
+        config = TapHoundConfigSchema.parse({
           ...parsed,
           run: {
             packageName: options.package ?? parsed.run.packageName,

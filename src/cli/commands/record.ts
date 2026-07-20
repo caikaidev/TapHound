@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 
 import { Command } from "commander";
 
-import { AprConfigSchema } from "../../domain/config.js";
+import { TapHoundConfigSchema } from "../../domain/config.js";
 import type { CliDependencies } from "../dependencies.js";
 import {
   errorMessage,
@@ -32,7 +32,7 @@ export function createRecordCommand(dependencies: CliDependencies): Command {
     .action(async (options: RecordOptions): Promise<void> => {
       let config;
       try {
-        config = AprConfigSchema.parse(await dependencies.readJson(
+        config = TapHoundConfigSchema.parse(await dependencies.readJson(
           resolve(options.project, options.config)
         ));
       } catch (error) {

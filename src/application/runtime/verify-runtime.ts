@@ -16,6 +16,7 @@ import type { Clock } from "../../ports/clock.js";
 import type { GradlePort } from "../../ports/gradle.js";
 import { LogcatCollector } from "../collector/logcat-collector.js";
 import type { ReportWriter } from "../report/report-writer.js";
+import { ActivityWaiter } from "./activity-waiter.js";
 import {
   StepRunner,
   type StepRunResult,
@@ -275,11 +276,38 @@ export class VerifyRuntime {
                 );
               } else {
                 logcat.scopeToPid(pid);
-                const activity = await this.dependencies.adb.currentActivity(identity);
-                if (activity !== launchActivity) {
+                const firstStep = input.journey.steps[0];
+                if (firstStep === undefined) {
+                  throw new Error("Journey requires at least one step");
+                }
+                const readiness = await new ActivityWaiter(
+                  this.dependencies.adb,
+                  this.dependencies.clock
+                ).wait({
+                  packageName: input.config.run.packageName,
+                  deviceSerial: input.deviceSerial,
+                  expectedActivity: firstStep.activity.before,
+                  pollIntervalMs: input.config.idle.pollIntervalMs,
+                  timeoutMs: input.config.idle.timeoutMs,
+                  ...(input.signal === undefined ? {} : { signal: input.signal })
+                });
+
+                if (readiness.status === "processMissing") {
                   setPrimary(
                     "APP_LAUNCH_FAILED",
-                    `Expected launch Activity ${launchActivity}, found ${activity}`,
+                    "App process exited before reaching the first Journey Activity",
+                    "readiness"
+                  );
+                } else if (readiness.status === "timeout") {
+                  setPrimary(
+                    "APP_LAUNCH_FAILED",
+                    `Expected startup Activity ${firstStep.activity.before}, found ${readiness.actual ?? "none"} before timeout`,
+                    "readiness"
+                  );
+                } else if (readiness.status === "cancelled") {
+                  setPrimary(
+                    "INTERNAL_ERROR",
+                    "Verification was cancelled",
                     "readiness"
                   );
                 } else {

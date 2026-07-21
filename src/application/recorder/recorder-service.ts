@@ -149,29 +149,42 @@ export class RecorderService {
       ...(input.signal === undefined ? {} : { signal: input.signal }),
       timeoutMs: input.config.idle.timeoutMs
     };
-    const pid = await this.dependencies.adb.pid(identity);
-    const initialActivity = await this.dependencies.adb.currentActivity(identity);
-    if (pid === null || normalizeActivity(input.config.run.packageName, initialActivity) !== launchActivity) {
+    if (await this.dependencies.adb.pid(identity) === null) {
       return {
         status: "failed",
         stepsRecorded: 0,
-        message: "App did not reach the configured launch Activity"
+        message: "App process was not found after launch"
       };
     }
+
+    const idleWaiter = new IdleWaiter(
+      this.dependencies.androidCli,
+      this.dependencies.clock,
+      input.deviceSerial
+    );
     await this.dependencies.androidCli.layout({
       deviceSerial: input.deviceSerial,
       ...(input.signal === undefined ? {} : { signal: input.signal }),
       timeoutMs: input.config.idle.timeoutMs
     });
+    const startupIdle = await idleWaiter.waitUntilIdle(
+      input.config.idle,
+      input.signal
+    );
+    if (startupIdle.status === "cancelled") {
+      return { status: "cancelled", stepsRecorded: 0 };
+    }
+    if (startupIdle.status === "timeout") {
+      return {
+        status: "failed",
+        stepsRecorded: 0,
+        message: "Layout did not become stable before timeout"
+      };
+    }
 
     const steps: JourneyStep[] = [];
     const executor = new ActionExecutor(
       this.dependencies.adb,
-      input.deviceSerial
-    );
-    const idleWaiter = new IdleWaiter(
-      this.dependencies.androidCli,
-      this.dependencies.clock,
       input.deviceSerial
     );
 

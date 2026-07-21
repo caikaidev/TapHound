@@ -33,7 +33,9 @@ function prompt(actions: RecorderAction[]): RecorderPromptPort {
       durationMs: 300
     })),
     selectFallbackLabel: vi.fn(() => Promise.resolve(undefined)),
-    notifyFailure: vi.fn(() => Promise.resolve())
+    notifyFailure: vi.fn(() => Promise.resolve()),
+    selectScrollContainer: vi.fn(() => Promise.resolve("scroll_container")),
+    scrollTargetDecision: vi.fn(() => Promise.resolve({ kind: "cancel" } as const))
   };
 }
 

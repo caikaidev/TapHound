@@ -3,10 +3,16 @@ export type RecorderAction =
   | "longClick"
   | "inputText"
   | "swipe"
+  | "scrollTo"
   | "back"
   | "wait"
   | "finish"
   | "cancel";
+
+export type ScrollDecision =
+  | { kind: "select"; id: string }
+  | { kind: "scrollMore" }
+  | { kind: "cancel" };
 
 export interface RecorderTargetChoice {
   id: string;
@@ -31,4 +37,10 @@ export interface RecorderPromptPort {
     annotatedScreenshotPath: string
   ) => Promise<string | undefined>;
   notifyFailure: (message: string) => Promise<void>;
+  selectScrollContainer: (
+    choices: readonly RecorderTargetChoice[]
+  ) => Promise<string>;
+  scrollTargetDecision: (
+    choices: readonly RecorderTargetChoice[]
+  ) => Promise<ScrollDecision>;
 }

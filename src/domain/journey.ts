@@ -91,6 +91,17 @@ const SwipeStepSchema = z.strictObject({
   ...CommonStepShape
 });
 
+const ScrollToStepSchema = z.strictObject({
+  action: z.literal("scrollTo"),
+  locator: LocatorSchema,
+  container: LocatorSchema,
+  direction: z.enum(["up", "down", "left", "right"]),
+  maxSwipes: z.number().int().positive().max(30).default(20),
+  distancePercent: z.number().positive().max(1).default(0.6),
+  durationMs: z.number().int().positive().default(300),
+  ...CommonStepShape
+});
+
 const BackStepSchema = z.strictObject({
   action: z.literal("back"),
   ...CommonStepShape
@@ -106,6 +117,7 @@ export const JourneyStepSchema = z.discriminatedUnion("action", [
   LongClickStepSchema,
   InputTextStepSchema,
   SwipeStepSchema,
+  ScrollToStepSchema,
   BackStepSchema,
   WaitStepSchema
 ]);

@@ -7,6 +7,7 @@ import {
 import type { AdbPort } from "../../../src/ports/adb.js";
 import type { CommandResult } from "../../../src/ports/process-runner.js";
 import type { JourneyStep } from "../../../src/domain/journey.js";
+import { commandResult } from "../../fakes/process-runner.js";
 
 const checkpoint = {
   before: "com.example.app.MainActivity",
@@ -180,5 +181,48 @@ describe("ActionExecutor", () => {
       status: "failed",
       code: "ACTION_FAILED"
     });
+  });
+});
+
+describe("scrollTo defensive case", () => {
+  it("returns ACTION_FAILED because scrollTo is not executed here", async () => {
+    const adb = adbPort();
+    const executor = new ActionExecutor(adb, "emulator-5554");
+    const outcome = await executor.execute({
+      action: "scrollTo",
+      locator: { resourceId: "x" },
+      container: { resourceId: "list" },
+      direction: "up",
+      maxSwipes: 5,
+      distancePercent: 0.6,
+      durationMs: 300,
+      activity: { before: "com.example.app.A", after: "com.example.app.A" }
+    }, undefined);
+    expect(outcome).toEqual({
+      status: "failed",
+      code: "ACTION_FAILED",
+      message: "scrollTo is not executed via ActionExecutor"
+    });
+  });
+});
+
+describe("swipeBounds", () => {
+  it("swipes within the given bounds and reports success", async () => {
+    const swipe = vi.fn(() => Promise.resolve(commandResult()));
+    const adb = { swipe } as unknown as AdbPort;
+    const executor = new ActionExecutor(adb, "emulator-5554");
+    const result = await executor.swipeBounds(
+      { left: 0, top: 0, right: 100, bottom: 200 },
+      "up",
+      0.6,
+      300
+    );
+    expect(result).toEqual({ status: "succeeded" });
+    expect(swipe).toHaveBeenCalledTimes(1);
+    const [from, to] = swipe.mock.calls[0] as unknown as [
+      { x: number; y: number },
+      { x: number; y: number }
+    ];
+    expect(from.y).toBeGreaterThan(to.y);
   });
 });

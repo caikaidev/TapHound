@@ -57,6 +57,7 @@ describe("VerifyRuntime", () => {
       "logcat-start",
       "run",
       "pid",
+      "pid",
       "activity-main",
       "baseline",
       "activity-main",
@@ -71,6 +72,74 @@ describe("VerifyRuntime", () => {
     ]);
     expect(test.artifacts.session.text.has("logcat.txt")).toBe(true);
     expect(test.artifacts.session.published).toBe(true);
+  });
+
+  it("waits for the first Journey Activity after a launch redirect", async () => {
+    const test = runtimeFixture();
+    vi.mocked(test.adb.currentActivity)
+      .mockResolvedValueOnce("com.example.app.SplashActivity")
+      .mockResolvedValueOnce("com.example.app.MainActivity")
+      .mockResolvedValueOnce("com.example.app.MainActivity")
+      .mockResolvedValueOnce("com.example.app.SearchActivity");
+
+    const result = await new VerifyRuntime(test.dependencies).verify(input());
+
+    expect(result).toMatchObject({ status: "passed", exitCode: 0 });
+    expect(test.dependencies.clock).toMatchObject({ sleeps: [100] });
+  });
+
+  it("fails launch readiness when the first Journey Activity is not reached", async () => {
+    const test = runtimeFixture();
+    vi.mocked(test.adb.currentActivity)
+      .mockResolvedValue("com.example.app.SplashActivity");
+
+    const result = await new VerifyRuntime(test.dependencies).verify(input());
+
+    expect(result).toMatchObject({
+      status: "failed",
+      exitCode: 1,
+      report: {
+        primaryFailure: {
+          code: "APP_LAUNCH_FAILED",
+          phase: "readiness"
+        },
+        steps: []
+      }
+    });
+    expect(result.report.primaryFailure?.message)
+      .toContain("com.example.app.MainActivity");
+    expect(result.report.primaryFailure?.message)
+      .toContain("com.example.app.SplashActivity");
+    expect(test.dependencies.clock).toMatchObject({
+      sleeps: [100, 100, 100, 100, 100]
+    });
+  });
+
+  it("fails launch readiness when the App process exits during redirect", async () => {
+    const test = runtimeFixture();
+    vi.mocked(test.adb.pid)
+      .mockResolvedValueOnce(42)
+      .mockResolvedValueOnce(42)
+      .mockResolvedValueOnce(null);
+    vi.mocked(test.adb.currentActivity)
+      .mockResolvedValue("com.example.app.SplashActivity");
+
+    const result = await new VerifyRuntime(test.dependencies).verify(input());
+
+    expect(result).toMatchObject({
+      status: "failed",
+      exitCode: 1,
+      report: {
+        primaryFailure: {
+          code: "APP_LAUNCH_FAILED",
+          message: "App process exited before reaching the first Journey Activity",
+          phase: "readiness"
+        },
+        steps: []
+      }
+    });
+    expect(test.order).not.toContain("baseline");
+    expect(test.order).not.toContain("action");
   });
 
   it("fails fast at build but still finalizes best-effort evidence", async () => {

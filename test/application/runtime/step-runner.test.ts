@@ -117,7 +117,15 @@ const scrollStep: JourneyStep = {
   }
 };
 
-function scrollCli(target: "present" | "afterOneSwipe" | "absent"): AndroidCliPort {
+function scrollCli(
+  target:
+    | "present"
+    | "afterOneSwipe"
+    | "absent"
+    | "idleTimeout"
+    | "ambiguous"
+    | "containerMissing"
+): AndroidCliPort {
   const container = {
     id: "message_list",
     resourceId: "message_list",
@@ -140,13 +148,32 @@ function scrollCli(target: "present" | "afterOneSwipe" | "absent"): AndroidCliPo
     runApp: vi.fn(),
     layout: vi.fn(() => {
       reads += 1;
+      if (target === "ambiguous") {
+        return Promise.resolve([
+          bubble,
+          { ...bubble, id: "message_bubble_2", bounds: { left: 0, top: 200, right: 100, bottom: 250 } }
+        ]);
+      }
+      if (target === "containerMissing") {
+        return Promise.resolve([{
+          id: "unrelated",
+          resourceId: "unrelated",
+          enabled: true,
+          bounds: { left: 0, top: 0, right: 50, bottom: 50 },
+          children: []
+        }]);
+      }
       const withBubble = [container, bubble];
       const withoutBubble = [container];
       if (target === "present") return Promise.resolve(withBubble);
-      if (target === "absent") return Promise.resolve(withoutBubble);
+      if (target === "absent" || target === "idleTimeout") {
+        return Promise.resolve(withoutBubble);
+      }
       return Promise.resolve(reads >= 2 ? withBubble : withoutBubble);
     }),
-    layoutDiff: vi.fn(() => Promise.resolve([])),
+    layoutDiff: vi.fn(() =>
+      Promise.resolve(target === "idleTimeout" ? [{ changed: "text" }] : [])
+    ),
     captureScreen: vi.fn(() => Promise.resolve(commandResult())),
     resolveScreen: vi.fn(() => Promise.resolve({ x: 50, y: 25 }))
   };
@@ -409,5 +436,48 @@ describe("scrollTo replay", () => {
       expect(result.failure.code).toBe("SCROLL_TARGET_NOT_FOUND");
     }
     expect(result.report.scroll).toEqual({ swipesUsed: 3, maxSwipes: 3 });
+  });
+
+  it("fails with IDLE_TIMEOUT and writes layout-diff when idle times out during a scroll swipe", async () => {
+    const { runner, artifacts } = fixture({
+      adb: mainActivityAdb(),
+      androidCli: scrollCli("idleTimeout")
+    });
+    const result = await runner.run(scrollStep, 0);
+    expect(result.status).toBe("failed");
+    if (result.status === "failed") {
+      expect(result.failure.code).toBe("IDLE_TIMEOUT");
+    }
+    expect(result.report.idle?.status).toBe("timeout");
+    expect(result.report.scroll).toEqual({ swipesUsed: 0, maxSwipes: 3 });
+    expect(artifacts.json.get("steps/001-layout-diff.json"))
+      .toEqual([{ changed: "text" }]);
+  });
+
+  it("fails with LOCATOR_AMBIGUOUS when the target matches multiple elements", async () => {
+    const { runner, adb } = fixture({
+      adb: mainActivityAdb(),
+      androidCli: scrollCli("ambiguous")
+    });
+    const result = await runner.run(scrollStep, 0);
+    expect(result.status).toBe("failed");
+    if (result.status === "failed") {
+      expect(result.failure.code).toBe("LOCATOR_AMBIGUOUS");
+    }
+    expect(adb.swipe).not.toHaveBeenCalled();
+    expect(result.report.scroll?.swipesUsed).toBe(0);
+  });
+
+  it("fails with LOCATOR_NOT_FOUND when the container is missing", async () => {
+    const { runner, adb } = fixture({
+      adb: mainActivityAdb(),
+      androidCli: scrollCli("containerMissing")
+    });
+    const result = await runner.run(scrollStep, 0);
+    expect(result.status).toBe("failed");
+    if (result.status === "failed") {
+      expect(result.failure.code).toBe("LOCATOR_NOT_FOUND");
+    }
+    expect(adb.swipe).not.toHaveBeenCalled();
   });
 });

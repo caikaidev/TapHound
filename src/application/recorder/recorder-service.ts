@@ -247,6 +247,7 @@ export class RecorderService {
       if (prepared === undefined) {
         continue;
       }
+      // scrollTo captures `before` post-scroll by design: it does not navigate, so before==after in practice (replay checks `before` pre-scroll but the Activity is unchanged).
       const before = normalizeActivity(
         input.config.run.packageName,
         await this.dependencies.adb.currentActivity(identity)
@@ -439,6 +440,12 @@ export class RecorderService {
       });
       if (resolved.status !== "found" || resolved.element.bounds === undefined) {
         await this.dependencies.prompt.notifyFailure("Scroll container disappeared");
+        return undefined;
+      }
+      if (swipesUsed >= 30) {
+        await this.dependencies.prompt.notifyFailure(
+          "scrollTo reached the 30-swipe recording cap; the Journey would not replay"
+        );
         return undefined;
       }
       const swipe = await executor.swipeBounds(

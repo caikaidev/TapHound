@@ -2,7 +2,7 @@
 
 - 审计日期：2026-07-20
 - 分支：`codex/taphound-rebrand`
-- 被审阅源码提交：`e28bdc895d6d54511ab6834d19797c1ccdee1f7f`
+- 被审阅源码提交：`57b0cf9482d36af80823aefd71512e376059f146`
 - 环境：Node.js `24.3.0`、npm `11.4.2`
 - 结论：本地质量门禁、精确 tarball 安装 smoke 与迁移审计通过；GitHub push 和 npm publish 均未执行，仍需各自独立的明确确认。
 
@@ -12,7 +12,7 @@
 
 | 检查 | 结果 |
 |---|---|
-| `npm test` | 通过；37 个测试文件、229 个测试 |
+| `npm test` | 通过；37 个测试文件、230 个测试 |
 | `npm run typecheck` | 通过 |
 | `npm run lint` | 通过 |
 | `npm run build` | 通过 |
@@ -20,6 +20,8 @@
 | `git diff --exit-code -- assets/brand/png` | 通过；确定性重渲染无差异 |
 
 独立完整分支审阅没有 Critical 发现。唯一 Important 发现是旧完成审计中的 Demo 路径不可复现；已用失败回归测试证明、改为 `examples/taphound-android-demo`、重新执行 doctor，并提交修复。审阅提出的 npm `files` 精确 allowlist 建议也已落实为测试。
+
+本地集成首次在主 checkout 运行完整门禁时发现 Vitest 会递归扫描 `.worktrees/`，造成测试重复和进程用例超时。已通过失败配置契约测试复现，并使用 `vitest.config.ts` 在保留 Vitest 默认排除项的同时排除嵌套 Git worktree；隔离工作树重新运行完整门禁得到上表结果。
 
 ## 构建后 CLI 与环境探测
 

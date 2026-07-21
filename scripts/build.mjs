@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { rm } from "node:fs/promises";
+import { chmod, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import process from "node:process";
 
@@ -28,4 +28,6 @@ if (result.error !== undefined) {
 }
 if (result.status !== 0) {
   process.exitCode = result.status ?? 1;
+} else {
+  await chmod(resolve(outputDirectory, "cli", "main.js"), 0o755);
 }

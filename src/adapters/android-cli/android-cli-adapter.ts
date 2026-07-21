@@ -16,7 +16,8 @@ import type {
 import {
   extractDescriptionPaths,
   selectApplicationId,
-  selectApkArtifact
+  selectApkArtifact,
+  selectDescribedApk
 } from "./describe-parser.js";
 import {
   parseLayout,
@@ -70,7 +71,13 @@ export class AndroidCliAdapter implements AndroidCliPort {
 
     const metadataPaths = extractDescriptionPaths(result.stdout);
     if (metadataPaths.length === 0) {
-      throw new Error("Android CLI describe returned no metadata paths");
+      const apkPath = selectDescribedApk(result.stdout, options);
+      if (apkPath === undefined) {
+        throw new Error(
+          "Android CLI describe returned no metadata paths or matching APK"
+        );
+      }
+      return { apkPath, metadataPaths };
     }
     const documents: unknown[] = await Promise.all(
       metadataPaths.map(async (path): Promise<unknown> => {

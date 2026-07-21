@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 
 import { describe, expect, it } from "vitest";
+import { defaultExclude } from "vitest/config";
 
 interface PackageDocument {
   name?: string;
@@ -73,5 +74,17 @@ describe("TapHound package metadata", () => {
 
     expect(document.scripts?.build).toBe("node scripts/build.mjs");
     expect(buildConfig.compilerOptions?.sourceMap).toBe(false);
+  });
+
+  it("excludes nested Git worktrees from test discovery", async () => {
+    const config = await readFile("vitest.config.ts", "utf8");
+    const typeScriptConfig = JSON.parse(
+      await readFile("tsconfig.json", "utf8")
+    ) as { include?: string[] };
+
+    expect(defaultExclude).toEqual(["**/node_modules/**", "**/.git/**"]);
+    expect(config).toContain("...defaultExclude");
+    expect(config).toContain(JSON.stringify("**/.worktrees/**"));
+    expect(typeScriptConfig.include).toContain("vitest.config.ts");
   });
 });

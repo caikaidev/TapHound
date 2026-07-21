@@ -7,6 +7,7 @@ import {
 import type { AdbPort } from "../../../src/ports/adb.js";
 import type { CommandResult } from "../../../src/ports/process-runner.js";
 import type { JourneyStep } from "../../../src/domain/journey.js";
+import { commandResult } from "../../fakes/process-runner.js";
 
 const checkpoint = {
   before: "com.example.app.MainActivity",
@@ -202,5 +203,26 @@ describe("scrollTo defensive case", () => {
       code: "ACTION_FAILED",
       message: "scrollTo is not executed via ActionExecutor"
     });
+  });
+});
+
+describe("swipeBounds", () => {
+  it("swipes within the given bounds and reports success", async () => {
+    const swipe = vi.fn(() => Promise.resolve(commandResult()));
+    const adb = { swipe } as unknown as AdbPort;
+    const executor = new ActionExecutor(adb, "emulator-5554");
+    const result = await executor.swipeBounds(
+      { left: 0, top: 0, right: 100, bottom: 200 },
+      "up",
+      0.6,
+      300
+    );
+    expect(result).toEqual({ status: "succeeded" });
+    expect(swipe).toHaveBeenCalledTimes(1);
+    const [from, to] = swipe.mock.calls[0] as unknown as [
+      { x: number; y: number },
+      { x: number; y: number }
+    ];
+    expect(from.y).toBeGreaterThan(to.y);
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { JourneySchema } from "../../src/domain/journey.js";
+import { JourneySchema, JourneyStepSchema } from "../../src/domain/journey.js";
 import searchJourney from "../fixtures/journeys/search.json" with { type: "json" };
 
 const activity = {
@@ -205,6 +205,49 @@ describe("JourneySchema", () => {
       version: 2,
       name: "Future",
       steps: [{ action: "wait", activity }]
+    })).toThrow();
+  });
+});
+
+describe("scrollTo step", () => {
+  const activity = {
+    before: "com.example.app.ChatActivity",
+    after: "com.example.app.ChatActivity"
+  };
+
+  it("parses a scrollTo step and applies defaults", () => {
+    const parsed = JourneyStepSchema.parse({
+      action: "scrollTo",
+      locator: { resourceId: "message_bubble", text: "hello" },
+      container: { resourceId: "message_list" },
+      direction: "up",
+      activity
+    });
+    expect(parsed).toMatchObject({
+      action: "scrollTo",
+      maxSwipes: 20,
+      distancePercent: 0.6,
+      durationMs: 300
+    });
+  });
+
+  it("rejects maxSwipes above 30", () => {
+    expect(() => JourneyStepSchema.parse({
+      action: "scrollTo",
+      locator: { resourceId: "message_bubble" },
+      container: { resourceId: "message_list" },
+      direction: "up",
+      maxSwipes: 31,
+      activity
+    })).toThrow();
+  });
+
+  it("rejects a scrollTo step without a container", () => {
+    expect(() => JourneyStepSchema.parse({
+      action: "scrollTo",
+      locator: { resourceId: "message_bubble" },
+      direction: "up",
+      activity
     })).toThrow();
   });
 });

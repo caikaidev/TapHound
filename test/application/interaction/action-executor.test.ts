@@ -182,3 +182,25 @@ describe("ActionExecutor", () => {
     });
   });
 });
+
+describe("scrollTo defensive case", () => {
+  it("returns ACTION_FAILED because scrollTo is not executed here", async () => {
+    const adb = adbPort();
+    const executor = new ActionExecutor(adb, "emulator-5554");
+    const outcome = await executor.execute({
+      action: "scrollTo",
+      locator: { resourceId: "x" },
+      container: { resourceId: "list" },
+      direction: "up",
+      maxSwipes: 5,
+      distancePercent: 0.6,
+      durationMs: 300,
+      activity: { before: "com.example.app.A", after: "com.example.app.A" }
+    }, undefined);
+    expect(outcome).toEqual({
+      status: "failed",
+      code: "ACTION_FAILED",
+      message: "scrollTo is not executed via ActionExecutor"
+    });
+  });
+});

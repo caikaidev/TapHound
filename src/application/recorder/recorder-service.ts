@@ -280,6 +280,12 @@ export class RecorderService {
     layout: readonly LayoutElement[],
     input: RecordInput
   ): Promise<{ draft: ActionDraft; target?: RecorderTarget } | undefined> {
+    if (action === "scrollTo") {
+      await this.dependencies.prompt.notifyFailure(
+        "scrollTo recording is not yet implemented"
+      );
+      return undefined;
+    }
     if (action === "inputText") {
       return {
         draft: { action, text: await this.dependencies.prompt.inputText() }

@@ -9,6 +9,7 @@ import type {
   RecorderAction,
   RecorderPromptPort,
   RecorderTargetChoice,
+  ScrollDecision,
   SwipeOptions
 } from "../../ports/recorder-prompt.js";
 
@@ -63,6 +64,7 @@ const ACTIONS: readonly RecorderAction[] = [
   "longClick",
   "inputText",
   "swipe",
+  "scrollTo",
   "back",
   "wait",
   "finish",
@@ -189,5 +191,42 @@ export class InquirerRecorderPrompt implements RecorderPromptPort {
   public notifyFailure(message: string): Promise<void> {
     this.diagnostics.write(`TapHound: ${message}\n`);
     return Promise.resolve();
+  }
+
+  public async selectScrollContainer(
+    choices: readonly RecorderTargetChoice[]
+  ): Promise<string> {
+    const value = await this.prompts.select({
+      message: "Choose the scrollable container",
+      choices: choices.map((choice) => ({ name: choice.label, value: choice.id }))
+    });
+    return selectedString(value, choices.map((choice) => choice.id));
+  }
+
+  public async scrollTargetDecision(
+    choices: readonly RecorderTargetChoice[]
+  ): Promise<ScrollDecision> {
+    const scrollMore = "__scroll_more__";
+    const cancel = "__cancel__";
+    const value = await this.prompts.select({
+      message: "Select the target once visible, or scroll again",
+      choices: [
+        ...choices.map((choice) => ({ name: choice.label, value: choice.id })),
+        { name: "Scroll again", value: scrollMore },
+        { name: "Cancel scrollTo", value: cancel }
+      ]
+    });
+    const selected = selectedString(value, [
+      ...choices.map((choice) => choice.id),
+      scrollMore,
+      cancel
+    ]);
+    if (selected === scrollMore) {
+      return { kind: "scrollMore" };
+    }
+    if (selected === cancel) {
+      return { kind: "cancel" };
+    }
+    return { kind: "select", id: selected };
   }
 }

@@ -35,6 +35,48 @@ export function extractDescriptionPaths(stdout: string): string[] {
     .filter((line) => line.endsWith(".json"));
 }
 
+export function selectDescribedApk(
+  stdout: string,
+  selector: ArtifactSelector
+): string | undefined {
+  const target = selector.target.replace(/^:+/, "");
+  let currentTarget: string | undefined;
+  let currentVariant: string | undefined;
+  const matches: string[] = [];
+
+  for (const rawLine of stdout.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (line.startsWith("Task:")) {
+      currentTarget = line.slice("Task:".length).trim().replace(/^:+/, "");
+      currentVariant = undefined;
+      continue;
+    }
+    if (line.startsWith("Variant:")) {
+      currentVariant = line.slice("Variant:".length).trim();
+      continue;
+    }
+    const apkPath = /^APK:\s+(.+)\s+\(Exists\)$/.exec(line)?.[1];
+    if (
+      apkPath !== undefined
+      && currentTarget === target
+      && currentVariant === selector.variant
+    ) {
+      matches.push(apkPath);
+    }
+  }
+
+  if (matches.length > 1) {
+    throw new Error(
+      `Ambiguous APK artifact for target ${selector.target} and variant ${selector.variant}`
+    );
+  }
+  const match = matches[0];
+  if (match === undefined) {
+    return undefined;
+  }
+  return isAbsolute(match) ? match : resolve(selector.projectDir, match);
+}
+
 function scalarContext(value: Record<string, unknown>): string[] {
   return Object.entries(value).flatMap(([key, item]) => {
     if (typeof item === "string" && !item.toLowerCase().endsWith(".apk")) {

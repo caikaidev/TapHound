@@ -146,6 +146,10 @@ function jsonOutput(result: CliProcessResult): Record<string, unknown> {
 }
 
 describe("built taphound verify --json process contract", () => {
+  it("builds an executable package entry point", async () => {
+    await expect(access(cli, constants.X_OK)).resolves.toBeUndefined();
+  });
+
   it("runs when invoked through a package-manager symlink", async () => {
     const root = await mkdtemp(join(tmpdir(), "taphound-bin-test-"));
     temporaryRoots.push(root);

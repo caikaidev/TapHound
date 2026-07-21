@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "name": "open-message-menu",
+  "steps": [
+    {
+      "action": "click",
+      "locator": { "resourceId": "conversation_item", "text": "Alice" },
+      "activity": {
+        "before": "com.example.chat.HomeActivity",
+        "after": "com.example.chat.ChatActivity"
+      }
+    },
+    {
+      "action": "scrollTo",
+      "locator": { "resourceId": "message_bubble", "text": "shared a photo" },
+      "container": { "resourceId": "message_list" },
+      "direction": "up",
+      "maxSwipes": 12,
+      "activity": {
+        "before": "com.example.chat.ChatActivity",
+        "after": "com.example.chat.ChatActivity"
+      }
+    },
+    {
+      "action": "longClick",
+      "locator": { "resourceId": "message_bubble", "text": "shared a photo" },
+      "durationMs": 800,
+      "activity": {
+        "before": "com.example.chat.ChatActivity",
+        "after": "com.example.chat.ChatActivity"
+      }
+    },
+    {
+      "action": "click",
+      "locator": { "text": "Delete" },
+      "activity": {
+        "before": "com.example.chat.ChatActivity",
+        "after": "com.example.chat.ChatActivity"
+      }
+    }
+  ]
+}

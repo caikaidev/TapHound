@@ -103,6 +103,9 @@ Journey, and the recorder does not invent business `expect` assertions.
   heuristically.
 - Annotated fallback is explicit and limited to `click` and `longClick`.
   Swipe without element bounds fails instead of guessing a region.
+- `scrollTo` scrolls a `container` locator up to `maxSwipes` times until its
+  target `locator` resolves uniquely, then stops without acting. Exhausting the
+  bound fails with `SCROLL_TARGET_NOT_FOUND`. No annotated-label fallback.
 - `verify --json` must write exactly one JSON value to stdout. Progress and
   diagnostics belong on stderr, and the JSON `exitCode` must match the process
   exit code.

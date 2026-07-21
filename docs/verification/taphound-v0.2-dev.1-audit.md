@@ -1,14 +1,14 @@
 # TapHound 0.2.0-dev.1 本地发布就绪审计
 
 - 审计日期：2026-07-20
-- 分支：`codex/taphound-rebrand`
+- 集成分支：`main`
 - 被审阅源码提交：`57b0cf9482d36af80823aefd71512e376059f146`
 - 环境：Node.js `24.3.0`、npm `11.4.2`
-- 结论：本地质量门禁、精确 tarball 安装 smoke 与迁移审计通过；GitHub push 和 npm publish 均未执行，仍需各自独立的明确确认。
+- 结论：本地质量门禁、精确 tarball 安装 smoke、迁移审计与 GitHub 首次 push 已完成；npm publish 未执行，仍需独立明确确认。
 
 ## 源码质量门禁
 
-在隔离工作树中基于上述源码提交重新执行：
+在隔离工作树中基于上述源码提交重新执行，并在快进集成后的主 checkout 再次复核：
 
 | 检查 | 结果 |
 |---|---|
@@ -70,11 +70,22 @@ Node、ADB、Android CLI 与示例 Gradle Wrapper 均通过。本机没有在线
 - Journey、Report 与配置 schema version 均保持 1；机器契约语义未更改。
 - 活跃树陈旧名称扫描仅命中旧完成审计中一处明确标注为“未发布阶段内部代号”的迁移说明，没有活动兼容接口。
 - secret 扫描无命中。
-- 主 checkout 的原始设计文件与归档副本（`docs/archive/a&#112;r-v0.2/A&#80;R-Design-v0.2.md`）的 SHA-256 均为 `61872af876f52fba677faea2938b27bffbaa50ec91d5ca088207317a9b5abbb9`；原文件未删除或改写。
+- 主 checkout 的原始设计文件与归档副本（`docs/archive/a&#112;r-v0.2/A&#80;R-Design-v0.2.md`）在集成前逐字节一致，SHA-256 均为 `61872af876f52fba677faea2938b27bffbaa50ec91d5ca088207317a9b5abbb9`。归档提交并集成后，旧根路径已移除；内容可从 Git 跟踪的归档恢复。
+
+## GitHub 首次 push 证据
+
+- 用户于 2026-07-21 明确授权 GitHub 首次 push；该授权不包含 npm publish。
+- 远端 URL：`git@github.com:caikaidev/TapHound.git`
+- 首次推送的本地与远端 `main` SHA：`473f27cf6993ce0cd2ed80d3180715e734dba4c7`
+- refspec：`main:main`
+- 验证时间：2026-07-21 11:18:06 CST
+- `git ls-remote --heads origin main` 返回上述精确 SHA；`git remote show origin` 显示默认分支为 `main`，本地 `main` 正常跟踪 `origin/main`。
+- 首次 push 前远端无 refs，因此没有覆盖或合并远端历史；push 未使用 `--force` 或 `--force-with-lease`。
+- 未登录访问仓库页面返回 HTTP 200，观察到仓库当前公开可见；本次没有修改可见性。GitHub CLI 的本地 token 已失效，因此未使用其 API 输出作为证据。
 
 ## 外部变更闸门
 
-- GitHub 首次 push：**待独立明确确认**；未执行，且不会 force-push。
+- GitHub 首次 push：**已完成并验证**；证据见上节，未 force-push。
 - npm publish：**待另一项独立明确确认**；未执行。允许的目标仅为公开的 `taphound@0.2.0-dev.1`、dist-tag `dev`，不得创建或移动 `latest`。
 - npm `11.4.2` 对 `npm publish <tgz>` 不执行 `prepublishOnly`。发布安全性依赖本审计记录的新鲜完整门禁和上方精确 tarball；`prepublishOnly` 仅保护从目录直接发布的路径。若 tarball 内容或摘要变化，必须重新执行完整 pack/install smoke，旧确认也不得沿用。
 

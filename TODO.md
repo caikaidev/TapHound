@@ -2,6 +2,14 @@
 
 本清单用于当前开发阶段结束后的跨机器验证和后续预发布。GitHub 推送证据完成后，应以远端 `main` 和 [`docs/verification/taphound-v0.2-dev.1-audit.md`](docs/verification/taphound-v0.2-dev.1-audit.md) 为基线。
 
+## 当前交接基线
+
+- [x] TapHound 重命名、HoundMark、发布元数据和本地 tarball smoke 已提交。
+- [x] 首次源代码 push 已普通推送到 `origin/main`，SHA 为 `473f27cf6993ce0cd2ed80d3180715e734dba4c7`，未 force-push。
+- [x] 远端默认分支为 `main`；仓库页面当前公开可见，本次没有修改可见性。
+- [x] 精确本地 tarball SHA-256 为 `0545c4f2324080b2c3cee99d27351887c868fe9f8bdf4ff37cc0275413d8e47f`。
+- [ ] npm package 尚未发布；独立发布闸门仍关闭。
+
 ## 换机后恢复
 
 - [ ] 从 `git@github.com:caikaidev/TapHound.git` 克隆或拉取 `main`。

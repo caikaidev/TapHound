@@ -103,6 +103,62 @@ function clickStep(): Extract<JourneyStep, { action: "click" }> {
   };
 }
 
+const scrollStep: JourneyStep = {
+  action: "scrollTo",
+  locator: { resourceId: "message_bubble", text: "target" },
+  container: { resourceId: "message_list" },
+  direction: "up",
+  maxSwipes: 3,
+  distancePercent: 0.6,
+  durationMs: 300,
+  activity: {
+    before: "com.example.app.MainActivity",
+    after: "com.example.app.MainActivity"
+  }
+};
+
+function scrollCli(target: "present" | "afterOneSwipe" | "absent"): AndroidCliPort {
+  const container = {
+    id: "message_list",
+    resourceId: "message_list",
+    scrollable: true,
+    enabled: true,
+    bounds: { left: 0, top: 0, right: 100, bottom: 400 },
+    children: []
+  };
+  const bubble = {
+    id: "message_bubble",
+    resourceId: "message_bubble",
+    text: "target",
+    enabled: true,
+    bounds: { left: 0, top: 100, right: 100, bottom: 150 },
+    children: []
+  };
+  let reads = 0;
+  return {
+    describeProject: vi.fn(),
+    runApp: vi.fn(),
+    layout: vi.fn(() => {
+      reads += 1;
+      const withBubble = [container, bubble];
+      const withoutBubble = [container];
+      if (target === "present") return Promise.resolve(withBubble);
+      if (target === "absent") return Promise.resolve(withoutBubble);
+      return Promise.resolve(reads >= 2 ? withBubble : withoutBubble);
+    }),
+    layoutDiff: vi.fn(() => Promise.resolve([])),
+    captureScreen: vi.fn(() => Promise.resolve(commandResult())),
+    resolveScreen: vi.fn(() => Promise.resolve({ x: 50, y: 25 }))
+  };
+}
+
+function mainActivityAdb(): AdbPort {
+  const adb = adbPort();
+  adb.currentActivity = vi.fn(() =>
+    Promise.resolve("com.example.app.MainActivity"));
+  return adb;
+}
+
 describe("StepRunner", () => {
   it("executes the complete successful step flow", async () => {
     const test = fixture();
@@ -316,5 +372,42 @@ describe("StepRunner", () => {
         }
       }
     });
+  });
+});
+
+describe("scrollTo replay", () => {
+  it("passes without swiping when the target is already visible", async () => {
+    const { runner, adb } = fixture({
+      adb: mainActivityAdb(),
+      androidCli: scrollCli("present")
+    });
+    const result = await runner.run(scrollStep, 0);
+    expect(result.status).toBe("passed");
+    expect(result.report.scroll).toEqual({ swipesUsed: 0, maxSwipes: 3 });
+    expect(adb.swipe).not.toHaveBeenCalled();
+  });
+
+  it("swipes until the target becomes visible", async () => {
+    const { runner, adb } = fixture({
+      adb: mainActivityAdb(),
+      androidCli: scrollCli("afterOneSwipe")
+    });
+    const result = await runner.run(scrollStep, 0);
+    expect(result.status).toBe("passed");
+    expect(result.report.scroll).toEqual({ swipesUsed: 1, maxSwipes: 3 });
+    expect(adb.swipe).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails with SCROLL_TARGET_NOT_FOUND when the bound is exhausted", async () => {
+    const { runner } = fixture({
+      adb: mainActivityAdb(),
+      androidCli: scrollCli("absent")
+    });
+    const result = await runner.run(scrollStep, 0);
+    expect(result.status).toBe("failed");
+    if (result.status === "failed") {
+      expect(result.failure.code).toBe("SCROLL_TARGET_NOT_FOUND");
+    }
+    expect(result.report.scroll).toEqual({ swipesUsed: 3, maxSwipes: 3 });
   });
 });

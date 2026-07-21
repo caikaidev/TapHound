@@ -46,6 +46,13 @@ export class ActivityWaiter {
       }
 
       const elapsed = this.clock.now() - startedAt;
+      if (elapsed >= options.timeoutMs) {
+        return {
+          status: "timeout",
+          durationMs: elapsed,
+          ...(actual === undefined ? {} : { actual })
+        };
+      }
       const commandTimeoutMs = Math.max(1, options.timeoutMs - elapsed);
       const identity = {
         packageName: options.packageName,

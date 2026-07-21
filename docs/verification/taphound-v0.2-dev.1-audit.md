@@ -2,7 +2,7 @@
 
 - 审计日期：2026-07-20
 - 分支：`codex/taphound-rebrand`
-- 被审阅源码提交：`17b4d98b86c80d67bf1f6daf6ef75874190f6d21`
+- 被审阅源码提交：`e28bdc895d6d54511ab6834d19797c1ccdee1f7f`
 - 环境：Node.js `24.3.0`、npm `11.4.2`
 - 结论：本地质量门禁、精确 tarball 安装 smoke 与迁移审计通过；GitHub push 和 npm publish 均未执行，仍需各自独立的明确确认。
 
@@ -12,7 +12,7 @@
 
 | 检查 | 结果 |
 |---|---|
-| `npm test` | 通过；37 个测试文件、228 个测试 |
+| `npm test` | 通过；37 个测试文件、229 个测试 |
 | `npm run typecheck` | 通过 |
 | `npm run lint` | 通过 |
 | `npm run build` | 通过 |
@@ -49,16 +49,16 @@ Node、ADB、Android CLI 与示例 Gradle Wrapper 均通过。本机没有在线
 
 | 属性 | 值 |
 |---|---|
-| 文件大小 | 43,507 bytes |
-| 解包大小 | 206,111 bytes |
+| 文件大小 | 43,630 bytes |
+| 解包大小 | 206,321 bytes |
 | 条目数 | 92 |
-| SHA-256 | `08ecd80cf66e5c1d7af6e8c8cfe7376ee96237660a8832d6492d435110564cfb` |
-| npm shasum (SHA-1) | `a37d7e825f6cfa88a5c3b9e849d677425382387b` |
-| npm integrity | `sha512-Cn/MBl1wkjJx4CsxWGQX3oeomUBIYDbszhe3g+Zx7KYr6+DcxVfIYtJi0g6Q+uTFvQ0/nNW/5qoDrbg+jJYEBg==` |
+| SHA-256 | `0545c4f2324080b2c3cee99d27351887c868fe9f8bdf4ff37cc0275413d8e47f` |
+| npm shasum (SHA-1) | `7b229925e7facc73466ea42565538dd645ab7727` |
+| npm integrity | `sha512-kmt/5FHn/VDQTzCa2gsSjBbyIHY/nYauMBn/JyPfAuhIaDbCd13JGyVP0n7qBcAVcOodU3SvJt/GfhH0oOj2Uw==` |
 
 `npm pack --json` 的文件清单仅包含 `dist`、`README.md`、`LICENSE`、`package.json` 与 `assets/brand/taphound-mark.svg`。清单中没有 source map、测试、归档、PNG、概念图或其他品牌 SVG。
 
-该精确 tarball 已安装到 `/private/tmp/taphound-install-smoke-final`。安装后的 `node_modules/.bin/taphound --help` 退出码为 0 并显示正确 CLI；`test ! -e node_modules/.bin/a&#112;r` 退出码为 0，证明旧二进制入口不存在。安装审计报告 0 个 vulnerability。
+该精确 tarball 已安装到 `/private/tmp/taphound-handoff-install-smoke`。安装后的 `node_modules/.bin/taphound --help` 退出码为 0 并显示正确 CLI；旧二进制入口的否定检查退出码为 0。
 
 ## 品牌与迁移合约
 

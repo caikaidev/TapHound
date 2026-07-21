@@ -149,4 +149,22 @@ export class ActionExecutor {
 
     return commandResult(result);
   }
+
+  public async swipeBounds(
+    bounds: Bounds,
+    direction: Extract<JourneyStep, { action: "swipe" }>["direction"],
+    distancePercent: number,
+    durationMs: number,
+    signal?: AbortSignal
+  ): Promise<ActionExecutionResult> {
+    const points = swipePoints(bounds, direction, distancePercent);
+    const result = await this.adb.swipe(
+      points.from,
+      points.to,
+      durationMs,
+      this.deviceSerial,
+      signal
+    );
+    return commandResult(result);
+  }
 }

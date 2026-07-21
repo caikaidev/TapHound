@@ -114,4 +114,18 @@ describe("parseLayoutDiff", () => {
       { changed: "text" }
     ]);
   });
+
+  it("flattens current Android CLI object diff format", () => {
+    const diff = parseLayoutDiff(JSON.stringify({
+      added: [{ "resource-id": "new_element" }],
+      modified: [{ changed: "text" }]
+    }));
+    expect(diff).toHaveLength(2);
+    expect(diff).toContainEqual({ "resource-id": "new_element" });
+    expect(diff).toContainEqual({ changed: "text" });
+  });
+
+  it("recognizes an empty object diff as stable", () => {
+    expect(parseLayoutDiff('{"added":[],"modified":[]}')).toEqual([]);
+  });
 });

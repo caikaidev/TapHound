@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  StepReportSchema,
   TapHoundReportSchema,
   hashJourney
 } from "../../src/domain/report.js";
@@ -84,5 +85,20 @@ describe("hashJourney", () => {
 
   it("changes when Journey content changes", () => {
     expect(hashJourney({ name: "one" })).not.toBe(hashJourney({ name: "two" }));
+  });
+});
+
+describe("scrollTo step report", () => {
+  it("accepts a scrollTo action with a scroll summary", () => {
+    const parsed = StepReportSchema.parse({
+      index: 0,
+      action: "scrollTo",
+      status: "passed",
+      startedAtMs: 0,
+      finishedAtMs: 10,
+      durationMs: 10,
+      scroll: { swipesUsed: 3, maxSwipes: 20 }
+    });
+    expect(parsed.scroll).toEqual({ swipesUsed: 3, maxSwipes: 20 });
   });
 });

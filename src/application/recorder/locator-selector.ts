@@ -72,3 +72,18 @@ export function listRecorderTargets(
     }];
   });
 }
+
+export function listLocatableTargets(
+  roots: readonly LayoutElement[]
+): RecorderTarget[] {
+  return flatten(roots).flatMap((element) => {
+    if (!element.enabled) {
+      return [];
+    }
+    const locator = selectUniqueLocator(element, roots);
+    if (locator === undefined) {
+      return [];
+    }
+    return [{ element, locator, label: targetLabel(element, locator) }];
+  });
+}

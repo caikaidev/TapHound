@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  listLocatableTargets,
   listRecorderTargets,
   selectUniqueLocator
 } from "../../../src/application/recorder/locator-selector.js";
@@ -83,5 +84,31 @@ describe("Recorder locator selection", () => {
     expect(listRecorderTargets(elements, "swipe").map(
       (choice) => choice.element.id
     )).toEqual(["results"]);
+  });
+});
+
+describe("listLocatableTargets", () => {
+  it("lists enabled elements with a unique locator regardless of clickability", () => {
+    const targets = listLocatableTargets([{
+      id: "bubble",
+      resourceId: "message_bubble",
+      text: "hello",
+      enabled: true,
+      bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+      children: []
+    }]);
+    expect(targets).toHaveLength(1);
+    expect(targets[0]?.locator).toEqual({ resourceId: "message_bubble" });
+  });
+
+  it("skips disabled elements", () => {
+    const targets = listLocatableTargets([{
+      id: "bubble",
+      resourceId: "message_bubble",
+      enabled: false,
+      bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+      children: []
+    }]);
+    expect(targets).toHaveLength(0);
   });
 });

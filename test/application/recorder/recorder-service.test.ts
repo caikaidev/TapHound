@@ -14,6 +14,7 @@ import {
   runtimeConfig,
   runtimeFixture
 } from "../../fakes/runtime-fixture.js";
+import { FakeClock } from "../../fakes/fake-clock.js";
 import { commandResult } from "../../fakes/process-runner.js";
 
 const realLayoutFixture = fileURLToPath(
@@ -87,6 +88,9 @@ describe("RecorderService", () => {
 
   it("launches the App and saves Activity checkpoints for successful Actions", async () => {
     const runtime = runtimeFixture();
+    vi.mocked(runtime.adb.currentActivity)
+      .mockResolvedValueOnce("com.example.app.MainActivity")
+      .mockResolvedValueOnce("com.example.app.SearchActivity");
     const recorderPrompt = prompt(["click", "finish"]);
     const journeyWriter = writer();
     const service = new RecorderService({
@@ -123,6 +127,161 @@ describe("RecorderService", () => {
     expect(runtime.order.slice(0, 3)).toEqual(["build", "describe", "run"]);
   });
 
+  it("records from the stable Activity reached after launch", async () => {
+    const runtime = runtimeFixture();
+    vi.mocked(runtime.adb.currentActivity)
+      .mockResolvedValueOnce("com.example.app.HomeActivity")
+      .mockResolvedValueOnce("com.example.app.SearchActivity");
+    const recorderPrompt = prompt(["click", "finish"]);
+    const journeyWriter = writer();
+    const service = new RecorderService({
+      gradle: runtime.gradle,
+      androidCli: runtime.androidCli,
+      adb: runtime.adb,
+      clock: runtime.dependencies.clock,
+      prompt: recorderPrompt,
+      journeyWriter
+    });
+
+    const result = await service.record({
+      config: runtimeConfig,
+      projectRoot: "/project",
+      deviceSerial: "emulator-5554",
+      journeyName: "Authenticated search",
+      outputPath: "/project/journeys/search.json"
+    });
+
+    expect(result).toMatchObject({ status: "completed", stepsRecorded: 1 });
+    expect(journeyWriter.journeys[0]?.steps[0]?.activity).toEqual({
+      before: "com.example.app.HomeActivity",
+      after: "com.example.app.SearchActivity"
+    });
+  });
+
+  it("waits for a delayed App process before entering the prompt loop", async () => {
+    const runtime = runtimeFixture();
+    vi.mocked(runtime.adb.pid)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(42);
+    const recorderPrompt = prompt(["cancel"]);
+    vi.mocked(recorderPrompt.selectAction).mockImplementation(() => {
+      expect(runtime.adb.pid).toHaveBeenCalledTimes(2);
+      return Promise.resolve("cancel");
+    });
+    const journeyWriter = writer();
+    const service = new RecorderService({
+      gradle: runtime.gradle,
+      androidCli: runtime.androidCli,
+      adb: runtime.adb,
+      clock: runtime.dependencies.clock,
+      prompt: recorderPrompt,
+      journeyWriter
+    });
+
+    await expect(service.record({
+      config: runtimeConfig,
+      projectRoot: "/project",
+      deviceSerial: "emulator-5554",
+      journeyName: "Delayed process",
+      outputPath: "/project/delayed.json"
+    })).resolves.toEqual({ status: "cancelled", stepsRecorded: 0 });
+    expect(runtime.dependencies.clock).toMatchObject({ sleeps: [100] });
+    expect(runtime.androidCli.layout).toHaveBeenCalled();
+    expect(journeyWriter.write).not.toHaveBeenCalled();
+  });
+
+  it("does not prompt when the App process is missing after launch", async () => {
+    const runtime = runtimeFixture();
+    vi.mocked(runtime.adb.pid).mockResolvedValue(null);
+    const recorderPrompt = prompt(["finish"]);
+    const journeyWriter = writer();
+    const service = new RecorderService({
+      gradle: runtime.gradle,
+      androidCli: runtime.androidCli,
+      adb: runtime.adb,
+      clock: runtime.dependencies.clock,
+      prompt: recorderPrompt,
+      journeyWriter
+    });
+
+    await expect(service.record({
+      config: runtimeConfig,
+      projectRoot: "/project",
+      deviceSerial: "emulator-5554",
+      journeyName: "Missing process",
+      outputPath: "/project/missing.json"
+    })).resolves.toEqual({
+      status: "failed",
+      stepsRecorded: 0,
+      message: "App process was not found after launch"
+    });
+    expect(recorderPrompt.selectAction).not.toHaveBeenCalled();
+  });
+
+  it("cancels process startup waiting without writing or prompting", async () => {
+    const runtime = runtimeFixture();
+    const clock = new FakeClock();
+    const controller = new AbortController();
+    vi.mocked(runtime.adb.pid).mockResolvedValue(null);
+    clock.onSleep = (): void => {
+      controller.abort();
+    };
+    const recorderPrompt = prompt(["finish"]);
+    const journeyWriter = writer();
+    const service = new RecorderService({
+      gradle: runtime.gradle,
+      androidCli: runtime.androidCli,
+      adb: runtime.adb,
+      clock,
+      prompt: recorderPrompt,
+      journeyWriter
+    });
+
+    await expect(service.record({
+      config: runtimeConfig,
+      projectRoot: "/project",
+      deviceSerial: "emulator-5554",
+      journeyName: "Cancelled startup",
+      outputPath: "/project/cancelled-startup.json",
+      signal: controller.signal
+    })).resolves.toEqual({ status: "cancelled", stepsRecorded: 0 });
+    expect(recorderPrompt.selectAction).not.toHaveBeenCalled();
+    expect(journeyWriter.write).not.toHaveBeenCalled();
+  });
+
+  it("does not prompt when the startup layout remains unstable", async () => {
+    const runtime = runtimeFixture();
+    vi.mocked(runtime.androidCli.layoutDiff).mockResolvedValue([
+      { changed: "text" }
+    ]);
+    const recorderPrompt = prompt(["finish"]);
+    const journeyWriter = writer();
+    const service = new RecorderService({
+      gradle: runtime.gradle,
+      androidCli: runtime.androidCli,
+      adb: runtime.adb,
+      clock: runtime.dependencies.clock,
+      prompt: recorderPrompt,
+      journeyWriter
+    });
+
+    await expect(service.record({
+      config: {
+        ...runtimeConfig,
+        idle: { pollIntervalMs: 100, stablePolls: 2, timeoutMs: 100 }
+      },
+      projectRoot: "/project",
+      deviceSerial: "emulator-5554",
+      journeyName: "Unstable startup",
+      outputPath: "/project/unstable-startup.json"
+    })).resolves.toEqual({
+      status: "failed",
+      stepsRecorded: 0,
+      message: "Layout did not become stable before timeout"
+    });
+    expect(recorderPrompt.selectAction).not.toHaveBeenCalled();
+  });
+
   it("does not append an Action that fails on the device", async () => {
     const runtime = runtimeFixture();
     vi.mocked(runtime.adb.tap)
@@ -154,9 +313,10 @@ describe("RecorderService", () => {
 
   it("stops recording when a successful Action leaves the device in an unverified state", async () => {
     const runtime = runtimeFixture();
-    vi.mocked(runtime.androidCli.layoutDiff).mockResolvedValue([
-      { changed: "text" }
-    ]);
+    vi.mocked(runtime.androidCli.layoutDiff)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([{ changed: "text" }]);
     const recorderPrompt = prompt(["click", "finish"]);
     const journeyWriter = writer();
     const service = new RecorderService({

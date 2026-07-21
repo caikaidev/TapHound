@@ -12,6 +12,7 @@ import {
   runtimeFixture,
   runtimeJourney
 } from "../../fakes/runtime-fixture.js";
+import { FakeClock } from "../../fakes/fake-clock.js";
 import { commandResult } from "../../fakes/process-runner.js";
 
 function input(signal?: AbortSignal): VerifyInput {
@@ -57,6 +58,7 @@ describe("VerifyRuntime", () => {
       "logcat-start",
       "run",
       "pid",
+      "pid",
       "activity-main",
       "baseline",
       "activity-main",
@@ -71,6 +73,102 @@ describe("VerifyRuntime", () => {
     ]);
     expect(test.artifacts.session.text.has("logcat.txt")).toBe(true);
     expect(test.artifacts.session.published).toBe(true);
+  });
+
+  it("waits for the first Journey Activity after a launch redirect", async () => {
+    const test = runtimeFixture();
+    vi.mocked(test.adb.currentActivity)
+      .mockResolvedValueOnce("com.example.app.SplashActivity")
+      .mockResolvedValueOnce("com.example.app.MainActivity")
+      .mockResolvedValueOnce("com.example.app.MainActivity")
+      .mockResolvedValueOnce("com.example.app.SearchActivity");
+
+    const result = await new VerifyRuntime(test.dependencies).verify(input());
+
+    expect(result).toMatchObject({ status: "passed", exitCode: 0 });
+    expect(test.dependencies.clock).toMatchObject({ sleeps: [100] });
+  });
+
+  it("waits for a delayed App process within one launch-readiness budget", async () => {
+    const test = runtimeFixture();
+    vi.mocked(test.adb.pid)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue(42);
+
+    const result = await new VerifyRuntime(test.dependencies).verify(input());
+
+    expect(result).toMatchObject({ status: "passed", exitCode: 0 });
+    expect(test.dependencies.clock).toMatchObject({
+      currentTime: 400,
+      sleeps: [100, 100, 100, 100]
+    });
+    expect(test.adb.pid).toHaveBeenNthCalledWith(5, {
+      packageName: runtimeConfig.run.packageName,
+      deviceSerial: "emulator-5554",
+      timeoutMs: 100
+    });
+    expect(test.adb.pid).toHaveBeenNthCalledWith(6, {
+      packageName: runtimeConfig.run.packageName,
+      deviceSerial: "emulator-5554",
+      timeoutMs: 100
+    });
+  });
+
+  it("fails launch readiness when the first Journey Activity is not reached", async () => {
+    const test = runtimeFixture();
+    vi.mocked(test.adb.currentActivity)
+      .mockResolvedValue("com.example.app.SplashActivity");
+
+    const result = await new VerifyRuntime(test.dependencies).verify(input());
+
+    expect(result).toMatchObject({
+      status: "failed",
+      exitCode: 1,
+      report: {
+        primaryFailure: {
+          code: "APP_LAUNCH_FAILED",
+          phase: "readiness"
+        },
+        steps: []
+      }
+    });
+    expect(result.report.primaryFailure?.message)
+      .toContain("com.example.app.MainActivity");
+    expect(result.report.primaryFailure?.message)
+      .toContain("com.example.app.SplashActivity");
+    expect(test.dependencies.clock).toMatchObject({
+      sleeps: [100, 100, 100, 100, 100]
+    });
+  });
+
+  it("fails launch readiness when the App process exits during redirect", async () => {
+    const test = runtimeFixture();
+    vi.mocked(test.adb.pid)
+      .mockResolvedValueOnce(42)
+      .mockResolvedValueOnce(42)
+      .mockResolvedValueOnce(null);
+    vi.mocked(test.adb.currentActivity)
+      .mockResolvedValue("com.example.app.SplashActivity");
+
+    const result = await new VerifyRuntime(test.dependencies).verify(input());
+
+    expect(result).toMatchObject({
+      status: "failed",
+      exitCode: 1,
+      report: {
+        primaryFailure: {
+          code: "APP_LAUNCH_FAILED",
+          message: "App process exited before reaching the first Journey Activity",
+          phase: "readiness"
+        },
+        steps: []
+      }
+    });
+    expect(test.order).not.toContain("baseline");
+    expect(test.order).not.toContain("action");
   });
 
   it("fails fast at build but still finalizes best-effort evidence", async () => {
@@ -247,6 +345,33 @@ describe("VerifyRuntime", () => {
         }
       }
     });
+  });
+
+  it("maps cancellation while waiting for the App process to INTERNAL_ERROR", async () => {
+    const test = runtimeFixture();
+    const clock = new FakeClock();
+    const controller = new AbortController();
+    vi.mocked(test.adb.pid).mockResolvedValue(null);
+    clock.onSleep = (): void => {
+      controller.abort();
+    };
+    test.dependencies.clock = clock;
+
+    const result = await new VerifyRuntime(test.dependencies)
+      .verify(input(controller.signal));
+
+    expect(result).toMatchObject({
+      status: "error",
+      exitCode: 4,
+      report: {
+        primaryFailure: {
+          code: "INTERNAL_ERROR",
+          message: "Verification was cancelled",
+          phase: "readiness"
+        }
+      }
+    });
+    expect(test.order.at(-1)).toBe("report");
   });
 
   it("maps cancellation to a stable INTERNAL_ERROR result and finalizes", async () => {

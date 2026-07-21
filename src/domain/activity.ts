@@ -7,14 +7,6 @@ function assertPackageName(packageName: string): void {
   }
 }
 
-function assertBelongsToPackage(packageName: string, activity: string): void {
-  if (!activity.startsWith(`${packageName}.`)) {
-    throw new Error(
-      `Activity ${activity} does not belong to package ${packageName}`
-    );
-  }
-}
-
 export function normalizeActivity(
   packageName: string,
   activityOrComponent: string
@@ -41,7 +33,6 @@ export function normalizeActivity(
     if (!QUALIFIED_ACTIVITY.test(normalized)) {
       throw new Error(`Invalid Activity: ${componentActivity}`);
     }
-    assertBelongsToPackage(packageName, normalized);
     return normalized;
   }
 
@@ -57,7 +48,6 @@ export function normalizeActivity(
     throw new Error(`Invalid Activity: ${value}`);
   }
 
-  assertBelongsToPackage(packageName, value);
   return value;
 }
 

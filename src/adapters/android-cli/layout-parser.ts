@@ -74,7 +74,7 @@ function parseCenter(value: unknown): LayoutPoint | undefined {
     return undefined;
   }
   if (typeof value === "string") {
-    const match = /^\(\s*(\d+)\s*,\s*(\d+)\s*\)$/.exec(value);
+    const match = /^[[(]\s*(\d+)\s*,\s*(\d+)\s*[)\]]/.exec(value);
     if (match === null) {
       throw new Error("Invalid Android Layout center");
     }
@@ -183,8 +183,14 @@ export function parseLayout(stdout: string): readonly LayoutElement[] {
 
 export function parseLayoutDiff(stdout: string): readonly unknown[] {
   const parsed = parseJson(stdout, "Layout Diff");
-  if (!Array.isArray(parsed)) {
-    throw new Error("Invalid Android Layout Diff structure");
+  if (Array.isArray(parsed)) {
+    return parsed;
   }
-  return parsed;
+  if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+    const record = parsed as Record<string, unknown>;
+    const added: unknown[] = Array.isArray(record.added) ? record.added : [];
+    const modified: unknown[] = Array.isArray(record.modified) ? record.modified : [];
+    return [...added, ...modified];
+  }
+  throw new Error("Invalid Android Layout Diff structure");
 }

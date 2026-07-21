@@ -50,6 +50,61 @@ function writer(): JourneyWriterPort & { journeys: Journey[] } {
   };
 }
 
+async function recordScrollToJourney(): Promise<Journey> {
+  const runtime = runtimeFixture();
+  const container = {
+    id: "message_list",
+    resourceId: "message_list",
+    scrollable: true,
+    enabled: true,
+    bounds: { left: 0, top: 0, right: 100, bottom: 400 },
+    children: []
+  };
+  const bubble = {
+    id: "message_bubble",
+    resourceId: "message_bubble",
+    text: "target",
+    enabled: true,
+    bounds: { left: 0, top: 100, right: 100, bottom: 150 },
+    children: []
+  };
+  let layoutReads = 0;
+  vi.mocked(runtime.androidCli.layout).mockImplementation(() => {
+    layoutReads += 1;
+    return Promise.resolve(layoutReads <= 2 ? [container] : [container, bubble]);
+  });
+  const recorderPrompt = prompt(["scrollTo", "finish"]);
+  vi.mocked(recorderPrompt.selectScrollContainer).mockResolvedValue("message_list");
+  vi.mocked(recorderPrompt.scrollTargetDecision)
+    .mockResolvedValueOnce({ kind: "scrollMore" })
+    .mockResolvedValueOnce({ kind: "select", id: "message_bubble" });
+  const journeyWriter = writer();
+  const service = new RecorderService({
+    gradle: runtime.gradle,
+    androidCli: runtime.androidCli,
+    adb: runtime.adb,
+    clock: runtime.dependencies.clock,
+    prompt: recorderPrompt,
+    journeyWriter
+  });
+
+  const result = await service.record({
+    config: runtimeConfig,
+    projectRoot: "/project",
+    deviceSerial: "emulator-5554",
+    journeyName: "Scroll to bubble",
+    outputPath: "/project/scroll-to.json"
+  });
+
+  expect(result).toMatchObject({ status: "completed", stepsRecorded: 1 });
+  expect(runtime.adb.swipe).toHaveBeenCalledTimes(1);
+  const journey = journeyWriter.journeys[0];
+  if (journey === undefined) {
+    throw new Error("No journey was written");
+  }
+  return journey;
+}
+
 describe("RecorderService", () => {
   it("executes the second selected element when Android CLI keys repeat", async () => {
     const runtime = runtimeFixture();
@@ -489,5 +544,16 @@ describe("RecorderService", () => {
 
     expect(result).toEqual({ status: "cancelled", stepsRecorded: 0 });
     expect(journeyWriter.write).not.toHaveBeenCalled();
+  });
+
+  it("records a scrollTo step with maxSwipes derived from swipes used", async () => {
+    const journey = await recordScrollToJourney();
+    expect(journey.steps[0]).toMatchObject({
+      action: "scrollTo",
+      locator: { resourceId: "message_bubble" },
+      container: { resourceId: "message_list" },
+      direction: "up",
+      maxSwipes: 6
+    });
   });
 });

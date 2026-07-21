@@ -19,9 +19,14 @@ import type {
   RecorderPromptPort
 } from "../../ports/recorder-prompt.js";
 import { ActionExecutor, type ActionTarget } from "../interaction/action-executor.js";
+import { resolveLocator } from "../locator/locator-resolver.js";
 import { ProcessWaiter } from "../runtime/process-waiter.js";
 import { IdleWaiter } from "../wait/idle-waiter.js";
-import { listRecorderTargets, type RecorderTarget } from "./locator-selector.js";
+import {
+  listLocatableTargets,
+  listRecorderTargets,
+  type RecorderTarget
+} from "./locator-selector.js";
 
 export interface RecorderDependencies {
   gradle: GradlePort;
@@ -58,7 +63,16 @@ type ActionDraft =
       durationMs: number;
     }
   | { action: "back" }
-  | { action: "wait" };
+  | { action: "wait" }
+  | {
+      action: "scrollTo";
+      locator: Locator;
+      container: Locator;
+      direction: "up" | "down" | "left" | "right";
+      maxSwipes: number;
+      distancePercent: number;
+      durationMs: number;
+    };
 
 function failedCommand(result: {
   exitCode: number | null;
@@ -237,25 +251,27 @@ export class RecorderService {
         input.config.run.packageName,
         await this.dependencies.adb.currentActivity(identity)
       );
-      const execution = await executor.execute(
-        prepared.draft as JourneyStep,
-        actionTarget(prepared.target),
-        input.signal
-      );
-      if (execution.status === "failed") {
-        await this.dependencies.prompt.notifyFailure(execution.message);
-        continue;
-      }
-      const idle = await idleWaiter.waitUntilIdle(input.config.idle, input.signal);
-      if (idle.status !== "stable") {
-        if (idle.status === "cancelled") {
-          return { status: "cancelled", stepsRecorded: steps.length };
+      if (prepared.draft.action !== "scrollTo") {
+        const execution = await executor.execute(
+          prepared.draft as JourneyStep,
+          actionTarget(prepared.target),
+          input.signal
+        );
+        if (execution.status === "failed") {
+          await this.dependencies.prompt.notifyFailure(execution.message);
+          continue;
         }
-        return {
-          status: "failed",
-          stepsRecorded: steps.length,
-          message: "Layout did not become stable before timeout"
-        };
+        const idle = await idleWaiter.waitUntilIdle(input.config.idle, input.signal);
+        if (idle.status !== "stable") {
+          if (idle.status === "cancelled") {
+            return { status: "cancelled", stepsRecorded: steps.length };
+          }
+          return {
+            status: "failed",
+            stepsRecorded: steps.length,
+            message: "Layout did not become stable before timeout"
+          };
+        }
       }
       if (await this.dependencies.adb.pid(identity) === null) {
         return {
@@ -281,10 +297,7 @@ export class RecorderService {
     input: RecordInput
   ): Promise<{ draft: ActionDraft; target?: RecorderTarget } | undefined> {
     if (action === "scrollTo") {
-      await this.dependencies.prompt.notifyFailure(
-        "scrollTo recording is not yet implemented"
-      );
-      return undefined;
+      return this.prepareScrollTo(layout, input);
     }
     if (action === "inputText") {
       return {
@@ -362,5 +375,96 @@ export class RecorderService {
         ...(fallback === undefined ? {} : { fallback })
       }
     };
+  }
+
+  private async prepareScrollTo(
+    layout: readonly LayoutElement[],
+    input: RecordInput
+  ): Promise<{ draft: ActionDraft; target?: RecorderTarget } | undefined> {
+    const containers = listRecorderTargets(layout, "swipe");
+    if (containers.length === 0) {
+      await this.dependencies.prompt.notifyFailure(
+        "No scrollable element has a unique deterministic Locator"
+      );
+      return undefined;
+    }
+    const containerId = await this.dependencies.prompt.selectScrollContainer(
+      containers.map((c) => ({ id: c.element.id, label: c.label }))
+    );
+    const container = containers.find((c) => c.element.id === containerId);
+    if (container === undefined) {
+      await this.dependencies.prompt.notifyFailure("Selected container is unavailable");
+      return undefined;
+    }
+    const direction = await this.dependencies.prompt.selectSwipeDirection();
+    const options = await this.dependencies.prompt.swipeOptions();
+
+    const executor = new ActionExecutor(this.dependencies.adb, input.deviceSerial);
+    const idleWaiter = new IdleWaiter(
+      this.dependencies.androidCli,
+      this.dependencies.clock,
+      input.deviceSerial
+    );
+    let currentLayout = layout;
+    let swipesUsed = 0;
+    for (;;) {
+      const targets = listLocatableTargets(currentLayout);
+      const decision = await this.dependencies.prompt.scrollTargetDecision(
+        targets.map((t) => ({ id: t.element.id, label: t.label }))
+      );
+      if (decision.kind === "cancel") {
+        return undefined;
+      }
+      if (decision.kind === "select") {
+        const target = targets.find((t) => t.element.id === decision.id);
+        if (target === undefined) {
+          await this.dependencies.prompt.notifyFailure("Selected target is unavailable");
+          return undefined;
+        }
+        return {
+          target,
+          draft: {
+            action: "scrollTo",
+            locator: target.locator,
+            container: container.locator,
+            direction,
+            maxSwipes: Math.min(30, swipesUsed + 5),
+            distancePercent: options.distancePercent,
+            durationMs: options.durationMs
+          }
+        };
+      }
+      const resolved = resolveLocator(currentLayout, container.locator, {
+        requireEnabled: false
+      });
+      if (resolved.status !== "found" || resolved.element.bounds === undefined) {
+        await this.dependencies.prompt.notifyFailure("Scroll container disappeared");
+        return undefined;
+      }
+      const swipe = await executor.swipeBounds(
+        resolved.element.bounds,
+        direction,
+        options.distancePercent,
+        options.durationMs,
+        input.signal
+      );
+      if (swipe.status === "failed") {
+        await this.dependencies.prompt.notifyFailure(swipe.message);
+        return undefined;
+      }
+      const idle = await idleWaiter.waitUntilIdle(input.config.idle, input.signal);
+      if (idle.status !== "stable") {
+        await this.dependencies.prompt.notifyFailure(
+          "Layout did not become stable before timeout"
+        );
+        return undefined;
+      }
+      swipesUsed += 1;
+      currentLayout = await this.dependencies.androidCli.layout({
+        deviceSerial: input.deviceSerial,
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+        timeoutMs: input.config.idle.timeoutMs
+      });
+    }
   }
 }

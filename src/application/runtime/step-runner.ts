@@ -157,95 +157,109 @@ export class StepRunner {
       );
     }
 
-    const layout = await this.options.androidCli.layout({
-      deviceSerial: this.options.deviceSerial,
-      ...(signal === undefined ? {} : { signal }),
-      timeoutMs: this.options.idle.timeoutMs
-    });
     let target: ActionTarget | undefined;
-    if (
-      step.action === "click"
-      || step.action === "longClick"
-      || step.action === "swipe"
-    ) {
-      const resolution = resolveLocator(layout, step.locator);
-      if (resolution.status === "found") {
-        target = {
-          point: resolution.point,
-          ...(resolution.element.bounds === undefined
-            ? {}
-            : { bounds: resolution.element.bounds })
-        };
-        report.locator = {
-          status: "found",
-          matchedBy: resolution.matchedBy,
-          fallbackUsed: false
-        };
-      } else {
-        const annotatedPath = stepPath(index, "fallback-annotated.png");
-        const fallback = await this.fallbackResolver.resolve(
-          step,
-          this.options.artifacts.path(annotatedPath),
-          signal
-        );
-        if (fallback.status !== "found") {
-          const code = fallback.status === "failed"
-            ? fallback.code
-            : resolution.code;
-          const message = fallback.status === "failed"
-            ? fallback.message
-            : resolution.message;
-          report.locator = {
-            status: "failed",
-            fallbackUsed: fallback.status === "failed"
-              && fallback.label !== undefined
-              && fallback.annotatedScreenshotPath !== undefined,
-            ...(fallback.status === "failed" && fallback.label !== undefined
-              ? { fallbackLabel: fallback.label }
-              : {}),
-            ...(fallback.status === "failed"
-              && fallback.annotatedScreenshotPath !== undefined
-              ? { annotatedScreenshotPath: annotatedPath }
-              : {}),
-            message
-          };
-          return fail(code, message);
-        }
-        target = targetForPoint(fallback.point);
-        report.locator = {
-          status: "found",
-          fallbackUsed: true,
-          fallbackLabel: fallback.label,
-          annotatedScreenshotPath: annotatedPath
-        };
+    if (step.action === "scrollTo") {
+      const scroll = await this.resolveByScrolling(step, signal);
+      report.scroll = {
+        swipesUsed: scroll.swipesUsed,
+        maxSwipes: step.maxSwipes
+      };
+      if (scroll.status === "cancelled") {
+        return finish("cancelled");
       }
-    }
-
-    const action = await this.actionExecutor.execute(step, target, signal);
-    if (action.status === "failed") {
-      return fail(action.code, action.message);
-    }
-
-    const idle = await this.idleWaiter.waitUntilIdle(this.options.idle, signal);
-    report.idle = idle.status === "timeout"
-      ? {
-          status: "timeout",
-          polls: idle.polls,
-          lastDiff: [...idle.lastDiff]
+      if (scroll.status === "failed") {
+        return fail(scroll.code, scroll.message);
+      }
+    } else {
+      const layout = await this.options.androidCli.layout({
+        deviceSerial: this.options.deviceSerial,
+        ...(signal === undefined ? {} : { signal }),
+        timeoutMs: this.options.idle.timeoutMs
+      });
+      if (
+        step.action === "click"
+        || step.action === "longClick"
+        || step.action === "swipe"
+      ) {
+        const resolution = resolveLocator(layout, step.locator);
+        if (resolution.status === "found") {
+          target = {
+            point: resolution.point,
+            ...(resolution.element.bounds === undefined
+              ? {}
+              : { bounds: resolution.element.bounds })
+          };
+          report.locator = {
+            status: "found",
+            matchedBy: resolution.matchedBy,
+            fallbackUsed: false
+          };
+        } else {
+          const annotatedPath = stepPath(index, "fallback-annotated.png");
+          const fallback = await this.fallbackResolver.resolve(
+            step,
+            this.options.artifacts.path(annotatedPath),
+            signal
+          );
+          if (fallback.status !== "found") {
+            const code = fallback.status === "failed"
+              ? fallback.code
+              : resolution.code;
+            const message = fallback.status === "failed"
+              ? fallback.message
+              : resolution.message;
+            report.locator = {
+              status: "failed",
+              fallbackUsed: fallback.status === "failed"
+                && fallback.label !== undefined
+                && fallback.annotatedScreenshotPath !== undefined,
+              ...(fallback.status === "failed" && fallback.label !== undefined
+                ? { fallbackLabel: fallback.label }
+                : {}),
+              ...(fallback.status === "failed"
+                && fallback.annotatedScreenshotPath !== undefined
+                ? { annotatedScreenshotPath: annotatedPath }
+                : {}),
+              message
+            };
+            return fail(code, message);
+          }
+          target = targetForPoint(fallback.point);
+          report.locator = {
+            status: "found",
+            fallbackUsed: true,
+            fallbackLabel: fallback.label,
+            annotatedScreenshotPath: annotatedPath
+          };
         }
-      : {
-          status: idle.status,
-          polls: idle.polls
-        };
-    if (idle.status === "cancelled") {
-      return finish("cancelled");
-    }
-    if (idle.status === "timeout") {
-      await this.options.artifacts.writeJson(
-        stepPath(index, "layout-diff.json"),
-        idle.lastDiff
-      );
-      return fail(idle.code, "Layout did not become stable before timeout");
+      }
+
+      const action = await this.actionExecutor.execute(step, target, signal);
+      if (action.status === "failed") {
+        return fail(action.code, action.message);
+      }
+
+      const idle = await this.idleWaiter.waitUntilIdle(this.options.idle, signal);
+      report.idle = idle.status === "timeout"
+        ? {
+            status: "timeout",
+            polls: idle.polls,
+            lastDiff: [...idle.lastDiff]
+          }
+        : {
+            status: idle.status,
+            polls: idle.polls
+          };
+      if (idle.status === "cancelled") {
+        return finish("cancelled");
+      }
+      if (idle.status === "timeout") {
+        await this.options.artifacts.writeJson(
+          stepPath(index, "layout-diff.json"),
+          idle.lastDiff
+        );
+        return fail(idle.code, "Layout did not become stable before timeout");
+      }
     }
 
     const pid = await this.options.adb.pid(identity);
@@ -300,5 +314,91 @@ export class StepRunner {
     }
 
     return finish("passed");
+  }
+
+  private async resolveByScrolling(
+    step: Extract<JourneyStep, { action: "scrollTo" }>,
+    signal?: AbortSignal
+  ): Promise<
+    | { status: "found"; swipesUsed: number }
+    | { status: "failed"; code: FailureCode; message: string; swipesUsed: number }
+    | { status: "cancelled"; swipesUsed: number }
+  > {
+    let swipesUsed = 0;
+    for (;;) {
+      if (signal?.aborted === true) {
+        return { status: "cancelled", swipesUsed };
+      }
+      const layout = await this.options.androidCli.layout({
+        deviceSerial: this.options.deviceSerial,
+        ...(signal === undefined ? {} : { signal }),
+        timeoutMs: this.options.idle.timeoutMs
+      });
+      const target = resolveLocator(layout, step.locator, { requireEnabled: false });
+      if (target.status === "found") {
+        return { status: "found", swipesUsed };
+      }
+      if (target.code === "LOCATOR_AMBIGUOUS") {
+        return {
+          status: "failed",
+          code: "LOCATOR_AMBIGUOUS",
+          message: target.message,
+          swipesUsed
+        };
+      }
+      if (swipesUsed >= step.maxSwipes) {
+        return {
+          status: "failed",
+          code: "SCROLL_TARGET_NOT_FOUND",
+          message: `Target not visible after ${String(step.maxSwipes)} swipes`,
+          swipesUsed
+        };
+      }
+      const container = resolveLocator(layout, step.container, { requireEnabled: false });
+      if (container.status !== "found") {
+        return {
+          status: "failed",
+          code: container.code,
+          message: container.message,
+          swipesUsed
+        };
+      }
+      if (container.element.bounds === undefined) {
+        return {
+          status: "failed",
+          code: "ACTION_FAILED",
+          message: "scroll container has no bounds to swipe",
+          swipesUsed
+        };
+      }
+      const swipe = await this.actionExecutor.swipeBounds(
+        container.element.bounds,
+        step.direction,
+        step.distancePercent,
+        step.durationMs,
+        signal
+      );
+      if (swipe.status === "failed") {
+        return {
+          status: "failed",
+          code: swipe.code,
+          message: swipe.message,
+          swipesUsed
+        };
+      }
+      const idle = await this.idleWaiter.waitUntilIdle(this.options.idle, signal);
+      if (idle.status === "cancelled") {
+        return { status: "cancelled", swipesUsed };
+      }
+      if (idle.status === "timeout") {
+        return {
+          status: "failed",
+          code: idle.code,
+          message: "Layout did not become stable before timeout",
+          swipesUsed
+        };
+      }
+      swipesUsed += 1;
+    }
   }
 }

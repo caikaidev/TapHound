@@ -556,4 +556,49 @@ describe("RecorderService", () => {
       maxSwipes: 6
     });
   });
+
+  it("stops the live scroll at 30 swipes with a notifyFailure and writes no scrollTo step", async () => {
+    const runtime = runtimeFixture();
+    const container = {
+      id: "message_list",
+      resourceId: "message_list",
+      scrollable: true,
+      enabled: true,
+      bounds: { left: 0, top: 0, right: 100, bottom: 400 },
+      children: []
+    };
+    vi.mocked(runtime.androidCli.layout).mockResolvedValue([container]);
+    const recorderPrompt = prompt(["scrollTo", "cancel"]);
+    vi.mocked(recorderPrompt.selectScrollContainer).mockResolvedValue("message_list");
+    let scrollMoreCount = 0;
+    vi.mocked(recorderPrompt.scrollTargetDecision).mockImplementation(() => {
+      scrollMoreCount += 1;
+      return Promise.resolve(
+        scrollMoreCount <= 31 ? { kind: "scrollMore" } : { kind: "cancel" }
+      );
+    });
+    const journeyWriter = writer();
+    const service = new RecorderService({
+      gradle: runtime.gradle,
+      androidCli: runtime.androidCli,
+      adb: runtime.adb,
+      clock: runtime.dependencies.clock,
+      prompt: recorderPrompt,
+      journeyWriter
+    });
+
+    const result = await service.record({
+      config: runtimeConfig,
+      projectRoot: "/project",
+      deviceSerial: "emulator-5554",
+      journeyName: "Scroll cap",
+      outputPath: "/project/scroll-cap.json"
+    });
+
+    expect(result).toEqual({ status: "cancelled", stepsRecorded: 0 });
+    expect(recorderPrompt.notifyFailure).toHaveBeenCalledWith(
+      "scrollTo reached the 30-swipe recording cap; the Journey would not replay"
+    );
+    expect(journeyWriter.write).not.toHaveBeenCalled();
+  });
 });

@@ -168,6 +168,17 @@ export class StepRunner {
         return finish("cancelled");
       }
       if (scroll.status === "failed") {
+        if (scroll.idle !== undefined) {
+          await this.options.artifacts.writeJson(
+            stepPath(index, "layout-diff.json"),
+            scroll.idle.lastDiff
+          );
+          report.idle = {
+            status: "timeout",
+            polls: scroll.idle.polls,
+            lastDiff: [...scroll.idle.lastDiff]
+          };
+        }
         return fail(scroll.code, scroll.message);
       }
     } else {
@@ -321,7 +332,13 @@ export class StepRunner {
     signal?: AbortSignal
   ): Promise<
     | { status: "found"; swipesUsed: number }
-    | { status: "failed"; code: FailureCode; message: string; swipesUsed: number }
+    | {
+        status: "failed";
+        code: FailureCode;
+        message: string;
+        swipesUsed: number;
+        idle?: { polls: number; lastDiff: readonly unknown[] };
+      }
     | { status: "cancelled"; swipesUsed: number }
   > {
     let swipesUsed = 0;
@@ -395,7 +412,8 @@ export class StepRunner {
           status: "failed",
           code: idle.code,
           message: "Layout did not become stable before timeout",
-          swipesUsed
+          swipesUsed,
+          idle: { polls: idle.polls, lastDiff: idle.lastDiff }
         };
       }
       swipesUsed += 1;

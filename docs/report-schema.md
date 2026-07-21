@@ -64,4 +64,4 @@ steps/001-fallback-annotated.png
 
 ## 步骤失败证据
 
-每个步骤记录单调时间、持续时间和步骤 Logcat 路径。Locator 报告包含匹配字段和回退证据；Idle 超时时保存最后一个 Layout Diff；Activity 与 Expect 分别记录期望、实际结果和固定失败码。
+每个步骤记录单调时间、持续时间和步骤 Logcat 路径。Locator 报告包含匹配字段和回退证据；Idle 超时时保存最后一个 Layout Diff；Activity 与 Expect 分别记录期望、实际结果和固定失败码。`scrollTo` 步骤记录 `scroll: { swipesUsed, maxSwipes }` 摘要且不填充 `locator`；仅当滚动期间 Idle 超时时才填充 `idle`（并写入对应的 `steps/NNN-layout-diff.json`），其余滚动失败（如 `SCROLL_TARGET_NOT_FOUND`、`LOCATOR_AMBIGUOUS`、容器缺失）不填充 `idle`。

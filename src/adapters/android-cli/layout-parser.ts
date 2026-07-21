@@ -74,7 +74,7 @@ function parseCenter(value: unknown): LayoutPoint | undefined {
     return undefined;
   }
   if (typeof value === "string") {
-    const match = /^\(\s*(\d+)\s*,\s*(\d+)\s*\)$/.exec(value);
+    const match = /^[[(]\s*(\d+)\s*,\s*(\d+)\s*[)\]]/.exec(value);
     if (match === null) {
       throw new Error("Invalid Android Layout center");
     }

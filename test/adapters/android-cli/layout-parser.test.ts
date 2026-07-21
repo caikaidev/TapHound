@@ -82,6 +82,25 @@ describe("parseLayout", () => {
     });
   });
 
+  it("parses bracket-format center coordinates from current Android CLI", () => {
+    const elements = parseLayout(JSON.stringify([
+      {
+        "interactions": ["clickable", "focusable"],
+        "center": "[540,1227]",
+        "bounds": "[0,265][1080,2190]",
+        "resource-id": "searchIv",
+        "key": 3506402
+      }
+    ]));
+
+    expect(elements[0]).toMatchObject({
+      resourceId: "searchIv",
+      clickable: true,
+      center: { x: 540, y: 1227 },
+      bounds: { left: 0, top: 265, right: 1080, bottom: 2190 }
+    });
+  });
+
   it("rejects malformed Layout JSON", () => {
     expect(() => parseLayout("{")).toThrow(/layout/i);
     expect(() => parseLayout(JSON.stringify({ enabled: true }))).toThrow(/layout/i);

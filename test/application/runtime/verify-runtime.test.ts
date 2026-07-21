@@ -12,6 +12,7 @@ import {
   runtimeFixture,
   runtimeJourney
 } from "../../fakes/runtime-fixture.js";
+import { FakeClock } from "../../fakes/fake-clock.js";
 import { commandResult } from "../../fakes/process-runner.js";
 
 function input(signal?: AbortSignal): VerifyInput {
@@ -86,6 +87,34 @@ describe("VerifyRuntime", () => {
 
     expect(result).toMatchObject({ status: "passed", exitCode: 0 });
     expect(test.dependencies.clock).toMatchObject({ sleeps: [100] });
+  });
+
+  it("waits for a delayed App process within one launch-readiness budget", async () => {
+    const test = runtimeFixture();
+    vi.mocked(test.adb.pid)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue(42);
+
+    const result = await new VerifyRuntime(test.dependencies).verify(input());
+
+    expect(result).toMatchObject({ status: "passed", exitCode: 0 });
+    expect(test.dependencies.clock).toMatchObject({
+      currentTime: 400,
+      sleeps: [100, 100, 100, 100]
+    });
+    expect(test.adb.pid).toHaveBeenNthCalledWith(5, {
+      packageName: runtimeConfig.run.packageName,
+      deviceSerial: "emulator-5554",
+      timeoutMs: 100
+    });
+    expect(test.adb.pid).toHaveBeenNthCalledWith(6, {
+      packageName: runtimeConfig.run.packageName,
+      deviceSerial: "emulator-5554",
+      timeoutMs: 100
+    });
   });
 
   it("fails launch readiness when the first Journey Activity is not reached", async () => {
@@ -316,6 +345,33 @@ describe("VerifyRuntime", () => {
         }
       }
     });
+  });
+
+  it("maps cancellation while waiting for the App process to INTERNAL_ERROR", async () => {
+    const test = runtimeFixture();
+    const clock = new FakeClock();
+    const controller = new AbortController();
+    vi.mocked(test.adb.pid).mockResolvedValue(null);
+    clock.onSleep = (): void => {
+      controller.abort();
+    };
+    test.dependencies.clock = clock;
+
+    const result = await new VerifyRuntime(test.dependencies)
+      .verify(input(controller.signal));
+
+    expect(result).toMatchObject({
+      status: "error",
+      exitCode: 4,
+      report: {
+        primaryFailure: {
+          code: "INTERNAL_ERROR",
+          message: "Verification was cancelled",
+          phase: "readiness"
+        }
+      }
+    });
+    expect(test.order.at(-1)).toBe("report");
   });
 
   it("maps cancellation to a stable INTERNAL_ERROR result and finalizes", async () => {

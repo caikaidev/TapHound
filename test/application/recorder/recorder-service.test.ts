@@ -14,6 +14,7 @@ import {
   runtimeConfig,
   runtimeFixture
 } from "../../fakes/runtime-fixture.js";
+import { FakeClock } from "../../fakes/fake-clock.js";
 import { commandResult } from "../../fakes/process-runner.js";
 
 const realLayoutFixture = fileURLToPath(
@@ -157,9 +158,41 @@ describe("RecorderService", () => {
     });
   });
 
+  it("waits for a delayed App process before entering the prompt loop", async () => {
+    const runtime = runtimeFixture();
+    vi.mocked(runtime.adb.pid)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(42);
+    const recorderPrompt = prompt(["cancel"]);
+    vi.mocked(recorderPrompt.selectAction).mockImplementation(() => {
+      expect(runtime.adb.pid).toHaveBeenCalledTimes(2);
+      return Promise.resolve("cancel");
+    });
+    const journeyWriter = writer();
+    const service = new RecorderService({
+      gradle: runtime.gradle,
+      androidCli: runtime.androidCli,
+      adb: runtime.adb,
+      clock: runtime.dependencies.clock,
+      prompt: recorderPrompt,
+      journeyWriter
+    });
+
+    await expect(service.record({
+      config: runtimeConfig,
+      projectRoot: "/project",
+      deviceSerial: "emulator-5554",
+      journeyName: "Delayed process",
+      outputPath: "/project/delayed.json"
+    })).resolves.toEqual({ status: "cancelled", stepsRecorded: 0 });
+    expect(runtime.dependencies.clock).toMatchObject({ sleeps: [100] });
+    expect(runtime.androidCli.layout).toHaveBeenCalled();
+    expect(journeyWriter.write).not.toHaveBeenCalled();
+  });
+
   it("does not prompt when the App process is missing after launch", async () => {
     const runtime = runtimeFixture();
-    vi.mocked(runtime.adb.pid).mockResolvedValueOnce(null);
+    vi.mocked(runtime.adb.pid).mockResolvedValue(null);
     const recorderPrompt = prompt(["finish"]);
     const journeyWriter = writer();
     const service = new RecorderService({
@@ -183,6 +216,37 @@ describe("RecorderService", () => {
       message: "App process was not found after launch"
     });
     expect(recorderPrompt.selectAction).not.toHaveBeenCalled();
+  });
+
+  it("cancels process startup waiting without writing or prompting", async () => {
+    const runtime = runtimeFixture();
+    const clock = new FakeClock();
+    const controller = new AbortController();
+    vi.mocked(runtime.adb.pid).mockResolvedValue(null);
+    clock.onSleep = (): void => {
+      controller.abort();
+    };
+    const recorderPrompt = prompt(["finish"]);
+    const journeyWriter = writer();
+    const service = new RecorderService({
+      gradle: runtime.gradle,
+      androidCli: runtime.androidCli,
+      adb: runtime.adb,
+      clock,
+      prompt: recorderPrompt,
+      journeyWriter
+    });
+
+    await expect(service.record({
+      config: runtimeConfig,
+      projectRoot: "/project",
+      deviceSerial: "emulator-5554",
+      journeyName: "Cancelled startup",
+      outputPath: "/project/cancelled-startup.json",
+      signal: controller.signal
+    })).resolves.toEqual({ status: "cancelled", stepsRecorded: 0 });
+    expect(recorderPrompt.selectAction).not.toHaveBeenCalled();
+    expect(journeyWriter.write).not.toHaveBeenCalled();
   });
 
   it("does not prompt when the startup layout remains unstable", async () => {

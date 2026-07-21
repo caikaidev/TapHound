@@ -29,6 +29,15 @@ describe("TapHound documentation examples", () => {
     );
   });
 
+  it("keeps the scrollTo example journey schema-valid", async () => {
+    const journey = JourneySchema.parse(
+      await json("examples/scroll-to.journey.json")
+    );
+
+    expect(journey.steps).toHaveLength(4);
+    expect(journey.steps[1]?.action).toBe("scrollTo");
+  });
+
   it("documents every executable command and its primary workflow", async () => {
     const readme = await text("README.md");
     const commandNames = createProgram().commands.map((command) => command.name());

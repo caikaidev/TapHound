@@ -33,7 +33,9 @@ function prompt(actions: RecorderAction[]): RecorderPromptPort {
       durationMs: 300
     })),
     selectFallbackLabel: vi.fn(() => Promise.resolve(undefined)),
-    notifyFailure: vi.fn(() => Promise.resolve())
+    notifyFailure: vi.fn(() => Promise.resolve()),
+    selectScrollContainer: vi.fn(() => Promise.resolve("scroll_container")),
+    scrollTargetDecision: vi.fn(() => Promise.resolve({ kind: "cancel" } as const))
   };
 }
 
@@ -46,6 +48,61 @@ function writer(): JourneyWriterPort & { journeys: Journey[] } {
       return Promise.resolve();
     })
   };
+}
+
+async function recordScrollToJourney(): Promise<Journey> {
+  const runtime = runtimeFixture();
+  const container = {
+    id: "message_list",
+    resourceId: "message_list",
+    scrollable: true,
+    enabled: true,
+    bounds: { left: 0, top: 0, right: 100, bottom: 400 },
+    children: []
+  };
+  const bubble = {
+    id: "message_bubble",
+    resourceId: "message_bubble",
+    text: "target",
+    enabled: true,
+    bounds: { left: 0, top: 100, right: 100, bottom: 150 },
+    children: []
+  };
+  let layoutReads = 0;
+  vi.mocked(runtime.androidCli.layout).mockImplementation(() => {
+    layoutReads += 1;
+    return Promise.resolve(layoutReads <= 2 ? [container] : [container, bubble]);
+  });
+  const recorderPrompt = prompt(["scrollTo", "finish"]);
+  vi.mocked(recorderPrompt.selectScrollContainer).mockResolvedValue("message_list");
+  vi.mocked(recorderPrompt.scrollTargetDecision)
+    .mockResolvedValueOnce({ kind: "scrollMore" })
+    .mockResolvedValueOnce({ kind: "select", id: "message_bubble" });
+  const journeyWriter = writer();
+  const service = new RecorderService({
+    gradle: runtime.gradle,
+    androidCli: runtime.androidCli,
+    adb: runtime.adb,
+    clock: runtime.dependencies.clock,
+    prompt: recorderPrompt,
+    journeyWriter
+  });
+
+  const result = await service.record({
+    config: runtimeConfig,
+    projectRoot: "/project",
+    deviceSerial: "emulator-5554",
+    journeyName: "Scroll to bubble",
+    outputPath: "/project/scroll-to.json"
+  });
+
+  expect(result).toMatchObject({ status: "completed", stepsRecorded: 1 });
+  expect(runtime.adb.swipe).toHaveBeenCalledTimes(1);
+  const journey = journeyWriter.journeys[0];
+  if (journey === undefined) {
+    throw new Error("No journey was written");
+  }
+  return journey;
 }
 
 describe("RecorderService", () => {
@@ -486,6 +543,62 @@ describe("RecorderService", () => {
     });
 
     expect(result).toEqual({ status: "cancelled", stepsRecorded: 0 });
+    expect(journeyWriter.write).not.toHaveBeenCalled();
+  });
+
+  it("records a scrollTo step with maxSwipes derived from swipes used", async () => {
+    const journey = await recordScrollToJourney();
+    expect(journey.steps[0]).toMatchObject({
+      action: "scrollTo",
+      locator: { resourceId: "message_bubble" },
+      container: { resourceId: "message_list" },
+      direction: "up",
+      maxSwipes: 6
+    });
+  });
+
+  it("stops the live scroll at 30 swipes with a notifyFailure and writes no scrollTo step", async () => {
+    const runtime = runtimeFixture();
+    const container = {
+      id: "message_list",
+      resourceId: "message_list",
+      scrollable: true,
+      enabled: true,
+      bounds: { left: 0, top: 0, right: 100, bottom: 400 },
+      children: []
+    };
+    vi.mocked(runtime.androidCli.layout).mockResolvedValue([container]);
+    const recorderPrompt = prompt(["scrollTo", "cancel"]);
+    vi.mocked(recorderPrompt.selectScrollContainer).mockResolvedValue("message_list");
+    let scrollMoreCount = 0;
+    vi.mocked(recorderPrompt.scrollTargetDecision).mockImplementation(() => {
+      scrollMoreCount += 1;
+      return Promise.resolve(
+        scrollMoreCount <= 31 ? { kind: "scrollMore" } : { kind: "cancel" }
+      );
+    });
+    const journeyWriter = writer();
+    const service = new RecorderService({
+      gradle: runtime.gradle,
+      androidCli: runtime.androidCli,
+      adb: runtime.adb,
+      clock: runtime.dependencies.clock,
+      prompt: recorderPrompt,
+      journeyWriter
+    });
+
+    const result = await service.record({
+      config: runtimeConfig,
+      projectRoot: "/project",
+      deviceSerial: "emulator-5554",
+      journeyName: "Scroll cap",
+      outputPath: "/project/scroll-cap.json"
+    });
+
+    expect(result).toEqual({ status: "cancelled", stepsRecorded: 0 });
+    expect(recorderPrompt.notifyFailure).toHaveBeenCalledWith(
+      "scrollTo reached the 30-swipe recording cap; the Journey would not replay"
+    );
     expect(journeyWriter.write).not.toHaveBeenCalled();
   });
 });

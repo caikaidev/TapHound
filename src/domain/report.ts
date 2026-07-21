@@ -66,6 +66,7 @@ export const StepReportSchema = z.strictObject({
     "longClick",
     "inputText",
     "swipe",
+    "scrollTo",
     "back",
     "wait"
   ]),
@@ -75,6 +76,10 @@ export const StepReportSchema = z.strictObject({
   durationMs: z.number().nonnegative(),
   locator: LocatorReportSchema.optional(),
   idle: IdleReportSchema.optional(),
+  scroll: z.strictObject({
+    swipesUsed: z.number().int().nonnegative(),
+    maxSwipes: z.number().int().positive()
+  }).optional(),
   activity: z.strictObject({
     before: ActivityCheckSchema,
     after: ActivityCheckSchema

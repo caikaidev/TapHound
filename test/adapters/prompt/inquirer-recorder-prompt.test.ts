@@ -55,4 +55,40 @@ describe("InquirerRecorderPrompt", () => {
 
     expect(output.write).toHaveBeenCalledWith("TapHound: tap failed\n");
   });
+
+  describe("scroll prompts", () => {
+    it("selects a scroll container by id", async () => {
+      const select = vi.fn(() => Promise.resolve("message_list"));
+      const prompt = new InquirerRecorderPrompt({
+        select,
+        input: vi.fn(),
+        confirm: vi.fn(),
+        number: vi.fn()
+      });
+      const id = await prompt.selectScrollContainer([
+        { id: "message_list", label: "message_list — resourceId: message_list" }
+      ]);
+      expect(id).toBe("message_list");
+    });
+
+    it("returns scrollMore, cancel, and select decisions", async () => {
+      const scenarios: [string, { kind: string; id?: string }][] = [
+        ["__scroll_more__", { kind: "scrollMore" }],
+        ["__cancel__", { kind: "cancel" }],
+        ["message_bubble", { kind: "select", id: "message_bubble" }]
+      ];
+      for (const [value, expected] of scenarios) {
+        const prompt = new InquirerRecorderPrompt({
+          select: vi.fn(() => Promise.resolve(value)),
+          input: vi.fn(),
+          confirm: vi.fn(),
+          number: vi.fn()
+        });
+        const decision = await prompt.scrollTargetDecision([
+          { id: "message_bubble", label: "message_bubble — text: hello" }
+        ]);
+        expect(decision).toMatchObject(expected);
+      }
+    });
+  });
 });

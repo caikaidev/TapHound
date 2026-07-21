@@ -43,6 +43,13 @@ describe("exitCodeForFailure", () => {
   });
 
   it("defines exactly the approved failure vocabulary", () => {
-    expect(FAILURE_CODES).toHaveLength(17);
+    expect(FAILURE_CODES).toHaveLength(18);
+  });
+});
+
+describe("SCROLL_TARGET_NOT_FOUND", () => {
+  it("is a known failure code with exit code 1", () => {
+    expect(FAILURE_CODES).toContain("SCROLL_TARGET_NOT_FOUND");
+    expect(exitCodeForFailure("SCROLL_TARGET_NOT_FOUND")).toBe(1);
   });
 });

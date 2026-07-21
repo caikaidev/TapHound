@@ -19,6 +19,7 @@ import type {
   RecorderPromptPort
 } from "../../ports/recorder-prompt.js";
 import { ActionExecutor, type ActionTarget } from "../interaction/action-executor.js";
+import { ProcessWaiter } from "../runtime/process-waiter.js";
 import { IdleWaiter } from "../wait/idle-waiter.js";
 import { listRecorderTargets, type RecorderTarget } from "./locator-selector.js";
 
@@ -149,7 +150,20 @@ export class RecorderService {
       ...(input.signal === undefined ? {} : { signal: input.signal }),
       timeoutMs: input.config.idle.timeoutMs
     };
-    if (await this.dependencies.adb.pid(identity) === null) {
+    const processReadiness = await new ProcessWaiter(
+      this.dependencies.adb,
+      this.dependencies.clock
+    ).wait({
+      packageName: input.config.run.packageName,
+      deviceSerial: input.deviceSerial,
+      pollIntervalMs: input.config.idle.pollIntervalMs,
+      timeoutMs: input.config.idle.timeoutMs,
+      ...(input.signal === undefined ? {} : { signal: input.signal })
+    });
+    if (processReadiness.status === "cancelled") {
+      return { status: "cancelled", stepsRecorded: 0 };
+    }
+    if (processReadiness.status === "timeout") {
       return {
         status: "failed",
         stepsRecorded: 0,

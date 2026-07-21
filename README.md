@@ -46,6 +46,8 @@ npm run lint
 npm run build
 ```
 
+完整的源码、npm tarball 与 Android 设备验证步骤见[本地测试指南](docs/local-testing.md)。更换开发机器时按[换机后 TODO](TODO.md)继续跟踪剩余验收与 npm `dev` 预发布。
+
 ## 配置
 
 在 Android 项目中创建 `taphound.config.json`。`run.packageName` 必填，不会从 APK 文件名或 Activity 猜测；完整示例见 [`examples/taphound.config.json`](examples/taphound.config.json)。

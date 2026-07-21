@@ -120,6 +120,21 @@ describe("TapHound documentation examples", () => {
     expect(audit).not.toContain("examples/taphound-demo");
   });
 
+  it("keeps local testing and machine handoff instructions discoverable", async () => {
+    const readme = await text("README.md");
+    const testing = await text("docs/local-testing.md");
+    const todo = await text("TODO.md");
+
+    expect(readme).toContain("docs/local-testing.md");
+    expect(readme).toContain("TODO.md");
+    expect(testing).toContain("npm test");
+    expect(testing).toContain("npm run acceptance:device");
+    expect(testing).toContain("taphound-0.2.0-dev.1.tgz");
+    expect(testing).toContain("examples/taphound-android-demo");
+    expect(todo).toContain("换机后");
+    expect(todo).toContain("npm `dev` 预发布");
+  });
+
   it("ignores generated Node, TapHound, Android, and local environment files", async () => {
     const ignore = await text(".gitignore");
 

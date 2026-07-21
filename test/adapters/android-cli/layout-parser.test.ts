@@ -82,6 +82,25 @@ describe("parseLayout", () => {
     });
   });
 
+  it("parses bracket-format center coordinates from current Android CLI", () => {
+    const elements = parseLayout(JSON.stringify([
+      {
+        "interactions": ["clickable", "focusable"],
+        "center": "[540,1227]",
+        "bounds": "[0,265][1080,2190]",
+        "resource-id": "searchIv",
+        "key": 3506402
+      }
+    ]));
+
+    expect(elements[0]).toMatchObject({
+      resourceId: "searchIv",
+      clickable: true,
+      center: { x: 540, y: 1227 },
+      bounds: { left: 0, top: 265, right: 1080, bottom: 2190 }
+    });
+  });
+
   it("rejects malformed Layout JSON", () => {
     expect(() => parseLayout("{")).toThrow(/layout/i);
     expect(() => parseLayout(JSON.stringify({ enabled: true }))).toThrow(/layout/i);
@@ -94,5 +113,19 @@ describe("parseLayoutDiff", () => {
     expect(parseLayoutDiff('[{"changed":"text"}]')).toEqual([
       { changed: "text" }
     ]);
+  });
+
+  it("flattens current Android CLI object diff format", () => {
+    const diff = parseLayoutDiff(JSON.stringify({
+      added: [{ "resource-id": "new_element" }],
+      modified: [{ changed: "text" }]
+    }));
+    expect(diff).toHaveLength(2);
+    expect(diff).toContainEqual({ "resource-id": "new_element" });
+    expect(diff).toContainEqual({ changed: "text" });
+  });
+
+  it("recognizes an empty object diff as stable", () => {
+    expect(parseLayoutDiff('{"added":[],"modified":[]}')).toEqual([]);
   });
 });

@@ -13,9 +13,23 @@ describe("normalizeActivity", () => {
       .toBe("com.example.app.SearchActivity");
   });
 
+  it("accepts an Activity class outside the application ID package", () => {
+    expect(normalizeActivity(
+      "com.whaleco.tchat",
+      "com.whaleco.im.ui.SplashActivity"
+    )).toBe("com.whaleco.im.ui.SplashActivity");
+  });
+
   it("normalizes an ADB component", () => {
     expect(normalizeActivity("com.example.app", "com.example.app/.SearchActivity"))
       .toBe("com.example.app.SearchActivity");
+  });
+
+  it("normalizes a component whose Activity class has another package", () => {
+    expect(normalizeActivity(
+      "com.whaleco.tchat",
+      "com.whaleco.tchat/com.whaleco.im.ui.SplashActivity"
+    )).toBe("com.whaleco.im.ui.SplashActivity");
   });
 
   it("rejects a component from another package", () => {

@@ -447,6 +447,15 @@ function assertOrdinaryTransition(
       "Recovery-required state must use the explicit recovery transition"
     );
   }
+  if (
+    JSON.stringify(current.pendingConfirmation)
+    !== JSON.stringify(next.pendingConfirmation)
+  ) {
+    throw new GenerationSessionStoreError(
+      "INVALID_TRANSITION",
+      "Pending confirmation must use the explicit confirmation transition"
+    );
+  }
   const stableStateMatches = JSON.stringify(transitionStableState(current))
     === JSON.stringify(transitionStableState(next));
   if (current.inFlight !== null) {
@@ -472,6 +481,55 @@ function assertOrdinaryTransition(
       "Starting inFlight cannot mutate candidate or result state"
     );
   }
+}
+
+function confirmationStableState(
+  session: GenerationSession
+): Record<string, unknown> {
+  const stable = transitionStableState(session);
+  return { ...stable, pendingConfirmation: undefined };
+}
+
+function assertConfirmationTransition(
+  current: GenerationSession,
+  next: GenerationSession
+): void {
+  assertCoreIdentityPreserved(current, next);
+  assertLatestSnapshotPreserved(current, next);
+  if (
+    current.state !== "active"
+    || next.state !== "active"
+    || current.inFlight !== null
+    || next.inFlight !== null
+    || JSON.stringify(confirmationStableState(current))
+      !== JSON.stringify(confirmationStableState(next))
+  ) {
+    throw new GenerationSessionStoreError(
+      "INVALID_TRANSITION",
+      "Confirmation transition may only change pending confirmation state"
+    );
+  }
+
+  const before = current.pendingConfirmation;
+  const after = next.pendingConfirmation;
+  if (before === null) {
+    if (after !== null && after.status === "pending") {
+      return;
+    }
+  } else if (after === null) {
+    return;
+  } else if (
+    before.status === "pending"
+    && after.status === "approved"
+    && JSON.stringify({ ...before, status: undefined })
+      === JSON.stringify({ ...after, status: undefined })
+  ) {
+    return;
+  }
+  throw new GenerationSessionStoreError(
+    "INVALID_TRANSITION",
+    "Invalid pending confirmation lifecycle transition"
+  );
 }
 
 function assertRecoveryTransition(
@@ -1053,6 +1111,57 @@ implements GenerationSessionStore {
     });
   };
 
+  public readonly updateConfirmation = async (
+    id: string,
+    expectedRevision: number,
+    input: GenerationSession
+  ): Promise<void> => {
+    assertId(id);
+    const next = parseSession(input, true);
+    validateNextRevision(id, expectedRevision, next);
+    await this.ensureGenerationRoot();
+
+    await this.withLock(id, async () => {
+      const activeDirectory = this.activeDirectory(id);
+      if (!await pathExists(activeDirectory)) {
+        if (await pathExists(this.finalDirectory(id))) {
+          throw new GenerationSessionStoreError(
+            "SESSION_PUBLISHED",
+            `Published generation session cannot update confirmation: ${id}`
+          );
+        }
+        throw new GenerationSessionStoreError(
+          "SESSION_NOT_FOUND",
+          `Generation session does not exist: ${id}`
+        );
+      }
+
+      const activeEvidence = await captureStoreDirectory(activeDirectory);
+      const current = await readBoundState(
+        activeDirectory,
+        id,
+        this.hooks.afterStateOpen,
+        activeEvidence
+      );
+      if (current.revision !== expectedRevision) {
+        throw new GenerationSessionStoreError(
+          "REVISION_CONFLICT",
+          `Expected generation revision ${String(expectedRevision)}, found ${
+            String(current.revision)
+          }`
+        );
+      }
+      assertConfirmationTransition(current, next);
+      await writeStateAtomically(
+        activeDirectory,
+        next,
+        this.syncDirectory,
+        this.hooks.beforeStateRename,
+        activeEvidence
+      );
+    });
+  };
+
   public readonly completeStep = async (
     id: string,
     expectedRevision: number,
@@ -1109,6 +1218,33 @@ implements GenerationSessionStore {
       }
       assertCoreIdentityPreserved(current, next);
       assertLatestSnapshotPreserved(current, next);
+      const candidateAppended = next.candidateSteps.length
+        === current.candidateSteps.length + 1
+        && JSON.stringify(next.candidateSteps.slice(
+          0,
+          current.candidateSteps.length
+        )) === JSON.stringify(current.candidateSteps);
+      const currentStable = {
+        ...transitionStableState(current),
+        candidateSteps: undefined,
+        pendingConfirmation: undefined
+      };
+      const nextStable = {
+        ...transitionStableState(next),
+        candidateSteps: undefined,
+        pendingConfirmation: undefined
+      };
+      if (
+        !candidateAppended
+        || current.pendingConfirmation !== null
+        || next.pendingConfirmation !== null
+        || JSON.stringify(currentStable) !== JSON.stringify(nextStable)
+      ) {
+        throw new GenerationSessionStoreError(
+          "INVALID_TRANSITION",
+          "Step completion must append exactly one successful Journey step"
+        );
+      }
       await writeStateAtomically(
         activeDirectory,
         next,

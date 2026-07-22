@@ -46,9 +46,11 @@ function validSession(): unknown {
     },
     variables,
     candidateSteps: [{
-      binding: proposalBinding,
       action: "wait",
-      activity: { before: "com.example.app.MainActivity" }
+      activity: {
+        before: "com.example.app.MainActivity",
+        after: "com.example.app.MainActivity"
+      }
     }],
     inFlight: null,
     pendingConfirmation: null,
@@ -163,10 +165,15 @@ describe("GenerationSessionSchema", () => {
   it("rejects simultaneous execution and pending confirmation", () => {
     expect(() => GenerationSessionSchema.parse({
       ...(validSession() as object),
-      inFlight: { stepIndex: 0, snapshotHash: "b".repeat(64) },
+      inFlight: { stepIndex: 1, snapshotHash: "b".repeat(64) },
       pendingConfirmation: {
-        stepIndex: 0,
-        reason: "Back may leave the current screen"
+        challengeId: "challenge-1",
+        stepIndex: 1,
+        proposalHash: "c".repeat(64),
+        snapshotHash: "b".repeat(64),
+        actionSummary: "Back from com.example.app.MainActivity",
+        expiresAt: "2026-07-22T12:00:30.000Z",
+        status: "pending"
       }
     })).toThrow(/inFlight.*pendingConfirmation/i);
   });
@@ -175,10 +182,10 @@ describe("GenerationSessionSchema", () => {
     expect(GenerationSessionSchema.parse({
       ...(validSession() as object),
       state: "recoveryRequired",
-      inFlight: { stepIndex: 0, snapshotHash: "b".repeat(64) }
+      inFlight: { stepIndex: 1, snapshotHash: "b".repeat(64) }
     })).toMatchObject({
       state: "recoveryRequired",
-      inFlight: { stepIndex: 0 }
+      inFlight: { stepIndex: 1 }
     });
     expect(() => GenerationSessionSchema.parse({
       ...(validSession() as object),
@@ -231,16 +238,31 @@ describe("GenerationSessionSchema", () => {
   it("rejects verification while a candidate step is active", () => {
     expect(() => GenerationSessionSchema.parse({
       ...(validSession() as object),
-      inFlight: { stepIndex: 0, snapshotHash: "b".repeat(64) },
+      inFlight: { stepIndex: 1, snapshotHash: "b".repeat(64) },
       verification: { status: "running" }
     })).toThrow(/verification/i);
   });
 
-  it("rejects state references outside candidate steps", () => {
-    expect(() => GenerationSessionSchema.parse({
+  it("requires active step state to identify the exact next candidate index", () => {
+    expect(GenerationSessionSchema.parse({
       ...(validSession() as object),
       inFlight: { stepIndex: 1, snapshotHash: "b".repeat(64) }
-    })).toThrow(/candidate/i);
+    })).toMatchObject({ inFlight: { stepIndex: 1 } });
+    expect(() => GenerationSessionSchema.parse({
+      ...(validSession() as object),
+      inFlight: { stepIndex: 0, snapshotHash: "b".repeat(64) }
+    })).toThrow(/next candidate/i);
+  });
+
+  it("stores only successful Journey steps, never proposal evidence", () => {
+    expect(() => GenerationSessionSchema.parse({
+      ...(validSession() as object),
+      candidateSteps: [{
+        binding: proposalBinding,
+        action: "wait",
+        activity: { before: "com.example.app.MainActivity" }
+      }]
+    })).toThrow();
   });
 });
 

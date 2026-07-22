@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { ProposedStepSchema } from "../../src/domain/proposed-step.js";
+import {
+  ProposedStepSchema,
+  hashProposedStep
+} from "../../src/domain/proposed-step.js";
 
 const binding = {
   generationId: "generation-1",
@@ -120,5 +123,25 @@ describe("ProposedStepSchema", () => {
       confidence: 0.99,
       risk: "safe"
     })).toThrow();
+  });
+
+  it("hashes the canonical parsed proposal rather than object key order", () => {
+    const first = {
+      binding,
+      action: "click",
+      locator: { resourceId: "search", text: "Search" },
+      activity: { before: "com.example.app.MainActivity" }
+    };
+    const reordered = {
+      activity: { before: "com.example.app.MainActivity" },
+      locator: { text: "Search", resourceId: "search" },
+      action: "click",
+      binding
+    };
+    expect(hashProposedStep(first)).toBe(hashProposedStep(reordered));
+    expect(hashProposedStep({
+      ...first,
+      locator: { resourceId: "other" }
+    })).not.toBe(hashProposedStep(first));
   });
 });

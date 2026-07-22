@@ -48,6 +48,11 @@ export interface GenerationSessionStore {
     expectedRevision: number,
     next: GenerationSession
   ) => Promise<void>;
+  updateConfirmation: (
+    id: string,
+    expectedRevision: number,
+    next: GenerationSession
+  ) => Promise<void>;
   completeStep: (
     id: string,
     expectedRevision: number,

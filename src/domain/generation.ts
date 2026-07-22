@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { JourneyStepSchema } from "./journey.js";
 import { ProjectRelativePathSchema } from "./project-context.js";
 import { InteractionPolicySchema } from "./project-context.js";
 import {
@@ -51,9 +52,14 @@ export const GenerationInFlightSchema = z.strictObject({
   snapshotHash: Sha256Schema
 });
 
-const PendingConfirmationSchema = z.strictObject({
+export const PendingConfirmationSchema = z.strictObject({
+  challengeId: GenerationSessionIdSchema,
   stepIndex: z.number().int().nonnegative(),
-  reason: z.string().trim().min(1)
+  proposalHash: Sha256Schema,
+  snapshotHash: Sha256Schema,
+  actionSummary: z.string().trim().min(1),
+  expiresAt: z.iso.datetime(),
+  status: z.enum(["pending", "approved"])
 });
 
 const GenerationFailureSchema = z.strictObject({
@@ -103,7 +109,7 @@ export const GenerationSessionSchema = z.strictObject({
     interactionPolicy: InteractionPolicySchema
   }),
   variables: GenerationVariablesSchema,
-  candidateSteps: z.array(ProposedStepSchema),
+  candidateSteps: z.array(JourneyStepSchema),
   inFlight: GenerationInFlightSchema.nullable(),
   pendingConfirmation: PendingConfirmationSchema.nullable(),
   verification: VerificationSchema,
@@ -128,11 +134,11 @@ export const GenerationSessionSchema = z.strictObject({
     ["inFlight", session.inFlight],
     ["pendingConfirmation", session.pendingConfirmation]
   ] as const) {
-    if (state !== null && state.stepIndex >= session.candidateSteps.length) {
+    if (state !== null && state.stepIndex !== session.candidateSteps.length) {
       context.addIssue({
         code: "custom",
         path: [field, "stepIndex"],
-        message: "State stepIndex must reference a candidate step"
+        message: "State stepIndex must equal the next candidate index"
       });
     }
   }
@@ -173,6 +179,7 @@ export const GenerationSessionSchema = z.strictObject({
 
 export type GenerationVariables = z.infer<typeof GenerationVariablesSchema>;
 export type GenerationInFlight = z.infer<typeof GenerationInFlightSchema>;
+export type PendingConfirmation = z.infer<typeof PendingConfirmationSchema>;
 export type GenerationSession = z.infer<typeof GenerationSessionSchema>;
 export interface GenerationCoreIdentity {
   id: GenerationSession["id"];

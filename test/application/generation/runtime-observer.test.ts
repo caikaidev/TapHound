@@ -299,15 +299,13 @@ describe("RuntimeObserver", () => {
       ...session(),
       state: "recoveryRequired",
       candidateSteps: [{
-        binding: {
-          generationId: "generation-1",
-          baseRevision: 1,
-          snapshotHash: "b".repeat(64)
-        },
         action: "wait",
-        activity: { before: "com.example.app.MainActivity" }
+        activity: {
+          before: "com.example.app.MainActivity",
+          after: "com.example.app.MainActivity"
+        }
       }],
-      inFlight: { stepIndex: 0, snapshotHash: "b".repeat(64) }
+      inFlight: { stepIndex: 1, snapshotHash: "b".repeat(64) }
     };
 
     await expect(test.observer.observe({

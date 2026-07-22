@@ -22,10 +22,15 @@ export type GenerationErrorCode = z.infer<typeof GenerationErrorCodeSchema>;
 
 const Sha256Schema = z.string().regex(/^[a-f\d]{64}$/);
 
+const LiteralSchema = z.string().refine(
+  (value) => !value.includes("${") && !value.includes("}"),
+  "Generation variable bindings must be literal"
+);
+
 export const GenerationVariablesSchema = z.strictObject({
-  runId: z.string().min(1),
-  timestamp: z.string().min(1),
-  randomHex: z.string().regex(/^[a-f\d]+$/)
+  runId: LiteralSchema.regex(/^[A-Za-z\d](?:[A-Za-z\d._-]*[A-Za-z\d])?$/),
+  timestamp: LiteralSchema.pipe(z.iso.datetime()),
+  randomHex: LiteralSchema.regex(/^[a-f\d]+$/)
 });
 
 const InFlightSchema = z.strictObject({
@@ -145,12 +150,19 @@ function expandValue(
   variables: GenerationVariables
 ): unknown {
   if (typeof value === "string") {
-    return value.replace(/\$\{([^}]+)\}/g, (_match, name: string) => {
-      if (name === "runId" || name === "timestamp" || name === "randomHex") {
-        return variables[name];
+    const expanded = value.replace(
+      /\$\{([^{}]+)\}/g,
+      (_match, name: string) => {
+        if (name === "runId" || name === "timestamp" || name === "randomHex") {
+          return variables[name];
+        }
+        throw new Error(`Unsupported generation variable: ${name}`);
       }
-      throw new Error(`Unsupported generation variable: ${name}`);
-    });
+    );
+    if (expanded.includes("${") || expanded.includes("}")) {
+      throw new Error("Expanded value contains a malformed template marker");
+    }
+    return expanded;
   }
   if (Array.isArray(value)) {
     return value.map((item) => expandValue(item, variables));

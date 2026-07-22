@@ -109,6 +109,22 @@ describe("generation variables", () => {
     })).toThrow();
   });
 
+  it.each([
+    { ...variables, runId: "run id" },
+    { ...variables, timestamp: "22 July 2026" },
+    { ...variables, randomHex: "not-hex" }
+  ])("rejects malformed Core variable bindings", (bindings) => {
+    expect(() => bindGenerationVariables(bindings)).toThrow();
+  });
+
+  it.each([
+    { ...variables, runId: "${timestamp}" },
+    { ...variables, timestamp: "${runId}" },
+    { ...variables, randomHex: "${runId}" }
+  ])("rejects template markers in Core variable bindings", (bindings) => {
+    expect(() => bindGenerationVariables(bindings)).toThrow(/literal/i);
+  });
+
   it("expands bound variables into literal proposed-step strings", () => {
     expect(expandProposedStepVariables({
       action: "inputText",
@@ -127,5 +143,18 @@ describe("generation variables", () => {
       text: "${plannerSecret}",
       activity: { before: "com.example.app.MainActivity" }
     }, variables)).toThrow(/unsupported generation variable/i);
+  });
+
+  it.each([
+    "${run${runId}}",
+    "${runId",
+    "${runId}}",
+    "${}"
+  ])("rejects nested or malformed template output %s", (text) => {
+    expect(() => expandProposedStepVariables({
+      action: "inputText",
+      text,
+      activity: { before: "com.example.app.MainActivity" }
+    }, variables)).toThrow(/template marker/i);
   });
 });

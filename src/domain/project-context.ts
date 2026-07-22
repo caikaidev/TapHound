@@ -16,10 +16,18 @@ const GenerationActionSchema = z.enum([
 ]);
 
 const ContextFileSchema = z.strictObject({
-  path: z.string().trim().min(1).refine(
-    (path) => !path.startsWith("/") && !path.split("/").includes(".."),
-    "Context file path must stay within the project"
-  ),
+  path: z.string()
+    .trim()
+    .min(1)
+    .transform((path) => path.replaceAll("\\", "/"))
+    .refine(
+      (path) => (
+        !path.startsWith("/")
+        && !/^[A-Za-z]:/.test(path)
+        && !path.split("/").includes("..")
+      ),
+      "Context file path must stay within the project"
+    ),
   sha256: z.string().regex(/^[a-f\d]{64}$/)
 });
 

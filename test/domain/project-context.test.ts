@@ -57,6 +57,28 @@ describe("generation project context contracts", () => {
     })).toThrow();
   });
 
+  it.each([
+    String.raw`C:\outside.txt`,
+    String.raw`\\server\share\outside.txt`,
+    String.raw`..\outside.txt`,
+    String.raw`safe/..\outside.txt`
+  ])("rejects platform-specific context path escape %s", (path) => {
+    expect(() => ContextManifestSchema.parse({
+      version: 1,
+      files: [{ path, sha256: "a".repeat(64) }]
+    })).toThrow(/within the project/i);
+  });
+
+  it("normalizes safe context path separators", () => {
+    expect(ContextManifestSchema.parse({
+      version: 1,
+      files: [{
+        path: String.raw`app\src\main\AndroidManifest.xml`,
+        sha256: "a".repeat(64)
+      }]
+    }).files[0]?.path).toBe("app/src/main/AndroidManifest.xml");
+  });
+
   it("rejects contradictory policy sets", () => {
     expect(() => InteractionPolicySchema.parse({
       ...validPolicy,

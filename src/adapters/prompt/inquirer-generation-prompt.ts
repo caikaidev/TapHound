@@ -42,29 +42,48 @@ interface NumberConfig {
   max?: number | undefined;
 }
 
+export type GenerationPromptContext = NonNullable<
+  Parameters<typeof confirm>[1]
+>;
+
 export interface GenerationPromptFunctions {
-  select: (config: SelectConfig) => Promise<unknown>;
-  input: (config: InputConfig) => Promise<unknown>;
-  confirm: (config: ConfirmConfig) => Promise<unknown>;
-  number: (config: NumberConfig) => Promise<unknown>;
+  select: (
+    config: SelectConfig,
+    context: GenerationPromptContext
+  ) => Promise<unknown>;
+  input: (
+    config: InputConfig,
+    context: GenerationPromptContext
+  ) => Promise<unknown>;
+  confirm: (
+    config: ConfirmConfig,
+    context: GenerationPromptContext
+  ) => Promise<unknown>;
+  number: (
+    config: NumberConfig,
+    context: GenerationPromptContext
+  ) => Promise<unknown>;
 }
 
-export interface GenerationDiagnosticStream {
-  write: (content: string) => unknown;
+export type GenerationInputStream = NodeJS.ReadableStream & {
   isTTY?: boolean | undefined;
-}
+};
+
+export type GenerationDiagnosticStream = NodeJS.WritableStream & {
+  isTTY?: boolean | undefined;
+};
 
 const defaultPrompts: GenerationPromptFunctions = {
-  select: async (config) => select({
+  select: async (config, context) => select({
     message: config.message,
     choices: [...config.choices]
-  }),
-  input: async (config) => input({
+  }, context),
+  input: async (config, context) => input({
     message: config.message,
     ...(config.validate === undefined ? {} : { validate: config.validate })
-  }),
-  confirm: async (config) => confirm(config),
-  number: async (config) => numberPrompt(config)
+  }, context),
+  confirm: async (config, context) => confirm(config, context),
+  number: async (config, context) => numberPrompt(config, context)
 };
 
 function selectedString(value: unknown, allowed?: readonly string[]): string {
@@ -114,13 +133,12 @@ function requireTargets(targets: readonly RecorderTarget[]): void {
 export class InquirerGenerationPrompt implements GenerationPromptPort {
   public constructor(
     private readonly prompts: GenerationPromptFunctions = defaultPrompts,
+    private readonly promptInput: GenerationInputStream = process.stdin,
     private readonly diagnostics: GenerationDiagnosticStream = process.stderr
   ) {}
 
   public async confirm(challenge: PendingConfirmation): Promise<boolean> {
-    if (this.diagnostics.isTTY !== true) {
-      throw new Error("Generation confirmation requires a local TTY");
-    }
+    this.assertLocalTty("Generation confirmation");
     if (challenge.status !== "pending") {
       throw new Error("Generation confirmation challenge is not pending");
     }
@@ -130,7 +148,7 @@ export class InquirerGenerationPrompt implements GenerationPromptPort {
     const answer = await this.prompts.confirm({
       message: `Approve action at step ${String(challenge.stepIndex)}?`,
       default: false
-    });
+    }, this.context());
     if (typeof answer !== "boolean") {
       throw new Error("Prompt returned an invalid confirmation");
     }
@@ -140,6 +158,7 @@ export class InquirerGenerationPrompt implements GenerationPromptPort {
   public async buildManualProposal(
     input: ManualProposalInput
   ): Promise<ProposedStep> {
+    this.assertLocalTty("Manual generation takeover");
     const shared = common(input);
     if (input.action === "back" || input.action === "wait") {
       return ProposedStepSchema.parse({ action: input.action, ...shared });
@@ -148,7 +167,7 @@ export class InquirerGenerationPrompt implements GenerationPromptPort {
       const text = selectedString(await this.prompts.input({
         message: "Text to enter",
         validate: (answer) => answer.length > 0 || "Text must not be empty"
-      }));
+      }, this.context()));
       return ProposedStepSchema.parse({ action: input.action, text, ...shared });
     }
     if (input.action === "scrollTo") {
@@ -172,7 +191,7 @@ export class InquirerGenerationPrompt implements GenerationPromptPort {
         message: "Long-click duration (ms)",
         default: 800,
         min: 1
-      }), 1);
+      }, this.context()), 1);
       return ProposedStepSchema.parse({
         action: input.action,
         locator: target.locator,
@@ -211,7 +230,7 @@ export class InquirerGenerationPrompt implements GenerationPromptPort {
       default: 20,
       min: 1,
       max: 30
-    }), 1, 30);
+    }, this.context()), 1, 30);
     return ProposedStepSchema.parse({
       action: "scrollTo",
       locator: target.locator,
@@ -234,7 +253,7 @@ export class InquirerGenerationPrompt implements GenerationPromptPort {
         name: target.label,
         value: target.element.id
       }))
-    }), targets.map((target) => target.element.id));
+    }, this.context()), targets.map((target) => target.element.id));
     const target = targets.find((candidate) => candidate.element.id === id);
     if (target === undefined) {
       throw new Error("Prompt returned an invalid selection");
@@ -252,7 +271,7 @@ export class InquirerGenerationPrompt implements GenerationPromptPort {
         name: direction,
         value: direction
       }))
-    });
+    }, this.context());
     return selectedString(value, directions) as typeof directions[number];
   }
 
@@ -265,12 +284,28 @@ export class InquirerGenerationPrompt implements GenerationPromptPort {
       default: 0.6,
       min: 0.01,
       max: 1
-    }), 0.01, 1);
+    }, this.context()), 0.01, 1);
     const durationMs = selectedNumber(await this.prompts.number({
       message: "Swipe duration (ms)",
       default: 300,
       min: 1
-    }), 1);
+    }, this.context()), 1);
     return { distancePercent, durationMs };
+  }
+
+  private assertLocalTty(operation: string): void {
+    if (
+      this.promptInput.isTTY !== true
+      || this.diagnostics.isTTY !== true
+    ) {
+      throw new Error(`${operation} requires local TTY input and diagnostics`);
+    }
+  }
+
+  private context(): GenerationPromptContext {
+    return {
+      input: this.promptInput,
+      output: this.diagnostics
+    };
   }
 }

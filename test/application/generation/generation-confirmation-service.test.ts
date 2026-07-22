@@ -123,6 +123,24 @@ function harness(confirmResult = true): {
   };
 }
 
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (error: Error) => void;
+} {
+  let resolvePromise: (value: T) => void = () => undefined;
+  let rejectPromise: (error: Error) => void = () => undefined;
+  const promise = new Promise<T>((resolve, reject) => {
+    resolvePromise = resolve;
+    rejectPromise = reject;
+  });
+  return {
+    promise,
+    resolve: resolvePromise,
+    reject: rejectPromise
+  };
+}
+
 describe("GenerationConfirmationService", () => {
   it("binds and persists a short-lived exact next-step challenge", async () => {
     const runtime = snapshot();
@@ -300,7 +318,7 @@ describe("GenerationConfirmationService", () => {
     expect(test.current().pendingConfirmation).toBeNull();
   });
 
-  it("invalidates a challenge after an unrelated session revision change", async () => {
+  it("fails closed without clearing after an unrelated revision change", async () => {
     const runtime = snapshot();
     const test = harness();
     await test.service.request({
@@ -320,10 +338,13 @@ describe("GenerationConfirmationService", () => {
       snapshot: runtime
     })).rejects.toThrow(/authoritative/i);
     expect(test.confirm).not.toHaveBeenCalled();
-    expect(test.current().pendingConfirmation).toBeNull();
+    expect(test.current().pendingConfirmation).toMatchObject({
+      challengeId: "challenge-1",
+      status: "pending"
+    });
   });
 
-  it("revalidates and clears state changed while the local prompt is open", async () => {
+  it("revalidates without stale cleanup when state changes during prompting", async () => {
     const runtime = snapshot();
     const test = harness();
     await test.service.request({
@@ -345,7 +366,10 @@ describe("GenerationConfirmationService", () => {
       proposal: proposal(runtime),
       snapshot: runtime
     })).rejects.toThrow(/changed while prompting/i);
-    expect(test.current().pendingConfirmation).toBeNull();
+    expect(test.current().pendingConfirmation).toMatchObject({
+      challengeId: "challenge-1",
+      status: "pending"
+    });
   });
 
   it("routes manual proposals through the same validation and risk pipeline", async () => {
@@ -383,5 +407,141 @@ describe("GenerationConfirmationService", () => {
         layout: runtime.layout
       }
     })).rejects.toThrow();
+  });
+
+  it.each(["decline", "failure"] as const)(
+    "does not let competing %s cleanup clear an approved challenge",
+    async (outcome) => {
+      const runtime = snapshot();
+      const firstPrompt = deferred<boolean>();
+      const secondPrompt = deferred<boolean>();
+      const test = harness();
+      test.confirm.mockReset();
+      test.confirm
+        .mockImplementationOnce(() => firstPrompt.promise)
+        .mockImplementationOnce(() => secondPrompt.promise);
+      await test.service.request({
+        generationId: "generation-1",
+        proposal: proposal(runtime),
+        snapshot: runtime
+      });
+
+      const first = test.service.confirm({
+        generationId: "generation-1",
+        challengeId: "challenge-1",
+        proposal: proposal(runtime),
+        snapshot: runtime
+      });
+      const second = test.service.confirm({
+        generationId: "generation-1",
+        challengeId: "challenge-1",
+        proposal: proposal(runtime),
+        snapshot: runtime
+      });
+      await vi.waitFor(() => {
+        expect(test.confirm).toHaveBeenCalledTimes(2);
+      });
+      firstPrompt.resolve(true);
+      await expect(first).resolves.toMatchObject({ status: "approved" });
+      if (outcome === "decline") {
+        secondPrompt.resolve(false);
+      } else {
+        secondPrompt.reject(new Error("TTY failed"));
+      }
+
+      await expect(second).rejects.toThrow();
+      expect(test.current().pendingConfirmation).toMatchObject({
+        challengeId: "challenge-1",
+        status: "approved"
+      });
+    }
+  );
+
+  it("allows only one of two concurrent approvals to persist", async () => {
+    const runtime = snapshot();
+    const firstPrompt = deferred<boolean>();
+    const secondPrompt = deferred<boolean>();
+    const test = harness();
+    test.confirm.mockReset();
+    test.confirm
+      .mockImplementationOnce(() => firstPrompt.promise)
+      .mockImplementationOnce(() => secondPrompt.promise);
+    await test.service.request({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime
+    });
+
+    const attempts = [
+      test.service.confirm({
+        generationId: "generation-1",
+        challengeId: "challenge-1",
+        proposal: proposal(runtime),
+        snapshot: runtime
+      }),
+      test.service.confirm({
+        generationId: "generation-1",
+        challengeId: "challenge-1",
+        proposal: proposal(runtime),
+        snapshot: runtime
+      })
+    ];
+    await vi.waitFor(() => {
+      expect(test.confirm).toHaveBeenCalledTimes(2);
+    });
+    firstPrompt.resolve(true);
+    await expect(attempts[0]).resolves.toMatchObject({ status: "approved" });
+    secondPrompt.resolve(true);
+    const second = await Promise.allSettled([attempts[1]]);
+
+    expect(second[0].status).toBe("rejected");
+    expect(test.current().pendingConfirmation).toMatchObject({
+      challengeId: "challenge-1",
+      status: "approved"
+    });
+  });
+
+  it("does not let stale prompt cleanup clear a replacement challenge", async () => {
+    const runtime = snapshot();
+    const promptResult = deferred<boolean>();
+    const test = harness();
+    test.confirm.mockReset();
+    test.confirm.mockImplementationOnce(() => promptResult.promise);
+    await test.service.request({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime
+    });
+    const confirmation = test.service.confirm({
+      generationId: "generation-1",
+      challengeId: "challenge-1",
+      proposal: proposal(runtime),
+      snapshot: runtime
+    });
+    await vi.waitFor(() => {
+      expect(test.confirm).toHaveBeenCalledTimes(1);
+    });
+    test.mutate((current) => {
+      const pending = current.pendingConfirmation;
+      if (pending === null) {
+        throw new Error("Expected pending confirmation");
+      }
+      return {
+        ...current,
+        revision: current.revision + 1,
+        pendingConfirmation: {
+          ...pending,
+          proposalHash: "d".repeat(64)
+        }
+      };
+    });
+    promptResult.reject(new Error("TTY failed"));
+
+    await expect(confirmation).rejects.toThrow(/TTY failed/);
+    expect(test.current().pendingConfirmation).toMatchObject({
+      challengeId: "challenge-1",
+      proposalHash: "d".repeat(64),
+      status: "pending"
+    });
   });
 });

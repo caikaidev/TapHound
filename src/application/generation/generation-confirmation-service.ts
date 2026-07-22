@@ -1,6 +1,5 @@
 import {
   GenerationSessionSchema,
-  type GenerationSession,
   type PendingConfirmation
 } from "../../domain/generation.js";
 import {
@@ -58,6 +57,11 @@ export type ConfirmationRequestResult =
     status: "confirmationRequired";
     challenge: PendingConfirmation;
   };
+
+interface PendingChallengeToken {
+  expectedRevision: number;
+  expectedChallenge: PendingConfirmation;
+}
 
 function locatorSummary(step: ProposedStep): string {
   if (
@@ -192,6 +196,16 @@ export class GenerationConfirmationService {
     if (challenge.status !== "pending") {
       throw bindingFailure("Generation confirmation was already used");
     }
+    const cleanupToken: PendingChallengeToken = {
+      expectedRevision: proposal.binding.baseRevision + 1,
+      expectedChallenge: {
+        ...challenge,
+        challengeId: input.challengeId,
+        proposalHash: hashProposedStep(proposal),
+        snapshotHash: hashRuntimeSnapshot(snapshot),
+        status: "pending"
+      }
+    };
 
     const expired = this.dependencies.now().getTime()
       >= new Date(challenge.expiresAt).getTime();
@@ -217,7 +231,7 @@ export class GenerationConfirmationService {
       || !snapshotMatches
       || !stateMatches
     ) {
-      await this.clear(session);
+      await this.clearPendingChallenge(session.id, cleanupToken);
       if (expired) {
         throw bindingFailure("Generation confirmation challenge expired");
       }
@@ -238,7 +252,7 @@ export class GenerationConfirmationService {
         proposal
       });
     } catch {
-      await this.clear(session);
+      await this.clearPendingChallenge(session.id, cleanupToken);
       throw bindingFailure(
         "Generation proposal or runtime state changed before confirmation"
       );
@@ -248,11 +262,11 @@ export class GenerationConfirmationService {
     try {
       confirmed = await this.dependencies.prompt.confirm(challenge);
     } catch (error) {
-      await this.clearChallenge(session.id, challenge.challengeId);
+      await this.clearPendingChallenge(session.id, cleanupToken);
       throw error;
     }
     if (!confirmed) {
-      await this.clearChallenge(session.id, challenge.challengeId);
+      await this.clearPendingChallenge(session.id, cleanupToken);
       throw bindingFailure("Generation action confirmation was declined");
     }
 
@@ -265,17 +279,13 @@ export class GenerationConfirmationService {
       && this.dependencies.now().getTime()
         < new Date(challenge.expiresAt).getTime();
     if (!stillAuthoritative) {
-      if (
-        latest.pendingConfirmation?.challengeId === challenge.challengeId
-      ) {
-        await this.clear(latest);
-      }
+      await this.clearPendingChallenge(session.id, cleanupToken);
       throw bindingFailure(
         "Generation confirmation state changed while prompting"
       );
     }
     if (latest.revision === Number.MAX_SAFE_INTEGER) {
-      await this.clear(latest);
+      await this.clearPendingChallenge(session.id, cleanupToken);
       throw bindingFailure("Generation revision cannot approve challenge");
     }
     const approved = GenerationSessionSchema.parse({
@@ -294,35 +304,34 @@ export class GenerationConfirmationService {
     return { status: "approved", proposal };
   };
 
-  private async clear(session: GenerationSession): Promise<void> {
-    if (session.pendingConfirmation === null) {
-      return;
-    }
-    if (session.revision === Number.MAX_SAFE_INTEGER) {
-      throw bindingFailure("Generation revision cannot clear challenge");
-    }
-    const cleared = GenerationSessionSchema.parse({
-      ...session,
-      revision: session.revision + 1,
-      pendingConfirmation: null
-    });
-    await this.dependencies.store.updateConfirmation(
-      session.id,
-      session.revision,
-      cleared
-    );
-  }
-
-  private async clearChallenge(
+  private async clearPendingChallenge(
     generationId: string,
-    challengeId: string
+    token: PendingChallengeToken
   ): Promise<void> {
     const latest = GenerationSessionSchema.parse(
       await this.dependencies.store.read(generationId)
     );
-    if (latest.pendingConfirmation?.challengeId !== challengeId) {
+    const pending = latest.pendingConfirmation;
+    if (
+      latest.revision !== token.expectedRevision
+      || pending === null
+      || pending.status !== "pending"
+      || JSON.stringify(pending) !== JSON.stringify(token.expectedChallenge)
+    ) {
       return;
     }
-    await this.clear(latest);
+    if (latest.revision === Number.MAX_SAFE_INTEGER) {
+      throw bindingFailure("Generation revision cannot clear challenge");
+    }
+    const cleared = GenerationSessionSchema.parse({
+      ...latest,
+      revision: latest.revision + 1,
+      pendingConfirmation: null
+    });
+    await this.dependencies.store.updateConfirmation(
+      latest.id,
+      latest.revision,
+      cleared
+    );
   }
 }

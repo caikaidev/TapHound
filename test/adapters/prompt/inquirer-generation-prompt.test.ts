@@ -1,7 +1,11 @@
+import { PassThrough } from "node:stream";
+
 import { describe, expect, it, vi } from "vitest";
 
 import {
   InquirerGenerationPrompt,
+  type GenerationInputStream,
+  type GenerationDiagnosticStream,
   type GenerationPromptFunctions
 } from "../../../src/adapters/prompt/inquirer-generation-prompt.js";
 import type { PendingConfirmation } from "../../../src/domain/generation.js";
@@ -51,6 +55,20 @@ function functions(answers: unknown[]): GenerationPromptFunctions {
   };
 }
 
+function streams(
+  inputIsTTY = true,
+  outputIsTTY = true
+): {
+  input: GenerationInputStream;
+  output: GenerationDiagnosticStream;
+} {
+  const inputStream = new PassThrough() as GenerationInputStream;
+  const outputStream = new PassThrough() as GenerationDiagnosticStream;
+  inputStream.isTTY = inputIsTTY;
+  outputStream.isTTY = outputIsTTY;
+  return { input: inputStream, output: outputStream };
+}
+
 function input(
   action: ManualProposalInput["action"]
 ): ManualProposalInput {
@@ -69,10 +87,14 @@ function input(
 
 describe("InquirerGenerationPrompt", () => {
   it("uses stderr/TTY for confirmation and never requires stdout", async () => {
-    const diagnostics = { write: vi.fn(() => true), isTTY: true };
+    const io = streams();
+    const write = vi.spyOn(io.output, "write");
+    const stdoutWrite = vi.spyOn(process.stdout, "write");
+    const injected = functions([true]);
     const prompt = new InquirerGenerationPrompt(
-      functions([true]),
-      diagnostics
+      injected,
+      io.input,
+      io.output
     );
     const challenge: PendingConfirmation = {
       challengeId: "challenge-1",
@@ -85,15 +107,32 @@ describe("InquirerGenerationPrompt", () => {
     };
 
     await expect(prompt.confirm(challenge)).resolves.toBe(true);
-    expect(diagnostics.write).toHaveBeenCalledWith(
+    const stdoutCalls = stdoutWrite.mock.calls.length;
+    stdoutWrite.mockRestore();
+    expect(stdoutCalls).toBe(0);
+    expect(write).toHaveBeenCalledWith(
       "TapHound confirmation: Back from com.example.app.MainActivity\n"
+    );
+    expect(injected.confirm).toHaveBeenCalledWith(
+      expect.objectContaining({ default: false }),
+      { input: io.input, output: io.output }
     );
   });
 
-  it("rejects confirmation without a local TTY", async () => {
+  it.each([
+    ["piped stdin", false, true],
+    ["non-TTY diagnostics", true, false]
+  ])("rejects confirmation with %s before invoking a prompt", async (
+    _name,
+    inputIsTTY,
+    outputIsTTY
+  ) => {
+    const io = streams(inputIsTTY, outputIsTTY);
+    const injected = functions([true]);
     const prompt = new InquirerGenerationPrompt(
-      functions([true]),
-      { write: vi.fn(), isTTY: false }
+      injected,
+      io.input,
+      io.output
     );
     await expect(prompt.confirm({
       challengeId: "challenge-1",
@@ -104,6 +143,30 @@ describe("InquirerGenerationPrompt", () => {
       expiresAt: "2026-07-22T12:00:30.000Z",
       status: "pending"
     })).rejects.toThrow(/TTY/i);
+    expect(injected.confirm).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["piped stdin", false, true],
+    ["non-TTY diagnostics", true, false]
+  ])("rejects manual takeover with %s before invoking a prompt", async (
+    _name,
+    inputIsTTY,
+    outputIsTTY
+  ) => {
+    const io = streams(inputIsTTY, outputIsTTY);
+    const injected = functions(["button"]);
+    const prompt = new InquirerGenerationPrompt(
+      injected,
+      io.input,
+      io.output
+    );
+
+    await expect(prompt.buildManualProposal(input("click")))
+      .rejects.toThrow(/TTY/i);
+    expect(injected.select).not.toHaveBeenCalled();
+    expect(injected.input).not.toHaveBeenCalled();
+    expect(injected.number).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -143,12 +206,19 @@ describe("InquirerGenerationPrompt", () => {
     answers,
     expected
   ) => {
+    const io = streams();
+    const injected = functions([...answers]);
+    const stdoutWrite = vi.spyOn(process.stdout, "write");
     const prompt = new InquirerGenerationPrompt(
-      functions([...answers]),
-      { write: vi.fn(), isTTY: true }
+      injected,
+      io.input,
+      io.output
     );
     const proposal = await prompt.buildManualProposal(input(action));
+    const stdoutCalls = stdoutWrite.mock.calls.length;
+    stdoutWrite.mockRestore();
 
+    expect(stdoutCalls).toBe(0);
     expect(proposal).toMatchObject({
       ...expected,
       binding,
@@ -156,12 +226,26 @@ describe("InquirerGenerationPrompt", () => {
       expect: input(action).expect
     });
     expect(proposal).not.toHaveProperty("fallback");
+    for (const operation of [
+      injected.select,
+      injected.input,
+      injected.number
+    ]) {
+      for (const call of vi.mocked(operation).mock.calls) {
+        expect(call[1]).toEqual({
+          input: io.input,
+          output: io.output
+        });
+      }
+    }
   });
 
   it("rejects selections not returned by deterministic target lists", async () => {
+    const io = streams();
     const prompt = new InquirerGenerationPrompt(
       functions(["unknown"]),
-      { write: vi.fn(), isTTY: true }
+      io.input,
+      io.output
     );
     await expect(prompt.buildManualProposal(input("click")))
       .rejects.toThrow(/selection/i);

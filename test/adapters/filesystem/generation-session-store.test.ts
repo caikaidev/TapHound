@@ -24,6 +24,11 @@ import {
 } from "../../../src/ports/generation-session-store.js";
 
 const roots: string[] = [];
+const proposalBinding = {
+  generationId: "generation-1",
+  baseRevision: 1,
+  snapshotHash: "b".repeat(64)
+};
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map(async (root) => {
@@ -94,6 +99,7 @@ function validSession(
     },
     candidateSteps: [{
       action: "wait",
+      binding: proposalBinding,
       activity: { before: "com.example.app.MainActivity" }
     }],
     inFlight: null,
@@ -298,6 +304,7 @@ describe("FileSystemGenerationSessionStore", () => {
 
     await expectStoreError(store.update("generation-1", 0, validSession(1, {
       candidateSteps: [{
+        binding: proposalBinding,
         action: "back",
         activity: { before: "com.example.app.MainActivity" }
       }],
@@ -308,6 +315,7 @@ describe("FileSystemGenerationSessionStore", () => {
     await expect(store.read("generation-1")).resolves.toEqual(begun);
     await expectStoreError(store.update("generation-1", 1, validSession(2, {
       candidateSteps: [{
+        binding: proposalBinding,
         action: "back",
         activity: { before: "com.example.app.MainActivity" }
       }],
@@ -347,6 +355,7 @@ describe("FileSystemGenerationSessionStore", () => {
     }],
     ["candidate steps", {
       candidateSteps: [{
+        binding: proposalBinding,
         action: "back",
         activity: { before: "com.example.app.MainActivity" }
       }]
@@ -429,6 +438,7 @@ describe("FileSystemGenerationSessionStore", () => {
     await expectStoreError(
       store.recover("generation-1", 2, validSession(3, {
         candidateSteps: [{
+          binding: proposalBinding,
           action: "back",
           activity: { before: "com.example.app.MainActivity" }
         }]
@@ -447,6 +457,7 @@ describe("FileSystemGenerationSessionStore", () => {
     await store.create(validSession(0, { inFlight }));
     const completed = validSession(1, {
       candidateSteps: [{
+        binding: proposalBinding,
         action: "wait",
         activity: { before: "com.example.app.CompletedActivity" }
       }],
@@ -461,6 +472,129 @@ describe("FileSystemGenerationSessionStore", () => {
     );
 
     await expect(store.read("generation-1")).resolves.toEqual(completed);
+  });
+
+  it.each([
+    "begin",
+    "markRecovery",
+    "completeStep",
+    "recover",
+    "commitSnapshot"
+  ] as const)("preserves immutable Core identity during %s", async (
+    transition
+  ) => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    const inFlight = {
+      stepIndex: 0,
+      snapshotHash: "b".repeat(64)
+    };
+    const changedTarget = {
+      ...validSession().target,
+      deviceSerial: "different-device"
+    };
+
+    if (transition === "begin") {
+      await store.create(validSession());
+      await expectStoreError(store.update(
+        "generation-1",
+        0,
+        validSession(1, { inFlight, target: changedTarget })
+      ), "INVALID_TRANSITION");
+      return;
+    }
+    if (transition === "markRecovery") {
+      await store.create(validSession(0, { inFlight }));
+      await expectStoreError(store.update(
+        "generation-1",
+        0,
+        validSession(1, {
+          state: "recoveryRequired",
+          inFlight,
+          target: changedTarget
+        })
+      ), "INVALID_TRANSITION");
+      return;
+    }
+    if (transition === "completeStep") {
+      await store.create(validSession(0, { inFlight }));
+      await expectStoreError(store.completeStep(
+        "generation-1",
+        0,
+        inFlight,
+        validSession(1, { target: changedTarget })
+      ), "INVALID_TRANSITION");
+      return;
+    }
+    if (transition === "recover") {
+      await store.create(validSession(0, {
+        state: "recoveryRequired",
+        inFlight
+      }));
+      await expectStoreError(store.recover(
+        "generation-1",
+        0,
+        validSession(1, { target: changedTarget })
+      ), "INVALID_TRANSITION");
+      return;
+    }
+
+    await store.create(validSession(0, {
+      bindings: {
+        ...validSession().bindings,
+        snapshotHash: null
+      }
+    }));
+    await expectStoreError(store.commitSnapshot(
+      "generation-1",
+      0,
+      validSession(1, {
+        bindings: {
+          ...validSession().bindings,
+          snapshotHash: "c".repeat(64)
+        },
+        target: changedTarget
+      })
+    ), "INVALID_TRANSITION");
+  });
+
+  it("completeStep preserves the pre-action latest snapshot reference", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    const inFlight = {
+      stepIndex: 0,
+      snapshotHash: "b".repeat(64)
+    };
+    await store.create(validSession(0, { inFlight }));
+
+    await expectStoreError(store.completeStep(
+      "generation-1",
+      0,
+      inFlight,
+      validSession(1, {
+        bindings: {
+          ...validSession().bindings,
+          snapshotHash: "c".repeat(64)
+        }
+      })
+    ), "INVALID_TRANSITION");
+  });
+
+  it("rejects latest snapshot changes through ordinary idle updates", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(validSession());
+
+    await expectStoreError(store.update(
+      "generation-1",
+      0,
+      validSession(1, {
+        bindings: {
+          ...validSession().bindings,
+          snapshotHash: "c".repeat(64)
+        }
+      })
+    ), "INVALID_TRANSITION");
   });
 
   it("rejects completeStep for mismatched inFlight and stale revisions", async () => {

@@ -5,8 +5,14 @@ import { Command } from "commander";
 import {
   GenerationOperationError
 } from "../../application/generation/generation-starter.js";
+import {
+  ProjectConfigurationError
+} from "../../application/project/project-describer.js";
 import { TapHoundConfigSchema } from "../../domain/config.js";
 import { ProjectContextSchema } from "../../domain/project-context.js";
+import {
+  GenerationSessionStoreError
+} from "../../ports/generation-session-store.js";
 import type { CliDependencies } from "../dependencies.js";
 import {
   errorMessage,
@@ -63,11 +69,16 @@ function createStartCommand(dependencies: CliDependencies): Command {
     .option("--json", "Emit one machine-readable JSON value")
     .action(async (options: GenerationStartOptions): Promise<void> => {
       let config;
-      let context;
       try {
         config = TapHoundConfigSchema.parse(await dependencies.readJson(
           resolve(options.project, options.config)
         ));
+      } catch (error) {
+        writeFailure(dependencies, options, 2, "CONFIG_INVALID", error);
+        return;
+      }
+      let context;
+      try {
         context = ProjectContextSchema.parse(await dependencies.readJson(
           resolve(options.project, options.context)
         ));
@@ -76,7 +87,7 @@ function createStartCommand(dependencies: CliDependencies): Command {
           dependencies,
           options,
           2,
-          "CONFIG_INVALID",
+          "CONTEXT_INVALID",
           error
         );
         return;
@@ -147,6 +158,16 @@ function createStartCommand(dependencies: CliDependencies): Command {
           );
           return;
         }
+        if (error instanceof ProjectConfigurationError) {
+          writeFailure(
+            dependencies,
+            options,
+            2,
+            "CONFIG_INVALID",
+            error
+          );
+          return;
+        }
         writeFailure(
           dependencies,
           options,
@@ -191,6 +212,28 @@ function createObserveCommand(dependencies: CliDependencies): Command {
         }
         dependencies.setExitCode(0);
       } catch (error) {
+        if (
+          (
+            error instanceof GenerationOperationError
+            && error.code === "SNAPSHOT_STALE"
+          )
+          || (
+            error instanceof GenerationSessionStoreError
+            && (
+              error.code === "REVISION_CONFLICT"
+              || error.code === "INVALID_TRANSITION"
+            )
+          )
+        ) {
+          writeFailure(
+            dependencies,
+            options,
+            1,
+            "SNAPSHOT_STALE",
+            error
+          );
+          return;
+        }
         writeFailure(
           dependencies,
           options,

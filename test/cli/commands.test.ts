@@ -1,8 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
+import {
+  GenerationOperationError
+} from "../../src/application/generation/generation-starter.js";
 import { ProjectConfigurationError } from "../../src/application/project/project-describer.js";
 import { createProgram } from "../../src/cli/program.js";
 import type { CliDependencies, TextOutput } from "../../src/cli/dependencies.js";
+import {
+  GenerationSessionStoreError
+} from "../../src/ports/generation-session-store.js";
 import { runtimeConfig, runtimeJourney } from "../fakes/runtime-fixture.js";
 import { validReport } from "../fixtures/report.js";
 
@@ -388,6 +394,104 @@ describe("TapHound CLI commands", () => {
       generationId: "generation-1"
     });
     expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("maps invalid generation Context input to CONTEXT_INVALID", async () => {
+    const test = dependencies();
+    vi.mocked(test.value.readJson).mockImplementation((path) => Promise.resolve(
+      path.includes("context") ? { version: 1, invalid: true } : runtimeConfig
+    ));
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "generation", "start",
+      "--project", "/project",
+      "--context", "context.json",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "error",
+      exitCode: 2,
+      failure: { code: "CONTEXT_INVALID" }
+    });
+    expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
+    expect(test.exitCodes).toEqual([2]);
+  });
+
+  it("maps unreadable generation Context JSON to CONTEXT_INVALID", async () => {
+    const test = dependencies();
+    vi.mocked(test.value.readJson).mockImplementation((path) => (
+      path.includes("context")
+        ? Promise.reject(new Error("invalid Context JSON"))
+        : Promise.resolve(runtimeConfig)
+    ));
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "generation", "start",
+      "--project", "/project",
+      "--context", "context.json",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toEqual({
+      status: "error",
+      exitCode: 2,
+      failure: {
+        code: "CONTEXT_INVALID",
+        message: "invalid Context JSON"
+      }
+    });
+    expect(test.exitCodes).toEqual([2]);
+  });
+
+  it("maps generation project conflicts to CONFIG_INVALID", async () => {
+    const test = dependencies();
+    vi.mocked(test.value.readJson).mockImplementation((path) => Promise.resolve(
+      path.includes("context") ? generationContext : runtimeConfig
+    ));
+    vi.mocked(test.value.projectDescriber.describe).mockRejectedValueOnce(
+      new ProjectConfigurationError("metadata package conflict")
+    );
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "generation", "start",
+      "--project", "/project",
+      "--context", "context.json",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "error",
+      exitCode: 2,
+      failure: { code: "CONFIG_INVALID" }
+    });
+    expect(test.exitCodes).toEqual([2]);
+  });
+
+  it.each([
+    new GenerationSessionStoreError("REVISION_CONFLICT", "revision changed"),
+    new GenerationOperationError("SNAPSHOT_STALE", "binding changed")
+  ])("maps observe binding conflicts to SNAPSHOT_STALE", async (error) => {
+    const test = dependencies();
+    vi.mocked(test.value.runtimeObserver.observe).mockRejectedValueOnce(error);
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "generation", "observe",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toEqual({
+      status: "error",
+      exitCode: 1,
+      failure: {
+        code: "SNAPSHOT_STALE",
+        message: error.message
+      }
+    });
+    expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
+    expect(test.exitCodes).toEqual([1]);
   });
 
   it("maps invalid project config and metadata conflicts to config errors", async () => {

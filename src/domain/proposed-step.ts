@@ -12,7 +12,16 @@ const ProposedActivitySchema = z.strictObject({
   before: QualifiedActivitySchema
 });
 
+export const ProposalBindingSchema = z.strictObject({
+  generationId: z.string().regex(
+    /^[A-Za-z\d](?:[A-Za-z\d._-]*[A-Za-z\d])?$/
+  ),
+  baseRevision: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  snapshotHash: z.string().regex(/^[a-f\d]{64}$/)
+});
+
 const CommonStepShape = {
+  binding: ProposalBindingSchema,
   activity: ProposedActivitySchema,
   expect: ExpectSchema.optional()
 };
@@ -77,3 +86,4 @@ export const ProposedStepSchema = z.discriminatedUnion("action", [
 ]);
 
 export type ProposedStep = z.infer<typeof ProposedStepSchema>;
+export type ProposalBinding = z.infer<typeof ProposalBindingSchema>;

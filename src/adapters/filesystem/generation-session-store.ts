@@ -21,6 +21,7 @@ import {
 import {
   GenerationInFlightSchema,
   GenerationSessionSchema,
+  generationCoreIdentity,
   type GenerationInFlight,
   type GenerationSession
 } from "../../domain/generation.js";
@@ -372,10 +373,38 @@ function transitionStableState(
   };
 }
 
+function assertCoreIdentityPreserved(
+  current: GenerationSession,
+  next: GenerationSession
+): void {
+  if (
+    JSON.stringify(generationCoreIdentity(current))
+    !== JSON.stringify(generationCoreIdentity(next))
+  ) {
+    throw new GenerationSessionStoreError(
+      "INVALID_TRANSITION",
+      "Generation Core identity is immutable"
+    );
+  }
+}
+
+function assertLatestSnapshotPreserved(
+  current: GenerationSession,
+  next: GenerationSession
+): void {
+  if (current.bindings.snapshotHash !== next.bindings.snapshotHash) {
+    throw new GenerationSessionStoreError(
+      "INVALID_TRANSITION",
+      "Latest snapshot may only change through commitSnapshot"
+    );
+  }
+}
+
 function assertSnapshotTransition(
   current: GenerationSession,
   next: GenerationSession
 ): void {
+  assertCoreIdentityPreserved(current, next);
   const currentBindings = {
     projectHash: current.bindings.projectHash,
     configHash: current.bindings.configHash,
@@ -410,6 +439,8 @@ function assertOrdinaryTransition(
   current: GenerationSession,
   next: GenerationSession
 ): void {
+  assertCoreIdentityPreserved(current, next);
+  assertLatestSnapshotPreserved(current, next);
   if (current.state === "recoveryRequired") {
     throw new GenerationSessionStoreError(
       "INVALID_TRANSITION",
@@ -447,6 +478,8 @@ function assertRecoveryTransition(
   current: GenerationSession,
   next: GenerationSession
 ): void {
+  assertCoreIdentityPreserved(current, next);
+  assertLatestSnapshotPreserved(current, next);
   if (
     current.state !== "recoveryRequired"
     || current.inFlight === null
@@ -1074,6 +1107,8 @@ implements GenerationSessionStore {
           "Step completion must clear the matching active inFlight record"
         );
       }
+      assertCoreIdentityPreserved(current, next);
+      assertLatestSnapshotPreserved(current, next);
       await writeStateAtomically(
         activeDirectory,
         next,

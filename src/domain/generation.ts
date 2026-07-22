@@ -173,6 +173,30 @@ export const GenerationSessionSchema = z.strictObject({
 export type GenerationVariables = z.infer<typeof GenerationVariablesSchema>;
 export type GenerationInFlight = z.infer<typeof GenerationInFlightSchema>;
 export type GenerationSession = z.infer<typeof GenerationSessionSchema>;
+export interface GenerationCoreIdentity {
+  id: GenerationSession["id"];
+  bindings: Pick<
+    GenerationSession["bindings"],
+    "projectHash" | "configHash" | "contextHash"
+  >;
+  target: GenerationSession["target"];
+  variables: GenerationSession["variables"];
+}
+
+export function generationCoreIdentity(
+  session: GenerationSession
+): GenerationCoreIdentity {
+  return {
+    id: session.id,
+    bindings: {
+      projectHash: session.bindings.projectHash,
+      configHash: session.bindings.configHash,
+      contextHash: session.bindings.contextHash
+    },
+    target: session.target,
+    variables: session.variables
+  };
+}
 
 export function bindGenerationVariables(input: unknown): GenerationVariables {
   return GenerationVariablesSchema.parse(input);

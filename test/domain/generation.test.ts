@@ -4,7 +4,8 @@ import {
   GENERATION_ERROR_CODES,
   GenerationSessionSchema,
   bindGenerationVariables,
-  expandProposedStepVariables
+  expandProposedStepVariables,
+  generationCoreIdentity
 } from "../../src/domain/generation.js";
 
 const hashes = {
@@ -18,6 +19,12 @@ const variables = {
   runId: "run-42",
   timestamp: "2026-07-22T12:00:00.000Z",
   randomHex: "c0ffee"
+};
+
+const proposalBinding = {
+  generationId: "generation-1",
+  baseRevision: 1,
+  snapshotHash: "b".repeat(64)
 };
 
 function validSession(): unknown {
@@ -39,6 +46,7 @@ function validSession(): unknown {
     },
     variables,
     candidateSteps: [{
+      binding: proposalBinding,
       action: "wait",
       activity: { before: "com.example.app.MainActivity" }
     }],
@@ -116,6 +124,21 @@ describe("GenerationSessionSchema", () => {
       packageName: "com.example.app",
       deviceSerial: "emulator-5554",
       resetStrategy: "processOnly"
+    });
+  });
+
+  it("projects every immutable Core-owned identity field", () => {
+    const session = GenerationSessionSchema.parse(validSession());
+
+    expect(generationCoreIdentity(session)).toEqual({
+      id: "generation-1",
+      bindings: {
+        projectHash: "d".repeat(64),
+        configHash: "e".repeat(64),
+        contextHash: "a".repeat(64)
+      },
+      target: session.target,
+      variables: session.variables
     });
   });
 
@@ -247,10 +270,12 @@ describe("generation variables", () => {
 
   it("expands bound variables into literal proposed-step strings", () => {
     expect(expandProposedStepVariables({
+      binding: proposalBinding,
       action: "inputText",
       text: "run=${runId};time=${timestamp};nonce=${randomHex}",
       activity: { before: "com.example.app.MainActivity" }
     }, variables)).toEqual({
+      binding: proposalBinding,
       action: "inputText",
       text: "run=run-42;time=2026-07-22T12:00:00.000Z;nonce=c0ffee",
       activity: { before: "com.example.app.MainActivity" }
@@ -259,6 +284,7 @@ describe("generation variables", () => {
 
   it("preserves unrelated JSON braces while expanding variables", () => {
     expect(expandProposedStepVariables({
+      binding: proposalBinding,
       action: "inputText",
       text: "json={\"run\":\"${runId}\"}",
       activity: { before: "com.example.app.MainActivity" }
@@ -269,6 +295,7 @@ describe("generation variables", () => {
 
   it("rejects unbound variable references", () => {
     expect(() => expandProposedStepVariables({
+      binding: proposalBinding,
       action: "inputText",
       text: "${plannerSecret}",
       activity: { before: "com.example.app.MainActivity" }
@@ -282,6 +309,7 @@ describe("generation variables", () => {
     "${}"
   ])("rejects nested or malformed template output %s", (text) => {
     expect(() => expandProposedStepVariables({
+      binding: proposalBinding,
       action: "inputText",
       text,
       activity: { before: "com.example.app.MainActivity" }

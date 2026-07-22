@@ -7,6 +7,10 @@ import {
 } from "../../domain/generation.js";
 import { LayoutElementSchema } from "../../domain/layout.js";
 import {
+  ProposalBindingSchema,
+  type ProposalBinding
+} from "../../domain/proposed-step.js";
+import {
   RuntimeSnapshotSchema,
   hashRuntimeSnapshot,
   type RuntimeSnapshot
@@ -16,12 +20,9 @@ import type { AndroidCliPort } from "../../ports/android-cli.js";
 import type {
   GenerationSessionStore
 } from "../../ports/generation-session-store.js";
+import { GenerationOperationError } from "./generation-starter.js";
 
-export interface RuntimeObservationBinding {
-  generationId: string;
-  baseRevision: number;
-  snapshotHash: string;
-}
+export type RuntimeObservationBinding = ProposalBinding;
 
 export interface RuntimeObservation {
   binding: RuntimeObservationBinding;
@@ -43,6 +44,13 @@ export interface RuntimeObserverDependencies {
   androidCli: Pick<AndroidCliPort, "layout" | "captureScreen">;
   now: () => Date;
   createAttemptId: () => string;
+}
+
+export interface SnapshotReobservationGuardDependencies {
+  store: Pick<GenerationSessionStore, "read">;
+  adb: Pick<AdbPort, "foregroundComponent" | "pid">;
+  androidCli: Pick<AndroidCliPort, "layout">;
+  now: () => Date;
 }
 
 function failedCapture(result: {
@@ -74,6 +82,40 @@ function assertObservable(session: GenerationSession): void {
   }
 }
 
+async function collectRuntime(
+  dependencies: {
+    adb: Pick<AdbPort, "foregroundComponent" | "pid">;
+    androidCli: Pick<AndroidCliPort, "layout">;
+  },
+  session: GenerationSession,
+  signal?: AbortSignal
+): Promise<{
+  foregroundPackageName: string;
+  activity: string;
+  pid: number | null;
+  layout: z.infer<typeof LayoutElementSchema>[];
+}> {
+  const identity = {
+    packageName: session.target.packageName,
+    deviceSerial: session.target.deviceSerial,
+    ...(signal === undefined ? {} : { signal })
+  };
+  const foreground = await dependencies.adb.foregroundComponent(identity);
+  const pid = await dependencies.adb.pid(identity);
+  const layout = z.array(LayoutElementSchema).parse(
+    await dependencies.androidCli.layout({
+      deviceSerial: session.target.deviceSerial,
+      ...(signal === undefined ? {} : { signal })
+    })
+  );
+  return {
+    foregroundPackageName: foreground.packageName,
+    activity: foreground.activity,
+    pid,
+    layout
+  };
+}
+
 export class RuntimeObserver {
   public constructor(
     private readonly dependencies: RuntimeObserverDependencies
@@ -86,20 +128,10 @@ export class RuntimeObserver {
       await this.dependencies.store.read(input.generationId)
     );
     assertObservable(current);
-    const identity = {
-      packageName: current.target.packageName,
-      deviceSerial: current.target.deviceSerial,
-      ...(input.signal === undefined ? {} : { signal: input.signal })
-    };
-    const foreground = await this.dependencies.adb.foregroundComponent(
-      identity
-    );
-    const pid = await this.dependencies.adb.pid(identity);
-    const layout = z.array(LayoutElementSchema).parse(
-      await this.dependencies.androidCli.layout({
-        deviceSerial: current.target.deviceSerial,
-        ...(input.signal === undefined ? {} : { signal: input.signal })
-      })
+    const runtime = await collectRuntime(
+      this.dependencies,
+      current,
+      input.signal
     );
 
     const baseRevision = current.revision + 1;
@@ -133,12 +165,12 @@ export class RuntimeObserver {
       baseRevision,
       deviceSerial: current.target.deviceSerial,
       expectedPackageName: current.target.packageName,
-      foregroundPackageName: foreground.packageName,
-      activity: foreground.activity,
-      pid,
+      foregroundPackageName: runtime.foregroundPackageName,
+      activity: runtime.activity,
+      pid: runtime.pid,
       capturedAt: this.dependencies.now().toISOString(),
       screenshotPath,
-      layout
+      layout: runtime.layout
     });
     const snapshotHash = hashRuntimeSnapshot(snapshot);
     await this.dependencies.store.writeEvidence(
@@ -169,5 +201,70 @@ export class RuntimeObserver {
       snapshot,
       snapshotHash
     };
+  };
+}
+
+export class SnapshotReobservationGuard {
+  public constructor(
+    private readonly dependencies: SnapshotReobservationGuardDependencies
+  ) {}
+
+  public readonly assertFresh = async (
+    input: ProposalBinding,
+    signal?: AbortSignal
+  ): Promise<RuntimeSnapshot> => {
+    try {
+      const binding = ProposalBindingSchema.parse(input);
+      const session = GenerationSessionSchema.parse(
+        await this.dependencies.store.read(binding.generationId)
+      );
+      if (
+        session.id !== binding.generationId
+        || session.state !== "active"
+        || session.revision !== binding.baseRevision
+        || session.bindings.snapshotHash !== binding.snapshotHash
+      ) {
+        throw new GenerationOperationError(
+          "SNAPSHOT_STALE",
+          "Proposal snapshot binding is no longer authoritative"
+        );
+      }
+      const runtime = await collectRuntime(
+        this.dependencies,
+        session,
+        signal
+      );
+      const snapshot = RuntimeSnapshotSchema.parse({
+        version: 1,
+        generationId: session.id,
+        baseRevision: binding.baseRevision,
+        deviceSerial: session.target.deviceSerial,
+        expectedPackageName: session.target.packageName,
+        foregroundPackageName: runtime.foregroundPackageName,
+        activity: runtime.activity,
+        pid: runtime.pid,
+        capturedAt: this.dependencies.now().toISOString(),
+        screenshotPath: "non-authoritative://runtime-reobservation",
+        layout: runtime.layout
+      });
+      if (hashRuntimeSnapshot(snapshot) !== binding.snapshotHash) {
+        throw new GenerationOperationError(
+          "SNAPSHOT_STALE",
+          "Runtime snapshot changed after proposal"
+        );
+      }
+      return snapshot;
+    } catch (error) {
+      if (
+        error instanceof GenerationOperationError
+        && error.code === "SNAPSHOT_STALE"
+      ) {
+        throw error;
+      }
+      throw new GenerationOperationError(
+        "SNAPSHOT_STALE",
+        "Runtime snapshot could not be re-observed"
+      );
+    }
   };
 }

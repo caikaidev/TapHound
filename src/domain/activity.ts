@@ -1,6 +1,11 @@
 const PACKAGE_NAME = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/;
 const QUALIFIED_ACTIVITY = /^(?:[A-Za-z_$][\w$]*\.)+[A-Za-z_$][\w$]*$/;
 
+export interface ForegroundComponent {
+  packageName: string;
+  activity: string;
+}
+
 function assertPackageName(packageName: string): void {
   if (!PACKAGE_NAME.test(packageName)) {
     throw new Error(`Invalid package name: ${packageName}`);
@@ -51,7 +56,9 @@ export function normalizeActivity(
   return value;
 }
 
-export function normalizeObservedActivityComponent(component: string): string {
+export function parseObservedActivityComponent(
+  component: string
+): ForegroundComponent {
   const value = component.trim();
   const parts = value.split("/");
   if (parts.length !== 2) {
@@ -71,5 +78,12 @@ export function normalizeObservedActivityComponent(component: string): string {
   if (!QUALIFIED_ACTIVITY.test(normalized)) {
     throw new Error(`Invalid Activity component: ${value}`);
   }
-  return normalized;
+  return {
+    packageName: componentPackage,
+    activity: normalized
+  };
+}
+
+export function normalizeObservedActivityComponent(component: string): string {
+  return parseObservedActivityComponent(component).activity;
 }

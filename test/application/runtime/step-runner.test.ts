@@ -23,9 +23,11 @@ const checkpoint = {
 function adbPort(): AdbPort {
   return {
     devices: vi.fn(),
+    foregroundComponent: vi.fn(),
     currentActivity: vi.fn()
       .mockResolvedValueOnce(checkpoint.before)
       .mockResolvedValueOnce(checkpoint.after),
+    forceStop: vi.fn(),
     pid: vi.fn(() => Promise.resolve(42)),
     tap: vi.fn(() => Promise.resolve(commandResult())),
     longClick: vi.fn(() => Promise.resolve(commandResult())),

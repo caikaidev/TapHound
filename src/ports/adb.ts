@@ -1,4 +1,5 @@
 import type { Point } from "./android-cli.js";
+import type { ForegroundComponent } from "../domain/activity.js";
 import type {
   CommandResult,
   RunningCommand
@@ -26,7 +27,11 @@ export interface LogcatOptions {
 
 export interface AdbPort {
   devices: (signal?: AbortSignal) => Promise<readonly DeviceInfo[]>;
+  foregroundComponent: (
+    identity: AppIdentity
+  ) => Promise<ForegroundComponent>;
   currentActivity: (identity: AppIdentity) => Promise<string>;
+  forceStop: (identity: AppIdentity) => Promise<CommandResult>;
   pid: (identity: AppIdentity) => Promise<number | null>;
   tap: (
     point: Point,

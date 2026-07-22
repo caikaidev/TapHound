@@ -48,6 +48,46 @@ describe("AdbAdapter", () => {
     });
   });
 
+  it("returns structured foreground identity without hiding Package escape", async () => {
+    const runner = processRunner(commandResult({
+      stdout: "topResumedActivity=ActivityRecord{42 u0 com.android.settings/.Settings t9}"
+    }));
+
+    await expect(new AdbAdapter(runner).foregroundComponent({
+      packageName: "com.example.app",
+      deviceSerial: "emulator-5554"
+    })).resolves.toEqual({
+      packageName: "com.android.settings",
+      activity: "com.android.settings.Settings"
+    });
+  });
+
+  it("rejects malformed resumed Activity output", async () => {
+    const runner = processRunner(commandResult({
+      stdout: "mResumedActivity: malformed"
+    }));
+
+    await expect(new AdbAdapter(runner).foregroundComponent({
+      packageName: "com.example.app",
+      deviceSerial: "emulator-5554"
+    })).rejects.toThrow("ADB did not report a resumed Activity");
+  });
+
+  it("keeps currentActivity compatible by delegating to foreground identity", async () => {
+    const runner = processRunner(commandResult({
+      stdout: "mResumedActivity: ActivityRecord{42 u0 com.example.app/.SearchActivity t9}"
+    }));
+    const adapter = new AdbAdapter(runner);
+    const foregroundComponent = vi.spyOn(adapter, "foregroundComponent");
+
+    await expect(adapter.currentActivity({
+      packageName: "com.example.app",
+      deviceSerial: "emulator-5554"
+    })).resolves.toBe("com.example.app.SearchActivity");
+
+    expect(foregroundComponent).toHaveBeenCalledOnce();
+  });
+
   it("ignores historical tasks before the resumed Activity", async () => {
     const runner = processRunner(commandResult({
       stdout: [
@@ -81,6 +121,28 @@ describe("AdbAdapter", () => {
       packageName: "com.example.app",
       deviceSerial: "emulator-5554"
     })).resolves.toBe(1234);
+  });
+
+  it("force-stops the exact Package on the selected device", async () => {
+    const expected = commandResult({ exitCode: 1, stderr: "failure" });
+    const runner = processRunner(expected);
+
+    await expect(new AdbAdapter(runner).forceStop({
+      packageName: "com.example.app",
+      deviceSerial: "emulator-5554"
+    })).resolves.toBe(expected);
+
+    expect(vi.mocked(runner.run)).toHaveBeenCalledWith({
+      executable: "adb",
+      args: [
+        "-s",
+        "emulator-5554",
+        "shell",
+        "am",
+        "force-stop",
+        "com.example.app"
+      ]
+    });
   });
 
   it("executes tap, long click, swipe, Back, and remote-shell-safe text", async () => {

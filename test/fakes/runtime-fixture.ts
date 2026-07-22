@@ -107,11 +107,13 @@ export function runtimeFixture(): RuntimeFixture {
   };
   const adb: AdbPort = {
     devices: vi.fn(),
+    foregroundComponent: vi.fn(),
     currentActivity: vi.fn(() => {
       const value = activities.shift() ?? "com.example.app.SearchActivity";
       order.push(value.endsWith("MainActivity") ? "activity-main" : "activity-search");
       return Promise.resolve(value);
     }),
+    forceStop: vi.fn(() => Promise.resolve(commandResult())),
     pid: vi.fn(() => {
       order.push("pid");
       return Promise.resolve(42);

@@ -39,7 +39,9 @@ function fixture(overrides: {
     devices: vi.fn(() => Promise.resolve(
       overrides.devices ?? [{ serial: "emulator-5554", status: "device" }]
     )),
+    foregroundComponent: vi.fn(),
     currentActivity: vi.fn(),
+    forceStop: vi.fn(),
     pid: vi.fn(),
     tap: vi.fn(),
     longClick: vi.fn(),

@@ -133,6 +133,9 @@ function parseElement(value: unknown, path: string): LayoutElement | undefined {
     ?? (interactions.has("long-clickable") ? true : undefined);
   const scrollable = optionalBoolean(record, "scrollable")
     ?? (interactions.has("scrollable") ? true : undefined);
+  const focusable = interactions.has("focusable") ? true : undefined;
+  const state = stringSet(record, "state");
+  const focused = state.has("focused") ? true : undefined;
   const bounds = parseBounds(record.bounds);
   const parsedCenter = parseCenter(record.center);
   const center = parsedCenter ?? (bounds === undefined
@@ -158,6 +161,8 @@ function parseElement(value: unknown, path: string): LayoutElement | undefined {
     ...(clickable === undefined ? {} : { clickable }),
     ...(longClickable === undefined ? {} : { longClickable }),
     ...(scrollable === undefined ? {} : { scrollable }),
+    ...(focusable === undefined ? {} : { focusable }),
+    ...(focused === undefined ? {} : { focused }),
     enabled: optionalBoolean(record, "enabled") ?? true,
     center,
     ...(bounds === undefined ? {} : { bounds }),

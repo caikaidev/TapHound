@@ -23,6 +23,7 @@ describe("parseLayout", () => {
         text: "Open search",
         contentDescription: "Open search screen",
         clickable: true,
+        focusable: true,
         enabled: true,
         center: { x: 540, y: 1200 },
         children: []
@@ -32,6 +33,7 @@ describe("parseLayout", () => {
         resourceId: "results",
         clickable: true,
         scrollable: true,
+        focused: true,
         enabled: true,
         center: { x: 540, y: 1400 },
         bounds: { left: 0, top: 200, right: 1080, bottom: 2200 },
@@ -96,9 +98,34 @@ describe("parseLayout", () => {
     expect(elements[0]).toMatchObject({
       resourceId: "searchIv",
       clickable: true,
+      focusable: true,
       center: { x: 540, y: 1227 },
       bounds: { left: 0, top: 265, right: 1080, bottom: 2190 }
     });
+  });
+
+  it("parses focused from Android CLI state", () => {
+    const elements = parseLayout(JSON.stringify([{
+      interactions: ["focusable"],
+      state: ["focused"],
+      center: "[100,200]"
+    }]));
+
+    expect(elements[0]).toMatchObject({
+      focusable: true,
+      focused: true
+    });
+  });
+
+  it("omits absent focus metadata", () => {
+    const [element] = parseLayout(JSON.stringify([{
+      interactions: ["clickable"],
+      state: ["selected"],
+      center: "[100,200]"
+    }]));
+
+    expect(element).not.toHaveProperty("focusable");
+    expect(element).not.toHaveProperty("focused");
   });
 
   it("rejects malformed Layout JSON", () => {

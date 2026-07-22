@@ -1,4 +1,7 @@
-import { normalizeObservedActivityComponent } from "../../domain/activity.js";
+import {
+  parseObservedActivityComponent,
+  type ForegroundComponent
+} from "../../domain/activity.js";
 import type {
   AdbPort,
   AppIdentity,
@@ -65,7 +68,9 @@ export class AdbAdapter implements AdbPort {
       });
   }
 
-  public async currentActivity(identity: AppIdentity): Promise<string> {
+  public async foregroundComponent(
+    identity: AppIdentity
+  ): Promise<ForegroundComponent> {
     const result = await this.run([
       ...deviceArgs(identity.deviceSerial),
       "shell",
@@ -83,9 +88,23 @@ export class AdbAdapter implements AdbPort {
     if (component?.[1] === undefined || component[2] === undefined) {
       throw new Error("ADB did not report a resumed Activity");
     }
-    return normalizeObservedActivityComponent(
+    return parseObservedActivityComponent(
       `${component[1]}/${component[2]}`
     );
+  }
+
+  public async currentActivity(identity: AppIdentity): Promise<string> {
+    return (await this.foregroundComponent(identity)).activity;
+  }
+
+  public forceStop(identity: AppIdentity): Promise<CommandResult> {
+    return this.run([
+      ...deviceArgs(identity.deviceSerial),
+      "shell",
+      "am",
+      "force-stop",
+      identity.packageName
+    ], identity.signal, identity.timeoutMs);
   }
 
   public async pid(identity: AppIdentity): Promise<number | null> {

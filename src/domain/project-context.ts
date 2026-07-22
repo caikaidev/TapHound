@@ -15,19 +15,21 @@ const GenerationActionSchema = z.enum([
   "wait"
 ]);
 
-const ContextFileSchema = z.strictObject({
-  path: z.string()
-    .trim()
-    .min(1)
-    .transform((path) => path.replaceAll("\\", "/"))
-    .refine(
-      (path) => (
-        !path.startsWith("/")
-        && !/^[A-Za-z]:/.test(path)
-        && !path.split("/").includes("..")
-      ),
-      "Context file path must stay within the project"
+export const ProjectRelativePathSchema = z.string()
+  .trim()
+  .min(1)
+  .transform((path) => path.replaceAll("\\", "/"))
+  .refine(
+    (path) => (
+      !path.startsWith("/")
+      && !/^[A-Za-z]:/.test(path)
+      && !path.split("/").includes("..")
     ),
+    "Path must stay within the project"
+  );
+
+const ContextFileSchema = z.strictObject({
+  path: ProjectRelativePathSchema,
   sha256: z.string().regex(/^[a-f\d]{64}$/)
 });
 

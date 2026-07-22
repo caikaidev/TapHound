@@ -84,6 +84,37 @@ describe("GenerationSessionSchema", () => {
     })).toThrow(/verification/i);
   });
 
+  it.each([
+    "/tmp/generated.json",
+    String.raw`C:\outside.json`,
+    String.raw`\\server\share\outside.json`,
+    "../outside.json",
+    String.raw`..\outside.json`,
+    String.raw`journeys/..\outside.json`
+  ])("rejects escaped publication journey path %s", (journeyPath) => {
+    expect(() => GenerationSessionSchema.parse({
+      ...(validSession() as object),
+      verification: { status: "passed" },
+      publication: { status: "published", journeyPath }
+    })).toThrow(/within the project/i);
+  });
+
+  it("normalizes a safe publication journey path", () => {
+    const parsed = GenerationSessionSchema.parse({
+      ...(validSession() as object),
+      verification: { status: "passed" },
+      publication: {
+        status: "published",
+        journeyPath: String.raw`journeys\generated.json`
+      }
+    });
+
+    expect(parsed.publication).toEqual({
+      status: "published",
+      journeyPath: "journeys/generated.json"
+    });
+  });
+
   it("rejects verification while a candidate step is active", () => {
     expect(() => GenerationSessionSchema.parse({
       ...(validSession() as object),
@@ -134,6 +165,16 @@ describe("generation variables", () => {
       action: "inputText",
       text: "run=run-42;time=2026-07-22T12:00:00.000Z;nonce=c0ffee",
       activity: { before: "com.example.app.MainActivity" }
+    });
+  });
+
+  it("preserves unrelated JSON braces while expanding variables", () => {
+    expect(expandProposedStepVariables({
+      action: "inputText",
+      text: "json={\"run\":\"${runId}\"}",
+      activity: { before: "com.example.app.MainActivity" }
+    }, variables)).toMatchObject({
+      text: "json={\"run\":\"run-42\"}"
     });
   });
 

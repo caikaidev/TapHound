@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { ProjectRelativePathSchema } from "./project-context.js";
 import {
   ProposedStepSchema,
   type ProposedStep
@@ -62,7 +63,7 @@ const PublicationSchema = z.discriminatedUnion("status", [
   z.strictObject({ status: z.literal("notRun") }),
   z.strictObject({
     status: z.literal("published"),
-    journeyPath: z.string().trim().min(1)
+    journeyPath: ProjectRelativePathSchema
   }),
   z.strictObject({
     status: z.literal("failed"),
@@ -145,24 +146,56 @@ export function bindGenerationVariables(input: unknown): GenerationVariables {
   return GenerationVariablesSchema.parse(input);
 }
 
+function expandString(
+  value: string,
+  variables: GenerationVariables
+): string {
+  let expanded = "";
+  let index = 0;
+  let literalBraceDepth = 0;
+
+  while (index < value.length) {
+    if (value.startsWith("${", index)) {
+      const closingIndex = value.indexOf("}", index + 2);
+      if (closingIndex === -1) {
+        throw new Error("Incomplete generation template marker");
+      }
+
+      const name = value.slice(index + 2, closingIndex);
+      if (name.length === 0 || name.includes("{") || name.includes("${")) {
+        throw new Error("Malformed or nested generation template marker");
+      }
+      if (name !== "runId" && name !== "timestamp" && name !== "randomHex") {
+        throw new Error(`Unsupported generation variable: ${name}`);
+      }
+
+      expanded += variables[name];
+      index = closingIndex + 1;
+      if (value.charAt(index) === "}" && literalBraceDepth === 0) {
+        throw new Error("Duplicated generation template marker closing");
+      }
+      continue;
+    }
+
+    const character = value.charAt(index);
+    if (character === "{") {
+      literalBraceDepth += 1;
+    } else if (character === "}" && literalBraceDepth > 0) {
+      literalBraceDepth -= 1;
+    }
+    expanded += character;
+    index += 1;
+  }
+
+  return expanded;
+}
+
 function expandValue(
   value: unknown,
   variables: GenerationVariables
 ): unknown {
   if (typeof value === "string") {
-    const expanded = value.replace(
-      /\$\{([^{}]+)\}/g,
-      (_match, name: string) => {
-        if (name === "runId" || name === "timestamp" || name === "randomHex") {
-          return variables[name];
-        }
-        throw new Error(`Unsupported generation variable: ${name}`);
-      }
-    );
-    if (expanded.includes("${") || expanded.includes("}")) {
-      throw new Error("Expanded value contains a malformed template marker");
-    }
-    return expanded;
+    return expandString(value, variables);
   }
   if (Array.isArray(value)) {
     return value.map((item) => expandValue(item, variables));

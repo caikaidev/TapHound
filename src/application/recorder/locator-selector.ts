@@ -48,17 +48,23 @@ function targetLabel(element: LayoutElement, locator: Locator): string {
   return `${element.id} — ${identity}: ${value}`;
 }
 
+function supportsAction(
+  element: LayoutElement,
+  action: RecorderTargetAction
+): boolean {
+  return action === "click"
+    ? element.clickable === true
+    : action === "longClick"
+      ? element.longClickable === true
+      : element.scrollable === true && element.bounds !== undefined;
+}
+
 export function listRecorderTargets(
   roots: readonly LayoutElement[],
   action: RecorderTargetAction
 ): RecorderTarget[] {
-  return flatten(roots).flatMap((element) => {
-    const supportsAction = action === "click"
-      ? element.clickable === true
-      : action === "longClick"
-        ? element.longClickable === true
-        : element.scrollable === true && element.bounds !== undefined;
-    if (!element.enabled || !supportsAction) {
+  const primary = flatten(roots).flatMap((element) => {
+    if (!element.enabled || !supportsAction(element, action)) {
       return [];
     }
     const locator = selectUniqueLocator(element, roots);
@@ -71,6 +77,32 @@ export function listRecorderTargets(
       label: targetLabel(element, locator)
     }];
   });
+
+  // Relaxed content targets are click-only: for longClick the interactive
+  // target is often a small bounded view (e.g. a chat bubble), so a sibling
+  // label's center coordinate hit-tests to a neighbouring element instead.
+  if (action !== "click") {
+    return primary;
+  }
+
+  const hasOrphan = flatten(roots).some(
+    (element) => element.enabled
+      && supportsAction(element, action)
+      && selectUniqueLocator(element, roots) === undefined
+  );
+  if (!hasOrphan) {
+    return primary;
+  }
+
+  const primaryIds = new Set(primary.map((target) => target.element.id));
+  const relaxed = listLocatableTargets(roots).filter(
+    (target) => !supportsAction(target.element, action)
+      && !primaryIds.has(target.element.id)
+      && (target.locator.text !== undefined
+        || target.locator.contentDescription !== undefined)
+  );
+
+  return [...primary, ...relaxed];
 }
 
 export function listLocatableTargets(

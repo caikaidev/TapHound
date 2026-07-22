@@ -546,6 +546,56 @@ describe("RecorderService", () => {
     expect(journeyWriter.write).not.toHaveBeenCalled();
   });
 
+  it("records a click on a unique content target inside an anonymous row", async () => {
+    const runtime = runtimeFixture();
+    const layout = [{
+      id: "row",
+      clickable: true,
+      longClickable: true,
+      enabled: true,
+      bounds: { left: 0, top: 100, right: 300, bottom: 200 },
+      children: []
+    }, {
+      id: "subject",
+      text: "Unique subject",
+      enabled: true,
+      center: { x: 150, y: 150 },
+      bounds: { left: 10, top: 110, right: 200, bottom: 140 },
+      children: []
+    }];
+    vi.mocked(runtime.androidCli.layout).mockResolvedValue(layout);
+    const recorderPrompt = prompt(["click", "finish"]);
+    vi.mocked(recorderPrompt.selectTarget).mockResolvedValue("subject");
+    const journeyWriter = writer();
+    const service = new RecorderService({
+      gradle: runtime.gradle,
+      androidCli: runtime.androidCli,
+      adb: runtime.adb,
+      clock: runtime.dependencies.clock,
+      prompt: recorderPrompt,
+      journeyWriter
+    });
+
+    const result = await service.record({
+      config: runtimeConfig,
+      projectRoot: "/project",
+      deviceSerial: "emulator-5554",
+      journeyName: "Mail draft",
+      outputPath: "/project/mail-draft.json"
+    });
+
+    expect(result).toMatchObject({ status: "completed", stepsRecorded: 1 });
+    expect(runtime.adb.tap).toHaveBeenCalledWith(
+      { x: 150, y: 150 },
+      "emulator-5554",
+      undefined
+    );
+    expect(journeyWriter.journeys[0]?.steps[0]).toMatchObject({
+      action: "click",
+      locator: { text: "Unique subject" }
+    });
+  });
+
   it("records a scrollTo step with maxSwipes derived from swipes used", async () => {
     const journey = await recordScrollToJourney();
     expect(journey.steps[0]).toMatchObject({

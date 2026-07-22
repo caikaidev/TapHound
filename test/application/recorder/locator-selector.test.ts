@@ -87,6 +87,140 @@ describe("Recorder locator selection", () => {
   });
 });
 
+const orphanRowLayout: LayoutElement[] = [{
+  id: "root",
+  enabled: true,
+  bounds: { left: 0, top: 0, right: 300, bottom: 600 },
+  children: [{
+    id: "chrome",
+    resourceId: "toolbar_search",
+    clickable: true,
+    longClickable: true,
+    enabled: true,
+    bounds: { left: 0, top: 0, right: 300, bottom: 50 },
+    children: []
+  }, {
+    id: "row",
+    clickable: true,
+    longClickable: true,
+    enabled: true,
+    bounds: { left: 0, top: 60, right: 300, bottom: 160 },
+    children: []
+  }, {
+    id: "subject",
+    text: "Unique subject",
+    enabled: true,
+    bounds: { left: 10, top: 70, right: 200, bottom: 100 },
+    children: []
+  }, {
+    id: "sender-a",
+    text: "Same sender",
+    enabled: true,
+    bounds: { left: 10, top: 110, right: 200, bottom: 140 },
+    children: []
+  }, {
+    id: "sender-b",
+    text: "Same sender",
+    enabled: true,
+    bounds: { left: 10, top: 170, right: 200, bottom: 200 },
+    children: []
+  }, {
+    id: "disabled-desc",
+    contentDescription: "Disabled item",
+    enabled: false,
+    bounds: { left: 10, top: 210, right: 200, bottom: 240 },
+    children: []
+  }]
+}];
+
+const clickOnlyOrphanLayout: LayoutElement[] = [{
+  id: "root",
+  enabled: true,
+  bounds: { left: 0, top: 0, right: 300, bottom: 600 },
+  children: [{
+    id: "chrome",
+    resourceId: "toolbar_search",
+    clickable: true,
+    longClickable: true,
+    enabled: true,
+    bounds: { left: 0, top: 0, right: 300, bottom: 50 },
+    children: []
+  }, {
+    id: "row",
+    clickable: true,
+    enabled: true,
+    bounds: { left: 0, top: 60, right: 300, bottom: 160 },
+    children: []
+  }, {
+    id: "subject",
+    text: "Unique subject",
+    enabled: true,
+    bounds: { left: 10, top: 70, right: 200, bottom: 100 },
+    children: []
+  }]
+}];
+
+const noOrphanLayout: LayoutElement[] = [{
+  id: "root",
+  enabled: true,
+  bounds: { left: 0, top: 0, right: 300, bottom: 600 },
+  children: [{
+    id: "chrome",
+    resourceId: "toolbar_search",
+    clickable: true,
+    longClickable: true,
+    enabled: true,
+    bounds: { left: 0, top: 0, right: 300, bottom: 50 },
+    children: []
+  }, {
+    id: "label",
+    text: "Standalone label",
+    enabled: true,
+    bounds: { left: 10, top: 70, right: 200, bottom: 100 },
+    children: []
+  }]
+}];
+
+describe("Recorder relaxed content targets", () => {
+  it("appends unique content targets after interactive ones when a click orphan exists", () => {
+    expect(listRecorderTargets(orphanRowLayout, "click").map(
+      (choice) => choice.element.id
+    )).toEqual(["chrome", "subject"]);
+  });
+
+  it("does not append content targets for longClick even when an orphan exists", () => {
+    expect(listRecorderTargets(orphanRowLayout, "longClick").map(
+      (choice) => choice.element.id
+    )).toEqual(["chrome"]);
+  });
+
+  it("locates a relaxed content target by its text field", () => {
+    const subject = listRecorderTargets(orphanRowLayout, "click").find(
+      (choice) => choice.element.id === "subject"
+    );
+    expect(subject?.locator).toEqual({ text: "Unique subject" });
+  });
+
+  it("does not activate the longClick fallback for a click-only orphan", () => {
+    expect(listRecorderTargets(clickOnlyOrphanLayout, "click").map(
+      (choice) => choice.element.id
+    )).toEqual(["chrome", "subject"]);
+    expect(listRecorderTargets(clickOnlyOrphanLayout, "longClick").map(
+      (choice) => choice.element.id
+    )).toEqual(["chrome"]);
+  });
+
+  it("does not list non-interactive content when no orphan exists", () => {
+    expect(listRecorderTargets(noOrphanLayout, "click").map(
+      (choice) => choice.element.id
+    )).toEqual(["chrome"]);
+  });
+
+  it("leaves swipe target selection unchanged", () => {
+    expect(listRecorderTargets(orphanRowLayout, "swipe")).toEqual([]);
+  });
+});
+
 describe("listLocatableTargets", () => {
   it("lists enabled elements with a unique locator regardless of clickability", () => {
     const targets = listLocatableTargets([{

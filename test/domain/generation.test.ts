@@ -58,6 +58,23 @@ describe("GenerationSessionSchema", () => {
     expect(GenerationSessionSchema.parse(validSession())).toEqual(validSession());
   });
 
+  it("accepts only nonnegative safe-integer session revisions", () => {
+    expect(GenerationSessionSchema.parse({
+      ...(validSession() as object),
+      revision: Number.MAX_SAFE_INTEGER
+    }).revision).toBe(Number.MAX_SAFE_INTEGER);
+    for (const revision of [
+      -1,
+      0.5,
+      Number.MAX_SAFE_INTEGER + 1
+    ]) {
+      expect(() => GenerationSessionSchema.parse({
+        ...(validSession() as object),
+        revision
+      })).toThrow();
+    }
+  });
+
   it("rejects unknown fields", () => {
     expect(() => GenerationSessionSchema.parse({
       ...(validSession() as object),

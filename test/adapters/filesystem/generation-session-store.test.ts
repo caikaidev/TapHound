@@ -54,11 +54,9 @@ async function writeLockOwner(
   pid: number,
   token = "other-owner"
 ): Promise<void> {
-  const directory = lockDirectory(root);
   await mkdir(join(generationRoot(root), ".locks"), { recursive: true });
-  await mkdir(directory);
   await writeFile(
-    join(directory, "owner.json"),
+    lockDirectory(root),
     `${JSON.stringify({ pid, token }, null, 2)}\n`,
     { flag: "wx" }
   );
@@ -102,6 +100,21 @@ function expectStoreError(
     name: "GenerationSessionStoreError",
     code
   });
+}
+
+function expectSynchronousStoreError(
+  operation: () => unknown,
+  code: GenerationSessionStoreError["code"]
+): void {
+  try {
+    operation();
+    throw new Error("Expected operation to throw");
+  } catch (error) {
+    expect(error).toMatchObject({
+      name: "GenerationSessionStoreError",
+      code
+    });
+  }
 }
 
 describe("FileSystemGenerationSessionStore", () => {
@@ -287,6 +300,106 @@ describe("FileSystemGenerationSessionStore", () => {
     );
   });
 
+  it("atomically completes the matching inFlight step with candidate changes", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    const inFlight = {
+      stepIndex: 0,
+      snapshotHash: "b".repeat(64)
+    };
+    await store.create(validSession(0, { inFlight }));
+    const completed = validSession(1, {
+      candidateSteps: [{
+        action: "wait",
+        activity: { before: "com.example.app.CompletedActivity" }
+      }],
+      inFlight: null
+    });
+
+    await store.completeStep(
+      "generation-1",
+      0,
+      inFlight,
+      completed
+    );
+
+    await expect(store.read("generation-1")).resolves.toEqual(completed);
+  });
+
+  it("rejects completeStep for mismatched inFlight and stale revisions", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    const inFlight = {
+      stepIndex: 0,
+      snapshotHash: "b".repeat(64)
+    };
+    await store.create(validSession(0, { inFlight }));
+
+    await expectStoreError(store.completeStep(
+      "generation-1",
+      0,
+      { ...inFlight, snapshotHash: "c".repeat(64) },
+      validSession(1)
+    ), "INVALID_TRANSITION");
+    await store.completeStep(
+      "generation-1",
+      0,
+      inFlight,
+      validSession(1)
+    );
+    await expectStoreError(store.completeStep(
+      "generation-1",
+      0,
+      inFlight,
+      validSession(1)
+    ), "REVISION_CONFLICT");
+  });
+
+  it("keeps completeStep separate from interrupted recovery", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    const inFlight = {
+      stepIndex: 0,
+      snapshotHash: "b".repeat(64)
+    };
+    await store.create(validSession(0, { inFlight }));
+    const recoveryRequired = validSession(1, {
+      state: "recoveryRequired",
+      inFlight
+    });
+    await store.update("generation-1", 0, recoveryRequired);
+
+    await expectStoreError(store.completeStep(
+      "generation-1",
+      1,
+      inFlight,
+      validSession(2)
+    ), "INVALID_TRANSITION");
+    await store.recover("generation-1", 1, validSession(2));
+    await expect(store.read("generation-1")).resolves.toEqual(
+      validSession(2)
+    );
+  });
+
+  it("rejects revision increments beyond Number.MAX_SAFE_INTEGER", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(validSession());
+    const statePath = join(activeDirectory(root), "state.json");
+    await writeFile(statePath, `${JSON.stringify(validSession(
+      Number.MAX_SAFE_INTEGER
+    ), null, 2)}\n`, "utf8");
+
+    await expectStoreError(
+      store.update(
+        "generation-1",
+        Number.MAX_SAFE_INTEGER,
+        validSession(Number.MAX_SAFE_INTEGER)
+      ),
+      "INVALID_REVISION"
+    );
+  });
+
   it("allows only one concurrent writer for the same revision", async () => {
     const root = await temporaryRoot();
     const firstStore = new FileSystemGenerationSessionStore(root);
@@ -337,6 +450,122 @@ describe("FileSystemGenerationSessionStore", () => {
     );
   });
 
+  it("rejects generation-root substitution during lock installation", async () => {
+    const root = await temporaryRoot();
+    let substituteRoot = false;
+    const generations = generationRoot(root);
+    const movedGenerations = `${generations}.moved`;
+    const store = new FileSystemGenerationSessionStore(root, {
+      hooks: {
+        beforeLockInstall: async (): Promise<void> => {
+          if (substituteRoot) {
+            substituteRoot = false;
+            await rename(generations, movedGenerations);
+            await mkdir(join(generations, ".locks"), { recursive: true });
+          }
+        }
+      }
+    });
+    await store.create(validSession());
+    substituteRoot = true;
+
+    await expectStoreError(
+      store.update("generation-1", 0, validSession(1)),
+      "IO_ERROR"
+    );
+    await expect(readFile(join(
+      movedGenerations,
+      ".generation-1.work",
+      "state.json"
+    ), "utf8")).resolves.toContain('"revision": 0');
+  });
+
+  it("rejects active-bundle substitution after opening state", async () => {
+    const root = await temporaryRoot();
+    let substituteBundle = false;
+    const active = activeDirectory(root);
+    const movedActive = `${active}.moved`;
+    const store = new FileSystemGenerationSessionStore(root, {
+      hooks: {
+        afterStateOpen: async (): Promise<void> => {
+          if (substituteBundle) {
+            substituteBundle = false;
+            await rename(active, movedActive);
+            await mkdir(active);
+            await writeFile(
+              join(active, "state.json"),
+              `${JSON.stringify(validSession(9), null, 2)}\n`,
+              "utf8"
+            );
+          }
+        }
+      }
+    });
+    await store.create(validSession());
+    substituteBundle = true;
+
+    await expectStoreError(store.read("generation-1"), "IO_ERROR");
+  });
+
+  it("rejects state-file substitution after opening its descriptor", async () => {
+    const root = await temporaryRoot();
+    let substituteState = false;
+    const statePath = join(activeDirectory(root), "state.json");
+    const store = new FileSystemGenerationSessionStore(root, {
+      hooks: {
+        afterStateOpen: async (): Promise<void> => {
+          if (substituteState) {
+            substituteState = false;
+            await rename(statePath, `${statePath}.moved`);
+            await writeFile(
+              statePath,
+              `${JSON.stringify(validSession(9), null, 2)}\n`,
+              "utf8"
+            );
+          }
+        }
+      }
+    });
+    await store.create(validSession());
+    substituteState = true;
+
+    await expectStoreError(store.read("generation-1"), "IO_ERROR");
+  });
+
+  it("rejects active-bundle substitution before state rename", async () => {
+    const root = await temporaryRoot();
+    let substituteBundle = false;
+    const active = activeDirectory(root);
+    const movedActive = `${active}.moved`;
+    const replacement = validSession(9);
+    const store = new FileSystemGenerationSessionStore(root, {
+      hooks: {
+        beforeStateRename: async (): Promise<void> => {
+          if (substituteBundle) {
+            substituteBundle = false;
+            await rename(active, movedActive);
+            await mkdir(active);
+            await writeFile(
+              join(active, "state.json"),
+              `${JSON.stringify(replacement, null, 2)}\n`,
+              "utf8"
+            );
+          }
+        }
+      }
+    });
+    await store.create(validSession());
+    substituteBundle = true;
+
+    await expectStoreError(
+      store.update("generation-1", 0, validSession(1)),
+      "IO_ERROR"
+    );
+    await expect(readFile(join(active, "state.json"), "utf8")).resolves.toBe(
+      `${JSON.stringify(replacement, null, 2)}\n`
+    );
+  });
+
   it("never reclaims a long-lived lock owned by a live PID", async () => {
     const root = await temporaryRoot();
     const store = new FileSystemGenerationSessionStore(root, {
@@ -351,8 +580,7 @@ describe("FileSystemGenerationSessionStore", () => {
       "LOCK_TIMEOUT"
     );
     await expect(readFile(join(
-      lockDirectory(root),
-      "owner.json"
+      lockDirectory(root)
     ), "utf8")).resolves.toContain(`"pid": ${String(process.pid)}`);
   });
 
@@ -398,9 +626,85 @@ describe("FileSystemGenerationSessionStore", () => {
       "LOCK_TIMEOUT"
     );
     await expect(readFile(
-      join(lockDirectory(root), "owner.json"),
+      lockDirectory(root),
       "utf8"
     )).resolves.toContain("replacement-owner");
+  });
+
+  it("ignores partial operation-owned lock staging files after a crash", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(validSession());
+    const locksRoot = join(generationRoot(root), ".locks");
+    const interrupted = join(
+      locksRoot,
+      ".generation-1.lock.acquire-interrupted.tmp"
+    );
+    await writeFile(interrupted, "{\"pid\":", "utf8");
+
+    await store.update("generation-1", 0, validSession(1));
+
+    await expect(readFile(interrupted, "utf8")).resolves.toBe("{\"pid\":");
+    await expect(stat(lockDirectory(root))).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+  });
+
+  it("cleans only its lock staging file after owner write failure", async () => {
+    const root = await temporaryRoot();
+    let failWrite = false;
+    const store = new FileSystemGenerationSessionStore(root, {
+      hooks: {
+        beforeLockStagingWrite: (): void => {
+          if (failWrite) {
+            failWrite = false;
+            throw new Error("simulated lock owner write failure");
+          }
+        }
+      }
+    });
+    await store.create(validSession());
+    failWrite = true;
+
+    await expectStoreError(
+      store.update("generation-1", 0, validSession(1)),
+      "IO_ERROR"
+    );
+    expect((await readdir(join(generationRoot(root), ".locks"))).filter(
+      (name) => name.includes(".acquire-")
+    )).toEqual([]);
+    await store.update("generation-1", 0, validSession(1));
+  });
+
+  it("preserves a competing lock installed before canonical hard-link", async () => {
+    const root = await temporaryRoot();
+    let installReplacement = false;
+    const store = new FileSystemGenerationSessionStore(root, {
+      lockTimeoutMs: 35,
+      lockRetryMs: 5,
+      hooks: {
+        beforeLockInstall: async (): Promise<void> => {
+          if (installReplacement) {
+            installReplacement = false;
+            await writeLockOwner(
+              root,
+              process.pid,
+              "install-race-owner"
+            );
+          }
+        }
+      }
+    });
+    await store.create(validSession());
+    installReplacement = true;
+
+    await expectStoreError(
+      store.update("generation-1", 0, validSession(1)),
+      "LOCK_TIMEOUT"
+    );
+    await expect(readFile(lockDirectory(root), "utf8")).resolves.toContain(
+      "install-race-owner"
+    );
   });
 
   it("writes immutable evidence with canonical JSON", async () => {
@@ -577,6 +881,8 @@ describe("FileSystemGenerationSessionStore", () => {
     });
 
     await store.create(validSession());
+    expect(synced).toContain(root);
+    expect(synced).toContain(join(root, ".taphound"));
     expect(synced).toContain(generationRoot(root));
     synced.length = 0;
 
@@ -630,6 +936,73 @@ describe("FileSystemGenerationSessionStore", () => {
     await expectStoreError(
       store.writeEvidence("generation-1", relativePath, { unsafe: true }),
       "INVALID_EVIDENCE_PATH"
+    );
+  });
+
+  it("returns typed errors for hostile and non-string public inputs", async () => {
+    const root = await temporaryRoot();
+    const hostile = new Proxy({}, {
+      get: (): never => {
+        throw new Error("hostile getter");
+      },
+      ownKeys: (): never => {
+        throw new Error("hostile ownKeys");
+      }
+    });
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(validSession());
+
+    await expectStoreError(
+      store.read(hostile as string),
+      "INVALID_ID"
+    );
+    await expectStoreError(
+      store.update("generation-1", 0, hostile as GenerationSession),
+      "INVALID_SESSION"
+    );
+    await expectStoreError(
+      store.completeStep(
+        "generation-1",
+        0,
+        hostile as GenerationSession["inFlight"] & object,
+        validSession(1)
+      ),
+      "INVALID_TRANSITION"
+    );
+    await expectStoreError(
+      store.writeEvidence(
+        "generation-1",
+        hostile as string,
+        {}
+      ),
+      "INVALID_EVIDENCE_PATH"
+    );
+    const evidenceWithThrowingGetter: Record<string, unknown> = {};
+    Object.defineProperty(evidenceWithThrowingGetter, "value", {
+      enumerable: true,
+      get: (): never => {
+        throw new Error("hostile evidence getter");
+      }
+    });
+    await expectStoreError(
+      store.writeEvidence(
+        "generation-1",
+        "evidence/hostile.json",
+        evidenceWithThrowingGetter
+      ),
+      "INVALID_EVIDENCE"
+    );
+
+    expectSynchronousStoreError(
+      () => new FileSystemGenerationSessionStore(hostile as string),
+      "IO_ERROR"
+    );
+    expectSynchronousStoreError(
+      () => new FileSystemGenerationSessionStore(
+        root,
+        hostile
+      ),
+      "IO_ERROR"
     );
   });
 
@@ -709,6 +1082,44 @@ describe("FileSystemGenerationSessionStore", () => {
       "result.json"
     ), "utf8")).resolves.toContain('"accepted": true');
     await expect(store.read("generation-1")).resolves.toEqual(completed);
+  });
+
+  it("rejects active-bundle substitution before publish rename", async () => {
+    const root = await temporaryRoot();
+    let substituteBundle = false;
+    const active = activeDirectory(root);
+    const movedActive = `${active}.moved`;
+    const publishable = validSession(0, {
+      verification: { status: "passed" },
+      publication: {
+        status: "published",
+        journeyPath: "journeys/generated.json"
+      }
+    });
+    const store = new FileSystemGenerationSessionStore(root, {
+      hooks: {
+        beforePublishRename: async (): Promise<void> => {
+          if (substituteBundle) {
+            substituteBundle = false;
+            await rename(active, movedActive);
+            await mkdir(active);
+            await writeFile(
+              join(active, "state.json"),
+              `${JSON.stringify(publishable, null, 2)}\n`,
+              "utf8"
+            );
+          }
+        }
+      }
+    });
+    await store.create(publishable);
+    substituteBundle = true;
+
+    await expectStoreError(store.publish("generation-1"), "IO_ERROR");
+    await expect(stat(join(
+      generationRoot(root),
+      "generation-1"
+    ))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("does not overwrite a duplicate final destination", async () => {

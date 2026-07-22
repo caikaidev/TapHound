@@ -39,7 +39,12 @@ export const GenerationVariablesSchema = z.strictObject({
   randomHex: LiteralSchema.regex(/^[a-f\d]+$/)
 });
 
-const InFlightSchema = z.strictObject({
+const NonnegativeSafeIntegerSchema = z.number()
+  .int()
+  .nonnegative()
+  .max(Number.MAX_SAFE_INTEGER);
+
+export const GenerationInFlightSchema = z.strictObject({
   stepIndex: z.number().int().nonnegative(),
   snapshotHash: Sha256Schema
 });
@@ -79,7 +84,7 @@ const PublicationSchema = z.discriminatedUnion("status", [
 export const GenerationSessionSchema = z.strictObject({
   version: z.literal(1),
   id: GenerationSessionIdSchema,
-  revision: z.number().int().nonnegative(),
+  revision: NonnegativeSafeIntegerSchema,
   state: z.enum(["active", "recoveryRequired"]),
   bindings: z.strictObject({
     contextHash: Sha256Schema,
@@ -87,7 +92,7 @@ export const GenerationSessionSchema = z.strictObject({
   }),
   variables: GenerationVariablesSchema,
   candidateSteps: z.array(ProposedStepSchema),
-  inFlight: InFlightSchema.nullable(),
+  inFlight: GenerationInFlightSchema.nullable(),
   pendingConfirmation: PendingConfirmationSchema.nullable(),
   verification: VerificationSchema,
   publication: PublicationSchema
@@ -155,6 +160,7 @@ export const GenerationSessionSchema = z.strictObject({
 });
 
 export type GenerationVariables = z.infer<typeof GenerationVariablesSchema>;
+export type GenerationInFlight = z.infer<typeof GenerationInFlightSchema>;
 export type GenerationSession = z.infer<typeof GenerationSessionSchema>;
 
 export function bindGenerationVariables(input: unknown): GenerationVariables {

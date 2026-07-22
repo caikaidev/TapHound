@@ -19,7 +19,9 @@ import {
 } from "node:path";
 
 import {
+  GenerationInFlightSchema,
   GenerationSessionSchema,
+  type GenerationInFlight,
   type GenerationSession
 } from "../../domain/generation.js";
 import {
@@ -34,7 +36,11 @@ export interface FileSystemGenerationSessionStoreOptions {
 }
 
 export interface FileSystemGenerationSessionStoreHooks {
+  beforeLockStagingWrite?: () => Promise<void> | void;
+  beforeLockInstall?: () => Promise<void> | void;
   afterLockTombstoneRename?: () => Promise<void> | void;
+  afterStateOpen?: () => Promise<void> | void;
+  beforeStateRename?: () => Promise<void> | void;
   beforePublishRename?: () => Promise<void> | void;
   beforeEvidenceInstall?: () => Promise<void> | void;
   afterEvidenceInstall?: () => Promise<void> | void;
@@ -51,6 +57,80 @@ const DEFAULT_OPTIONS: RequiredStoreOptions = {
   lockRetryMs: 10
 };
 
+const HOOK_NAMES = [
+  "beforeLockStagingWrite",
+  "beforeLockInstall",
+  "afterLockTombstoneRename",
+  "afterStateOpen",
+  "beforeStateRename",
+  "beforePublishRename",
+  "beforeEvidenceInstall",
+  "afterEvidenceInstall",
+  "afterDirectorySync"
+] as const satisfies readonly (keyof FileSystemGenerationSessionStoreHooks)[];
+
+function parseStoreConfiguration(
+  projectRoot: unknown,
+  options: unknown
+): {
+  projectRoot: string;
+  options: RequiredStoreOptions;
+  hooks: FileSystemGenerationSessionStoreHooks;
+} {
+  try {
+    if (typeof projectRoot !== "string") {
+      throw new TypeError("projectRoot must be a string");
+    }
+    if (options === null || typeof options !== "object") {
+      throw new TypeError("options must be an object");
+    }
+    const lockTimeoutInput = Reflect.get(options, "lockTimeoutMs") as unknown;
+    const lockRetryInput = Reflect.get(options, "lockRetryMs") as unknown;
+    const lockTimeoutMs = lockTimeoutInput
+      ?? DEFAULT_OPTIONS.lockTimeoutMs;
+    const lockRetryMs = lockRetryInput ?? DEFAULT_OPTIONS.lockRetryMs;
+    if (
+      !Number.isSafeInteger(lockTimeoutMs)
+      || (lockTimeoutMs as number) < 0
+      || !Number.isSafeInteger(lockRetryMs)
+      || (lockRetryMs as number) < 0
+    ) {
+      throw new TypeError("lock timing options must be safe integers");
+    }
+
+    const hooksInput = Reflect.get(options, "hooks") as unknown;
+    const hooks: FileSystemGenerationSessionStoreHooks = {};
+    if (hooksInput !== undefined) {
+      if (hooksInput === null || typeof hooksInput !== "object") {
+        throw new TypeError("hooks must be an object");
+      }
+      for (const name of HOOK_NAMES) {
+        const hook = Reflect.get(hooksInput, name) as unknown;
+        if (hook !== undefined && typeof hook !== "function") {
+          throw new TypeError(`${name} must be a function`);
+        }
+        if (hook !== undefined) {
+          hooks[name] = hook as never;
+        }
+      }
+    }
+    return {
+      projectRoot: resolve(projectRoot),
+      options: {
+        lockTimeoutMs: lockTimeoutMs as number,
+        lockRetryMs: lockRetryMs as number
+      },
+      hooks
+    };
+  } catch (error) {
+    throw new GenerationSessionStoreError(
+      "IO_ERROR",
+      "Generation session store configuration is invalid",
+      { cause: error }
+    );
+  }
+}
+
 interface LockOwner {
   pid: number;
   token: string;
@@ -65,6 +145,92 @@ interface DirectoryEvidence {
   path: string;
   canonicalPath: string;
   identity: FileIdentity;
+}
+
+interface StoreDirectoryEvidence {
+  path: string;
+  canonicalPath: string;
+  identity: FileIdentity;
+}
+
+function sameIdentity(left: FileIdentity, right: FileIdentity): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+async function captureStoreDirectory(
+  path: string
+): Promise<StoreDirectoryEvidence> {
+  const stats = await lstat(path, { bigint: true });
+  if (!stats.isDirectory() || stats.isSymbolicLink()) {
+    throw new GenerationSessionStoreError(
+      "IO_ERROR",
+      `Generation store path is not a real directory: ${path}`
+    );
+  }
+  return {
+    path,
+    canonicalPath: await realpath(path),
+    identity: { dev: stats.dev, ino: stats.ino }
+  };
+}
+
+async function verifyStoreDirectory(
+  expected: StoreDirectoryEvidence
+): Promise<void> {
+  const current = await captureStoreDirectory(expected.path);
+  if (
+    current.canonicalPath !== expected.canonicalPath
+    || !sameIdentity(current.identity, expected.identity)
+  ) {
+    throw new GenerationSessionStoreError(
+      "IO_ERROR",
+      `Generation store directory identity changed: ${expected.path}`
+    );
+  }
+}
+
+async function captureStoreFile(path: string): Promise<FileIdentity> {
+  const stats = await lstat(path, { bigint: true });
+  if (!stats.isFile() || stats.isSymbolicLink()) {
+    throw new GenerationSessionStoreError(
+      "IO_ERROR",
+      `Generation store path is not a real file: ${path}`
+    );
+  }
+  return { dev: stats.dev, ino: stats.ino };
+}
+
+async function captureOptionalStoreFile(
+  path: string
+): Promise<FileIdentity | null> {
+  try {
+    return await captureStoreFile(path);
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function verifyOptionalStoreFile(
+  path: string,
+  expected: FileIdentity | null
+): Promise<void> {
+  const current = await captureOptionalStoreFile(path);
+  if (
+    (current === null) !== (expected === null)
+    || (
+      current !== null
+      && expected !== null
+      && !sameIdentity(current, expected)
+    )
+  ) {
+    throw new GenerationSessionStoreError(
+      "IO_ERROR",
+      `Generation state file identity changed: ${path}`
+    );
+  }
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
@@ -89,7 +255,7 @@ function assertId(id: unknown): asserts id is string {
   ) {
     throw new GenerationSessionStoreError(
       "INVALID_ID",
-      `Invalid generation session id: ${String(id)}`
+      "Invalid generation session id"
     );
   }
 }
@@ -101,14 +267,17 @@ function parseSession(
   try {
     return GenerationSessionSchema.parse(value);
   } catch (error) {
-    if (
-      classifyInvalidId
-      && value !== null
-      && typeof value === "object"
-      && "id" in value
-      && typeof (value as { id?: unknown }).id === "string"
-    ) {
-      assertId((value as { id: string }).id);
+    if (classifyInvalidId && value !== null && typeof value === "object") {
+      try {
+        const id = Reflect.get(value, "id") as unknown;
+        if (typeof id === "string") {
+          assertId(id);
+        }
+      } catch (idError) {
+        if (idError instanceof GenerationSessionStoreError) {
+          throw idError;
+        }
+      }
     }
     throw new GenerationSessionStoreError(
       "INVALID_SESSION",
@@ -128,7 +297,7 @@ function validateExpectedRevision(revision: number): void {
   if (!Number.isSafeInteger(revision) || revision < 0) {
     throw new GenerationSessionStoreError(
       "INVALID_REVISION",
-      `Invalid expected generation revision: ${String(revision)}`
+      "Invalid expected generation revision"
     );
   }
 }
@@ -148,6 +317,12 @@ function validateNextRevision(
   next: GenerationSession
 ): void {
   validateExpectedRevision(expectedRevision);
+  if (expectedRevision === Number.MAX_SAFE_INTEGER) {
+    throw new GenerationSessionStoreError(
+      "INVALID_REVISION",
+      "Generation revision cannot increment beyond Number.MAX_SAFE_INTEGER"
+    );
+  }
   if (sessionId(next) !== id) {
     throw new GenerationSessionStoreError(
       "INVALID_ID",
@@ -158,6 +333,18 @@ function validateNextRevision(
     throw new GenerationSessionStoreError(
       "INVALID_REVISION",
       "Next generation revision must increment expectedRevision by exactly one"
+    );
+  }
+}
+
+function parseInFlight(value: unknown): GenerationInFlight {
+  try {
+    return GenerationInFlightSchema.parse(value);
+  } catch (error) {
+    throw new GenerationSessionStoreError(
+      "INVALID_TRANSITION",
+      "Expected inFlight record is invalid",
+      { cause: error }
     );
   }
 }
@@ -271,7 +458,7 @@ function serializeJson(value: unknown): string {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 
-function canonicalizeEvidence(
+function canonicalizeEvidenceValue(
   value: unknown,
   ancestors: Set<object> = new Set()
 ): unknown {
@@ -307,7 +494,7 @@ function canonicalizeEvidence(
   ancestors.add(value);
   try {
     if (Array.isArray(value)) {
-      return value.map((item) => canonicalizeEvidence(item, ancestors));
+      return value.map((item) => canonicalizeEvidenceValue(item, ancestors));
     }
 
     const prototype = Object.getPrototypeOf(value) as unknown;
@@ -323,7 +510,7 @@ function canonicalizeEvidence(
         .sort((left, right) => left.localeCompare(right))
         .map((key) => [
           key,
-          canonicalizeEvidence(
+          canonicalizeEvidenceValue(
             (value as Record<string, unknown>)[key],
             ancestors
           )
@@ -334,9 +521,25 @@ function canonicalizeEvidence(
   }
 }
 
-function validateEvidencePath(relativePath: string): string[] {
+function canonicalizeEvidence(value: unknown): unknown {
+  try {
+    return canonicalizeEvidenceValue(value);
+  } catch (error) {
+    if (error instanceof GenerationSessionStoreError) {
+      throw error;
+    }
+    throw new GenerationSessionStoreError(
+      "INVALID_EVIDENCE",
+      "Evidence value cannot be safely inspected",
+      { cause: error }
+    );
+  }
+}
+
+function validateEvidencePath(relativePath: unknown): string[] {
   if (
-    relativePath.length === 0
+    typeof relativePath !== "string"
+    || relativePath.length === 0
     || relativePath.includes("\\")
     || relativePath.includes("\0")
     || isAbsolute(relativePath)
@@ -344,7 +547,7 @@ function validateEvidencePath(relativePath: string): string[] {
   ) {
     throw new GenerationSessionStoreError(
       "INVALID_EVIDENCE_PATH",
-      `Invalid generation evidence path: ${relativePath}`
+      "Invalid generation evidence path"
     );
   }
 
@@ -359,7 +562,7 @@ function validateEvidencePath(relativePath: string): string[] {
   ) {
     throw new GenerationSessionStoreError(
       "INVALID_EVIDENCE_PATH",
-      `Invalid generation evidence path: ${relativePath}`
+      "Invalid generation evidence path"
     );
   }
   return segments;
@@ -432,9 +635,13 @@ async function fileIdentity(path: string): Promise<FileIdentity> {
 }
 
 async function readStateFromDirectory(
-  directory: string
+  directory: string,
+  afterOpen?: () => Promise<void> | void,
+  expectedDirectory?: StoreDirectoryEvidence
 ): Promise<GenerationSession> {
-  await requireRealDirectory(directory);
+  const directoryEvidence = expectedDirectory
+    ?? await captureStoreDirectory(directory);
+  await verifyStoreDirectory(directoryEvidence);
   const statePath = join(directory, "state.json");
   let text: string;
   try {
@@ -443,6 +650,26 @@ async function readStateFromDirectory(
       constants.O_RDONLY | constants.O_NOFOLLOW
     );
     try {
+      const openedStats = await handle.stat({ bigint: true });
+      if (!openedStats.isFile()) {
+        throw new GenerationSessionStoreError(
+          "IO_ERROR",
+          `Generation state is not a regular file: ${statePath}`
+        );
+      }
+      const openedIdentity = {
+        dev: openedStats.dev,
+        ino: openedStats.ino
+      };
+      await afterOpen?.();
+      await verifyStoreDirectory(directoryEvidence);
+      const pathIdentity = await captureStoreFile(statePath);
+      if (!sameIdentity(openedIdentity, pathIdentity)) {
+        throw new GenerationSessionStoreError(
+          "IO_ERROR",
+          `Generation state file identity changed: ${statePath}`
+        );
+      }
       text = await handle.readFile("utf8");
     } finally {
       await handle.close();
@@ -474,9 +701,15 @@ async function readStateFromDirectory(
 
 async function readBoundState(
   directory: string,
-  id: string
+  id: string,
+  afterOpen?: () => Promise<void> | void,
+  expectedDirectory?: StoreDirectoryEvidence
 ): Promise<GenerationSession> {
-  const session = await readStateFromDirectory(directory);
+  const session = await readStateFromDirectory(
+    directory,
+    afterOpen,
+    expectedDirectory
+  );
   if (sessionId(session) !== id) {
     throw new GenerationSessionStoreError(
       "INVALID_SESSION",
@@ -489,9 +722,15 @@ async function readBoundState(
 async function writeStateAtomically(
   directory: string,
   session: GenerationSession,
-  sync: (path: string) => Promise<void> = syncDirectory
+  sync: (path: string) => Promise<void> = syncDirectory,
+  beforeRename?: () => Promise<void> | void,
+  expectedDirectory?: StoreDirectoryEvidence
 ): Promise<void> {
+  const directoryEvidence = expectedDirectory
+    ?? await captureStoreDirectory(directory);
+  await verifyStoreDirectory(directoryEvidence);
   const statePath = join(directory, "state.json");
+  const originalStateIdentity = await captureOptionalStoreFile(statePath);
   const temporaryPath = join(
     directory,
     `.state.json.${randomUUID()}.tmp`
@@ -510,7 +749,18 @@ async function writeStateAtomically(
     await handle.sync();
     await handle.close();
     handle = undefined;
+    const temporaryIdentity = await captureStoreFile(temporaryPath);
+    await beforeRename?.();
+    await verifyStoreDirectory(directoryEvidence);
+    await verifyOptionalStoreFile(statePath, originalStateIdentity);
     await rename(temporaryPath, statePath);
+    const installedIdentity = await captureStoreFile(statePath);
+    if (!sameIdentity(temporaryIdentity, installedIdentity)) {
+      throw new GenerationSessionStoreError(
+        "IO_ERROR",
+        `Generation state install identity changed: ${statePath}`
+      );
+    }
     await sync(directory);
   } catch (error) {
     if (handle !== undefined) {
@@ -533,18 +783,16 @@ implements GenerationSessionStore {
     projectRoot: string,
     options: FileSystemGenerationSessionStoreOptions = {}
   ) {
-    this.projectRoot = resolve(projectRoot);
+    const configuration = parseStoreConfiguration(projectRoot, options);
+    this.projectRoot = configuration.projectRoot;
     this.generationRoot = join(
       this.projectRoot,
       ".taphound",
       "generations"
     );
     this.locksRoot = join(this.generationRoot, ".locks");
-    this.options = {
-      lockTimeoutMs: options.lockTimeoutMs ?? DEFAULT_OPTIONS.lockTimeoutMs,
-      lockRetryMs: options.lockRetryMs ?? DEFAULT_OPTIONS.lockRetryMs
-    };
-    this.hooks = options.hooks ?? {};
+    this.options = configuration.options;
+    this.hooks = configuration.hooks;
   }
 
   public readonly create = async (
@@ -570,10 +818,13 @@ implements GenerationSessionStore {
 
       await mkdir(activeDirectory);
       try {
+        const activeEvidence = await captureStoreDirectory(activeDirectory);
         await writeStateAtomically(
           activeDirectory,
           session,
-          this.syncDirectory
+          this.syncDirectory,
+          this.hooks.beforeStateRename,
+          activeEvidence
         );
         await this.syncDirectory(this.generationRoot);
       } catch (error) {
@@ -589,11 +840,23 @@ implements GenerationSessionStore {
     return this.withLock(id, async () => {
       const finalDirectory = this.finalDirectory(id);
       if (await pathExists(finalDirectory)) {
-        return readBoundState(finalDirectory, id);
+        const finalEvidence = await captureStoreDirectory(finalDirectory);
+        return readBoundState(
+          finalDirectory,
+          id,
+          this.hooks.afterStateOpen,
+          finalEvidence
+        );
       }
       const activeDirectory = this.activeDirectory(id);
       if (await pathExists(activeDirectory)) {
-        return readBoundState(activeDirectory, id);
+        const activeEvidence = await captureStoreDirectory(activeDirectory);
+        return readBoundState(
+          activeDirectory,
+          id,
+          this.hooks.afterStateOpen,
+          activeEvidence
+        );
       }
       throw new GenerationSessionStoreError(
         "SESSION_NOT_FOUND",
@@ -627,7 +890,13 @@ implements GenerationSessionStore {
         );
       }
 
-      const current = await readBoundState(activeDirectory, id);
+      const activeEvidence = await captureStoreDirectory(activeDirectory);
+      const current = await readBoundState(
+        activeDirectory,
+        id,
+        this.hooks.afterStateOpen,
+        activeEvidence
+      );
       if (current.revision !== expectedRevision) {
         throw new GenerationSessionStoreError(
           "REVISION_CONFLICT",
@@ -637,7 +906,77 @@ implements GenerationSessionStore {
         );
       }
       assertOrdinaryTransition(current, next);
-      await writeStateAtomically(activeDirectory, next, this.syncDirectory);
+      await writeStateAtomically(
+        activeDirectory,
+        next,
+        this.syncDirectory,
+        this.hooks.beforeStateRename,
+        activeEvidence
+      );
+    });
+  };
+
+  public readonly completeStep = async (
+    id: string,
+    expectedRevision: number,
+    expectedInFlightInput: GenerationInFlight,
+    input: GenerationSession
+  ): Promise<void> => {
+    assertId(id);
+    const expectedInFlight = parseInFlight(expectedInFlightInput);
+    const next = parseSession(input, true);
+    validateNextRevision(id, expectedRevision, next);
+    await this.ensureGenerationRoot();
+
+    await this.withLock(id, async () => {
+      const activeDirectory = this.activeDirectory(id);
+      if (!await pathExists(activeDirectory)) {
+        if (await pathExists(this.finalDirectory(id))) {
+          throw new GenerationSessionStoreError(
+            "SESSION_PUBLISHED",
+            `Published generation session cannot complete a step: ${id}`
+          );
+        }
+        throw new GenerationSessionStoreError(
+          "SESSION_NOT_FOUND",
+          `Generation session does not exist: ${id}`
+        );
+      }
+
+      const activeEvidence = await captureStoreDirectory(activeDirectory);
+      const current = await readBoundState(
+        activeDirectory,
+        id,
+        this.hooks.afterStateOpen,
+        activeEvidence
+      );
+      if (current.revision !== expectedRevision) {
+        throw new GenerationSessionStoreError(
+          "REVISION_CONFLICT",
+          `Expected generation revision ${String(expectedRevision)}, found ${
+            String(current.revision)
+          }`
+        );
+      }
+      if (
+        current.state !== "active"
+        || current.inFlight === null
+        || !sameInFlight(current.inFlight, expectedInFlight)
+        || next.state !== "active"
+        || next.inFlight !== null
+      ) {
+        throw new GenerationSessionStoreError(
+          "INVALID_TRANSITION",
+          "Step completion must clear the matching active inFlight record"
+        );
+      }
+      await writeStateAtomically(
+        activeDirectory,
+        next,
+        this.syncDirectory,
+        this.hooks.beforeStateRename,
+        activeEvidence
+      );
     });
   };
 
@@ -666,7 +1005,13 @@ implements GenerationSessionStore {
         );
       }
 
-      const current = await readBoundState(activeDirectory, id);
+      const activeEvidence = await captureStoreDirectory(activeDirectory);
+      const current = await readBoundState(
+        activeDirectory,
+        id,
+        this.hooks.afterStateOpen,
+        activeEvidence
+      );
       if (current.revision !== expectedRevision) {
         throw new GenerationSessionStoreError(
           "REVISION_CONFLICT",
@@ -676,7 +1021,13 @@ implements GenerationSessionStore {
         );
       }
       assertRecoveryTransition(current, next);
-      await writeStateAtomically(activeDirectory, next, this.syncDirectory);
+      await writeStateAtomically(
+        activeDirectory,
+        next,
+        this.syncDirectory,
+        this.hooks.beforeStateRename,
+        activeEvidence
+      );
     });
   };
 
@@ -818,13 +1169,22 @@ implements GenerationSessionStore {
     assertId(id);
     await this.ensureGenerationRoot();
     return this.withLock(id, async () => {
+      const generationRootEvidence = await captureStoreDirectory(
+        this.generationRoot
+      );
       const activeDirectory = this.activeDirectory(id);
       const finalDirectory = this.finalDirectory(id);
       const activeExists = await pathExists(activeDirectory);
       const finalExists = await pathExists(finalDirectory);
 
       if (finalExists && !activeExists) {
-        const state = await readBoundState(finalDirectory, id);
+        const finalEvidence = await captureStoreDirectory(finalDirectory);
+        const state = await readBoundState(
+          finalDirectory,
+          id,
+          this.hooks.afterStateOpen,
+          finalEvidence
+        );
         this.assertPublishable(state);
         await this.syncDirectory(this.generationRoot);
         return finalDirectory;
@@ -842,11 +1202,26 @@ implements GenerationSessionStore {
         );
       }
 
-      const state = await readBoundState(activeDirectory, id);
+      const activeEvidence = await captureStoreDirectory(activeDirectory);
+      const state = await readBoundState(
+        activeDirectory,
+        id,
+        this.hooks.afterStateOpen,
+        activeEvidence
+      );
       this.assertPublishable(state);
       try {
         await this.hooks.beforePublishRename?.();
+        await verifyStoreDirectory(generationRootEvidence);
+        await verifyStoreDirectory(activeEvidence);
         await rename(activeDirectory, finalDirectory);
+        const finalEvidence = await captureStoreDirectory(finalDirectory);
+        if (!sameIdentity(activeEvidence.identity, finalEvidence.identity)) {
+          throw new GenerationSessionStoreError(
+            "IO_ERROR",
+            "Published generation bundle identity changed"
+          );
+        }
       } catch (error) {
         if (
           isNodeError(error)
@@ -872,9 +1247,15 @@ implements GenerationSessionStore {
     try {
       await requireRealDirectory(this.projectRoot);
       const taphoundDirectory = join(this.projectRoot, ".taphound");
-      await createOrRequireDirectory(taphoundDirectory);
-      await createOrRequireDirectory(this.generationRoot);
-      await createOrRequireDirectory(this.locksRoot);
+      if (await createOrRequireDirectory(taphoundDirectory)) {
+        await this.syncDirectory(this.projectRoot);
+      }
+      if (await createOrRequireDirectory(this.generationRoot)) {
+        await this.syncDirectory(taphoundDirectory);
+      }
+      if (await createOrRequireDirectory(this.locksRoot)) {
+        await this.syncDirectory(this.generationRoot);
+      }
     } catch (error) {
       throw asStoreIoError(error, "initialize its generation directory");
     }
@@ -902,8 +1283,21 @@ implements GenerationSessionStore {
     operation: () => Promise<T>
   ): Promise<T> => {
     const token = randomUUID();
+    let generationRootEvidence: StoreDirectoryEvidence;
+    let locksRootEvidence: StoreDirectoryEvidence;
     try {
-      await this.acquireLock(id, { pid: process.pid, token });
+      generationRootEvidence = await captureStoreDirectory(
+        this.generationRoot
+      );
+      locksRootEvidence = await captureStoreDirectory(this.locksRoot);
+      await this.acquireLock(
+        id,
+        { pid: process.pid, token },
+        generationRootEvidence,
+        locksRootEvidence
+      );
+      await verifyStoreDirectory(generationRootEvidence);
+      await verifyStoreDirectory(locksRootEvidence);
     } catch (error) {
       throw asStoreIoError(error, "acquire its exclusive lock");
     }
@@ -936,31 +1330,21 @@ implements GenerationSessionStore {
 
   private readonly acquireLock = async (
     id: string,
-    owner: LockOwner
+    owner: LockOwner,
+    generationRootEvidence: StoreDirectoryEvidence,
+    locksRootEvidence: StoreDirectoryEvidence
   ): Promise<void> => {
     const lockPath = this.lockPath(id);
     const deadline = Date.now() + this.options.lockTimeoutMs;
     for (;;) {
-      try {
-        await mkdir(lockPath, { mode: 0o700 });
-        const handle = await open(
-          join(lockPath, "owner.json"),
-          "wx",
-          0o600
-        );
-        try {
-          await handle.writeFile(serializeJson(owner), "utf8");
-          await handle.sync();
-        } finally {
-          await handle.close();
-        }
-        await this.syncDirectory(lockPath);
-        await this.syncDirectory(this.locksRoot);
+      if (await this.tryInstallLock(
+        id,
+        lockPath,
+        owner,
+        generationRootEvidence,
+        locksRootEvidence
+      )) {
         return;
-      } catch (error) {
-        if (!isNodeError(error) || error.code !== "EEXIST") {
-          throw error;
-        }
       }
 
       await this.reapDeadOwnerLock(id, lockPath);
@@ -976,12 +1360,57 @@ implements GenerationSessionStore {
     }
   };
 
+  private readonly tryInstallLock = async (
+    id: string,
+    lockPath: string,
+    owner: LockOwner,
+    generationRootEvidence: StoreDirectoryEvidence,
+    locksRootEvidence: StoreDirectoryEvidence
+  ): Promise<boolean> => {
+    const stagingPath = join(
+      this.locksRoot,
+      `.${id}.lock.acquire-${randomUUID()}.tmp`
+    );
+    try {
+      const handle = await open(stagingPath, "wx", 0o600);
+      try {
+        await this.hooks.beforeLockStagingWrite?.();
+        await handle.writeFile(serializeJson(owner), "utf8");
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      await this.hooks.beforeLockInstall?.();
+      await verifyStoreDirectory(generationRootEvidence);
+      await verifyStoreDirectory(locksRootEvidence);
+      try {
+        await link(stagingPath, lockPath);
+      } catch (error) {
+        if (isNodeError(error) && error.code === "EEXIST") {
+          return false;
+        }
+        throw error;
+      }
+      try {
+        await this.syncDirectory(this.locksRoot);
+        await verifyStoreDirectory(generationRootEvidence);
+        await verifyStoreDirectory(locksRootEvidence);
+      } catch (error) {
+        await this.releaseLock(id, owner.token).catch(() => undefined);
+        throw error;
+      }
+      return true;
+    } finally {
+      await unlink(stagingPath).catch(() => undefined);
+    }
+  };
+
   private readonly reapDeadOwnerLock = async (
     id: string,
     lockPath: string
   ): Promise<void> => {
     try {
-      const identity = await this.directoryIdentity(lockPath);
+      const identity = await this.fileIdentity(lockPath);
       const owner = await this.readLockOwner(lockPath);
       if (owner === null || this.isProcessAlive(owner.pid)) {
         return;
@@ -992,7 +1421,7 @@ implements GenerationSessionStore {
         `.${id}.lock.reap-${randomUUID()}`
       );
       await rename(lockPath, tombstone);
-      const movedIdentity = await this.directoryIdentity(tombstone);
+      const movedIdentity = await this.fileIdentity(tombstone);
       if (
         movedIdentity.dev !== identity.dev
         || movedIdentity.ino !== identity.ino
@@ -1001,7 +1430,7 @@ implements GenerationSessionStore {
         return;
       }
       await this.hooks.afterLockTombstoneRename?.();
-      await rm(tombstone, { recursive: true });
+      await unlink(tombstone);
       await this.syncDirectory(this.locksRoot);
     } catch (error) {
       if (!isNodeError(error) || error.code !== "ENOENT") {
@@ -1016,7 +1445,7 @@ implements GenerationSessionStore {
   ): Promise<void> => {
     const lockPath = this.lockPath(id);
     try {
-      const identity = await this.directoryIdentity(lockPath);
+      const identity = await this.fileIdentity(lockPath);
       const current = await this.readLockOwner(lockPath);
       if (current?.pid === process.pid && current.token === token) {
         const tombstone = join(
@@ -1024,12 +1453,12 @@ implements GenerationSessionStore {
           `.${id}.lock.release-${randomUUID()}`
         );
         await rename(lockPath, tombstone);
-        const movedIdentity = await this.directoryIdentity(tombstone);
+        const movedIdentity = await this.fileIdentity(tombstone);
         if (
           movedIdentity.dev === identity.dev
           && movedIdentity.ino === identity.ino
         ) {
-          await rm(tombstone, { recursive: true });
+          await unlink(tombstone);
           await this.syncDirectory(this.locksRoot);
         } else {
           await rename(tombstone, lockPath).catch(() => undefined);
@@ -1046,7 +1475,7 @@ implements GenerationSessionStore {
     lockPath: string
   ): Promise<LockOwner | null> => {
     const handle = await open(
-      join(lockPath, "owner.json"),
+      lockPath,
       constants.O_RDONLY | constants.O_NOFOLLOW
     );
     try {
@@ -1069,14 +1498,14 @@ implements GenerationSessionStore {
     }
   };
 
-  private readonly directoryIdentity = async (
+  private readonly fileIdentity = async (
     path: string
   ): Promise<FileIdentity> => {
     const stats = await lstat(path, { bigint: true });
-    if (!stats.isDirectory() || stats.isSymbolicLink()) {
+    if (!stats.isFile() || stats.isSymbolicLink()) {
       throw new GenerationSessionStoreError(
         "IO_ERROR",
-        `Generation lock path is not a real directory: ${path}`
+        `Generation lock path is not a real file: ${path}`
       );
     }
     return { dev: stats.dev, ino: stats.ino };

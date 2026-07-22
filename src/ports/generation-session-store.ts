@@ -1,4 +1,7 @@
-import type { GenerationSession } from "../domain/generation.js";
+import type {
+  GenerationInFlight,
+  GenerationSession
+} from "../domain/generation.js";
 
 export const GENERATION_SESSION_STORE_ERROR_CODES = [
   "INVALID_ID",
@@ -38,6 +41,12 @@ export interface GenerationSessionStore {
   update: (
     id: string,
     expectedRevision: number,
+    next: GenerationSession
+  ) => Promise<void>;
+  completeStep: (
+    id: string,
+    expectedRevision: number,
+    expectedInFlight: GenerationInFlight,
     next: GenerationSession
   ) => Promise<void>;
   recover: (

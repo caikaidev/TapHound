@@ -10,7 +10,8 @@ const validManifest = {
   version: 1,
   files: [{
     path: "app/src/main/AndroidManifest.xml",
-    sha256: "a".repeat(64)
+    sha256: "a".repeat(64),
+    confidence: "sourceConfirmed"
   }]
 };
 
@@ -24,6 +25,31 @@ describe("generation project context contracts", () => {
   it("parses a strict context manifest and interaction policy", () => {
     expect(ContextManifestSchema.parse(validManifest)).toEqual(validManifest);
     expect(InteractionPolicySchema.parse(validPolicy)).toEqual(validPolicy);
+  });
+
+  it.each([
+    "sourceConfirmed",
+    "runtimeConfirmed",
+    "inferred",
+    "unknown"
+  ])("accepts the exact evidence confidence member %s", (confidence) => {
+    expect(ContextManifestSchema.parse({
+      ...validManifest,
+      files: [{ ...validManifest.files[0], confidence }]
+    }).files[0]?.confidence).toBe(confidence);
+  });
+
+  it.each([
+    "confirmed",
+    "high",
+    "",
+    0.9,
+    null
+  ])("rejects out-of-contract evidence confidence %s", (confidence) => {
+    expect(() => ContextManifestSchema.parse({
+      ...validManifest,
+      files: [{ ...validManifest.files[0], confidence }]
+    })).toThrow();
   });
 
   it("parses a strict project context", () => {
@@ -65,7 +91,11 @@ describe("generation project context contracts", () => {
   ])("rejects platform-specific context path escape %s", (path) => {
     expect(() => ContextManifestSchema.parse({
       version: 1,
-      files: [{ path, sha256: "a".repeat(64) }]
+      files: [{
+        path,
+        sha256: "a".repeat(64),
+        confidence: "sourceConfirmed"
+      }]
     })).toThrow(/within the project/i);
   });
 
@@ -74,7 +104,8 @@ describe("generation project context contracts", () => {
       version: 1,
       files: [{
         path: String.raw`app\src\main\AndroidManifest.xml`,
-        sha256: "a".repeat(64)
+        sha256: "a".repeat(64),
+        confidence: "sourceConfirmed"
       }]
     }).files[0]?.path).toBe("app/src/main/AndroidManifest.xml");
   });

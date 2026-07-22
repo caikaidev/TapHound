@@ -9,7 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   ContextValidator,
@@ -17,6 +17,7 @@ import {
 } from "../../../src/application/context/context-validator.js";
 import { NodeProjectFileInspector } from "../../../src/adapters/filesystem/project-file-inspector.js";
 import type { TapHoundConfig } from "../../../src/domain/config.js";
+import type { ProjectFileInspector } from "../../../src/ports/project-file-inspector.js";
 
 const temporaryRoots: string[] = [];
 
@@ -47,13 +48,23 @@ function sha256(content: string | Uint8Array): string {
 }
 
 function contextFor(
-  files: Array<{ path: string; sha256: string }>
+  files: Array<{
+    path: string;
+    sha256: string;
+    confidence?: unknown;
+  }>
 ): unknown {
   return {
     version: 1,
     packageName: config.run.packageName,
     launchActivity: "com.example.app.MainActivity",
-    manifest: { version: 1, files },
+    manifest: {
+      version: 1,
+      files: files.map((file) => ({
+        ...file,
+        confidence: file.confidence ?? "sourceConfirmed"
+      }))
+    },
     interactionPolicy: policy
   };
 }
@@ -155,6 +166,27 @@ describe("ContextValidator", () => {
     });
   });
 
+  it("rejects a project root that is not a directory", async () => {
+    const root = await temporaryRoot();
+    const projectFile = join(root, "project.txt");
+    await writeFile(projectFile, "not a directory");
+
+    await expect(validator().validate({
+      context: contextFor([{
+        path: "source.kt",
+        sha256: "a".repeat(64)
+      }]),
+      projectRoot: projectFile,
+      config
+    })).resolves.toEqual({
+      status: "invalid",
+      reason: {
+        code: "PROJECT_ROOT_NOT_DIRECTORY",
+        message: "Project root is not a directory"
+      }
+    });
+  });
+
   it.each([
     "/tmp/outside.kt",
     "../outside.kt",
@@ -204,10 +236,18 @@ describe("ContextValidator", () => {
 
   it.each([
     ".env",
+    ".envrc",
     ".env.production",
+    ".secrets/token.txt",
+    ".credentials/config",
+    "android/keystore.properties",
+    "local.properties",
     "credentials.json",
+    "credentials.yaml",
+    "service-account.json",
     "signing/release.keystore",
-    "keys/id_rsa"
+    "keys/id_rsa",
+    "keys/private.pem"
   ])("rejects secret evidence path %s", async (path) => {
     const root = await temporaryRoot();
     const content = "secret";
@@ -248,6 +288,29 @@ describe("ContextValidator", () => {
     });
   });
 
+  it("maps changed file identity from the secure inspection boundary", async () => {
+    const files: ProjectFileInspector = {
+      inspectProjectFile: vi.fn(() => Promise.resolve({
+        status: "changedIdentity" as const
+      }))
+    };
+
+    await expect(new ContextValidator(files).validate({
+      context: contextFor([{
+        path: "source.kt",
+        sha256: "a".repeat(64)
+      }]),
+      projectRoot: "/project",
+      config
+    })).resolves.toEqual({
+      status: "invalid",
+      reason: {
+        code: "EVIDENCE_CHANGED_IDENTITY",
+        message: "Evidence file changed during inspection: source.kt"
+      }
+    });
+  });
+
   it("rejects evidence larger than the explicit maximum", async () => {
     const root = await temporaryRoot();
     const path = "app/src/main/large.txt";
@@ -271,13 +334,11 @@ describe("ContextValidator", () => {
     const root = await temporaryRoot();
 
     await expect(validator().validate({
-      context: {
-        ...(contextFor([{
-          path: "source.kt",
-          sha256: "a".repeat(64)
-        }]) as object),
-        confidence: 1.1
-      },
+      context: contextFor([{
+        path: "source.kt",
+        sha256: "a".repeat(64),
+        confidence: "high"
+      }]),
       projectRoot: root,
       config
     })).resolves.toEqual({

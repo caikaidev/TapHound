@@ -15,6 +15,16 @@ const GenerationActionSchema = z.enum([
   "wait"
 ]);
 
+export const ContextEvidenceConfidenceSchema = z.enum([
+  "sourceConfirmed",
+  "runtimeConfirmed",
+  "inferred",
+  "unknown"
+]);
+export type ContextEvidenceConfidence = z.infer<
+  typeof ContextEvidenceConfidenceSchema
+>;
+
 export const ProjectRelativePathSchema = z.string()
   .trim()
   .min(1)
@@ -30,7 +40,8 @@ export const ProjectRelativePathSchema = z.string()
 
 const ContextFileSchema = z.strictObject({
   path: ProjectRelativePathSchema,
-  sha256: z.string().regex(/^[a-f\d]{64}$/)
+  sha256: z.string().regex(/^[a-f\d]{64}$/),
+  confidence: ContextEvidenceConfidenceSchema
 });
 
 export const ContextManifestSchema = z.strictObject({

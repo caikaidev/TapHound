@@ -1,24 +1,23 @@
 export type ProjectFileInspection =
-  | { status: "notFile" }
-  | { status: "tooLarge"; size: number }
-  | { status: "inspected"; size: number; sha256: string };
-
-export type ProjectFileInspectionFailure = "notFound" | "unreadable";
-
-export class ProjectFileInspectionError extends Error {
-  public constructor(
-    public readonly failure: ProjectFileInspectionFailure,
-    message: string
-  ) {
-    super(message);
-    this.name = "ProjectFileInspectionError";
-  }
-}
+  | { status: "rootNotFound" }
+  | { status: "rootUnreadable" }
+  | { status: "rootNotDirectory" }
+  | { status: "notFound" }
+  | { status: "unreadable" }
+  | { status: "escape" }
+  | { status: "changedIdentity"; resolvedRelativePath?: string }
+  | { status: "notFile"; resolvedRelativePath: string }
+  | { status: "tooLarge"; resolvedRelativePath: string }
+  | {
+      status: "inspected";
+      resolvedRelativePath: string;
+      sha256: string;
+    };
 
 export interface ProjectFileInspector {
-  realPath: (path: string) => Promise<string>;
-  inspectFile: (
-    realPath: string,
-    maximumBytes: number
-  ) => Promise<ProjectFileInspection>;
+  inspectProjectFile: (input: {
+    projectRoot: string;
+    relativePath: string;
+    maximumBytes: number;
+  }) => Promise<ProjectFileInspection>;
 }

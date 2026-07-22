@@ -1,15 +1,8 @@
-import {
-  isAbsolute,
-  relative,
-  resolve,
-  sep
-} from "node:path";
-
 import { normalizeActivity } from "../../domain/activity.js";
 import type { TapHoundConfig } from "../../domain/config.js";
 import { ProjectContextSchema } from "../../domain/project-context.js";
 import {
-  ProjectFileInspectionError,
+  type ProjectFileInspection,
   type ProjectFileInspector
 } from "../../ports/project-file-inspector.js";
 
@@ -19,11 +12,13 @@ export type ContextValidationReasonCode =
   | "CONTEXT_SCHEMA_INVALID"
   | "CONTEXT_IDENTITY_MISMATCH"
   | "PROJECT_ROOT_UNREADABLE"
+  | "PROJECT_ROOT_NOT_DIRECTORY"
   | "EVIDENCE_SECRET_PATH"
   | "EVIDENCE_NOT_FOUND"
   | "EVIDENCE_UNREADABLE"
   | "EVIDENCE_NOT_FILE"
   | "EVIDENCE_PATH_ESCAPE"
+  | "EVIDENCE_CHANGED_IDENTITY"
   | "EVIDENCE_TOO_LARGE"
   | "EVIDENCE_HASH_MISMATCH";
 
@@ -44,46 +39,52 @@ export interface ContextValidationInput {
 }
 
 const SECRET_FILE_NAMES = new Set([
+  ".git-credentials",
   ".netrc",
   ".npmrc",
   ".pypirc",
   "credentials",
-  "credentials.json",
   "id_dsa",
   "id_ecdsa",
   "id_ed25519",
   "id_rsa",
+  "keystore.properties",
+  "local.properties",
   "secret.json",
   "secrets.json"
 ]);
 
 const SECRET_FILE_EXTENSIONS = [
+  ".der",
   ".jks",
   ".key",
   ".keystore",
   ".p12",
+  ".pk8",
   ".pem",
-  ".pfx"
+  ".pfx",
+  ".ppk"
 ];
 
 function isSecretEvidencePath(path: string): boolean {
-  const fileName = path.split("/").at(-1)?.toLowerCase() ?? "";
+  const components = path
+    .replaceAll("\\", "/")
+    .split("/")
+    .filter((component) => component.length > 0)
+    .map((component) => component.toLowerCase());
+  const fileName = components.at(-1) ?? "";
   return (
-    /^\.env(?:\.|$)/.test(fileName)
+    components.some((component) => (
+      component.startsWith(".env")
+      || component === ".secrets"
+      || component === ".credentials"
+      || component === ".ssh"
+      || component === ".gnupg"
+    ))
     || SECRET_FILE_NAMES.has(fileName)
+    || /^credentials(?:\.|$)/.test(fileName)
+    || /^service-account(?:\.|$)/.test(fileName)
     || SECRET_FILE_EXTENSIONS.some((extension) => fileName.endsWith(extension))
-  );
-}
-
-function isContained(root: string, path: string): boolean {
-  const fromRoot = relative(root, path);
-  return (
-    fromRoot === ""
-    || (
-      fromRoot !== ".."
-      && !fromRoot.startsWith(`..${sep}`)
-      && !isAbsolute(fromRoot)
-    )
   );
 }
 
@@ -94,23 +95,53 @@ function invalid(
   return { status: "invalid", reason: { code, message } };
 }
 
-function inspectionFailure(
+function invalidInspection(
   path: string,
-  error: unknown
+  inspection: Exclude<ProjectFileInspection, { status: "inspected" }>
 ): ContextValidationResult {
-  if (
-    error instanceof ProjectFileInspectionError
-    && error.failure === "notFound"
-  ) {
-    return invalid(
-      "EVIDENCE_NOT_FOUND",
-      `Evidence file does not exist: ${path}`
-    );
+  switch (inspection.status) {
+    case "rootNotFound":
+    case "rootUnreadable":
+      return invalid(
+        "PROJECT_ROOT_UNREADABLE",
+        "Project root does not exist or cannot be read"
+      );
+    case "rootNotDirectory":
+      return invalid(
+        "PROJECT_ROOT_NOT_DIRECTORY",
+        "Project root is not a directory"
+      );
+    case "notFound":
+      return invalid(
+        "EVIDENCE_NOT_FOUND",
+        `Evidence file does not exist: ${path}`
+      );
+    case "unreadable":
+      return invalid(
+        "EVIDENCE_UNREADABLE",
+        `Evidence file cannot be read: ${path}`
+      );
+    case "escape":
+      return invalid(
+        "EVIDENCE_PATH_ESCAPE",
+        `Evidence file resolves outside the project: ${path}`
+      );
+    case "changedIdentity":
+      return invalid(
+        "EVIDENCE_CHANGED_IDENTITY",
+        `Evidence file changed during inspection: ${path}`
+      );
+    case "notFile":
+      return invalid(
+        "EVIDENCE_NOT_FILE",
+        `Evidence path is not a file: ${path}`
+      );
+    case "tooLarge":
+      return invalid(
+        "EVIDENCE_TOO_LARGE",
+        `Evidence file exceeds ${String(MAX_CONTEXT_EVIDENCE_BYTES)} bytes: ${path}`
+      );
   }
-  return invalid(
-    "EVIDENCE_UNREADABLE",
-    `Evidence file cannot be read: ${path}`
-  );
 }
 
 export class ContextValidator {
@@ -150,16 +181,6 @@ export class ContextValidator {
       );
     }
 
-    let projectRoot: string;
-    try {
-      projectRoot = await this.files.realPath(input.projectRoot);
-    } catch {
-      return invalid(
-        "PROJECT_ROOT_UNREADABLE",
-        "Project root does not exist or cannot be read"
-      );
-    }
-
     let staleReason: ContextValidationReason | undefined;
     for (const evidence of parsed.data.manifest.files) {
       if (isSecretEvidencePath(evidence.path)) {
@@ -169,50 +190,23 @@ export class ContextValidator {
         );
       }
 
-      const candidate = resolve(projectRoot, evidence.path);
-      let evidenceRealPath: string;
-      try {
-        evidenceRealPath = await this.files.realPath(candidate);
-      } catch (error: unknown) {
-        return inspectionFailure(evidence.path, error);
-      }
-
-      if (!isContained(projectRoot, evidenceRealPath)) {
-        return invalid(
-          "EVIDENCE_PATH_ESCAPE",
-          `Evidence file resolves outside the project: ${evidence.path}`
-        );
-      }
-      const resolvedRelativePath = relative(projectRoot, evidenceRealPath)
-        .replaceAll("\\", "/");
-      if (isSecretEvidencePath(resolvedRelativePath)) {
+      const inspection = await this.files.inspectProjectFile({
+        projectRoot: input.projectRoot,
+        relativePath: evidence.path,
+        maximumBytes: MAX_CONTEXT_EVIDENCE_BYTES
+      });
+      if (
+        "resolvedRelativePath" in inspection
+        && isSecretEvidencePath(inspection.resolvedRelativePath)
+      ) {
         return invalid(
           "EVIDENCE_SECRET_PATH",
           `Secret files cannot be context evidence: ${evidence.path}`
         );
       }
 
-      let inspection;
-      try {
-        inspection = await this.files.inspectFile(
-          evidenceRealPath,
-          MAX_CONTEXT_EVIDENCE_BYTES
-        );
-      } catch (error: unknown) {
-        return inspectionFailure(evidence.path, error);
-      }
-
-      if (inspection.status === "notFile") {
-        return invalid(
-          "EVIDENCE_NOT_FILE",
-          `Evidence path is not a file: ${evidence.path}`
-        );
-      }
-      if (inspection.status === "tooLarge") {
-        return invalid(
-          "EVIDENCE_TOO_LARGE",
-          `Evidence file exceeds ${String(MAX_CONTEXT_EVIDENCE_BYTES)} bytes: ${evidence.path}`
-        );
+      if (inspection.status !== "inspected") {
+        return invalidInspection(evidence.path, inspection);
       }
       if (inspection.sha256 !== evidence.sha256) {
         staleReason ??= {

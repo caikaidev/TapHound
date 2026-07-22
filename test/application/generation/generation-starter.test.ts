@@ -179,6 +179,61 @@ describe("GenerationStarter", () => {
     expect(test.created).toEqual([]);
   });
 
+  it.each([
+    [
+      "project root",
+      { projectRoot: "/other-project" },
+      "Project description root does not match requested project root"
+    ],
+    [
+      "project package",
+      { packageName: "com.other.app" },
+      "Project package does not match configured package"
+    ]
+  ])("rejects a conflicting %s as CONFIG_INVALID", async (
+    _identity,
+    projectOverride,
+    message
+  ) => {
+    const test = starter();
+
+    await expect(test.service.start({
+      projectRoot: "/project",
+      config,
+      context,
+      project: { ...project, ...projectOverride },
+      deviceSerial: "emulator-5554"
+    })).rejects.toEqual(expect.objectContaining({
+      code: "CONFIG_INVALID",
+      message
+    }));
+    expect(test.created).toEqual([]);
+  });
+
+  it.each([
+    ["package", { packageName: "com.other.app" }],
+    ["launch Activity", { launchActivity: "com.example.app.OtherActivity" }]
+  ])("rejects a conflicting Context %s as CONTEXT_INVALID", async (
+    _identity,
+    contextOverride
+  ) => {
+    const test = starter();
+
+    await expect(test.service.start({
+      projectRoot: "/project",
+      config,
+      context: { ...context, ...contextOverride },
+      project,
+      deviceSerial: "emulator-5554"
+    })).rejects.toEqual(expect.objectContaining<
+      Partial<GenerationOperationError>
+    >({
+      code: "CONTEXT_INVALID",
+      message: "Context package and launch identity do not match the project"
+    }));
+    expect(test.created).toEqual([]);
+  });
+
   it("does not accept caller-controlled identifiers or variables", async () => {
     const test = starter();
 

@@ -8,6 +8,7 @@ import {
 } from "./proposed-step.js";
 
 export const GENERATION_ERROR_CODES = [
+  "CONFIG_INVALID",
   "CONTEXT_INVALID",
   "CONTEXT_STALE",
   "SNAPSHOT_STALE",

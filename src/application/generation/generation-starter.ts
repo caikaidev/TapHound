@@ -97,6 +97,18 @@ export class GenerationStarter {
     input: GenerationStartInput
   ): Promise<GenerationSession> => {
     const config = TapHoundConfigSchema.parse(input.config);
+    if (input.project.projectRoot !== input.projectRoot) {
+      throw new GenerationOperationError(
+        "CONFIG_INVALID",
+        "Project description root does not match requested project root"
+      );
+    }
+    if (input.project.packageName !== config.run.packageName) {
+      throw new GenerationOperationError(
+        "CONFIG_INVALID",
+        "Project package does not match configured package"
+      );
+    }
     const validation = await this.dependencies.contextValidator.validate({
       context: input.context,
       projectRoot: input.projectRoot,
@@ -110,13 +122,12 @@ export class GenerationStarter {
     }
     const context = ProjectContextSchema.parse(input.context);
     if (
-      input.project.projectRoot !== input.projectRoot
-      || input.project.packageName !== config.run.packageName
-      || context.packageName !== input.project.packageName
+      context.packageName !== input.project.packageName
+      || context.launchActivity !== input.project.launchActivity
     ) {
       throw new GenerationOperationError(
         "CONTEXT_INVALID",
-        "Project, config, and Context identity do not match"
+        "Context package and launch identity do not match the project"
       );
     }
 

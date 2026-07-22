@@ -60,6 +60,7 @@ function validSession(): unknown {
 describe("generation error contract", () => {
   it("defines generation-only error codes", () => {
     expect(GENERATION_ERROR_CODES).toEqual([
+      "CONFIG_INVALID",
       "CONTEXT_INVALID",
       "CONTEXT_STALE",
       "SNAPSHOT_STALE",

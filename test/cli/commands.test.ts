@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  GenerationOperationError
+  GenerationOperationError,
+  GenerationStarter
 } from "../../src/application/generation/generation-starter.js";
 import { ProjectConfigurationError } from "../../src/application/project/project-describer.js";
 import { createProgram } from "../../src/cli/program.js";
@@ -465,6 +466,71 @@ describe("TapHound CLI commands", () => {
       exitCode: 2,
       failure: { code: "CONFIG_INVALID" }
     });
+    expect(test.exitCodes).toEqual([2]);
+  });
+
+  it.each([
+    [
+      "root",
+      {
+        projectRoot: "/other-project",
+        packageName: "com.example.app"
+      },
+      "Project description root does not match requested project root"
+    ],
+    [
+      "package",
+      {
+        projectRoot: "/project",
+        packageName: "com.other.app"
+      },
+      "Project package does not match configured package"
+    ]
+  ])("maps a returned conflicting ProjectDescription %s to exact CONFIG_INVALID JSON", async (
+    _identity,
+    projectIdentity,
+    message
+  ) => {
+    const test = dependencies();
+    vi.mocked(test.value.readJson).mockImplementation((path) => Promise.resolve(
+      path.includes("context") ? generationContext : runtimeConfig
+    ));
+    vi.mocked(test.value.projectDescriber.describe).mockResolvedValueOnce({
+      ...projectIdentity,
+      buildTask: ":app:assembleDebug",
+      artifactTarget: "app",
+      variant: "debug",
+      launchActivity: "com.example.app.MainActivity",
+      apkPath: "/project/app-debug.apk",
+      metadataPaths: ["/project/output-metadata.json"],
+      metadataPackageName: projectIdentity.packageName
+    });
+    test.value.generationStarter = new GenerationStarter({
+      contextValidator: test.value.contextValidator,
+      store: { create: vi.fn((): Promise<void> => Promise.resolve()) },
+      now: (): Date => new Date("2026-07-22T12:00:00.000Z"),
+      generateId: (): string => "unused-id",
+      randomBytes: (): Uint8Array => new Uint8Array()
+    });
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "generation", "start",
+      "--project", "/project",
+      "--context", "context.json",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toEqual({
+      status: "error",
+      exitCode: 2,
+      failure: {
+        code: "CONFIG_INVALID",
+        message
+      }
+    });
+    expect(test.stdout.value.endsWith("\n")).toBe(true);
+    expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
+    expect(test.stderr.value).toBe("");
     expect(test.exitCodes).toEqual([2]);
   });
 

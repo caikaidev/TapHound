@@ -14,11 +14,14 @@ import { AndroidCliAdapter } from "../adapters/android-cli/android-cli-adapter.j
 import { SystemClock } from "../adapters/clock/system-clock.js";
 import { FileSystemArtifactStore } from "../adapters/filesystem/artifact-store.js";
 import { FileSystemJourneyWriter } from "../adapters/filesystem/journey-writer.js";
+import { NodeProjectFileInspector } from "../adapters/filesystem/project-file-inspector.js";
 import { GradleAdapter } from "../adapters/gradle/gradle-adapter.js";
 import { NodeProcessRunner } from "../adapters/process/node-process-runner.js";
 import { InquirerRecorderPrompt } from "../adapters/prompt/inquirer-recorder-prompt.js";
+import { ContextValidator } from "../application/context/context-validator.js";
 import { DoctorService } from "../application/doctor/doctor-service.js";
 import type { DoctorReport } from "../application/doctor/doctor-service.js";
+import { ProjectDescriber } from "../application/project/project-describer.js";
 import { RecorderService, type RecordInput, type RecordResult } from "../application/recorder/recorder-service.js";
 import { ReportWriter } from "../application/report/report-writer.js";
 import { VerifyRuntime, type VerifyInput, type VerifyResult } from "../application/runtime/verify-runtime.js";
@@ -42,6 +45,8 @@ export interface CliDependencies {
   verifier: {
     verify: (input: VerifyInput) => Promise<VerifyResult>;
   };
+  projectDescriber: Pick<ProjectDescriber, "describe">;
+  contextValidator: Pick<ContextValidator, "validate">;
   readJson: (path: string) => Promise<unknown>;
   cwd: () => string;
   stdout: TextOutput;
@@ -126,6 +131,8 @@ export function createProductionDependencies(
       now: () => new Date(),
       createRunId: runId
     }),
+    projectDescriber: new ProjectDescriber(androidCli),
+    contextValidator: new ContextValidator(new NodeProjectFileInspector()),
     readJson: async (path): Promise<unknown> => JSON.parse(
       await readFile(path, "utf8")
     ) as unknown,

@@ -35,6 +35,12 @@ function baseDependencies(exitCodes: number[]): CliDependencies {
         summaryPath: "/reports/summary.txt"
       }))
     },
+    projectDescriber: {
+      describe: vi.fn(() => Promise.reject(new Error("unused")))
+    },
+    contextValidator: {
+      validate: vi.fn(() => Promise.reject(new Error("unused")))
+    },
     readJson: vi.fn((path: string) => Promise.resolve(
       path.includes("journey") ? runtimeJourney : runtimeConfig
     )),

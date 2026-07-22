@@ -21,6 +21,12 @@ function dependencies(exitCodes: number[]): CliDependencies {
     doctor: { run: () => Promise.reject(new Error("unused")) },
     recorder: { record: () => Promise.reject(new Error("unused")) },
     verifier: { verify: () => Promise.reject(new Error("unused")) },
+    projectDescriber: {
+      describe: () => Promise.reject(new Error("unused"))
+    },
+    contextValidator: {
+      validate: () => Promise.reject(new Error("unused"))
+    },
     readJson: (path) => Promise.resolve(
       path.includes("journey") ? runtimeJourney : runtimeConfig
     ),
@@ -61,6 +67,26 @@ describe("runMain", () => {
     });
     expect((test.stderr as BufferOutput).value)
       .toContain("required option '--journey <path>' not specified");
+    expect(exitCodes).toEqual([2]);
+  });
+
+  it("keeps nested command usage errors out of JSON stdout", async () => {
+    const exitCodes: number[] = [];
+    const test = dependencies(exitCodes);
+
+    await runMain([
+      "node", "taphound", "context", "validate", "--json"
+    ], test);
+
+    const stdout = (test.stdout as BufferOutput).value;
+    expect(JSON.parse(stdout)).toMatchObject({
+      status: "error",
+      exitCode: 2,
+      failure: { code: "CONFIG_INVALID" }
+    });
+    expect(stdout.trim().split("\n")).toHaveLength(1);
+    expect((test.stderr as BufferOutput).value)
+      .toContain("required option '--context <path>' not specified");
     expect(exitCodes).toEqual([2]);
   });
 

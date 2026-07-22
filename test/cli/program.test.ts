@@ -12,9 +12,23 @@ describe("createProgram", () => {
     );
   });
 
-  it("publishes the doctor, record, and verify commands", () => {
+  it("publishes commands in stable order, including project and context", () => {
     const names = createProgram().commands.map((command) => command.name());
 
-    expect(names).toEqual(["doctor", "record", "verify"]);
+    expect(names).toEqual([
+      "doctor",
+      "record",
+      "verify",
+      "project",
+      "context"
+    ]);
+    expect(
+      createProgram().commands.find((command) => command.name() === "project")
+        ?.commands.map((command) => command.name())
+    ).toEqual(["describe"]);
+    expect(
+      createProgram().commands.find((command) => command.name() === "context")
+        ?.commands.map((command) => command.name())
+    ).toEqual(["validate", "status"]);
   });
 });

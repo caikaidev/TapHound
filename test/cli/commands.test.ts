@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { ProjectConfigurationError } from "../../src/application/project/project-describer.js";
 import { createProgram } from "../../src/cli/program.js";
 import type { CliDependencies, TextOutput } from "../../src/cli/dependencies.js";
 import { runtimeConfig, runtimeJourney } from "../fakes/runtime-fixture.js";
@@ -53,8 +54,28 @@ function dependencies(): {
           summaryPath: "/reports/run/summary.txt"
         }))
       },
+      projectDescriber: {
+        describe: vi.fn(() => Promise.resolve({
+          projectRoot: "/project",
+          packageName: "com.example.app",
+          buildTask: ":app:assembleDebug",
+          artifactTarget: "app",
+          variant: "debug",
+          launchActivity: "com.example.app.MainActivity",
+          apkPath: "/project/app-debug.apk",
+          metadataPaths: ["/project/output-metadata.json"],
+          metadataPackageName: "com.example.app"
+        }))
+      },
+      contextValidator: {
+        validate: vi.fn(() => Promise.resolve({ status: "valid" as const }))
+      },
       readJson: vi.fn((path: string) => Promise.resolve(
-        path.includes("journey") ? runtimeJourney : runtimeConfig
+        path.includes("journey")
+          ? runtimeJourney
+          : path.includes("context")
+            ? { version: 1, opaque: "passed to validator" }
+            : runtimeConfig
       )),
       cwd: () => "/project",
       stdout,
@@ -154,5 +175,161 @@ describe("TapHound CLI commands", () => {
       journey: runtimeJourney
     });
     expect(verifyInput?.signal).toBe(signal);
+  });
+
+  it("describes stable project facts as exactly one JSON value", async () => {
+    const test = dependencies();
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "project", "describe",
+      "--project", "/project",
+      "--config", "taphound.config.json",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toEqual({
+      status: "described",
+      exitCode: 0,
+      projectRoot: "/project",
+      packageName: "com.example.app",
+      buildTask: ":app:assembleDebug",
+      artifactTarget: "app",
+      variant: "debug",
+      launchActivity: "com.example.app.MainActivity",
+      apkPath: "/project/app-debug.apk",
+      metadataPaths: ["/project/output-metadata.json"],
+      metadataPackageName: "com.example.app"
+    });
+    expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
+    expect(test.stderr.value).toBe("");
+    expect(test.value.readJson).toHaveBeenCalledWith(
+      "/project/taphound.config.json"
+    );
+    expect(test.value.projectDescriber.describe).toHaveBeenCalledWith({
+      projectRoot: "/project",
+      config: runtimeConfig
+    });
+    expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("maps invalid project config and metadata conflicts to config errors", async () => {
+    const invalidConfig = dependencies();
+    vi.mocked(invalidConfig.value.readJson).mockRejectedValue(
+      new Error("config unreadable")
+    );
+
+    await createProgram(invalidConfig.value).parseAsync([
+      "node", "taphound", "project", "describe", "--json"
+    ]);
+
+    expect(JSON.parse(invalidConfig.stdout.value)).toMatchObject({
+      status: "error",
+      exitCode: 2,
+      failure: { code: "CONFIG_INVALID", message: "config unreadable" }
+    });
+    expect(invalidConfig.stderr.value).toBe("");
+    expect(invalidConfig.exitCodes).toEqual([2]);
+
+    const conflict = dependencies();
+    vi.mocked(conflict.value.projectDescriber.describe).mockRejectedValue(
+      new ProjectConfigurationError("metadata package conflict")
+    );
+
+    await createProgram(conflict.value).parseAsync([
+      "node", "taphound", "project", "describe", "--json"
+    ]);
+
+    expect(JSON.parse(conflict.stdout.value)).toMatchObject({
+      status: "error",
+      exitCode: 2,
+      failure: {
+        code: "CONFIG_INVALID",
+        message: "metadata package conflict"
+      }
+    });
+    expect(conflict.stdout.value.trim().split("\n")).toHaveLength(1);
+    expect(conflict.stderr.value).toBe("");
+    expect(conflict.exitCodes).toEqual([2]);
+  });
+
+  it.each([
+    ["validate", "valid", 0],
+    ["validate", "stale", 1],
+    ["validate", "invalid", 2],
+    ["status", "valid", 0],
+    ["status", "stale", 0],
+    ["status", "invalid", 2]
+  ] as const)(
+    "maps context %s status %s to exit %i with full validator output",
+    async (command, status, exitCode) => {
+      const test = dependencies();
+      const validation = status === "valid"
+        ? { status }
+        : {
+            status,
+            reason: {
+              code: status === "stale"
+                ? "EVIDENCE_HASH_MISMATCH" as const
+                : "CONTEXT_SCHEMA_INVALID" as const,
+              message: `${status} context`
+            }
+          };
+      vi.mocked(test.value.contextValidator.validate)
+        .mockResolvedValue(validation);
+
+      await createProgram(test.value).parseAsync([
+        "node", "taphound", "context", command,
+        "--project", "/project",
+        "--config", "taphound.config.json",
+        "--context", "project.context.json",
+        "--json"
+      ]);
+
+      expect(JSON.parse(test.stdout.value)).toEqual({
+        ...validation,
+        exitCode
+      });
+      expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
+      expect(test.stderr.value).toBe("");
+      expect(test.value.contextValidator.validate).toHaveBeenCalledWith({
+        context: { version: 1, opaque: "passed to validator" },
+        projectRoot: "/project",
+        config: runtimeConfig
+      });
+      expect(test.exitCodes).toEqual([exitCode]);
+    }
+  );
+
+  it.each([
+    ["config read", "taphound.config.json"],
+    ["context read", "project.context.json"]
+  ])("isolates context %s failures to one JSON stdout value", async (
+    _case,
+    failingPath
+  ) => {
+    const test = dependencies();
+    vi.mocked(test.value.readJson).mockImplementation((path: string) => (
+      path.endsWith(failingPath)
+        ? Promise.reject(new Error(`${failingPath} unreadable`))
+        : Promise.resolve(runtimeConfig)
+    ));
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "context", "validate",
+      "--project", "/project",
+      "--config", "taphound.config.json",
+      "--context", "project.context.json",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "error",
+      exitCode: 2,
+      failure: { code: "CONFIG_INVALID" }
+    });
+    expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
+    expect(test.stderr.value).toBe("");
+    expect(test.value.contextValidator.validate).not.toHaveBeenCalled();
+    expect(test.exitCodes).toEqual([2]);
   });
 });

@@ -237,6 +237,91 @@ describe("FileSystemGenerationSessionStore", () => {
     );
   });
 
+  it("starts inFlight without mutating candidate or result state", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(validSession());
+    const inFlight = {
+      stepIndex: 0,
+      snapshotHash: "b".repeat(64)
+    };
+
+    await expectStoreError(store.update("generation-1", 0, validSession(1, {
+      candidateSteps: [{
+        action: "back",
+        activity: { before: "com.example.app.MainActivity" }
+      }],
+      inFlight
+    })), "INVALID_TRANSITION");
+    const begun = validSession(1, { inFlight });
+    await store.update("generation-1", 0, begun);
+    await expect(store.read("generation-1")).resolves.toEqual(begun);
+    await expectStoreError(store.update("generation-1", 1, validSession(2, {
+      candidateSteps: [{
+        action: "back",
+        activity: { before: "com.example.app.MainActivity" }
+      }],
+      inFlight
+    })), "INVALID_TRANSITION");
+  });
+
+  it("rejects fabricated recovery from a session without inFlight", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(validSession());
+
+    await expectStoreError(store.update("generation-1", 0, validSession(1, {
+      state: "recoveryRequired",
+      inFlight: {
+        stepIndex: 0,
+        snapshotHash: "b".repeat(64)
+      }
+    })), "INVALID_TRANSITION");
+  });
+
+  it.each([
+    ["bindings", {
+      bindings: {
+        contextHash: "c".repeat(64),
+        snapshotHash: "b".repeat(64)
+      }
+    }],
+    ["variables", {
+      variables: {
+        runId: "other-run",
+        timestamp: "2026-07-22T12:00:00.000Z",
+        randomHex: "c0ffee"
+      }
+    }],
+    ["candidate steps", {
+      candidateSteps: [{
+        action: "back",
+        activity: { before: "com.example.app.MainActivity" }
+      }]
+    }]
+  ] satisfies [string, Partial<GenerationSession>][])(
+    "rejects %s mutation while marking inFlight recovery",
+    async (_field, mutation) => {
+      const root = await temporaryRoot();
+      const store = new FileSystemGenerationSessionStore(root);
+      const inFlight = {
+        stepIndex: 0,
+        snapshotHash: "b".repeat(64)
+      };
+      await store.create(validSession(0, { inFlight }));
+
+      await expectStoreError(store.update(
+        "generation-1",
+        0,
+        validSession(1, {
+          state: "recoveryRequired",
+          inFlight,
+          ...mutation
+        })
+      ), "INVALID_TRANSITION");
+    }
+  );
+
   it("requires an explicit recovery transition for persisted inFlight state", async () => {
     const root = await temporaryRoot();
     const store = new FileSystemGenerationSessionStore(root);
@@ -741,6 +826,62 @@ describe("FileSystemGenerationSessionStore", () => {
     await expect(readFile(evidencePath, "utf8")).resolves.not.toContain(
       "replacement"
     );
+  });
+
+  it("rejects evidence writes when persisted state has another session id", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(validSession());
+    await writeFile(
+      join(activeDirectory(root), "state.json"),
+      `${JSON.stringify({
+        ...validSession(),
+        id: "different-generation"
+      }, null, 2)}\n`,
+      "utf8"
+    );
+
+    await expectStoreError(store.writeEvidence(
+      "generation-1",
+      "evidence/result.json",
+      {}
+    ), "INVALID_SESSION");
+    await expect(readdir(activeDirectory(root))).resolves.toEqual([
+      "state.json"
+    ]);
+  });
+
+  it("creates no evidence after the active bundle is renamed during state read", async () => {
+    const root = await temporaryRoot();
+    const active = activeDirectory(root);
+    const movedActive = `${active}.moved`;
+    let renameBundle = false;
+    const store = new FileSystemGenerationSessionStore(root, {
+      hooks: {
+        afterStateOpen: async (): Promise<void> => {
+          if (renameBundle) {
+            renameBundle = false;
+            await rename(active, movedActive);
+            await mkdir(active);
+            await writeFile(
+              join(active, "state.json"),
+              `${JSON.stringify(validSession(), null, 2)}\n`,
+              "utf8"
+            );
+          }
+        }
+      }
+    });
+    await store.create(validSession());
+    renameBundle = true;
+
+    await expectStoreError(store.writeEvidence(
+      "generation-1",
+      "evidence/result.json",
+      {}
+    ), "IO_ERROR");
+    await expect(readdir(active)).resolves.toEqual(["state.json"]);
+    await expect(readdir(movedActive)).resolves.toEqual(["state.json"]);
   });
 
   it("retries evidence after a crash before atomic installation", async () => {

@@ -356,28 +356,7 @@ function sameInFlight(
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function assertOrdinaryTransition(
-  current: GenerationSession,
-  next: GenerationSession
-): void {
-  if (current.state === "recoveryRequired") {
-    throw new GenerationSessionStoreError(
-      "INVALID_TRANSITION",
-      "Recovery-required state must use the explicit recovery transition"
-    );
-  }
-  if (
-    current.inFlight !== null
-    && !sameInFlight(current.inFlight, next.inFlight)
-  ) {
-    throw new GenerationSessionStoreError(
-      "INVALID_TRANSITION",
-      "Ordinary updates cannot clear or replace persisted inFlight evidence"
-    );
-  }
-}
-
-function recoveryStableState(session: GenerationSession): unknown {
+function transitionStableState(session: GenerationSession): unknown {
   return {
     version: session.version,
     id: session.id,
@@ -390,6 +369,43 @@ function recoveryStableState(session: GenerationSession): unknown {
   };
 }
 
+function assertOrdinaryTransition(
+  current: GenerationSession,
+  next: GenerationSession
+): void {
+  if (current.state === "recoveryRequired") {
+    throw new GenerationSessionStoreError(
+      "INVALID_TRANSITION",
+      "Recovery-required state must use the explicit recovery transition"
+    );
+  }
+  const stableStateMatches = JSON.stringify(transitionStableState(current))
+    === JSON.stringify(transitionStableState(next));
+  if (current.inFlight !== null) {
+    if (
+      next.state === "recoveryRequired"
+      && sameInFlight(current.inFlight, next.inFlight)
+      && stableStateMatches
+    ) {
+      return;
+    }
+    throw new GenerationSessionStoreError(
+      "INVALID_TRANSITION",
+      "Persisted inFlight may only be marked recoveryRequired without mutation"
+    );
+  }
+
+  if (
+    next.state === "recoveryRequired"
+    || (next.inFlight !== null && !stableStateMatches)
+  ) {
+    throw new GenerationSessionStoreError(
+      "INVALID_TRANSITION",
+      "Starting inFlight cannot mutate candidate or result state"
+    );
+  }
+}
+
 function assertRecoveryTransition(
   current: GenerationSession,
   next: GenerationSession
@@ -399,8 +415,8 @@ function assertRecoveryTransition(
     || current.inFlight === null
     || next.state !== "active"
     || next.inFlight !== null
-    || JSON.stringify(recoveryStableState(current))
-      !== JSON.stringify(recoveryStableState(next))
+    || JSON.stringify(transitionStableState(current))
+      !== JSON.stringify(transitionStableState(next))
   ) {
     throw new GenerationSessionStoreError(
       "INVALID_TRANSITION",
@@ -1055,13 +1071,20 @@ implements GenerationSessionStore {
           `Generation session does not exist: ${id}`
         );
       }
-      await requireRealDirectory(activeDirectory);
+      const activeEvidence = await captureStoreDirectory(activeDirectory);
+      await readBoundState(
+        activeDirectory,
+        id,
+        this.hooks.afterStateOpen,
+        activeEvidence
+      );
 
       let parent = activeDirectory;
       const directoryEvidence: DirectoryEvidence[] = [
-        await captureDirectoryEvidence(activeDirectory)
+        activeEvidence
       ];
       for (const segment of segments.slice(0, -1)) {
+        await verifyStoreDirectory(activeEvidence);
         const parentBeforeCreation = parent;
         parent = join(parentBeforeCreation, segment);
         try {
@@ -1098,6 +1121,7 @@ implements GenerationSessionStore {
       let installed = false;
       let committed = false;
       try {
+        await verifyStoreDirectory(activeEvidence);
         handle = await open(
           temporaryPath,
           constants.O_WRONLY

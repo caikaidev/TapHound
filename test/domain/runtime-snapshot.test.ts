@@ -8,8 +8,13 @@ import {
 function validSnapshot(): unknown {
   return {
     version: 1,
-    packageName: "com.example.app",
+    generationId: "generation-1",
+    baseRevision: 1,
+    deviceSerial: "emulator-5554",
+    expectedPackageName: "com.example.app",
+    foregroundPackageName: "com.example.system",
     activity: "com.example.app.MainActivity",
+    pid: null,
     capturedAt: "2026-07-22T12:00:00.000Z",
     screenshotPath: ".taphound/snapshots/current.png",
     layout: [{
@@ -43,8 +48,13 @@ describe("hashRuntimeSnapshot", () => {
       layout: snapshot.layout,
       screenshotPath: snapshot.screenshotPath,
       capturedAt: snapshot.capturedAt,
+      pid: snapshot.pid,
       activity: snapshot.activity,
-      packageName: snapshot.packageName,
+      foregroundPackageName: snapshot.foregroundPackageName,
+      expectedPackageName: snapshot.expectedPackageName,
+      deviceSerial: snapshot.deviceSerial,
+      baseRevision: snapshot.baseRevision,
+      generationId: snapshot.generationId,
       version: snapshot.version
     }));
   });
@@ -64,5 +74,23 @@ describe("hashRuntimeSnapshot", () => {
       ...snapshot,
       activity: "com.example.app.SearchActivity"
     }));
+  });
+
+  it("binds generation, revision, device, foreground identity, and PID", () => {
+    const snapshot = validSnapshot() as Record<string, unknown>;
+    for (const change of [
+      { generationId: "generation-2" },
+      { baseRevision: 2 },
+      { deviceSerial: "device-2" },
+      { expectedPackageName: "com.other.app" },
+      { foregroundPackageName: "com.example.app" },
+      { activity: "com.example.app.SearchActivity" },
+      { pid: 42 }
+    ]) {
+      expect(hashRuntimeSnapshot(snapshot)).not.toBe(hashRuntimeSnapshot({
+        ...snapshot,
+        ...change
+      }));
+    }
   });
 });

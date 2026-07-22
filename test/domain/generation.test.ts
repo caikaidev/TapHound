@@ -8,8 +8,10 @@ import {
 } from "../../src/domain/generation.js";
 
 const hashes = {
+  projectHash: "d".repeat(64),
+  configHash: "e".repeat(64),
   contextHash: "a".repeat(64),
-  snapshotHash: "b".repeat(64)
+  snapshotHash: null
 };
 
 const variables = {
@@ -25,6 +27,16 @@ function validSession(): unknown {
     revision: 0,
     state: "active",
     bindings: hashes,
+    target: {
+      packageName: "com.example.app",
+      deviceSerial: "emulator-5554",
+      resetStrategy: "processOnly",
+      interactionPolicy: {
+        allowedActions: ["click", "wait"],
+        confirmationRequiredActions: [],
+        forbiddenActions: ["back"]
+      }
+    },
     variables,
     candidateSteps: [{
       action: "wait",
@@ -94,6 +106,17 @@ describe("GenerationSessionSchema", () => {
 
     expect(parsed.id).toBe("generation-identity");
     expect(parsed.variables.runId).toBe("journey-run-binding");
+  });
+
+  it("requires Core environment bindings and permits no initial snapshot", () => {
+    const parsed = GenerationSessionSchema.parse(validSession());
+
+    expect(parsed.bindings).toEqual(hashes);
+    expect(parsed.target).toMatchObject({
+      packageName: "com.example.app",
+      deviceSerial: "emulator-5554",
+      resetStrategy: "processOnly"
+    });
   });
 
   it.each([

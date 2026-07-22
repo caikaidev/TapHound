@@ -47,7 +47,8 @@ describe("TapHound documentation examples", () => {
       "record",
       "verify",
       "project",
-      "context"
+      "context",
+      "generation"
     ]);
     expect(readme).toContain("# TapHound");
     expect(readme).toContain("TapHound for Android");

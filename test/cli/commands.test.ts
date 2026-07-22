@@ -6,6 +6,25 @@ import type { CliDependencies, TextOutput } from "../../src/cli/dependencies.js"
 import { runtimeConfig, runtimeJourney } from "../fakes/runtime-fixture.js";
 import { validReport } from "../fixtures/report.js";
 
+const generationContext = {
+  version: 1 as const,
+  packageName: "com.example.app",
+  launchActivity: "com.example.app.MainActivity",
+  manifest: {
+    version: 1 as const,
+    files: [{
+      path: "AndroidManifest.xml",
+      sha256: "a".repeat(64),
+      confidence: "sourceConfirmed" as const
+    }]
+  },
+  interactionPolicy: {
+    allowedActions: ["click" as const],
+    confirmationRequiredActions: [],
+    forbiddenActions: ["back" as const]
+  }
+};
+
 class BufferOutput implements TextOutput {
   public value = "";
   public readonly write = (content: string): void => {
@@ -69,6 +88,64 @@ function dependencies(): {
       },
       contextValidator: {
         validate: vi.fn(() => Promise.resolve({ status: "valid" as const }))
+      },
+      generationStarter: {
+        start: vi.fn(() => Promise.resolve({
+          version: 1 as const,
+          id: "generation-1",
+          revision: 0,
+          state: "active" as const,
+          bindings: {
+            projectHash: "d".repeat(64),
+            configHash: "e".repeat(64),
+            contextHash: "a".repeat(64),
+            snapshotHash: null
+          },
+          target: {
+            packageName: "com.example.app",
+            deviceSerial: "emulator-5554",
+            resetStrategy: "processOnly" as const,
+            interactionPolicy: {
+              allowedActions: ["click" as const],
+              confirmationRequiredActions: [],
+              forbiddenActions: ["back" as const]
+            }
+          },
+          variables: {
+            runId: "journey-run-1",
+            timestamp: "2026-07-22T12:00:00.000Z",
+            randomHex: "00ff"
+          },
+          candidateSteps: [],
+          inFlight: null,
+          pendingConfirmation: null,
+          verification: { status: "notRun" as const },
+          publication: { status: "notRun" as const }
+        }))
+      },
+      runtimeObserver: {
+        observe: vi.fn(() => Promise.resolve({
+          binding: {
+            generationId: "generation-1",
+            baseRevision: 1,
+            snapshotHash: "b".repeat(64)
+          },
+          snapshotHash: "b".repeat(64),
+          snapshot: {
+            version: 1 as const,
+            generationId: "generation-1",
+            baseRevision: 1,
+            deviceSerial: "emulator-5554",
+            expectedPackageName: "com.example.app",
+            foregroundPackageName: "com.example.app",
+            activity: "com.example.app.MainActivity",
+            pid: null,
+            capturedAt: "2026-07-22T12:01:00.000Z",
+            screenshotPath:
+              "evidence/snapshots/revision-000001/screen.png",
+            layout: []
+          }
+        }))
       },
       readJson: vi.fn((path: string) => Promise.resolve(
         path.includes("journey")
@@ -208,6 +285,107 @@ describe("TapHound CLI commands", () => {
     expect(test.value.projectDescriber.describe).toHaveBeenCalledWith({
       projectRoot: "/project",
       config: runtimeConfig
+    });
+    expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("starts a generation with one exact JSON result", async () => {
+    const test = dependencies();
+    vi.mocked(test.value.readJson).mockImplementation((path) => Promise.resolve(
+      path.includes("context") ? generationContext : runtimeConfig
+    ));
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "generation", "start",
+      "--project", "/project",
+      "--config", "taphound.config.json",
+      "--context", "context.json",
+      "--device", "emulator-5554",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toEqual({
+      status: "started",
+      exitCode: 0,
+      generationId: "generation-1",
+      revision: 0,
+      bindings: {
+        projectHash: "d".repeat(64),
+        configHash: "e".repeat(64),
+        contextHash: "a".repeat(64),
+        snapshotHash: null
+      },
+      variables: {
+        runId: "journey-run-1",
+        timestamp: "2026-07-22T12:00:00.000Z",
+        randomHex: "00ff"
+      },
+      target: {
+        packageName: "com.example.app",
+        deviceSerial: "emulator-5554",
+        resetStrategy: "processOnly",
+        interactionPolicy: {
+          allowedActions: ["click"],
+          confirmationRequiredActions: [],
+          forbiddenActions: ["back"]
+        }
+      }
+    });
+    expect(test.stdout.value.endsWith("\n")).toBe(true);
+    expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
+    expect(test.stderr.value).toBe("");
+    const startInput = vi.mocked(
+      test.value.generationStarter.start
+    ).mock.calls[0]?.[0];
+    expect(startInput).toMatchObject({
+      projectRoot: "/project",
+      config: runtimeConfig,
+      context: generationContext,
+      project: {
+        projectRoot: "/project",
+        packageName: "com.example.app"
+      },
+      deviceSerial: "emulator-5554"
+    });
+    expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("observes a generation with one exact JSON result", async () => {
+    const test = dependencies();
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "generation", "observe",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toEqual({
+      status: "observed",
+      exitCode: 0,
+      generationId: "generation-1",
+      baseRevision: 1,
+      snapshotHash: "b".repeat(64),
+      snapshot: {
+        version: 1,
+        generationId: "generation-1",
+        baseRevision: 1,
+        deviceSerial: "emulator-5554",
+        expectedPackageName: "com.example.app",
+        foregroundPackageName: "com.example.app",
+        activity: "com.example.app.MainActivity",
+        pid: null,
+        capturedAt: "2026-07-22T12:01:00.000Z",
+        screenshotPath: "evidence/snapshots/revision-000001/screen.png",
+        layout: []
+      }
+    });
+    expect(test.stdout.value.endsWith("\n")).toBe(true);
+    expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
+    expect(test.stderr.value).toBe("");
+    expect(test.value.runtimeObserver.observe).toHaveBeenCalledWith({
+      projectRoot: "/project",
+      generationId: "generation-1"
     });
     expect(test.exitCodes).toEqual([0]);
   });

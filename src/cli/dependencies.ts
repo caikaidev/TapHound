@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import {
   access,
@@ -13,6 +13,7 @@ import { AdbAdapter } from "../adapters/adb/adb-adapter.js";
 import { AndroidCliAdapter } from "../adapters/android-cli/android-cli-adapter.js";
 import { SystemClock } from "../adapters/clock/system-clock.js";
 import { FileSystemArtifactStore } from "../adapters/filesystem/artifact-store.js";
+import { FileSystemGenerationSessionStore } from "../adapters/filesystem/generation-session-store.js";
 import { FileSystemJourneyWriter } from "../adapters/filesystem/journey-writer.js";
 import { NodeProjectFileInspector } from "../adapters/filesystem/project-file-inspector.js";
 import { GradleAdapter } from "../adapters/gradle/gradle-adapter.js";
@@ -21,6 +22,15 @@ import { InquirerRecorderPrompt } from "../adapters/prompt/inquirer-recorder-pro
 import { ContextValidator } from "../application/context/context-validator.js";
 import { DoctorService } from "../application/doctor/doctor-service.js";
 import type { DoctorReport } from "../application/doctor/doctor-service.js";
+import {
+  GenerationStarter,
+  type GenerationStartInput
+} from "../application/generation/generation-starter.js";
+import {
+  RuntimeObserver,
+  type RuntimeObservation,
+  type RuntimeObserveInput
+} from "../application/generation/runtime-observer.js";
 import { ProjectDescriber } from "../application/project/project-describer.js";
 import { RecorderService, type RecordInput, type RecordResult } from "../application/recorder/recorder-service.js";
 import { ReportWriter } from "../application/report/report-writer.js";
@@ -47,6 +57,16 @@ export interface CliDependencies {
   };
   projectDescriber: Pick<ProjectDescriber, "describe">;
   contextValidator: Pick<ContextValidator, "validate">;
+  generationStarter: {
+    start: (input: GenerationStartInput) => Promise<
+      Awaited<ReturnType<GenerationStarter["start"]>>
+    >;
+  };
+  runtimeObserver: {
+    observe: (
+      input: RuntimeObserveInput & { projectRoot: string }
+    ) => Promise<RuntimeObservation>;
+  };
   readJson: (path: string) => Promise<unknown>;
   cwd: () => string;
   stdout: TextOutput;
@@ -66,6 +86,7 @@ export function createProductionDependencies(
   const androidCli = new AndroidCliAdapter(runner);
   const gradle = new GradleAdapter(runner);
   const clock = new SystemClock();
+  const contextValidator = new ContextValidator(new NodeProjectFileInspector());
   return {
     ...(signal === undefined ? {} : { signal }),
     doctor: new DoctorService({
@@ -132,7 +153,29 @@ export function createProductionDependencies(
       createRunId: runId
     }),
     projectDescriber: new ProjectDescriber(androidCli),
-    contextValidator: new ContextValidator(new NodeProjectFileInspector()),
+    contextValidator,
+    generationStarter: {
+      start: async (input): Promise<
+        Awaited<ReturnType<GenerationStarter["start"]>>
+      > => new GenerationStarter({
+        contextValidator,
+        store: new FileSystemGenerationSessionStore(input.projectRoot),
+        now: () => new Date(),
+        generateId: randomUUID,
+        randomBytes
+      }).start(input)
+    },
+    runtimeObserver: {
+      observe: async ({ projectRoot, ...input }): Promise<RuntimeObservation> => (
+        new RuntimeObserver({
+          store: new FileSystemGenerationSessionStore(projectRoot),
+          adb,
+          androidCli,
+          now: () => new Date(),
+          createAttemptId: randomUUID
+        }).observe(input)
+      )
+    },
     readJson: async (path): Promise<unknown> => JSON.parse(
       await readFile(path, "utf8")
     ) as unknown,

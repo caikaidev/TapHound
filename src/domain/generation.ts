@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { ProjectRelativePathSchema } from "./project-context.js";
+import { InteractionPolicySchema } from "./project-context.js";
 import {
   ProposedStepSchema,
   type ProposedStep
@@ -87,8 +88,18 @@ export const GenerationSessionSchema = z.strictObject({
   revision: NonnegativeSafeIntegerSchema,
   state: z.enum(["active", "recoveryRequired"]),
   bindings: z.strictObject({
+    projectHash: Sha256Schema,
+    configHash: Sha256Schema,
     contextHash: Sha256Schema,
-    snapshotHash: Sha256Schema
+    snapshotHash: Sha256Schema.nullable()
+  }),
+  target: z.strictObject({
+    packageName: z.string().regex(
+      /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/
+    ),
+    deviceSerial: z.string().trim().min(1),
+    resetStrategy: z.literal("processOnly"),
+    interactionPolicy: InteractionPolicySchema
   }),
   variables: GenerationVariablesSchema,
   candidateSteps: z.array(ProposedStepSchema),

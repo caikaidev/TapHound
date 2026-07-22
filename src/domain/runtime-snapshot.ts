@@ -11,8 +11,13 @@ const QualifiedNameSchema = z.string().regex(
 
 export const RuntimeSnapshotSchema = z.strictObject({
   version: z.literal(1),
-  packageName: QualifiedNameSchema,
+  generationId: z.string().trim().min(1),
+  baseRevision: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  deviceSerial: z.string().trim().min(1),
+  expectedPackageName: QualifiedNameSchema,
+  foregroundPackageName: QualifiedNameSchema,
   activity: QualifiedNameSchema,
+  pid: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).nullable(),
   capturedAt: z.iso.datetime(),
   screenshotPath: z.string().trim().min(1).optional(),
   layout: z.array(LayoutElementSchema)
@@ -39,8 +44,13 @@ export function hashRuntimeSnapshot(snapshot: unknown): string {
   const parsed = RuntimeSnapshotSchema.parse(snapshot);
   const content = {
     version: parsed.version,
-    packageName: parsed.packageName,
+    generationId: parsed.generationId,
+    baseRevision: parsed.baseRevision,
+    deviceSerial: parsed.deviceSerial,
+    expectedPackageName: parsed.expectedPackageName,
+    foregroundPackageName: parsed.foregroundPackageName,
     activity: parsed.activity,
+    pid: parsed.pid,
     layout: parsed.layout
   };
 

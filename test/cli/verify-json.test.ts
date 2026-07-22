@@ -41,6 +41,12 @@ function baseDependencies(exitCodes: number[]): CliDependencies {
     contextValidator: {
       validate: vi.fn(() => Promise.reject(new Error("unused")))
     },
+    generationStarter: {
+      start: vi.fn(() => Promise.reject(new Error("unused")))
+    },
+    runtimeObserver: {
+      observe: vi.fn(() => Promise.reject(new Error("unused")))
+    },
     readJson: vi.fn((path: string) => Promise.resolve(
       path.includes("journey") ? runtimeJourney : runtimeConfig
     )),

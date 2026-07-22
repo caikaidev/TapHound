@@ -356,17 +356,54 @@ function sameInFlight(
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function transitionStableState(session: GenerationSession): unknown {
+function transitionStableState(
+  session: GenerationSession
+): Record<string, unknown> {
   return {
     version: session.version,
     id: session.id,
     bindings: session.bindings,
+    target: session.target,
     variables: session.variables,
     candidateSteps: session.candidateSteps,
     pendingConfirmation: session.pendingConfirmation,
     verification: session.verification,
     publication: session.publication
   };
+}
+
+function assertSnapshotTransition(
+  current: GenerationSession,
+  next: GenerationSession
+): void {
+  const currentBindings = {
+    projectHash: current.bindings.projectHash,
+    configHash: current.bindings.configHash,
+    contextHash: current.bindings.contextHash
+  };
+  const { snapshotHash: nextSnapshotHash, ...nextBindings } = next.bindings;
+  if (
+    current.state !== "active"
+    || current.inFlight !== null
+    || current.pendingConfirmation !== null
+    || next.state !== "active"
+    || next.inFlight !== null
+    || next.pendingConfirmation !== null
+    || nextSnapshotHash === null
+    || JSON.stringify(currentBindings) !== JSON.stringify(nextBindings)
+    || JSON.stringify({
+      ...transitionStableState(current),
+      bindings: undefined
+    }) !== JSON.stringify({
+      ...transitionStableState(next),
+      bindings: undefined
+    })
+  ) {
+    throw new GenerationSessionStoreError(
+      "INVALID_TRANSITION",
+      "Snapshot commit may only replace the active snapshot binding"
+    );
+  }
 }
 
 function assertOrdinaryTransition(
@@ -932,6 +969,57 @@ implements GenerationSessionStore {
     });
   };
 
+  public readonly commitSnapshot = async (
+    id: string,
+    expectedRevision: number,
+    input: GenerationSession
+  ): Promise<void> => {
+    assertId(id);
+    const next = parseSession(input, true);
+    validateNextRevision(id, expectedRevision, next);
+    await this.ensureGenerationRoot();
+
+    await this.withLock(id, async () => {
+      const activeDirectory = this.activeDirectory(id);
+      if (!await pathExists(activeDirectory)) {
+        if (await pathExists(this.finalDirectory(id))) {
+          throw new GenerationSessionStoreError(
+            "SESSION_PUBLISHED",
+            `Published generation session cannot commit a snapshot: ${id}`
+          );
+        }
+        throw new GenerationSessionStoreError(
+          "SESSION_NOT_FOUND",
+          `Generation session does not exist: ${id}`
+        );
+      }
+
+      const activeEvidence = await captureStoreDirectory(activeDirectory);
+      const current = await readBoundState(
+        activeDirectory,
+        id,
+        this.hooks.afterStateOpen,
+        activeEvidence
+      );
+      if (current.revision !== expectedRevision) {
+        throw new GenerationSessionStoreError(
+          "REVISION_CONFLICT",
+          `Expected generation revision ${String(expectedRevision)}, found ${
+            String(current.revision)
+          }`
+        );
+      }
+      assertSnapshotTransition(current, next);
+      await writeStateAtomically(
+        activeDirectory,
+        next,
+        this.syncDirectory,
+        this.hooks.beforeStateRename,
+        activeEvidence
+      );
+    });
+  };
+
   public readonly completeStep = async (
     id: string,
     expectedRevision: number,
@@ -1052,9 +1140,38 @@ implements GenerationSessionStore {
     relativePath: string,
     value: unknown
   ): Promise<void> => {
+    const canonicalValue = canonicalizeEvidence(value);
+    await this.produceEvidence(id, relativePath, async (temporaryPath) => {
+      const handle = await open(
+        temporaryPath,
+        constants.O_WRONLY
+          | constants.O_CREAT
+          | constants.O_EXCL
+          | constants.O_NOFOLLOW,
+        0o600
+      );
+      try {
+        await handle.writeFile(serializeJson(canonicalValue), "utf8");
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+    });
+  };
+
+  public readonly produceEvidence = async (
+    id: string,
+    relativePath: string,
+    produce: (temporaryPath: string) => Promise<void>
+  ): Promise<void> => {
     assertId(id);
     const segments = validateEvidencePath(relativePath);
-    const canonicalValue = canonicalizeEvidence(value);
+    if (typeof produce !== "function") {
+      throw new GenerationSessionStoreError(
+        "INVALID_EVIDENCE",
+        "Evidence producer must be a function"
+      );
+    }
     await this.ensureGenerationRoot();
 
     await this.withLock(id, async () => {
@@ -1115,29 +1232,23 @@ implements GenerationSessionStore {
       assertContained(activeDirectory, outputPath);
       const temporaryPath = join(
         activeDirectory,
-        `.evidence-${randomUUID()}.tmp`
+        `.producer-${randomUUID()}.tmp`
       );
-      let handle: Awaited<ReturnType<typeof open>> | undefined;
       let installed = false;
       let committed = false;
       try {
         await verifyStoreDirectory(activeEvidence);
-        handle = await open(
-          temporaryPath,
-          constants.O_WRONLY
-            | constants.O_CREAT
-            | constants.O_EXCL
-            | constants.O_NOFOLLOW,
-          0o600
-        );
-        await handle.writeFile(
-          serializeJson(canonicalValue),
-          "utf8"
-        );
-        await handle.sync();
-        await handle.close();
-        handle = undefined;
+        await produce(temporaryPath);
         const temporaryIdentity = await fileIdentity(temporaryPath);
+        const handle = await open(
+          temporaryPath,
+          constants.O_RDONLY | constants.O_NOFOLLOW
+        );
+        try {
+          await handle.sync();
+        } finally {
+          await handle.close();
+        }
         await this.hooks.beforeEvidenceInstall?.();
         await verifyDirectoryEvidence(realActive, directoryEvidence);
         await link(temporaryPath, outputPath);
@@ -1157,9 +1268,6 @@ implements GenerationSessionStore {
         committed = true;
         await this.hooks.afterEvidenceInstall?.();
       } catch (error) {
-        if (handle !== undefined) {
-          await handle.close().catch(() => undefined);
-        }
         if (installed && !committed) {
           try {
             const currentIdentity = await fileIdentity(outputPath);

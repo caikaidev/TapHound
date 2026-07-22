@@ -72,8 +72,20 @@ function validSession(
     revision,
     state: "active",
     bindings: {
+      projectHash: "d".repeat(64),
+      configHash: "e".repeat(64),
       contextHash: "a".repeat(64),
       snapshotHash: "b".repeat(64)
+    },
+    target: {
+      packageName: "com.example.app",
+      deviceSerial: "emulator-5554",
+      resetStrategy: "processOnly",
+      interactionPolicy: {
+        allowedActions: ["click", "wait"],
+        confirmationRequiredActions: [],
+        forbiddenActions: ["back"]
+      }
     },
     variables: {
       runId: "journey-run-42",
@@ -237,6 +249,44 @@ describe("FileSystemGenerationSessionStore", () => {
     );
   });
 
+  it("CAS-commits only the authoritative snapshot binding", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(validSession(0, {
+      bindings: {
+        projectHash: "d".repeat(64),
+        configHash: "e".repeat(64),
+        contextHash: "a".repeat(64),
+        snapshotHash: null
+      }
+    }));
+    const committed = validSession(1, {
+      bindings: {
+        projectHash: "d".repeat(64),
+        configHash: "e".repeat(64),
+        contextHash: "a".repeat(64),
+        snapshotHash: "c".repeat(64)
+      }
+    });
+
+    await store.commitSnapshot("generation-1", 0, committed);
+    await expect(store.read("generation-1")).resolves.toEqual(committed);
+    await expectStoreError(
+      store.commitSnapshot("generation-1", 0, committed),
+      "REVISION_CONFLICT"
+    );
+    await expectStoreError(store.commitSnapshot(
+      "generation-1",
+      1,
+      validSession(2, {
+        variables: {
+          ...validSession().variables,
+          randomHex: "bad0"
+        }
+      })
+    ), "INVALID_TRANSITION");
+  });
+
   it("starts inFlight without mutating candidate or result state", async () => {
     const root = await temporaryRoot();
     const store = new FileSystemGenerationSessionStore(root);
@@ -282,6 +332,8 @@ describe("FileSystemGenerationSessionStore", () => {
   it.each([
     ["bindings", {
       bindings: {
+        projectHash: "d".repeat(64),
+        configHash: "e".repeat(64),
         contextHash: "c".repeat(64),
         snapshotHash: "b".repeat(64)
       }
@@ -826,6 +878,70 @@ describe("FileSystemGenerationSessionStore", () => {
     await expect(readFile(evidencePath, "utf8")).resolves.not.toContain(
       "replacement"
     );
+  });
+
+  it("installs immutable binary evidence through a Store-owned producer path", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(validSession());
+    let producerPath = "";
+
+    await store.produceEvidence(
+      "generation-1",
+      "evidence/snapshots/revision-000001/screen.png",
+      async (temporaryPath) => {
+        producerPath = temporaryPath;
+        await writeFile(temporaryPath, Buffer.from([0, 1, 2, 255]));
+      }
+    );
+
+    expect(producerPath.startsWith(`${activeDirectory(root)}/`)).toBe(true);
+    await expect(readFile(join(
+      activeDirectory(root),
+      "evidence",
+      "snapshots",
+      "revision-000001",
+      "screen.png"
+    ))).resolves.toEqual(Buffer.from([0, 1, 2, 255]));
+    await expectStoreError(store.produceEvidence(
+      "generation-1",
+      "evidence/snapshots/revision-000001/screen.png",
+      async (temporaryPath) => {
+        await writeFile(temporaryPath, "replacement");
+      }
+    ), "EVIDENCE_ALREADY_EXISTS");
+  });
+
+  it("cleans only its producer temporary file after producer failure", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(validSession());
+    const interrupted = join(activeDirectory(root), ".evidence-unrelated.tmp");
+    await writeFile(interrupted, "preserve me");
+
+    await expect(store.produceEvidence(
+      "generation-1",
+      "evidence/snapshots/revision-000001/screen.png",
+      async (temporaryPath) => {
+        await writeFile(temporaryPath, "partial");
+        throw new Error("capture failed");
+      }
+    )).rejects.toMatchObject({
+      name: "GenerationSessionStoreError",
+      code: "IO_ERROR"
+    });
+
+    await expect(readFile(interrupted, "utf8")).resolves.toBe("preserve me");
+    expect((await readdir(activeDirectory(root))).filter(
+      (name) => name.startsWith(".producer-")
+    )).toEqual([]);
+    await expect(readFile(join(
+      activeDirectory(root),
+      "evidence",
+      "snapshots",
+      "revision-000001",
+      "screen.png"
+    ))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("rejects evidence writes when persisted state has another session id", async () => {

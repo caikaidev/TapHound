@@ -27,6 +27,12 @@ function dependencies(exitCodes: number[]): CliDependencies {
     contextValidator: {
       validate: () => Promise.reject(new Error("unused"))
     },
+    generationStarter: {
+      start: () => Promise.reject(new Error("unused"))
+    },
+    runtimeObserver: {
+      observe: () => Promise.reject(new Error("unused"))
+    },
     readJson: (path) => Promise.resolve(
       path.includes("journey") ? runtimeJourney : runtimeConfig
     ),

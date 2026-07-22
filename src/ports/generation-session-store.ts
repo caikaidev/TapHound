@@ -43,6 +43,11 @@ export interface GenerationSessionStore {
     expectedRevision: number,
     next: GenerationSession
   ) => Promise<void>;
+  commitSnapshot: (
+    id: string,
+    expectedRevision: number,
+    next: GenerationSession
+  ) => Promise<void>;
   completeStep: (
     id: string,
     expectedRevision: number,
@@ -58,6 +63,11 @@ export interface GenerationSessionStore {
     id: string,
     relativePath: string,
     value: unknown
+  ) => Promise<void>;
+  produceEvidence: (
+    id: string,
+    relativePath: string,
+    produce: (temporaryPath: string) => Promise<void>
   ) => Promise<void>;
   publish: (id: string) => Promise<string>;
 }

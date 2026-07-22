@@ -1,6 +1,7 @@
 import type {
   GenerationInFlight,
-  GenerationSession
+  GenerationSession,
+  PendingConfirmation
 } from "../domain/generation.js";
 
 export const GENERATION_SESSION_STORE_ERROR_CODES = [
@@ -53,6 +54,12 @@ export interface GenerationSessionStore {
     expectedRevision: number,
     next: GenerationSession
   ) => Promise<void>;
+  beginStep: (
+    id: string,
+    expectedRevision: number,
+    inFlight: GenerationInFlight,
+    approvedConfirmation?: PendingConfirmation
+  ) => Promise<GenerationSession>;
   completeStep: (
     id: string,
     expectedRevision: number,
@@ -68,6 +75,11 @@ export interface GenerationSessionStore {
     id: string,
     relativePath: string,
     value: unknown
+  ) => Promise<void>;
+  writeTextEvidence: (
+    id: string,
+    relativePath: string,
+    value: string
   ) => Promise<void>;
   produceEvidence: (
     id: string,

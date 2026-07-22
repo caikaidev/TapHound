@@ -70,6 +70,7 @@ function session(runtime = snapshot()): GenerationSession {
       randomHex: "a0"
     },
     candidateSteps: [],
+    candidateSources: [],
     inFlight: null,
     pendingConfirmation: null,
     verification: { status: "notRun" },

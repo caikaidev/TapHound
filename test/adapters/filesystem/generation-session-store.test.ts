@@ -92,6 +92,7 @@ function validSession(
       randomHex: "c0ffee"
     },
     candidateSteps: [],
+    candidateSources: [],
     inFlight: null,
     pendingConfirmation: null,
     verification: { status: "notRun" },
@@ -243,7 +244,7 @@ describe("FileSystemGenerationSessionStore", () => {
     await store.create(validSession());
 
     const next = validSession(1, {
-      inFlight: { stepIndex: 0, snapshotHash: "b".repeat(64) }
+      inFlight: { stepIndex: 0, snapshotHash: "b".repeat(64), proposalHash: "c".repeat(64) }
     });
     await store.update("generation-1", 0, next);
 
@@ -307,13 +308,77 @@ describe("FileSystemGenerationSessionStore", () => {
     ), "INVALID_TRANSITION");
   });
 
+  it("atomically begins a safe step without changing candidate or Core state", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    const initial = validSession();
+    const inFlight = {
+      stepIndex: 0,
+      snapshotHash: "b".repeat(64),
+      proposalHash: "c".repeat(64)
+    };
+    await store.create(initial);
+
+    const begun = await store.beginStep("generation-1", 0, inFlight);
+
+    expect(begun).toEqual({
+      ...initial,
+      revision: 1,
+      inFlight
+    });
+    await expect(store.read("generation-1")).resolves.toEqual(begun);
+  });
+
+  it("consumes only the exact approved confirmation when beginning a step", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    const approved = {
+      ...pendingConfirmation("challenge-1"),
+      status: "approved" as const
+    };
+    const inFlight = {
+      stepIndex: 0,
+      snapshotHash: "b".repeat(64),
+      proposalHash: "c".repeat(64)
+    };
+    await store.create(validSession(0, {
+      pendingConfirmation: approved
+    }));
+
+    await expectStoreError(
+      store.beginStep("generation-1", 0, inFlight),
+      "INVALID_TRANSITION"
+    );
+    await expectStoreError(
+      store.beginStep("generation-1", 0, inFlight, {
+        ...approved,
+        challengeId: "challenge-2"
+      }),
+      "INVALID_TRANSITION"
+    );
+    const begun = await store.beginStep(
+      "generation-1",
+      0,
+      inFlight,
+      approved
+    );
+    expect(begun).toMatchObject({
+      revision: 1,
+      inFlight,
+      pendingConfirmation: null,
+      candidateSteps: [],
+      candidateSources: []
+    });
+  });
+
   it("starts inFlight without mutating candidate or result state", async () => {
     const root = await temporaryRoot();
     const store = new FileSystemGenerationSessionStore(root);
     await store.create(validSession());
     const inFlight = {
       stepIndex: 0,
-      snapshotHash: "b".repeat(64)
+      snapshotHash: "b".repeat(64),
+      proposalHash: "c".repeat(64)
     };
 
     await expectStoreError(store.update("generation-1", 0, validSession(1, {
@@ -350,7 +415,8 @@ describe("FileSystemGenerationSessionStore", () => {
       state: "recoveryRequired",
       inFlight: {
         stepIndex: 0,
-        snapshotHash: "b".repeat(64)
+        snapshotHash: "b".repeat(64),
+        proposalHash: "c".repeat(64)
       }
     })), "INVALID_TRANSITION");
   });
@@ -387,7 +453,8 @@ describe("FileSystemGenerationSessionStore", () => {
       const store = new FileSystemGenerationSessionStore(root);
       const inFlight = {
         stepIndex: 0,
-        snapshotHash: "b".repeat(64)
+        snapshotHash: "b".repeat(64),
+      proposalHash: "c".repeat(64)
       };
       await store.create(validSession(0, { inFlight }));
 
@@ -409,7 +476,7 @@ describe("FileSystemGenerationSessionStore", () => {
     const root = await temporaryRoot();
     const store = new FileSystemGenerationSessionStore(root);
     const inFlight = validSession(0, {
-      inFlight: { stepIndex: 0, snapshotHash: "b".repeat(64) }
+      inFlight: { stepIndex: 0, snapshotHash: "b".repeat(64), proposalHash: "c".repeat(64) }
     });
 
     await store.create(inFlight);
@@ -421,14 +488,14 @@ describe("FileSystemGenerationSessionStore", () => {
     );
     await expectStoreError(
       store.update("generation-1", 0, validSession(1, {
-        inFlight: { stepIndex: 0, snapshotHash: "c".repeat(64) }
+        inFlight: { stepIndex: 0, snapshotHash: "c".repeat(64), proposalHash: "c".repeat(64) }
       })),
       "INVALID_TRANSITION"
     );
 
     const recoveryRequired = validSession(1, {
       state: "recoveryRequired",
-      inFlight: { stepIndex: 0, snapshotHash: "b".repeat(64) }
+      inFlight: { stepIndex: 0, snapshotHash: "b".repeat(64), proposalHash: "c".repeat(64) }
     });
     await store.update("generation-1", 0, recoveryRequired);
     await expectStoreError(
@@ -451,11 +518,11 @@ describe("FileSystemGenerationSessionStore", () => {
     );
 
     await store.update("generation-1", 0, validSession(1, {
-      inFlight: { stepIndex: 0, snapshotHash: "b".repeat(64) }
+      inFlight: { stepIndex: 0, snapshotHash: "b".repeat(64), proposalHash: "c".repeat(64) }
     }));
     await store.update("generation-1", 1, validSession(2, {
       state: "recoveryRequired",
-      inFlight: { stepIndex: 0, snapshotHash: "b".repeat(64) }
+      inFlight: { stepIndex: 0, snapshotHash: "b".repeat(64), proposalHash: "c".repeat(64) }
     }));
     await expectStoreError(
       store.recover("generation-1", 2, validSession(3, {
@@ -465,7 +532,8 @@ describe("FileSystemGenerationSessionStore", () => {
             before: "com.example.app.MainActivity",
             after: "com.example.app.MainActivity"
           }
-        }]
+        }],
+        candidateSources: ["planner"]
       })),
       "INVALID_TRANSITION"
     );
@@ -476,7 +544,8 @@ describe("FileSystemGenerationSessionStore", () => {
     const store = new FileSystemGenerationSessionStore(root);
     const inFlight = {
       stepIndex: 0,
-      snapshotHash: "b".repeat(64)
+      snapshotHash: "b".repeat(64),
+      proposalHash: "c".repeat(64)
     };
     await store.create(validSession(0, { inFlight }));
     const completed = validSession(1, {
@@ -487,6 +556,7 @@ describe("FileSystemGenerationSessionStore", () => {
           after: "com.example.app.CompletedActivity"
         }
       }],
+      candidateSources: ["planner"],
       inFlight: null
     });
 
@@ -519,7 +589,8 @@ describe("FileSystemGenerationSessionStore", () => {
     const store = new FileSystemGenerationSessionStore(root);
     const inFlight = {
       stepIndex: 0,
-      snapshotHash: "b".repeat(64)
+      snapshotHash: "b".repeat(64),
+      proposalHash: "c".repeat(64)
     };
     const changedTarget = {
       ...validSession().target,
@@ -595,7 +666,8 @@ describe("FileSystemGenerationSessionStore", () => {
     const store = new FileSystemGenerationSessionStore(root);
     const inFlight = {
       stepIndex: 0,
-      snapshotHash: "b".repeat(64)
+      snapshotHash: "b".repeat(64),
+      proposalHash: "c".repeat(64)
     };
     await store.create(validSession(0, { inFlight }));
 
@@ -634,7 +706,8 @@ describe("FileSystemGenerationSessionStore", () => {
     const store = new FileSystemGenerationSessionStore(root);
     const inFlight = {
       stepIndex: 0,
-      snapshotHash: "b".repeat(64)
+      snapshotHash: "b".repeat(64),
+      proposalHash: "c".repeat(64)
     };
     await store.create(validSession(0, { inFlight }));
 
@@ -648,13 +721,19 @@ describe("FileSystemGenerationSessionStore", () => {
       "generation-1",
       0,
       inFlight,
-      validSession(1, { candidateSteps: [successfulWaitStep()] })
+      validSession(1, {
+        candidateSteps: [successfulWaitStep()],
+        candidateSources: ["planner"]
+      })
     );
     await expectStoreError(store.completeStep(
       "generation-1",
       0,
       inFlight,
-      validSession(1, { candidateSteps: [successfulWaitStep()] })
+      validSession(1, {
+        candidateSteps: [successfulWaitStep()],
+        candidateSources: ["planner"]
+      })
     ), "REVISION_CONFLICT");
   });
 
@@ -663,7 +742,8 @@ describe("FileSystemGenerationSessionStore", () => {
     const store = new FileSystemGenerationSessionStore(root);
     const inFlight = {
       stepIndex: 0,
-      snapshotHash: "b".repeat(64)
+      snapshotHash: "b".repeat(64),
+      proposalHash: "c".repeat(64)
     };
     await store.create(validSession(0, { inFlight }));
     const recoveryRequired = validSession(1, {
@@ -1098,6 +1178,30 @@ describe("FileSystemGenerationSessionStore", () => {
     await expect(readFile(evidencePath, "utf8")).resolves.not.toContain(
       "replacement"
     );
+  });
+
+  it("writes immutable text evidence without exposing a producer path", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(validSession());
+
+    await store.writeTextEvidence(
+      "generation-1",
+      "evidence/steps/001-logcat.txt",
+      "line one\nline two\n"
+    );
+
+    await expect(readFile(join(
+      activeDirectory(root),
+      "evidence",
+      "steps",
+      "001-logcat.txt"
+    ), "utf8")).resolves.toBe("line one\nline two\n");
+    await expectStoreError(store.writeTextEvidence(
+      "generation-1",
+      "evidence/steps/001-logcat.txt",
+      "replacement"
+    ), "EVIDENCE_ALREADY_EXISTS");
   });
 
   it("installs immutable binary evidence through a Store-owned producer path", async () => {

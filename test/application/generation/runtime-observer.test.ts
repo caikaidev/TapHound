@@ -63,6 +63,7 @@ function session(revision = 0): GenerationSession {
       randomHex: "00ff"
     },
     candidateSteps: [],
+    candidateSources: [],
     inFlight: null,
     pendingConfirmation: null,
     verification: { status: "notRun" },
@@ -305,7 +306,12 @@ describe("RuntimeObserver", () => {
           after: "com.example.app.MainActivity"
         }
       }],
-      inFlight: { stepIndex: 1, snapshotHash: "b".repeat(64) }
+      candidateSources: ["planner"],
+      inFlight: {
+        stepIndex: 1,
+        snapshotHash: "b".repeat(64),
+        proposalHash: "c".repeat(64)
+      }
     };
 
     await expect(test.observer.observe({

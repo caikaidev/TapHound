@@ -52,6 +52,7 @@ function validSession(): unknown {
         after: "com.example.app.MainActivity"
       }
     }],
+    candidateSources: ["planner"],
     inFlight: null,
     pendingConfirmation: null,
     verification: { status: "notRun" },
@@ -165,7 +166,7 @@ describe("GenerationSessionSchema", () => {
   it("rejects simultaneous execution and pending confirmation", () => {
     expect(() => GenerationSessionSchema.parse({
       ...(validSession() as object),
-      inFlight: { stepIndex: 1, snapshotHash: "b".repeat(64) },
+      inFlight: { stepIndex: 1, snapshotHash: "b".repeat(64), proposalHash: "c".repeat(64) },
       pendingConfirmation: {
         challengeId: "challenge-1",
         stepIndex: 1,
@@ -182,7 +183,7 @@ describe("GenerationSessionSchema", () => {
     expect(GenerationSessionSchema.parse({
       ...(validSession() as object),
       state: "recoveryRequired",
-      inFlight: { stepIndex: 1, snapshotHash: "b".repeat(64) }
+      inFlight: { stepIndex: 1, snapshotHash: "b".repeat(64), proposalHash: "c".repeat(64) }
     })).toMatchObject({
       state: "recoveryRequired",
       inFlight: { stepIndex: 1 }
@@ -238,7 +239,7 @@ describe("GenerationSessionSchema", () => {
   it("rejects verification while a candidate step is active", () => {
     expect(() => GenerationSessionSchema.parse({
       ...(validSession() as object),
-      inFlight: { stepIndex: 1, snapshotHash: "b".repeat(64) },
+      inFlight: { stepIndex: 1, snapshotHash: "b".repeat(64), proposalHash: "c".repeat(64) },
       verification: { status: "running" }
     })).toThrow(/verification/i);
   });
@@ -246,11 +247,11 @@ describe("GenerationSessionSchema", () => {
   it("requires active step state to identify the exact next candidate index", () => {
     expect(GenerationSessionSchema.parse({
       ...(validSession() as object),
-      inFlight: { stepIndex: 1, snapshotHash: "b".repeat(64) }
+      inFlight: { stepIndex: 1, snapshotHash: "b".repeat(64), proposalHash: "c".repeat(64) }
     })).toMatchObject({ inFlight: { stepIndex: 1 } });
     expect(() => GenerationSessionSchema.parse({
       ...(validSession() as object),
-      inFlight: { stepIndex: 0, snapshotHash: "b".repeat(64) }
+      inFlight: { stepIndex: 0, snapshotHash: "b".repeat(64), proposalHash: "c".repeat(64) }
     })).toThrow(/next candidate/i);
   });
 

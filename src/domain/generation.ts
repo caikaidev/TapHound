@@ -49,7 +49,8 @@ const NonnegativeSafeIntegerSchema = z.number()
 
 export const GenerationInFlightSchema = z.strictObject({
   stepIndex: z.number().int().nonnegative(),
-  snapshotHash: Sha256Schema
+  snapshotHash: Sha256Schema,
+  proposalHash: Sha256Schema
 });
 
 export const PendingConfirmationSchema = z.strictObject({
@@ -110,11 +111,19 @@ export const GenerationSessionSchema = z.strictObject({
   }),
   variables: GenerationVariablesSchema,
   candidateSteps: z.array(JourneyStepSchema),
+  candidateSources: z.array(z.enum(["planner", "manualOverride"])),
   inFlight: GenerationInFlightSchema.nullable(),
   pendingConfirmation: PendingConfirmationSchema.nullable(),
   verification: VerificationSchema,
   publication: PublicationSchema
 }).superRefine((session, context) => {
+  if (session.candidateSources.length !== session.candidateSteps.length) {
+    context.addIssue({
+      code: "custom",
+      path: ["candidateSources"],
+      message: "Candidate provenance must align exactly with candidate steps"
+    });
+  }
   if (session.state === "recoveryRequired" && session.inFlight === null) {
     context.addIssue({
       code: "custom",

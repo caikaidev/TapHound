@@ -11,6 +11,7 @@ import type { Clock } from "../../ports/clock.js";
 import type { LogcatCollector } from "../collector/logcat-collector.js";
 import { ActionExecutor, type ActionTarget } from "../interaction/action-executor.js";
 import { FallbackResolver } from "../interaction/fallback-resolver.js";
+import { ScrollToExecutor } from "../interaction/scroll-to-executor.js";
 import { resolveLocator } from "../locator/locator-resolver.js";
 import { ExpectationEvaluator } from "../assertion/expectation-evaluator.js";
 import { IdleWaiter, type IdleConfig } from "../wait/idle-waiter.js";
@@ -52,6 +53,7 @@ export class StepRunner {
   private readonly fallbackResolver: FallbackResolver;
   private readonly idleWaiter: IdleWaiter;
   private readonly expectationEvaluator: ExpectationEvaluator;
+  private readonly scrollToExecutor: ScrollToExecutor;
 
   public constructor(private readonly options: StepRunnerOptions) {
     this.actionExecutor = new ActionExecutor(options.adb, options.deviceSerial);
@@ -70,6 +72,13 @@ export class StepRunner {
       options.logcat,
       options.clock
     );
+    this.scrollToExecutor = new ScrollToExecutor({
+      androidCli: options.androidCli,
+      actionExecutor: this.actionExecutor,
+      idleWaiter: this.idleWaiter,
+      deviceSerial: options.deviceSerial,
+      idle: options.idle
+    });
   }
 
   public async run(
@@ -159,7 +168,7 @@ export class StepRunner {
 
     let target: ActionTarget | undefined;
     if (step.action === "scrollTo") {
-      const scroll = await this.resolveByScrolling(step, signal);
+      const scroll = await this.scrollToExecutor.execute(step, signal);
       report.scroll = {
         swipesUsed: scroll.swipesUsed,
         maxSwipes: step.maxSwipes
@@ -325,98 +334,5 @@ export class StepRunner {
     }
 
     return finish("passed");
-  }
-
-  private async resolveByScrolling(
-    step: Extract<JourneyStep, { action: "scrollTo" }>,
-    signal?: AbortSignal
-  ): Promise<
-    | { status: "found"; swipesUsed: number }
-    | {
-        status: "failed";
-        code: FailureCode;
-        message: string;
-        swipesUsed: number;
-        idle?: { polls: number; lastDiff: readonly unknown[] };
-      }
-    | { status: "cancelled"; swipesUsed: number }
-  > {
-    let swipesUsed = 0;
-    for (;;) {
-      if (signal?.aborted === true) {
-        return { status: "cancelled", swipesUsed };
-      }
-      const layout = await this.options.androidCli.layout({
-        deviceSerial: this.options.deviceSerial,
-        ...(signal === undefined ? {} : { signal }),
-        timeoutMs: this.options.idle.timeoutMs
-      });
-      const target = resolveLocator(layout, step.locator, { requireEnabled: false });
-      if (target.status === "found") {
-        return { status: "found", swipesUsed };
-      }
-      if (target.code === "LOCATOR_AMBIGUOUS") {
-        return {
-          status: "failed",
-          code: "LOCATOR_AMBIGUOUS",
-          message: target.message,
-          swipesUsed
-        };
-      }
-      if (swipesUsed >= step.maxSwipes) {
-        return {
-          status: "failed",
-          code: "SCROLL_TARGET_NOT_FOUND",
-          message: `Target not visible after ${String(step.maxSwipes)} swipes`,
-          swipesUsed
-        };
-      }
-      const container = resolveLocator(layout, step.container, { requireEnabled: false });
-      if (container.status !== "found") {
-        return {
-          status: "failed",
-          code: container.code,
-          message: container.message,
-          swipesUsed
-        };
-      }
-      if (container.element.bounds === undefined) {
-        return {
-          status: "failed",
-          code: "ACTION_FAILED",
-          message: "scroll container has no bounds to swipe",
-          swipesUsed
-        };
-      }
-      const swipe = await this.actionExecutor.swipeBounds(
-        container.element.bounds,
-        step.direction,
-        step.distancePercent,
-        step.durationMs,
-        signal
-      );
-      if (swipe.status === "failed") {
-        return {
-          status: "failed",
-          code: swipe.code,
-          message: swipe.message,
-          swipesUsed
-        };
-      }
-      const idle = await this.idleWaiter.waitUntilIdle(this.options.idle, signal);
-      if (idle.status === "cancelled") {
-        return { status: "cancelled", swipesUsed };
-      }
-      if (idle.status === "timeout") {
-        return {
-          status: "failed",
-          code: idle.code,
-          message: "Layout did not become stable before timeout",
-          swipesUsed,
-          idle: { polls: idle.polls, lastDiff: idle.lastDiff }
-        };
-      }
-      swipesUsed += 1;
-    }
   }
 }

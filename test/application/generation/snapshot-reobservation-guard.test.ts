@@ -65,6 +65,7 @@ function session(overrides: Partial<GenerationSession> = {}): GenerationSession 
       randomHex: "00ff"
     },
     candidateSteps: [],
+    candidateSources: [],
     inFlight: null,
     pendingConfirmation: null,
     verification: { status: "notRun" },
@@ -178,5 +179,31 @@ describe("SnapshotReobservationGuard", () => {
     await expect(
       test.guard.assertFresh(binding(test))
     ).rejects.toMatchObject({ code: "SNAPSHOT_STALE" });
+  });
+
+  it("lets only the exact approved challenge bridge confirmation revisions", async () => {
+    const test = harness();
+    const approved = {
+      challengeId: "challenge-1",
+      stepIndex: 0,
+      proposalHash: "c".repeat(64),
+      snapshotHash: binding(test).snapshotHash,
+      actionSummary: "click submit",
+      expiresAt: "2026-07-22T12:20:00.000Z",
+      status: "approved" as const
+    };
+    test.current.revision = 3;
+    test.current.pendingConfirmation = approved;
+
+    await expect(test.guard.assertFresh(
+      binding(test),
+      undefined,
+      approved
+    )).resolves.toMatchObject({ baseRevision: 1, pid: 42 });
+    await expect(test.guard.assertFresh(
+      binding(test),
+      undefined,
+      { ...approved, challengeId: "challenge-2" }
+    )).rejects.toMatchObject({ code: "SNAPSHOT_STALE" });
   });
 });

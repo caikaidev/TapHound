@@ -124,6 +124,7 @@ function dependencies(): {
             randomHex: "00ff"
           },
           candidateSteps: [],
+          candidateSources: [],
           inFlight: null,
           pendingConfirmation: null,
           verification: { status: "notRun" as const },

@@ -156,6 +156,7 @@ export class GenerationStarter {
         randomHex: randomHex(this.dependencies.randomBytes(16))
       },
       candidateSteps: [],
+      candidateSources: [],
       inFlight: null,
       pendingConfirmation: null,
       verification: { status: "notRun" },

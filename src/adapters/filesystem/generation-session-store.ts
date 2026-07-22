@@ -21,9 +21,11 @@ import {
 import {
   GenerationInFlightSchema,
   GenerationSessionSchema,
+  PendingConfirmationSchema,
   generationCoreIdentity,
   type GenerationInFlight,
-  type GenerationSession
+  type GenerationSession,
+  type PendingConfirmation
 } from "../../domain/generation.js";
 import {
   GenerationSessionStoreError,
@@ -367,6 +369,7 @@ function transitionStableState(
     target: session.target,
     variables: session.variables,
     candidateSteps: session.candidateSteps,
+    candidateSources: session.candidateSources,
     pendingConfirmation: session.pendingConfirmation,
     verification: session.verification,
     publication: session.publication
@@ -1162,6 +1165,95 @@ implements GenerationSessionStore {
     });
   };
 
+  public readonly beginStep = async (
+    id: string,
+    expectedRevision: number,
+    inFlightInput: GenerationInFlight,
+    approvedConfirmationInput?: PendingConfirmation
+  ): Promise<GenerationSession> => {
+    assertId(id);
+    validateExpectedRevision(expectedRevision);
+    if (expectedRevision === Number.MAX_SAFE_INTEGER) {
+      throw new GenerationSessionStoreError(
+        "INVALID_REVISION",
+        "Generation revision cannot increment beyond Number.MAX_SAFE_INTEGER"
+      );
+    }
+    const inFlight = parseInFlight(inFlightInput);
+    const approvedConfirmation = approvedConfirmationInput === undefined
+      ? undefined
+      : PendingConfirmationSchema.parse(approvedConfirmationInput);
+    await this.ensureGenerationRoot();
+
+    return this.withLock(id, async () => {
+      const activeDirectory = this.activeDirectory(id);
+      if (!await pathExists(activeDirectory)) {
+        if (await pathExists(this.finalDirectory(id))) {
+          throw new GenerationSessionStoreError(
+            "SESSION_PUBLISHED",
+            `Published generation session cannot begin a step: ${id}`
+          );
+        }
+        throw new GenerationSessionStoreError(
+          "SESSION_NOT_FOUND",
+          `Generation session does not exist: ${id}`
+        );
+      }
+      const activeEvidence = await captureStoreDirectory(activeDirectory);
+      const current = await readBoundState(
+        activeDirectory,
+        id,
+        this.hooks.afterStateOpen,
+        activeEvidence
+      );
+      if (current.revision !== expectedRevision) {
+        throw new GenerationSessionStoreError(
+          "REVISION_CONFLICT",
+          `Expected generation revision ${String(expectedRevision)}, found ${
+            String(current.revision)
+          }`
+        );
+      }
+      const expectedConfirmation = approvedConfirmation ?? null;
+      if (
+        current.state !== "active"
+        || current.inFlight !== null
+        || current.verification.status !== "notRun"
+        || current.publication.status !== "notRun"
+        || inFlight.stepIndex !== current.candidateSteps.length
+        || JSON.stringify(current.pendingConfirmation)
+          !== JSON.stringify(expectedConfirmation)
+        || (
+          approvedConfirmation !== undefined
+          && (
+            approvedConfirmation.status !== "approved"
+            || approvedConfirmation.proposalHash !== inFlight.proposalHash
+            || approvedConfirmation.snapshotHash !== inFlight.snapshotHash
+          )
+        )
+      ) {
+        throw new GenerationSessionStoreError(
+          "INVALID_TRANSITION",
+          "Step begin requires exact active state and approved confirmation"
+        );
+      }
+      const next = GenerationSessionSchema.parse({
+        ...current,
+        revision: current.revision + 1,
+        inFlight,
+        pendingConfirmation: null
+      });
+      await writeStateAtomically(
+        activeDirectory,
+        next,
+        this.syncDirectory,
+        this.hooks.beforeStateRename,
+        activeEvidence
+      );
+      return next;
+    });
+  };
+
   public readonly completeStep = async (
     id: string,
     expectedRevision: number,
@@ -1224,18 +1316,27 @@ implements GenerationSessionStore {
           0,
           current.candidateSteps.length
         )) === JSON.stringify(current.candidateSteps);
+      const sourceAppended = next.candidateSources.length
+        === current.candidateSources.length + 1
+        && JSON.stringify(next.candidateSources.slice(
+          0,
+          current.candidateSources.length
+        )) === JSON.stringify(current.candidateSources);
       const currentStable = {
         ...transitionStableState(current),
         candidateSteps: undefined,
+        candidateSources: undefined,
         pendingConfirmation: undefined
       };
       const nextStable = {
         ...transitionStableState(next),
         candidateSteps: undefined,
+        candidateSources: undefined,
         pendingConfirmation: undefined
       };
       if (
         !candidateAppended
+        || !sourceAppended
         || current.pendingConfirmation !== null
         || next.pendingConfirmation !== null
         || JSON.stringify(currentStable) !== JSON.stringify(nextStable)
@@ -1323,6 +1424,35 @@ implements GenerationSessionStore {
       );
       try {
         await handle.writeFile(serializeJson(canonicalValue), "utf8");
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+    });
+  };
+
+  public readonly writeTextEvidence = async (
+    id: string,
+    relativePath: string,
+    value: string
+  ): Promise<void> => {
+    if (typeof value !== "string") {
+      throw new GenerationSessionStoreError(
+        "INVALID_EVIDENCE",
+        "Text evidence must be a string"
+      );
+    }
+    await this.produceEvidence(id, relativePath, async (temporaryPath) => {
+      const handle = await open(
+        temporaryPath,
+        constants.O_WRONLY
+          | constants.O_CREAT
+          | constants.O_EXCL
+          | constants.O_NOFOLLOW,
+        0o600
+      );
+      try {
+        await handle.writeFile(value, "utf8");
         await handle.sync();
       } finally {
         await handle.close();

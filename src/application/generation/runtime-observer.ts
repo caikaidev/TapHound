@@ -3,7 +3,8 @@ import { z } from "zod";
 import {
   GenerationSessionIdSchema,
   GenerationSessionSchema,
-  type GenerationSession
+  type GenerationSession,
+  type PendingConfirmation
 } from "../../domain/generation.js";
 import { LayoutElementSchema } from "../../domain/layout.js";
 import {
@@ -211,7 +212,8 @@ export class SnapshotReobservationGuard {
 
   public readonly assertFresh = async (
     input: ProposalBinding,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    approvedConfirmation?: PendingConfirmation
   ): Promise<RuntimeSnapshot> => {
     try {
       const binding = ProposalBindingSchema.parse(input);
@@ -221,8 +223,22 @@ export class SnapshotReobservationGuard {
       if (
         session.id !== binding.generationId
         || session.state !== "active"
-        || session.revision !== binding.baseRevision
         || session.bindings.snapshotHash !== binding.snapshotHash
+        || session.inFlight !== null
+        || session.verification.status !== "notRun"
+        || session.publication.status !== "notRun"
+        || (
+          approvedConfirmation === undefined
+            ? (
+                session.revision !== binding.baseRevision
+                || session.pendingConfirmation !== null
+              )
+            : (
+                approvedConfirmation.status !== "approved"
+                || JSON.stringify(session.pendingConfirmation)
+                  !== JSON.stringify(approvedConfirmation)
+              )
+        )
       ) {
         throw new GenerationOperationError(
           "SNAPSHOT_STALE",

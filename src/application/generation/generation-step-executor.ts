@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import {
   GenerationSessionSchema,
+  GenerationInFlightSchema,
   expandProposedStepVariables,
   type GenerationInFlight,
   type GenerationSession,
@@ -72,10 +73,47 @@ export interface GenerationStepExecutorDependencies {
   clock: Clock;
   idle: IdleConfig;
   now: () => Date;
+  generateAttemptId: () => string;
 }
 
-function executionPath(index: number, suffix: string): string {
-  return `evidence/steps/${String(index + 1).padStart(3, "0")}-${suffix}`;
+interface LiveRuntime {
+  foregroundPackageName: string;
+  activity: string;
+  pid: number;
+  layout: readonly LayoutElement[];
+}
+
+class StepCancelledError extends Error {
+  public override readonly name = "StepCancelledError";
+}
+
+function cancellation(): GenerationStepExecutionResult {
+  return {
+    status: "cancelled",
+    failure: {
+      code: "RECOVERY_REQUIRED",
+      message: "Step was cancelled"
+    }
+  };
+}
+
+function isCancelled(signal?: AbortSignal): boolean {
+  return signal?.aborted === true;
+}
+
+function throwIfCancelled(signal?: AbortSignal): void {
+  if (isCancelled(signal)) {
+    throw new StepCancelledError("Step was cancelled");
+  }
+}
+
+function executionPath(
+  inFlight: GenerationInFlight,
+  suffix: string
+): string {
+  return `evidence/steps/${String(inFlight.stepIndex)}-${
+    inFlight.attemptId
+  }/${suffix}`;
 }
 
 function flatten(elements: readonly LayoutElement[]): LayoutElement[] {
@@ -105,6 +143,13 @@ function asFailure(error: unknown): GenerationStepFailure {
 
 function fail(code: string, message: string): never {
   throw Object.assign(new Error(message), { code });
+}
+
+function sameSession(
+  left: GenerationSession,
+  right: GenerationSession
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function exactApprovedChallenge(
@@ -236,6 +281,9 @@ export class GenerationStepExecutor {
     const session = GenerationSessionSchema.parse(
       await this.dependencies.store.read(input.generationId)
     );
+    if (isCancelled(input.signal)) {
+      return cancellation();
+    }
     assertBaseAuthorization(session, proposal, snapshot);
     const risk = this.riskEvaluator.evaluate(
       proposal.action,
@@ -270,24 +318,38 @@ export class GenerationStepExecutor {
       input.signal,
       approved
     );
-    if (
-      fresh.foregroundPackageName !== session.target.packageName
-      || fresh.pid === null
-      || fresh.activity !== proposal.activity.before
-    ) {
+    if (isCancelled(input.signal)) {
+      return cancellation();
+    }
+    if (fresh.foregroundPackageName !== session.target.packageName) {
       throw new GenerationOperationError(
-        fresh.foregroundPackageName !== session.target.packageName
-          ? "PACKAGE_ESCAPE"
-          : "SNAPSHOT_STALE",
-        "Fresh runtime identity does not match the accepted proposal"
+        "PACKAGE_ESCAPE",
+        "Fresh foreground package escaped the generation target"
       );
     }
+    if (fresh.pid === null) {
+      throw new GenerationOperationError(
+        "APP_CRASHED",
+        "Fresh generation process is not running"
+      );
+    }
+    if (fresh.activity !== proposal.activity.before) {
+      throw new GenerationOperationError(
+        "SNAPSHOT_STALE",
+        "Fresh Activity does not match the accepted proposal"
+      );
+    }
+    const authoritativePid = fresh.pid;
 
-    const inFlight: GenerationInFlight = {
+    const inFlight = GenerationInFlightSchema.parse({
       stepIndex: session.candidateSteps.length,
       snapshotHash: proposal.binding.snapshotHash,
-      proposalHash: hashProposedStep(proposal)
-    };
+      proposalHash: hashProposedStep(proposal),
+      attemptId: this.dependencies.generateAttemptId()
+    });
+    if (isCancelled(input.signal)) {
+      return cancellation();
+    }
     let begun: GenerationSession;
     try {
       begun = await this.dependencies.store.beginStep(
@@ -305,6 +367,10 @@ export class GenerationStepExecutor {
       }
       throw error;
     }
+    if (isCancelled(input.signal)) {
+      await this.markRecovery(session.id, inFlight);
+      return cancellation();
+    }
 
     const logcat = new LogcatCollector(
       this.dependencies.adb,
@@ -317,10 +383,19 @@ export class GenerationStepExecutor {
     try {
       await logcat.start({
         deviceSerial: session.target.deviceSerial,
-        pid: fresh.pid,
+        pid: authoritativePid,
         ...(input.signal === undefined ? {} : { signal: input.signal })
       });
       logcatStarted = true;
+      throwIfCancelled(input.signal);
+      const preAction = await this.observeLive(
+        session,
+        authoritativePid,
+        proposal.activity.before,
+        input.signal,
+        fresh
+      );
+      throwIfCancelled(input.signal);
       const provisional = executableStep(
         proposal,
         session.variables,
@@ -342,8 +417,18 @@ export class GenerationStepExecutor {
           actionExecutor,
           idleWaiter,
           deviceSerial: session.target.deviceSerial,
-          idle: this.dependencies.idle
-        }).execute(provisional, input.signal, fresh.layout);
+          idle: this.dependencies.idle,
+          beforeSwipe: async (): Promise<readonly LayoutElement[]> => {
+            const guarded = await this.observeLive(
+              session,
+              authoritativePid,
+              proposal.activity.before,
+              input.signal
+            );
+            return guarded.layout;
+          }
+        }).execute(provisional, input.signal, preAction.layout);
+        throwIfCancelled(input.signal);
         if (scroll.status === "cancelled") {
           outcome = {
             status: "cancelled",
@@ -353,14 +438,9 @@ export class GenerationStepExecutor {
           fail(scroll.code, scroll.message);
         }
       } else {
-        const target = requireTarget(fresh.layout, provisional);
+        const target = requireTarget(preAction.layout, provisional);
         if (provisional.action === "inputText") {
-          const latestLayout = await this.dependencies.androidCli.layout({
-            deviceSerial: session.target.deviceSerial,
-            ...(input.signal === undefined ? {} : { signal: input.signal }),
-            timeoutMs: this.dependencies.idle.timeoutMs
-          });
-          const focused = flatten(latestLayout).filter(
+          const focused = flatten(preAction.layout).filter(
             (element) => element.enabled && element.focused === true
           );
           if (focused.length !== 1) {
@@ -371,12 +451,13 @@ export class GenerationStepExecutor {
           }
         }
         if (outcome === undefined) {
+          throwIfCancelled(input.signal);
           const action = await actionExecutor.execute(
             provisional,
             target,
             input.signal
           );
-          if (input.signal?.aborted === true) {
+          if (isCancelled(input.signal)) {
             outcome = {
               status: "cancelled",
               failure: {
@@ -404,30 +485,22 @@ export class GenerationStepExecutor {
           } else if (idle.status === "timeout") {
             fail(idle.code, "Layout did not become stable before timeout");
           }
+          throwIfCancelled(input.signal);
         }
       }
 
       if (outcome === undefined) {
-        const identity = {
-          packageName: session.target.packageName,
-          deviceSerial: session.target.deviceSerial,
-          ...(input.signal === undefined ? {} : { signal: input.signal }),
-          timeoutMs: this.dependencies.idle.timeoutMs
-        };
-        const pid = await this.dependencies.adb.pid(identity);
-        if (pid === null) {
-          fail("APP_CRASHED", "App process is no longer running");
-        }
-        const foreground = await this.dependencies.adb.foregroundComponent(
-          identity
+        throwIfCancelled(input.signal);
+        const after = await this.observeLive(
+          session,
+          authoritativePid,
+          undefined,
+          input.signal
         );
-        if (foreground.packageName !== session.target.packageName) {
-          fail("PACKAGE_ESCAPE", "Foreground package escaped generation target");
-        }
         finalStep = executableStep(
           proposal,
           session.variables,
-          foreground.activity
+          after.activity
         );
         if (finalStep.expect !== undefined) {
           const expectation = await new ExpectationEvaluator(
@@ -451,16 +524,29 @@ export class GenerationStepExecutor {
           } else if (expectation.status === "failed") {
             fail(expectation.code, expectation.message);
           }
+          throwIfCancelled(input.signal);
+          await this.observeLive(
+            session,
+            authoritativePid,
+            after.activity,
+            input.signal
+          );
+          throwIfCancelled(input.signal);
         }
       }
     } catch (error) {
-      outcome = { status: "failed", failure: asFailure(error) };
+      outcome = error instanceof StepCancelledError
+        ? cancellation()
+        : { status: "failed", failure: asFailure(error) };
     }
 
     let stopFailure: GenerationStepFailure | undefined;
     if (logcatStarted) {
       try {
         const stopped = await logcat.stop();
+        if (isCancelled(input.signal)) {
+          outcome = cancellation();
+        }
         if (
           stopped.exitCode !== 0
           || stopped.timedOut
@@ -493,17 +579,18 @@ export class GenerationStepExecutor {
     try {
       await this.dependencies.store.writeTextEvidence(
         session.id,
-        executionPath(inFlight.stepIndex, "logcat.txt"),
+        executionPath(inFlight, "logcat.txt"),
         log.length === 0 ? "" : `${log}\n`
       );
       await this.dependencies.store.writeEvidence(
         session.id,
-        executionPath(inFlight.stepIndex, "result.json"),
+        executionPath(inFlight, "result.json"),
         {
           version: 1,
           stepIndex: inFlight.stepIndex,
           proposalHash: inFlight.proposalHash,
           snapshotHash: inFlight.snapshotHash,
+          attemptId: inFlight.attemptId,
           source,
           outcome,
           ...(stopFailure === undefined
@@ -517,14 +604,14 @@ export class GenerationStepExecutor {
     }
 
     if (outcome.status === "succeeded") {
+      const next = GenerationSessionSchema.parse({
+        ...begun,
+        revision: begun.revision + 1,
+        inFlight: null,
+        candidateSteps: [...begun.candidateSteps, outcome.step],
+        candidateSources: [...begun.candidateSources, source]
+      });
       try {
-        const next = GenerationSessionSchema.parse({
-          ...begun,
-          revision: begun.revision + 1,
-          inFlight: null,
-          candidateSteps: [...begun.candidateSteps, outcome.step],
-          candidateSources: [...begun.candidateSources, source]
-        });
         await this.dependencies.store.completeStep(
           session.id,
           begun.revision,
@@ -532,8 +619,31 @@ export class GenerationStepExecutor {
           next
         );
       } catch (error) {
-        await this.markRecovery(session.id, inFlight);
-        throw error;
+        let latest: GenerationSession;
+        try {
+          latest = GenerationSessionSchema.parse(
+            await this.dependencies.store.read(session.id)
+          );
+        } catch {
+          throw new GenerationOperationError(
+            "RECOVERY_REQUIRED",
+            "Unable to reconcile step completion state"
+          );
+        }
+        if (sameSession(latest, next)) {
+          return outcome;
+        }
+        if (
+          latest.state === "active"
+          && JSON.stringify(latest.inFlight) === JSON.stringify(inFlight)
+        ) {
+          await this.markRecovery(session.id, inFlight);
+          throw error;
+        }
+        throw new GenerationOperationError(
+          "RECOVERY_REQUIRED",
+          "Step completion state is ambiguous and requires recovery"
+        );
       }
       return outcome;
     }
@@ -541,6 +651,69 @@ export class GenerationStepExecutor {
     await this.markRecovery(session.id, inFlight);
     return outcome;
   };
+
+  private async observeLive(
+    session: GenerationSession,
+    expectedPid: number,
+    expectedActivity: string | undefined,
+    signal?: AbortSignal,
+    authoritativeSnapshot?: RuntimeSnapshot
+  ): Promise<LiveRuntime> {
+    const identity = {
+      packageName: session.target.packageName,
+      deviceSerial: session.target.deviceSerial,
+      ...(signal === undefined ? {} : { signal }),
+      timeoutMs: this.dependencies.idle.timeoutMs
+    };
+    const foreground = await this.dependencies.adb.foregroundComponent(
+      identity
+    );
+    throwIfCancelled(signal);
+    if (foreground.packageName !== session.target.packageName) {
+      fail("PACKAGE_ESCAPE", "Foreground package escaped generation target");
+    }
+    const pid = await this.dependencies.adb.pid(identity);
+    throwIfCancelled(signal);
+    if (pid === null || pid !== expectedPid) {
+      fail("APP_CRASHED", "Generation process identity changed");
+    }
+    const layout = await this.dependencies.androidCli.layout({
+      deviceSerial: session.target.deviceSerial,
+      ...(signal === undefined ? {} : { signal }),
+      timeoutMs: this.dependencies.idle.timeoutMs
+    });
+    throwIfCancelled(signal);
+    if (
+      expectedActivity !== undefined
+      && foreground.activity !== expectedActivity
+    ) {
+      fail("SNAPSHOT_STALE", "Generation Activity changed unexpectedly");
+    }
+    if (authoritativeSnapshot !== undefined) {
+      const liveHash = hashRuntimeSnapshot({
+        ...authoritativeSnapshot,
+        foregroundPackageName: foreground.packageName,
+        activity: foreground.activity,
+        pid,
+        layout
+      });
+      const authoritativeHash = hashRuntimeSnapshot(authoritativeSnapshot);
+      if (liveHash !== authoritativeHash) {
+        fail(
+          "SNAPSHOT_STALE",
+          `Generation Layout changed before action (${authoritativeHash} -> ${
+            liveHash
+          })`
+        );
+      }
+    }
+    return {
+      foregroundPackageName: foreground.packageName,
+      activity: foreground.activity,
+      pid,
+      layout
+    };
+  }
 
   private async markRecovery(
     generationId: string,

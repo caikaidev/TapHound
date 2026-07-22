@@ -68,6 +68,7 @@ describe("generation error contract", () => {
       "CONTEXT_STALE",
       "SNAPSHOT_STALE",
       "PACKAGE_ESCAPE",
+      "APP_CRASHED",
       "ACTION_UNSUPPORTED",
       "RISK_CONFIRMATION_REQUIRED",
       "ACTION_FORBIDDEN",
@@ -78,6 +79,29 @@ describe("generation error contract", () => {
 });
 
 describe("GenerationSessionSchema", () => {
+  it("requires a safe Core-generated attempt id for inFlight execution", () => {
+    const input = {
+      ...(validSession() as object),
+      inFlight: {
+        stepIndex: 1,
+        snapshotHash: "b".repeat(64),
+        proposalHash: "c".repeat(64),
+        attemptId: "attempt-1"
+      }
+    };
+
+    expect(GenerationSessionSchema.parse(input)).toMatchObject({
+      inFlight: { attemptId: "attempt-1" }
+    });
+    expect(() => GenerationSessionSchema.parse({
+      ...input,
+      inFlight: {
+        ...input.inFlight,
+        attemptId: "../escape"
+      }
+    })).toThrow(/attempt/i);
+  });
+
   it("parses the initial strict session state", () => {
     expect(GenerationSessionSchema.parse(validSession())).toEqual(validSession());
   });
@@ -166,7 +190,7 @@ describe("GenerationSessionSchema", () => {
   it("rejects simultaneous execution and pending confirmation", () => {
     expect(() => GenerationSessionSchema.parse({
       ...(validSession() as object),
-      inFlight: { stepIndex: 1, snapshotHash: "b".repeat(64), proposalHash: "c".repeat(64) },
+      inFlight: { stepIndex: 1, snapshotHash: "b".repeat(64), proposalHash: "c".repeat(64), attemptId: "attempt-1" },
       pendingConfirmation: {
         challengeId: "challenge-1",
         stepIndex: 1,
@@ -183,7 +207,7 @@ describe("GenerationSessionSchema", () => {
     expect(GenerationSessionSchema.parse({
       ...(validSession() as object),
       state: "recoveryRequired",
-      inFlight: { stepIndex: 1, snapshotHash: "b".repeat(64), proposalHash: "c".repeat(64) }
+      inFlight: { stepIndex: 1, snapshotHash: "b".repeat(64), proposalHash: "c".repeat(64), attemptId: "attempt-1" }
     })).toMatchObject({
       state: "recoveryRequired",
       inFlight: { stepIndex: 1 }
@@ -239,7 +263,7 @@ describe("GenerationSessionSchema", () => {
   it("rejects verification while a candidate step is active", () => {
     expect(() => GenerationSessionSchema.parse({
       ...(validSession() as object),
-      inFlight: { stepIndex: 1, snapshotHash: "b".repeat(64), proposalHash: "c".repeat(64) },
+      inFlight: { stepIndex: 1, snapshotHash: "b".repeat(64), proposalHash: "c".repeat(64), attemptId: "attempt-1" },
       verification: { status: "running" }
     })).toThrow(/verification/i);
   });
@@ -247,11 +271,11 @@ describe("GenerationSessionSchema", () => {
   it("requires active step state to identify the exact next candidate index", () => {
     expect(GenerationSessionSchema.parse({
       ...(validSession() as object),
-      inFlight: { stepIndex: 1, snapshotHash: "b".repeat(64), proposalHash: "c".repeat(64) }
+      inFlight: { stepIndex: 1, snapshotHash: "b".repeat(64), proposalHash: "c".repeat(64), attemptId: "attempt-1" }
     })).toMatchObject({ inFlight: { stepIndex: 1 } });
     expect(() => GenerationSessionSchema.parse({
       ...(validSession() as object),
-      inFlight: { stepIndex: 0, snapshotHash: "b".repeat(64), proposalHash: "c".repeat(64) }
+      inFlight: { stepIndex: 0, snapshotHash: "b".repeat(64), proposalHash: "c".repeat(64), attemptId: "attempt-1" }
     })).toThrow(/next candidate/i);
   });
 

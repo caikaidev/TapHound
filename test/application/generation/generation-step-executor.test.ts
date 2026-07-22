@@ -60,7 +60,7 @@ function proposal(runtime = snapshot()): ProposedStep {
     locator: { text: "Submit ${runId}" },
     binding: {
       generationId: "generation-1",
-      baseRevision: 2,
+      baseRevision: runtime.baseRevision,
       snapshotHash: hashRuntimeSnapshot(runtime)
     },
     activity: { before: activity }
@@ -107,7 +107,10 @@ function session(
   });
 }
 
-function harness(initial = session()): {
+function harness(
+  initial = session(),
+  generateAttemptId: () => string = () => "attempt-1"
+): {
   execute: GenerationStepExecutor["execute"];
   current: () => GenerationSession;
   calls: string[];
@@ -131,22 +134,34 @@ function harness(initial = session()): {
   evidence: Map<string, unknown>;
   stopLogcat: ReturnType<typeof vi.fn>;
   writeEvidence: ReturnType<typeof vi.fn>;
+  beginStep: ReturnType<typeof vi.fn>;
+  completeStep: ReturnType<typeof vi.fn>;
+  recover: () => void;
+  replaceCurrent: (next: GenerationSession) => void;
+  afterBegin: (callback: () => void) => void;
+  setNow: (next: Date) => void;
 } {
   let current = initial;
   const calls: string[] = [];
   const evidence = new Map<string, unknown>();
+  let beginCallback: (() => void) | undefined;
   let time = 0;
+  let now = new Date("2026-07-22T12:00:01.000Z");
   const stopLogcat = vi.fn(() => Promise.resolve(ok));
   const running: RunningCommand = {
     started: Promise.resolve(undefined),
     completion: Promise.resolve(ok),
     stop: stopLogcat
   };
+  let foregroundCalls = 0;
   const adb = {
-    foregroundComponent: vi.fn(() => Promise.resolve({
-      packageName: "com.example.app",
-      activity: afterActivity
-    })),
+    foregroundComponent: vi.fn(() => {
+      foregroundCalls += 1;
+      return Promise.resolve({
+        packageName: "com.example.app",
+        activity: foregroundCalls === 1 ? activity : afterActivity
+      });
+    }),
     currentActivity: vi.fn(() => Promise.resolve(afterActivity)),
     pid: vi.fn(() => Promise.resolve(42)),
     tap: vi.fn(() => {
@@ -177,8 +192,11 @@ function harness(initial = session()): {
     ) => {
       calls.push("begin");
       expect(current.revision).toBe(expectedRevision);
-      if (approved !== undefined) {
+    if (approved !== undefined && approved !== null) {
         expect(current.pendingConfirmation).toEqual(approved);
+      if (now.getTime() >= new Date(approved.expiresAt).getTime()) {
+        throw new Error("Approved confirmation expired before step begin");
+      }
       }
       current = GenerationSessionSchema.parse({
         ...current,
@@ -186,6 +204,7 @@ function harness(initial = session()): {
         inFlight,
         pendingConfirmation: null
       });
+      beginCallback?.();
       return Promise.resolve(current);
     }),
     completeStep: vi.fn((
@@ -229,7 +248,8 @@ function harness(initial = session()): {
       sleep: (): Promise<void> => Promise.resolve()
     },
     idle: { pollIntervalMs: 1, stablePolls: 1, timeoutMs: 10 },
-    now: (): Date => new Date("2026-07-22T12:00:01.000Z")
+    now: (): Date => now,
+    generateAttemptId
   });
   return {
     execute: executor.execute,
@@ -240,7 +260,26 @@ function harness(initial = session()): {
     guard,
     evidence,
     stopLogcat,
-    writeEvidence: store.writeEvidence
+    writeEvidence: store.writeEvidence,
+    beginStep: store.beginStep,
+    completeStep: store.completeStep,
+    recover: (): void => {
+      current = GenerationSessionSchema.parse({
+        ...current,
+        revision: current.revision + 1,
+        state: "active",
+        inFlight: null
+      });
+    },
+    replaceCurrent: (next): void => {
+      current = GenerationSessionSchema.parse(next);
+    },
+    afterBegin: (callback): void => {
+      beginCallback = callback;
+    },
+    setNow: (next): void => {
+      now = next;
+    }
   };
 }
 
@@ -398,7 +437,8 @@ describe("GenerationStepExecutor", () => {
     expect(test.current().inFlight).toEqual({
       stepIndex: 0,
       snapshotHash: hashRuntimeSnapshot(runtime),
-      proposalHash: hashProposedStep(proposal(runtime))
+      proposalHash: hashProposedStep(proposal(runtime)),
+      attemptId: "attempt-1"
     });
   });
 
@@ -406,7 +446,9 @@ describe("GenerationStepExecutor", () => {
     const runtime = snapshot();
     const test = harness(session(runtime));
     const controller = new AbortController();
-    controller.abort();
+    test.afterBegin(() => {
+      controller.abort();
+    });
 
     const result = await test.execute({
       generationId: "generation-1",
@@ -418,6 +460,155 @@ describe("GenerationStepExecutor", () => {
 
     expect(result.status).toBe("cancelled");
     expect(test.current().state).toBe("recoveryRequired");
+    expect(test.current().candidateSteps).toEqual([]);
+  });
+
+  it("cancels before begin without creating inFlight state", async () => {
+    const runtime = snapshot();
+    const test = harness(session(runtime));
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(test.execute({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime,
+      source: "planner",
+      signal: controller.signal
+    })).resolves.toMatchObject({ status: "cancelled" });
+
+    expect(test.calls).toEqual([]);
+    expect(test.current().inFlight).toBeNull();
+  });
+
+  it("cancels after freshness without creating inFlight state", async () => {
+    const runtime = snapshot();
+    const test = harness(session(runtime));
+    const controller = new AbortController();
+    test.guard.mockImplementationOnce((() => {
+      controller.abort();
+      return Promise.resolve(runtime);
+    }) as never);
+
+    await expect(test.execute({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime,
+      source: "planner",
+      signal: controller.signal
+    })).resolves.toMatchObject({ status: "cancelled" });
+
+    expect(test.beginStep).not.toHaveBeenCalled();
+    expect(test.current().inFlight).toBeNull();
+  });
+
+  it.each([
+    ["Logcat start", (
+      test: ReturnType<typeof harness>,
+      controller: AbortController,
+      runtime: RuntimeSnapshot
+    ): ProposedStep => {
+      test.adb.startLogcat.mockImplementationOnce((() => {
+        let resolveStarted: (result: undefined) => void = () => undefined;
+        const started = new Promise<undefined>((resolve) => {
+          resolveStarted = resolve;
+        });
+        queueMicrotask(() => {
+          controller.abort();
+          resolveStarted(undefined);
+        });
+        return {
+          started,
+          completion: Promise.resolve(ok),
+          stop: test.stopLogcat
+        };
+      }) as never);
+      return proposal(runtime);
+    }],
+    ["pre-action observation", (
+      test: ReturnType<typeof harness>,
+      controller: AbortController,
+      runtime: RuntimeSnapshot
+    ): ProposedStep => {
+      test.adb.foregroundComponent.mockImplementationOnce((() => {
+        controller.abort();
+        return Promise.resolve({
+          packageName: "com.example.app",
+          activity
+        });
+      }) as never);
+      return proposal(runtime);
+    }],
+    ["action", (
+      test: ReturnType<typeof harness>,
+      controller: AbortController,
+      runtime: RuntimeSnapshot
+    ): ProposedStep => {
+      test.adb.tap.mockImplementationOnce((() => {
+        controller.abort();
+        return Promise.resolve(ok);
+      }) as never);
+      return proposal(runtime);
+    }],
+    ["idle wait", (
+      test: ReturnType<typeof harness>,
+      controller: AbortController,
+      runtime: RuntimeSnapshot
+    ): ProposedStep => {
+      test.androidCli.layoutDiff.mockImplementationOnce((() => {
+        controller.abort();
+        return Promise.resolve([]);
+      }) as never);
+      return proposal(runtime);
+    }],
+    ["Expect", (
+      test: ReturnType<typeof harness>,
+      controller: AbortController,
+      runtime: RuntimeSnapshot
+    ): ProposedStep => {
+      test.adb.currentActivity.mockImplementationOnce((() => {
+        controller.abort();
+        return Promise.resolve(afterActivity);
+      }) as never);
+      return {
+        ...proposal(runtime),
+        expect: {
+          type: "activity",
+          value: afterActivity,
+          timeoutMs: 10
+        }
+      };
+    }],
+    ["Logcat stop", (
+      test: ReturnType<typeof harness>,
+      controller: AbortController,
+      runtime: RuntimeSnapshot
+    ): ProposedStep => {
+      test.stopLogcat.mockImplementationOnce((() => {
+        controller.abort();
+        return Promise.resolve(ok);
+      }) as never);
+      return proposal(runtime);
+    }]
+  ])("preserves inFlight when cancelled after %s", async (
+    _name,
+    setup
+  ) => {
+    const runtime = snapshot();
+    const test = harness(session(runtime));
+    const controller = new AbortController();
+    const step = setup(test, controller, runtime);
+
+    await expect(test.execute({
+      generationId: "generation-1",
+      proposal: step,
+      snapshot: runtime,
+      source: "planner",
+      signal: controller.signal
+    })).resolves.toMatchObject({ status: "cancelled" });
+
+    expect(test.current().state).toBe("recoveryRequired");
+    expect(test.current().inFlight).not.toBeNull();
     expect(test.current().candidateSteps).toEqual([]);
   });
 
@@ -454,8 +645,8 @@ describe("GenerationStepExecutor", () => {
     expect(test.current().state).toBe("recoveryRequired");
     expect(test.current().candidateSteps).toEqual([]);
     expect([...test.evidence.keys()]).toEqual([
-      "evidence/steps/001-logcat.txt",
-      "evidence/steps/001-result.json"
+      "evidence/steps/0-attempt-1/logcat.txt",
+      "evidence/steps/0-attempt-1/result.json"
     ]);
   });
 
@@ -524,6 +715,229 @@ describe("GenerationStepExecutor", () => {
     expect(test.current().state).toBe("recoveryRequired");
   });
 
+  it("does not begin when confirmation expires during freshness", async () => {
+    const runtime = snapshot();
+    const step: ProposedStep = {
+      action: "back",
+      binding: proposal(runtime).binding,
+      activity: { before: activity }
+    };
+    const approved = {
+      challengeId: "challenge-1",
+      stepIndex: 0,
+      proposalHash: hashProposedStep(step),
+      snapshotHash: hashRuntimeSnapshot(runtime),
+      actionSummary: "Back from com.example.app.MainActivity",
+      expiresAt: "2026-07-22T12:00:30.000Z",
+      status: "approved" as const
+    };
+    const test = harness(session(runtime, {
+      revision: 4,
+      pendingConfirmation: approved
+    }));
+    test.guard.mockImplementationOnce((() => {
+      test.setNow(new Date("2026-07-22T12:00:31.000Z"));
+      return Promise.resolve(runtime);
+    }) as never);
+
+    await expect(test.execute({
+      generationId: "generation-1",
+      proposal: step,
+      snapshot: runtime,
+      source: "planner"
+    })).rejects.toThrow(/expired/);
+
+    expect(test.current().inFlight).toBeNull();
+    expect(test.adb.back).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["package escape", (test: ReturnType<typeof harness>): void => {
+      test.adb.foregroundComponent.mockResolvedValueOnce({
+        packageName: "com.android.systemui",
+        activity: "com.android.systemui.Dialog"
+      });
+    }, "PACKAGE_ESCAPE"],
+    ["Activity drift", (test: ReturnType<typeof harness>): void => {
+      test.adb.foregroundComponent.mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: "com.example.app.OtherActivity"
+      });
+    }, "SNAPSHOT_STALE"],
+    ["missing PID", (test: ReturnType<typeof harness>): void => {
+      test.adb.pid.mockResolvedValueOnce(null);
+    }, "APP_CRASHED"],
+    ["replaced PID", (test: ReturnType<typeof harness>): void => {
+      test.adb.pid.mockResolvedValueOnce(99);
+    }, "APP_CRASHED"],
+    ["Layout drift", (test: ReturnType<typeof harness>): void => {
+      test.androidCli.layout.mockResolvedValueOnce([{
+        ...target,
+        text: "Changed"
+      }]);
+    }, "SNAPSHOT_STALE"]
+  ])("blocks action on post-begin %s", async (_name, mutate, code) => {
+    const runtime = snapshot();
+    const test = harness(session(runtime));
+    mutate(test);
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result).toMatchObject({ status: "failed", failure: { code } });
+    expect(test.adb.tap).not.toHaveBeenCalled();
+    expect(test.current().state).toBe("recoveryRequired");
+  });
+
+  it("detects PID replacement after the action", async () => {
+    const runtime = snapshot();
+    const test = harness(session(runtime));
+    test.adb.pid
+      .mockResolvedValueOnce(42)
+      .mockResolvedValueOnce(99);
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { code: "APP_CRASHED" }
+    });
+    expect(test.current().state).toBe("recoveryRequired");
+  });
+
+  it("rechecks identity after Expect passes", async () => {
+    const runtime = snapshot();
+    const test = harness(session(runtime));
+    test.adb.foregroundComponent
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: afterActivity
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: "com.example.app.EscapedActivity"
+      });
+    const expected: ProposedStep = {
+      ...proposal(runtime),
+      expect: {
+        type: "activity",
+        value: afterActivity,
+        timeoutMs: 10
+      }
+    };
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: expected,
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { code: "SNAPSHOT_STALE" }
+    });
+  });
+
+  it("accepts durable completion when the completion call throws afterward", async () => {
+    const runtime = snapshot();
+    const test = harness(session(runtime));
+    test.completeStep.mockImplementationOnce(((
+      _id: string,
+      _expectedRevision: number,
+      _inFlight: NonNullable<GenerationSession["inFlight"]>,
+      next: GenerationSession
+    ) => {
+      test.replaceCurrent(next);
+      return Promise.reject(new Error("directory sync failed"));
+    }) as never);
+
+    await expect(test.execute({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime,
+      source: "planner"
+    })).resolves.toMatchObject({ status: "succeeded" });
+    expect(test.current().candidateSteps).toHaveLength(1);
+  });
+
+  it("fails closed when completion throws with conflicting state", async () => {
+    const runtime = snapshot();
+    const initial = session(runtime);
+    const test = harness(initial);
+    test.completeStep.mockImplementationOnce((() => {
+      test.replaceCurrent({
+        ...initial,
+        revision: initial.revision + 2
+      });
+      return Promise.reject(new Error("directory sync failed"));
+    }) as never);
+
+    await expect(test.execute({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime,
+      source: "planner"
+    })).rejects.toMatchObject({ code: "RECOVERY_REQUIRED" });
+    expect(test.current().candidateSteps).toEqual([]);
+  });
+
+  it("uses distinct immutable evidence paths across recovered retries", async () => {
+    const attemptIds = ["attempt-1", "attempt-2"];
+    const runtime = snapshot();
+    const test = harness(
+      session(runtime),
+      () => attemptIds.shift() ?? "unexpected"
+    );
+    test.adb.tap.mockRejectedValue(new Error("transport closed"));
+
+    await test.execute({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime,
+      source: "planner"
+    });
+    test.recover();
+    const retryRuntime = {
+      ...runtime,
+      baseRevision: test.current().revision
+    };
+    test.replaceCurrent({
+      ...test.current(),
+      bindings: {
+        ...test.current().bindings,
+        snapshotHash: hashRuntimeSnapshot(retryRuntime)
+      }
+    });
+    test.guard.mockResolvedValueOnce(retryRuntime);
+    await test.execute({
+      generationId: "generation-1",
+      proposal: proposal(retryRuntime),
+      snapshot: retryRuntime,
+      source: "planner"
+    });
+
+    expect([...test.evidence.keys()]).toEqual([
+      "evidence/steps/0-attempt-1/logcat.txt",
+      "evidence/steps/0-attempt-1/result.json",
+      "evidence/steps/0-attempt-2/logcat.txt",
+      "evidence/steps/0-attempt-2/result.json"
+    ]);
+  });
+
   it.each([
     ["found", [{
       id: "list",
@@ -587,6 +1001,11 @@ describe("GenerationStepExecutor", () => {
     };
     const test = harness(session(runtime));
     test.guard.mockResolvedValueOnce(runtime);
+    test.androidCli.layout.mockResolvedValue(layout);
+    test.adb.foregroundComponent.mockResolvedValue({
+      packageName: "com.example.app",
+      activity
+    });
 
     const result = await test.execute({
       generationId: "generation-1",
@@ -594,7 +1013,6 @@ describe("GenerationStepExecutor", () => {
       snapshot: runtime,
       source: "planner"
     });
-
     expect(result.status).toBe(expectedStatus);
     if (_name === "ambiguous") {
       expect(result).toMatchObject({
@@ -631,6 +1049,10 @@ describe("GenerationStepExecutor", () => {
     const test = harness(session(runtime));
     test.guard.mockResolvedValueOnce(runtime);
     test.androidCli.layout.mockResolvedValue(layout);
+    test.adb.foregroundComponent.mockResolvedValue({
+      packageName: "com.example.app",
+      activity
+    });
 
     const result = await test.execute({
       generationId: "generation-1",
@@ -645,5 +1067,53 @@ describe("GenerationStepExecutor", () => {
     });
     expect(test.adb.swipe).toHaveBeenCalledTimes(1);
     expect(test.current().state).toBe("recoveryRequired");
+  });
+
+  it("blocks a scroll swipe when live identity escapes", async () => {
+    const layout = [{
+      id: "list",
+      resourceId: "list",
+      enabled: true,
+      scrollable: true,
+      bounds: { left: 0, top: 0, right: 100, bottom: 200 },
+      children: []
+    }];
+    const runtime = { ...snapshot(), layout };
+    const test = harness(session(runtime));
+    test.guard.mockResolvedValueOnce(runtime);
+    test.androidCli.layout.mockResolvedValue(layout);
+    test.adb.foregroundComponent
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.android.systemui",
+        activity: "com.android.systemui.Dialog"
+      });
+    const scroll: ProposedStep = {
+      action: "scrollTo",
+      locator: { resourceId: "wanted" },
+      container: { resourceId: "list" },
+      direction: "up",
+      maxSwipes: 1,
+      distancePercent: 0.6,
+      durationMs: 300,
+      binding: proposal(runtime).binding,
+      activity: { before: activity }
+    };
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: scroll,
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { code: "PACKAGE_ESCAPE" }
+    });
+    expect(test.adb.swipe).not.toHaveBeenCalled();
   });
 });

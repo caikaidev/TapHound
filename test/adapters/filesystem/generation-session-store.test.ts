@@ -244,7 +244,7 @@ describe("FileSystemGenerationSessionStore", () => {
     await store.create(validSession());
 
     const next = validSession(1, {
-      inFlight: { stepIndex: 0, snapshotHash: "b".repeat(64), proposalHash: "c".repeat(64) }
+      inFlight: { stepIndex: 0, snapshotHash: "b".repeat(64), proposalHash: "c".repeat(64), attemptId: "attempt-1" }
     });
     await store.update("generation-1", 0, next);
 
@@ -315,7 +315,8 @@ describe("FileSystemGenerationSessionStore", () => {
     const inFlight = {
       stepIndex: 0,
       snapshotHash: "b".repeat(64),
-      proposalHash: "c".repeat(64)
+      proposalHash: "c".repeat(64),
+      attemptId: "attempt-1"
     };
     await store.create(initial);
 
@@ -331,7 +332,9 @@ describe("FileSystemGenerationSessionStore", () => {
 
   it("consumes only the exact approved confirmation when beginning a step", async () => {
     const root = await temporaryRoot();
-    const store = new FileSystemGenerationSessionStore(root);
+    const store = new FileSystemGenerationSessionStore(root, {
+      now: (): Date => new Date("2026-07-22T12:00:00.000Z")
+    });
     const approved = {
       ...pendingConfirmation("challenge-1"),
       status: "approved" as const
@@ -339,7 +342,8 @@ describe("FileSystemGenerationSessionStore", () => {
     const inFlight = {
       stepIndex: 0,
       snapshotHash: "b".repeat(64),
-      proposalHash: "c".repeat(64)
+      proposalHash: "c".repeat(64),
+      attemptId: "attempt-1"
     };
     await store.create(validSession(0, {
       pendingConfirmation: approved
@@ -371,6 +375,34 @@ describe("FileSystemGenerationSessionStore", () => {
     });
   });
 
+  it("rejects a confirmation that expires inside the beginStep lock", async () => {
+    const root = await temporaryRoot();
+    let now = new Date("2026-07-22T12:00:00.000Z");
+    const store = new FileSystemGenerationSessionStore(root, {
+      now: (): Date => now,
+      hooks: {
+        beforeStateRename: (): void => {
+          now = new Date("2026-07-22T12:00:31.000Z");
+        }
+      }
+    });
+    const approved = {
+      ...pendingConfirmation("challenge-1"),
+      status: "approved" as const
+    };
+    const initial = validSession(0, { pendingConfirmation: approved });
+    await store.create(initial);
+    now = new Date("2026-07-22T12:00:00.000Z");
+
+    await expectStoreError(store.beginStep("generation-1", 0, {
+      stepIndex: 0,
+      snapshotHash: "b".repeat(64),
+      proposalHash: "c".repeat(64),
+      attemptId: "attempt-1"
+    }, approved), "INVALID_TRANSITION");
+    await expect(store.read("generation-1")).resolves.toEqual(initial);
+  });
+
   it("starts inFlight without mutating candidate or result state", async () => {
     const root = await temporaryRoot();
     const store = new FileSystemGenerationSessionStore(root);
@@ -378,7 +410,8 @@ describe("FileSystemGenerationSessionStore", () => {
     const inFlight = {
       stepIndex: 0,
       snapshotHash: "b".repeat(64),
-      proposalHash: "c".repeat(64)
+      proposalHash: "c".repeat(64),
+      attemptId: "attempt-1"
     };
 
     await expectStoreError(store.update("generation-1", 0, validSession(1, {
@@ -416,7 +449,8 @@ describe("FileSystemGenerationSessionStore", () => {
       inFlight: {
         stepIndex: 0,
         snapshotHash: "b".repeat(64),
-        proposalHash: "c".repeat(64)
+        proposalHash: "c".repeat(64),
+        attemptId: "attempt-1"
       }
     })), "INVALID_TRANSITION");
   });
@@ -454,7 +488,8 @@ describe("FileSystemGenerationSessionStore", () => {
       const inFlight = {
         stepIndex: 0,
         snapshotHash: "b".repeat(64),
-      proposalHash: "c".repeat(64)
+      proposalHash: "c".repeat(64),
+      attemptId: "attempt-1"
       };
       await store.create(validSession(0, { inFlight }));
 
@@ -476,7 +511,7 @@ describe("FileSystemGenerationSessionStore", () => {
     const root = await temporaryRoot();
     const store = new FileSystemGenerationSessionStore(root);
     const inFlight = validSession(0, {
-      inFlight: { stepIndex: 0, snapshotHash: "b".repeat(64), proposalHash: "c".repeat(64) }
+      inFlight: { stepIndex: 0, snapshotHash: "b".repeat(64), proposalHash: "c".repeat(64), attemptId: "attempt-1" }
     });
 
     await store.create(inFlight);
@@ -488,14 +523,14 @@ describe("FileSystemGenerationSessionStore", () => {
     );
     await expectStoreError(
       store.update("generation-1", 0, validSession(1, {
-        inFlight: { stepIndex: 0, snapshotHash: "c".repeat(64), proposalHash: "c".repeat(64) }
+        inFlight: { stepIndex: 0, snapshotHash: "c".repeat(64), proposalHash: "c".repeat(64), attemptId: "attempt-1" }
       })),
       "INVALID_TRANSITION"
     );
 
     const recoveryRequired = validSession(1, {
       state: "recoveryRequired",
-      inFlight: { stepIndex: 0, snapshotHash: "b".repeat(64), proposalHash: "c".repeat(64) }
+      inFlight: { stepIndex: 0, snapshotHash: "b".repeat(64), proposalHash: "c".repeat(64), attemptId: "attempt-1" }
     });
     await store.update("generation-1", 0, recoveryRequired);
     await expectStoreError(
@@ -518,11 +553,11 @@ describe("FileSystemGenerationSessionStore", () => {
     );
 
     await store.update("generation-1", 0, validSession(1, {
-      inFlight: { stepIndex: 0, snapshotHash: "b".repeat(64), proposalHash: "c".repeat(64) }
+      inFlight: { stepIndex: 0, snapshotHash: "b".repeat(64), proposalHash: "c".repeat(64), attemptId: "attempt-1" }
     }));
     await store.update("generation-1", 1, validSession(2, {
       state: "recoveryRequired",
-      inFlight: { stepIndex: 0, snapshotHash: "b".repeat(64), proposalHash: "c".repeat(64) }
+      inFlight: { stepIndex: 0, snapshotHash: "b".repeat(64), proposalHash: "c".repeat(64), attemptId: "attempt-1" }
     }));
     await expectStoreError(
       store.recover("generation-1", 2, validSession(3, {
@@ -545,7 +580,8 @@ describe("FileSystemGenerationSessionStore", () => {
     const inFlight = {
       stepIndex: 0,
       snapshotHash: "b".repeat(64),
-      proposalHash: "c".repeat(64)
+      proposalHash: "c".repeat(64),
+      attemptId: "attempt-1"
     };
     await store.create(validSession(0, { inFlight }));
     const completed = validSession(1, {
@@ -590,7 +626,8 @@ describe("FileSystemGenerationSessionStore", () => {
     const inFlight = {
       stepIndex: 0,
       snapshotHash: "b".repeat(64),
-      proposalHash: "c".repeat(64)
+      proposalHash: "c".repeat(64),
+      attemptId: "attempt-1"
     };
     const changedTarget = {
       ...validSession().target,
@@ -667,7 +704,8 @@ describe("FileSystemGenerationSessionStore", () => {
     const inFlight = {
       stepIndex: 0,
       snapshotHash: "b".repeat(64),
-      proposalHash: "c".repeat(64)
+      proposalHash: "c".repeat(64),
+      attemptId: "attempt-1"
     };
     await store.create(validSession(0, { inFlight }));
 
@@ -707,7 +745,8 @@ describe("FileSystemGenerationSessionStore", () => {
     const inFlight = {
       stepIndex: 0,
       snapshotHash: "b".repeat(64),
-      proposalHash: "c".repeat(64)
+      proposalHash: "c".repeat(64),
+      attemptId: "attempt-1"
     };
     await store.create(validSession(0, { inFlight }));
 
@@ -743,7 +782,8 @@ describe("FileSystemGenerationSessionStore", () => {
     const inFlight = {
       stepIndex: 0,
       snapshotHash: "b".repeat(64),
-      proposalHash: "c".repeat(64)
+      proposalHash: "c".repeat(64),
+      attemptId: "attempt-1"
     };
     await store.create(validSession(0, { inFlight }));
     const recoveryRequired = validSession(1, {

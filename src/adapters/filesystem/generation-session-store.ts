@@ -35,6 +35,7 @@ import {
 export interface FileSystemGenerationSessionStoreOptions {
   lockTimeoutMs?: number;
   lockRetryMs?: number;
+  now?: (() => Date) | undefined;
   hooks?: FileSystemGenerationSessionStoreHooks;
 }
 
@@ -78,6 +79,7 @@ function parseStoreConfiguration(
 ): {
   projectRoot: string;
   options: RequiredStoreOptions;
+  now: () => Date;
   hooks: FileSystemGenerationSessionStoreHooks;
 } {
   try {
@@ -89,6 +91,7 @@ function parseStoreConfiguration(
     }
     const lockTimeoutInput = Reflect.get(options, "lockTimeoutMs") as unknown;
     const lockRetryInput = Reflect.get(options, "lockRetryMs") as unknown;
+    const nowInput = Reflect.get(options, "now") as unknown;
     const lockTimeoutMs = lockTimeoutInput
       ?? DEFAULT_OPTIONS.lockTimeoutMs;
     const lockRetryMs = lockRetryInput ?? DEFAULT_OPTIONS.lockRetryMs;
@@ -99,6 +102,9 @@ function parseStoreConfiguration(
       || (lockRetryMs as number) < 0
     ) {
       throw new TypeError("lock timing options must be safe integers");
+    }
+    if (nowInput !== undefined && typeof nowInput !== "function") {
+      throw new TypeError("now must be a function");
     }
 
     const hooksInput = Reflect.get(options, "hooks") as unknown;
@@ -123,6 +129,7 @@ function parseStoreConfiguration(
         lockTimeoutMs: lockTimeoutMs as number,
         lockRetryMs: lockRetryMs as number
       },
+      now: (nowInput ?? ((): Date => new Date())) as () => Date,
       hooks
     };
   } catch (error) {
@@ -871,7 +878,8 @@ async function writeStateAtomically(
   session: GenerationSession,
   sync: (path: string) => Promise<void> = syncDirectory,
   beforeRename?: () => Promise<void> | void,
-  expectedDirectory?: StoreDirectoryEvidence
+  expectedDirectory?: StoreDirectoryEvidence,
+  beforeInstall?: () => Promise<void> | void
 ): Promise<void> {
   const directoryEvidence = expectedDirectory
     ?? await captureStoreDirectory(directory);
@@ -900,6 +908,7 @@ async function writeStateAtomically(
     await beforeRename?.();
     await verifyStoreDirectory(directoryEvidence);
     await verifyOptionalStoreFile(statePath, originalStateIdentity);
+    await beforeInstall?.();
     await rename(temporaryPath, statePath);
     const installedIdentity = await captureStoreFile(statePath);
     if (!sameIdentity(temporaryIdentity, installedIdentity)) {
@@ -924,6 +933,7 @@ implements GenerationSessionStore {
   private readonly generationRoot: string;
   private readonly locksRoot: string;
   private readonly options: RequiredStoreOptions;
+  private readonly now: () => Date;
   private readonly hooks: FileSystemGenerationSessionStoreHooks;
 
   public constructor(
@@ -939,6 +949,7 @@ implements GenerationSessionStore {
     );
     this.locksRoot = join(this.generationRoot, ".locks");
     this.options = configuration.options;
+    this.now = configuration.now;
     this.hooks = configuration.hooks;
   }
 
@@ -1248,7 +1259,23 @@ implements GenerationSessionStore {
         next,
         this.syncDirectory,
         this.hooks.beforeStateRename,
-        activeEvidence
+        activeEvidence,
+        () => {
+          if (approvedConfirmation !== undefined) {
+            const now = this.now();
+            if (
+              !(now instanceof Date)
+              || !Number.isFinite(now.getTime())
+              || now.getTime()
+                >= new Date(approvedConfirmation.expiresAt).getTime()
+            ) {
+              throw new GenerationSessionStoreError(
+                "INVALID_TRANSITION",
+                "Approved confirmation expired before step begin"
+              );
+            }
+          }
+        }
       );
       return next;
     });

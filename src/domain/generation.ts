@@ -14,6 +14,7 @@ export const GENERATION_ERROR_CODES = [
   "CONTEXT_STALE",
   "SNAPSHOT_STALE",
   "PACKAGE_ESCAPE",
+  "APP_CRASHED",
   "ACTION_UNSUPPORTED",
   "RISK_CONFIRMATION_REQUIRED",
   "ACTION_FORBIDDEN",
@@ -50,7 +51,8 @@ const NonnegativeSafeIntegerSchema = z.number()
 export const GenerationInFlightSchema = z.strictObject({
   stepIndex: z.number().int().nonnegative(),
   snapshotHash: Sha256Schema,
-  proposalHash: Sha256Schema
+  proposalHash: Sha256Schema,
+  attemptId: GenerationSessionIdSchema
 });
 
 export const PendingConfirmationSchema = z.strictObject({

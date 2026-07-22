@@ -23,6 +23,11 @@ export interface ScrollToExecutorOptions {
   idleWaiter: Pick<IdleWaiter, "waitUntilIdle">;
   deviceSerial: string;
   idle: IdleConfig;
+  beforeSwipe?: (() => Promise<readonly LayoutElement[]>) | undefined;
+}
+
+function isCancelled(signal?: AbortSignal): boolean {
+  return signal?.aborted === true;
 }
 
 export class ScrollToExecutor {
@@ -36,7 +41,7 @@ export class ScrollToExecutor {
     let swipesUsed = 0;
     let layout = initialLayout;
     for (;;) {
-      if (signal?.aborted === true) {
+    if (isCancelled(signal)) {
         return { status: "cancelled", swipesUsed };
       }
       layout ??= await this.options.androidCli.layout({
@@ -44,6 +49,9 @@ export class ScrollToExecutor {
         ...(signal === undefined ? {} : { signal }),
         timeoutMs: this.options.idle.timeoutMs
       });
+      if (isCancelled(signal)) {
+        return { status: "cancelled", swipesUsed };
+      }
       const target = resolveLocator(
         layout,
         step.locator,
@@ -68,7 +76,7 @@ export class ScrollToExecutor {
           swipesUsed
         };
       }
-      const container = resolveLocator(
+      let container = resolveLocator(
         layout,
         step.container,
         { requireEnabled: false }
@@ -89,6 +97,52 @@ export class ScrollToExecutor {
           swipesUsed
         };
       }
+      if (this.options.beforeSwipe !== undefined) {
+        layout = await this.options.beforeSwipe();
+        if (isCancelled(signal)) {
+          return { status: "cancelled", swipesUsed };
+        }
+        const liveTarget = resolveLocator(
+          layout,
+          step.locator,
+          { requireEnabled: false }
+        );
+        if (liveTarget.status === "found") {
+          return { status: "found", swipesUsed };
+        }
+        if (liveTarget.code === "LOCATOR_AMBIGUOUS") {
+          return {
+            status: "failed",
+            code: "LOCATOR_AMBIGUOUS",
+            message: liveTarget.message,
+            swipesUsed
+          };
+        }
+        container = resolveLocator(
+          layout,
+          step.container,
+          { requireEnabled: false }
+        );
+        if (container.status !== "found") {
+          return {
+            status: "failed",
+            code: container.code,
+            message: container.message,
+            swipesUsed
+          };
+        }
+        if (container.element.bounds === undefined) {
+          return {
+            status: "failed",
+            code: "ACTION_FAILED",
+            message: "scroll container has no bounds to swipe",
+            swipesUsed
+          };
+        }
+      }
+      if (isCancelled(signal)) {
+        return { status: "cancelled", swipesUsed };
+      }
       const swipe = await this.options.actionExecutor.swipeBounds(
         container.element.bounds,
         step.direction,
@@ -96,6 +150,9 @@ export class ScrollToExecutor {
         step.durationMs,
         signal
       );
+      if (isCancelled(signal)) {
+        return { status: "cancelled", swipesUsed };
+      }
       if (swipe.status === "failed") {
         return {
           status: "failed",
@@ -108,6 +165,9 @@ export class ScrollToExecutor {
         this.options.idle,
         signal
       );
+      if (isCancelled(signal)) {
+        return { status: "cancelled", swipesUsed };
+      }
       if (idle.status === "cancelled") {
         return { status: "cancelled", swipesUsed };
       }

@@ -310,7 +310,8 @@ describe("RuntimeObserver", () => {
       inFlight: {
         stepIndex: 1,
         snapshotHash: "b".repeat(64),
-        proposalHash: "c".repeat(64)
+        proposalHash: "c".repeat(64),
+        attemptId: "attempt-1"
       }
     };
 

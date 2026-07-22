@@ -23,6 +23,11 @@ export type GenerationErrorCode = z.infer<typeof GenerationErrorCodeSchema>;
 
 const Sha256Schema = z.string().regex(/^[a-f\d]{64}$/);
 
+export const GenerationSessionIdSchema = z.string().regex(
+  /^[A-Za-z\d](?:[A-Za-z\d._-]*[A-Za-z\d])?$/,
+  "Generation session id must be a safe directory name"
+);
+
 const LiteralSchema = z.string().refine(
   (value) => !value.includes("${") && !value.includes("}"),
   "Generation variable bindings must be literal"
@@ -73,7 +78,9 @@ const PublicationSchema = z.discriminatedUnion("status", [
 
 export const GenerationSessionSchema = z.strictObject({
   version: z.literal(1),
+  id: GenerationSessionIdSchema,
   revision: z.number().int().nonnegative(),
+  state: z.enum(["active", "recoveryRequired"]),
   bindings: z.strictObject({
     contextHash: Sha256Schema,
     snapshotHash: Sha256Schema
@@ -85,6 +92,14 @@ export const GenerationSessionSchema = z.strictObject({
   verification: VerificationSchema,
   publication: PublicationSchema
 }).superRefine((session, context) => {
+  if (session.state === "recoveryRequired" && session.inFlight === null) {
+    context.addIssue({
+      code: "custom",
+      path: ["state"],
+      message: "recoveryRequired state must preserve inFlight evidence"
+    });
+  }
+
   if (session.inFlight !== null && session.pendingConfirmation !== null) {
     context.addIssue({
       code: "custom",

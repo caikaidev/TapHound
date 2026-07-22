@@ -8,6 +8,7 @@ export const GENERATION_SESSION_STORE_ERROR_CODES = [
   "SESSION_NOT_FOUND",
   "SESSION_PUBLISHED",
   "REVISION_CONFLICT",
+  "INVALID_TRANSITION",
   "LOCK_TIMEOUT",
   "INVALID_EVIDENCE_PATH",
   "INVALID_EVIDENCE",
@@ -35,6 +36,11 @@ export interface GenerationSessionStore {
   create: (session: GenerationSession) => Promise<void>;
   read: (id: string) => Promise<GenerationSession>;
   update: (
+    id: string,
+    expectedRevision: number,
+    next: GenerationSession
+  ) => Promise<void>;
+  recover: (
     id: string,
     expectedRevision: number,
     next: GenerationSession

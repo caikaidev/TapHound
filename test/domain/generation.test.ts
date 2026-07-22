@@ -21,7 +21,9 @@ const variables = {
 function validSession(): unknown {
   return {
     version: 1,
+    id: "generation-1",
     revision: 0,
+    state: "active",
     bindings: hashes,
     variables,
     candidateSteps: [{
@@ -63,6 +65,37 @@ describe("GenerationSessionSchema", () => {
     })).toThrow();
   });
 
+  it("keeps generation identity separate from Journey runId bindings", () => {
+    const parsed = GenerationSessionSchema.parse({
+      ...(validSession() as object),
+      id: "generation-identity",
+      variables: {
+        ...variables,
+        runId: "journey-run-binding"
+      }
+    });
+
+    expect(parsed.id).toBe("generation-identity");
+    expect(parsed.variables.runId).toBe("journey-run-binding");
+  });
+
+  it.each([
+    "",
+    ".",
+    "..",
+    "../escape",
+    "nested/id",
+    String.raw`nested\id`,
+    "/absolute",
+    String.raw`C:\outside`,
+    String.raw`\\server\share`
+  ])("rejects invalid generation id %s", (id) => {
+    expect(() => GenerationSessionSchema.parse({
+      ...(validSession() as object),
+      id
+    })).toThrow(/generation session id/i);
+  });
+
   it("rejects simultaneous execution and pending confirmation", () => {
     expect(() => GenerationSessionSchema.parse({
       ...(validSession() as object),
@@ -72,6 +105,22 @@ describe("GenerationSessionSchema", () => {
         reason: "Back may leave the current screen"
       }
     })).toThrow(/inFlight.*pendingConfirmation/i);
+  });
+
+  it("requires recoveryRequired state to retain inFlight evidence", () => {
+    expect(GenerationSessionSchema.parse({
+      ...(validSession() as object),
+      state: "recoveryRequired",
+      inFlight: { stepIndex: 0, snapshotHash: "b".repeat(64) }
+    })).toMatchObject({
+      state: "recoveryRequired",
+      inFlight: { stepIndex: 0 }
+    });
+    expect(() => GenerationSessionSchema.parse({
+      ...(validSession() as object),
+      state: "recoveryRequired",
+      inFlight: null
+    })).toThrow(/recoveryRequired.*inFlight/i);
   });
 
   it("rejects publication before successful verification", () => {

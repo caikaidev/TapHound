@@ -582,6 +582,15 @@ export class GenerationStepExecutor {
         executionPath(inFlight, "logcat.txt"),
         log.length === 0 ? "" : `${log}\n`
       );
+    } catch (error) {
+      await this.markRecovery(session.id, inFlight);
+      throw error;
+    }
+    if (isCancelled(input.signal)) {
+      await this.markRecovery(session.id, inFlight);
+      return cancellation();
+    }
+    try {
       await this.dependencies.store.writeEvidence(
         session.id,
         executionPath(inFlight, "result.json"),
@@ -602,6 +611,10 @@ export class GenerationStepExecutor {
       await this.markRecovery(session.id, inFlight);
       throw error;
     }
+    if (isCancelled(input.signal)) {
+      await this.markRecovery(session.id, inFlight);
+      return cancellation();
+    }
 
     if (outcome.status === "succeeded") {
       const next = GenerationSessionSchema.parse({
@@ -611,6 +624,10 @@ export class GenerationStepExecutor {
         candidateSteps: [...begun.candidateSteps, outcome.step],
         candidateSources: [...begun.candidateSources, source]
       });
+      if (isCancelled(input.signal)) {
+        await this.markRecovery(session.id, inFlight);
+        return cancellation();
+      }
       try {
         await this.dependencies.store.completeStep(
           session.id,
@@ -677,15 +694,32 @@ export class GenerationStepExecutor {
     if (pid === null || pid !== expectedPid) {
       fail("APP_CRASHED", "Generation process identity changed");
     }
+    if (
+      expectedActivity !== undefined
+      && foreground.activity !== expectedActivity
+    ) {
+      fail("SNAPSHOT_STALE", "Generation Activity changed unexpectedly");
+    }
     const layout = await this.dependencies.androidCli.layout({
       deviceSerial: session.target.deviceSerial,
       ...(signal === undefined ? {} : { signal }),
       timeoutMs: this.dependencies.idle.timeoutMs
     });
     throwIfCancelled(signal);
+    const confirmedForeground = await this.dependencies.adb
+      .foregroundComponent(identity);
+    throwIfCancelled(signal);
+    if (confirmedForeground.packageName !== session.target.packageName) {
+      fail("PACKAGE_ESCAPE", "Foreground package escaped generation target");
+    }
+    const confirmedPid = await this.dependencies.adb.pid(identity);
+    throwIfCancelled(signal);
+    if (confirmedPid === null || confirmedPid !== expectedPid) {
+      fail("APP_CRASHED", "Generation process identity changed");
+    }
     if (
-      expectedActivity !== undefined
-      && foreground.activity !== expectedActivity
+      confirmedForeground.activity
+        !== (expectedActivity ?? foreground.activity)
     ) {
       fail("SNAPSHOT_STALE", "Generation Activity changed unexpectedly");
     }

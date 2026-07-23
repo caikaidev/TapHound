@@ -4,6 +4,9 @@ import {
   GenerationStepExecutor
 } from "../../../src/application/generation/generation-step-executor.js";
 import {
+  GenerationSessionStoreError
+} from "../../../src/ports/generation-session-store.js";
+import {
   GenerationSessionSchema,
   type GenerationSession
 } from "../../../src/domain/generation.js";
@@ -134,6 +137,7 @@ function harness(
   evidence: Map<string, unknown>;
   stopLogcat: ReturnType<typeof vi.fn>;
   writeEvidence: ReturnType<typeof vi.fn>;
+  writeTextEvidence: ReturnType<typeof vi.fn>;
   beginStep: ReturnType<typeof vi.fn>;
   completeStep: ReturnType<typeof vi.fn>;
   recover: () => void;
@@ -159,7 +163,7 @@ function harness(
       foregroundCalls += 1;
       return Promise.resolve({
         packageName: "com.example.app",
-        activity: foregroundCalls === 1 ? activity : afterActivity
+        activity: foregroundCalls <= 2 ? activity : afterActivity
       });
     }),
     currentActivity: vi.fn(() => Promise.resolve(afterActivity)),
@@ -261,6 +265,7 @@ function harness(
     evidence,
     stopLogcat,
     writeEvidence: store.writeEvidence,
+    writeTextEvidence: store.writeTextEvidence,
     beginStep: store.beginStep,
     completeStep: store.completeStep,
     recover: (): void => {
@@ -666,6 +671,44 @@ describe("GenerationStepExecutor", () => {
     expect(test.current().candidateSteps).toEqual([]);
   });
 
+  it.each([
+    ["Logcat evidence", (
+      test: ReturnType<typeof harness>,
+      controller: AbortController
+    ): void => {
+      test.writeTextEvidence.mockImplementationOnce((() => {
+        controller.abort();
+        return Promise.resolve();
+      }) as never);
+    }],
+    ["result evidence", (
+      test: ReturnType<typeof harness>,
+      controller: AbortController
+    ): void => {
+      test.writeEvidence.mockImplementationOnce((() => {
+        controller.abort();
+        return Promise.resolve();
+      }) as never);
+    }]
+  ])("marks recovery when cancelled after %s write", async (_name, setup) => {
+    const runtime = snapshot();
+    const test = harness(session(runtime));
+    const controller = new AbortController();
+    setup(test, controller);
+
+    await expect(test.execute({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime,
+      source: "planner",
+      signal: controller.signal
+    })).resolves.toMatchObject({ status: "cancelled" });
+
+    expect(test.completeStep).not.toHaveBeenCalled();
+    expect(test.current().state).toBe("recoveryRequired");
+    expect(test.current().candidateSteps).toEqual([]);
+  });
+
   it("marks Expect failure recoveryRequired without appending", async () => {
     const runtime = snapshot();
     const test = harness(session(runtime));
@@ -793,10 +836,52 @@ describe("GenerationStepExecutor", () => {
     expect(test.current().state).toBe("recoveryRequired");
   });
 
+  it.each([
+    ["package", "PACKAGE_ESCAPE"],
+    ["Activity", "SNAPSHOT_STALE"],
+    ["PID", "APP_CRASHED"]
+  ])("blocks action when %s changes while Layout is pending", async (
+    identity,
+    code
+  ) => {
+    const runtime = snapshot();
+    const test = harness(session(runtime));
+    let layoutReturned = false;
+    test.adb.foregroundComponent.mockImplementation((() => Promise.resolve({
+      packageName: identity === "package" && layoutReturned
+        ? "com.android.systemui"
+        : "com.example.app",
+      activity: identity === "Activity" && layoutReturned
+        ? "com.example.app.OtherActivity"
+        : activity
+    })) as never);
+    test.adb.pid.mockImplementation((() => Promise.resolve(
+      identity === "PID" && layoutReturned ? 99 : 42
+    )) as never);
+    test.androidCli.layout.mockImplementationOnce((async () => {
+      await Promise.resolve();
+      layoutReturned = true;
+      return runtime.layout;
+    }) as never);
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result).toMatchObject({ status: "failed", failure: { code } });
+    expect(test.adb.tap).not.toHaveBeenCalled();
+    expect(test.current().state).toBe("recoveryRequired");
+  });
+
   it("detects PID replacement after the action", async () => {
     const runtime = snapshot();
     const test = harness(session(runtime));
     test.adb.pid
+      .mockResolvedValueOnce(42)
+      .mockResolvedValueOnce(42)
       .mockResolvedValueOnce(42)
       .mockResolvedValueOnce(99);
 
@@ -821,6 +906,18 @@ describe("GenerationStepExecutor", () => {
       .mockResolvedValueOnce({
         packageName: "com.example.app",
         activity
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: afterActivity
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: afterActivity
       })
       .mockResolvedValueOnce({
         packageName: "com.example.app",
@@ -936,6 +1033,28 @@ describe("GenerationStepExecutor", () => {
       "evidence/steps/0-attempt-2/logcat.txt",
       "evidence/steps/0-attempt-2/result.json"
     ]);
+  });
+
+  it("does not mutate the device when a recovered attempt id collides", async () => {
+    const runtime = snapshot();
+    const test = harness(session(runtime));
+    test.beginStep.mockRejectedValueOnce(
+      new GenerationSessionStoreError(
+        "EVIDENCE_ALREADY_EXISTS",
+        "Attempt evidence namespace already exists"
+      )
+    );
+
+    await expect(test.execute({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime,
+      source: "planner"
+    })).rejects.toMatchObject({ code: "EVIDENCE_ALREADY_EXISTS" });
+
+    expect(test.adb.startLogcat).not.toHaveBeenCalled();
+    expect(test.adb.tap).not.toHaveBeenCalled();
+    expect(test.current().inFlight).toBeNull();
   });
 
   it.each([
@@ -1115,5 +1234,66 @@ describe("GenerationStepExecutor", () => {
       failure: { code: "PACKAGE_ESCAPE" }
     });
     expect(test.adb.swipe).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["package", "PACKAGE_ESCAPE"],
+    ["PID", "APP_CRASHED"]
+  ])("blocks a scroll swipe when %s changes while Layout is pending", async (
+    identity,
+    code
+  ) => {
+    const layout = [{
+      id: "list",
+      resourceId: "list",
+      enabled: true,
+      scrollable: true,
+      bounds: { left: 0, top: 0, right: 100, bottom: 200 },
+      children: []
+    }];
+    const runtime = { ...snapshot(), layout };
+    const test = harness(session(runtime));
+    let layoutCalls = 0;
+    let escaped = false;
+    test.guard.mockResolvedValueOnce(runtime);
+    test.androidCli.layout.mockImplementation((async () => {
+      layoutCalls += 1;
+      await Promise.resolve();
+      if (layoutCalls === 2) {
+        escaped = true;
+      }
+      return layout;
+    }) as never);
+    test.adb.foregroundComponent.mockImplementation((() => Promise.resolve({
+      packageName: identity === "package" && escaped
+        ? "com.android.systemui"
+        : "com.example.app",
+      activity
+    })) as never);
+    test.adb.pid.mockImplementation((() => Promise.resolve(
+      identity === "PID" && escaped ? 99 : 42
+    )) as never);
+    const scroll: ProposedStep = {
+      action: "scrollTo",
+      locator: { resourceId: "wanted" },
+      container: { resourceId: "list" },
+      direction: "up",
+      maxSwipes: 1,
+      distancePercent: 0.6,
+      durationMs: 300,
+      binding: proposal(runtime).binding,
+      activity: { before: activity }
+    };
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: scroll,
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result).toMatchObject({ status: "failed", failure: { code } });
+    expect(test.adb.swipe).not.toHaveBeenCalled();
+    expect(test.current().state).toBe("recoveryRequired");
   });
 });

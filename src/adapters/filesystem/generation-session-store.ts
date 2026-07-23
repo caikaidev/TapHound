@@ -777,6 +777,54 @@ async function verifyDirectoryEvidence(
   }
 }
 
+async function assertEvidenceNamespaceAvailable(
+  activeDirectory: string,
+  activeEvidence: StoreDirectoryEvidence,
+  inFlight: GenerationInFlight
+): Promise<void> {
+  const relativePath = `evidence/steps/${String(inFlight.stepIndex)}-${
+    inFlight.attemptId
+  }`;
+  const segments = validateEvidencePath(relativePath);
+  await verifyStoreDirectory(activeEvidence);
+  let parent = activeDirectory;
+  const directories: DirectoryEvidence[] = [activeEvidence];
+
+  for (const [index, segment] of segments.entries()) {
+    const candidate = join(parent, segment);
+    assertContained(activeDirectory, candidate);
+    let stats: Awaited<ReturnType<typeof lstat>>;
+    try {
+      stats = await lstat(candidate);
+    } catch (error) {
+      if (isNodeError(error) && error.code === "ENOENT") {
+        await verifyDirectoryEvidence(
+          activeEvidence.canonicalPath,
+          directories
+        );
+        return;
+      }
+      throw error;
+    }
+    if (index === segments.length - 1) {
+      throw new GenerationSessionStoreError(
+        "EVIDENCE_ALREADY_EXISTS",
+        `Generation attempt evidence namespace already exists: ${relativePath}`
+      );
+    }
+    if (!stats.isDirectory() || stats.isSymbolicLink()) {
+      throw new GenerationSessionStoreError(
+        "INVALID_EVIDENCE_PATH",
+        `Attempt evidence parent is not a safe directory: ${relativePath}`
+      );
+    }
+    const evidence = await captureDirectoryEvidence(candidate);
+    assertContained(activeEvidence.canonicalPath, evidence.canonicalPath, true);
+    directories.push(evidence);
+    parent = candidate;
+  }
+}
+
 async function fileIdentity(path: string): Promise<FileIdentity> {
   const stats = await lstat(path, { bigint: true });
   if (!stats.isFile() || stats.isSymbolicLink()) {
@@ -1184,10 +1232,10 @@ implements GenerationSessionStore {
   ): Promise<GenerationSession> => {
     assertId(id);
     validateExpectedRevision(expectedRevision);
-    if (expectedRevision === Number.MAX_SAFE_INTEGER) {
+    if (expectedRevision >= Number.MAX_SAFE_INTEGER - 1) {
       throw new GenerationSessionStoreError(
         "INVALID_REVISION",
-        "Generation revision cannot increment beyond Number.MAX_SAFE_INTEGER"
+        "Step begin must reserve a revision for completion or recovery"
       );
     }
     const inFlight = parseInFlight(inFlightInput);
@@ -1260,7 +1308,12 @@ implements GenerationSessionStore {
         this.syncDirectory,
         this.hooks.beforeStateRename,
         activeEvidence,
-        () => {
+        async () => {
+          await assertEvidenceNamespaceAvailable(
+            activeDirectory,
+            activeEvidence,
+            inFlight
+          );
           if (approvedConfirmation !== undefined) {
             const now = this.now();
             if (

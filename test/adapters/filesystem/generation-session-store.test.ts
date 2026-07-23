@@ -403,6 +403,68 @@ describe("FileSystemGenerationSessionStore", () => {
     await expect(store.read("generation-1")).resolves.toEqual(initial);
   });
 
+  it("rejects a recovered retry whose attempt evidence namespace exists", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    const initial = validSession();
+    const inFlight = {
+      stepIndex: 0,
+      snapshotHash: "b".repeat(64),
+      proposalHash: "c".repeat(64),
+      attemptId: "attempt-1"
+    };
+    await store.create(initial);
+    const begun = await store.beginStep("generation-1", 0, inFlight);
+    await store.writeTextEvidence(
+      "generation-1",
+      "evidence/steps/0-attempt-1/logcat.txt",
+      "first attempt\n"
+    );
+    const recoveryRequired = {
+      ...begun,
+      revision: 2,
+      state: "recoveryRequired" as const
+    };
+    await store.update("generation-1", 1, recoveryRequired);
+    const recovered = {
+      ...recoveryRequired,
+      revision: 3,
+      state: "active" as const,
+      inFlight: null
+    };
+    await store.recover("generation-1", 2, recovered);
+
+    await expectStoreError(
+      store.beginStep("generation-1", 3, inFlight),
+      "EVIDENCE_ALREADY_EXISTS"
+    );
+    await expect(store.read("generation-1")).resolves.toEqual(recovered);
+  });
+
+  it("reserves one revision after begin for completion or recovery", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(validSession());
+    const state = validSession(Number.MAX_SAFE_INTEGER - 1);
+    await writeFile(
+      join(activeDirectory(root), "state.json"),
+      `${JSON.stringify(state, null, 2)}\n`,
+      "utf8"
+    );
+
+    await expectStoreError(store.beginStep(
+      "generation-1",
+      Number.MAX_SAFE_INTEGER - 1,
+      {
+        stepIndex: 0,
+        snapshotHash: "b".repeat(64),
+        proposalHash: "c".repeat(64),
+        attemptId: "attempt-1"
+      }
+    ), "INVALID_REVISION");
+    await expect(store.read("generation-1")).resolves.toEqual(state);
+  });
+
   it("starts inFlight without mutating candidate or result state", async () => {
     const root = await temporaryRoot();
     const store = new FileSystemGenerationSessionStore(root);

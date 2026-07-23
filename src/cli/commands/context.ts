@@ -4,6 +4,7 @@ import { Command } from "commander";
 
 import type { ContextValidationResult } from "../../application/context/context-validator.js";
 import { TapHoundConfigSchema } from "../../domain/config.js";
+import { ProjectContextSchema } from "../../domain/project-context.js";
 import type { CliDependencies } from "../dependencies.js";
 import {
   errorMessage,
@@ -52,15 +53,33 @@ function createContextOperation(
         config = TapHoundConfigSchema.parse(await dependencies.readJson(
           resolve(options.project, options.config)
         ));
-        context = await dependencies.readJson(
-          resolve(options.project, options.context)
-        );
       } catch (error) {
         const output = failureOutput(
           2,
           "CONFIG_INVALID",
           errorMessage(error)
         );
+        if (options.json === true) {
+          writeJson(dependencies.stdout, output);
+        } else {
+          writeLine(dependencies.stderr, output.failure.message);
+        }
+        dependencies.setExitCode(2);
+        return;
+      }
+      try {
+        context = ProjectContextSchema.parse(await dependencies.readJson(
+          resolve(options.project, options.context)
+        ));
+      } catch (error) {
+        const output = {
+          status: "error" as const,
+          exitCode: 2 as const,
+          failure: {
+            code: "CONTEXT_INVALID" as const,
+            message: errorMessage(error)
+          }
+        };
         if (options.json === true) {
           writeJson(dependencies.stdout, output);
         } else {

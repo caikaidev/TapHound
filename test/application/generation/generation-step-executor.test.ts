@@ -178,7 +178,7 @@ function harness(
       foregroundCalls += 1;
       return Promise.resolve({
         packageName: "com.example.app",
-        activity: foregroundCalls <= 2 ? activity : afterActivity
+        activity: foregroundCalls <= 3 ? activity : afterActivity
       });
     }),
     currentActivity: vi.fn(() => Promise.resolve(afterActivity)),
@@ -348,6 +348,29 @@ describe("GenerationStepExecutor", () => {
       }]
     });
     expect(JSON.stringify(test.current().candidateSteps)).not.toContain("${");
+    expect(test.evidence.get(
+      "evidence/steps/0-attempt-1/proposal.json"
+    )).toEqual(proposal(runtime));
+    expect(test.evidence.get(
+      "evidence/steps/0-attempt-1/snapshot.json"
+    )).toEqual(runtime);
+    expect(test.evidence.get(
+      "evidence/steps/0-attempt-1/result.json"
+    )).toMatchObject({
+      version: 1,
+      stepIndex: 0,
+      attemptId: "attempt-1",
+      source: "manualOverride",
+      proposalEvidence: {
+        path: "evidence/steps/0-attempt-1/proposal.json"
+      },
+      snapshotEvidence: {
+        path: "evidence/steps/0-attempt-1/snapshot.json"
+      }
+    });
+    expect(JSON.stringify(test.evidence.get(
+      "evidence/steps/0-attempt-1/result.json"
+    ))).toMatch(/"sha256":"[a-f0-9]{64}"/);
   });
 
   it("consumes only an exact non-expired approved challenge and rejects replay", async () => {
@@ -904,6 +927,8 @@ describe("GenerationStepExecutor", () => {
     expect(test.current().state).toBe("recoveryRequired");
     expect(test.current().candidateSteps).toEqual([]);
     expect([...test.evidence.keys()]).toEqual([
+      "evidence/steps/0-attempt-1/proposal.json",
+      "evidence/steps/0-attempt-1/snapshot.json",
       "evidence/steps/0-attempt-1/logcat.txt",
       "evidence/steps/0-attempt-1/result.json"
     ]);
@@ -1284,8 +1309,12 @@ describe("GenerationStepExecutor", () => {
     });
 
     expect([...test.evidence.keys()]).toEqual([
+      "evidence/steps/0-attempt-1/proposal.json",
+      "evidence/steps/0-attempt-1/snapshot.json",
       "evidence/steps/0-attempt-1/logcat.txt",
       "evidence/steps/0-attempt-1/result.json",
+      "evidence/steps/0-attempt-2/proposal.json",
+      "evidence/steps/0-attempt-2/snapshot.json",
       "evidence/steps/0-attempt-2/logcat.txt",
       "evidence/steps/0-attempt-2/result.json"
     ]);

@@ -397,6 +397,11 @@ async function writeCrashRecoveryEvidence(
 describe("GenerationFinalizer", () => {
   it("replays exactly once and publishes a verified immutable bundle", async () => {
     const test = await fixture();
+    await test.store.writeEvidence(
+      "generation-1",
+      "evidence/runtime-observation.json",
+      { captured: true }
+    );
 
     const result = await test.finalize.finalize(input(test.root));
 
@@ -415,11 +420,12 @@ describe("GenerationFinalizer", () => {
     ), "utf8")) as { files: { path: string }[] };
     expect(manifest.files.map((file) => file.path)).toEqual([
       "candidate/journey.json",
-      "verified/journey.json",
+      "evidence/runtime-observation.json",
       "generation-report.json",
-      "verification/report.json",
+      "meta.json",
       "verification/receipt.json",
-      "meta.json"
+      "verification/report.json",
+      "verified/journey.json"
     ]);
     await expect(readFile(
       join(test.root, "journeys/generated.json"),

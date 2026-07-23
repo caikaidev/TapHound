@@ -4,7 +4,8 @@ import type {
   ConfirmationRequestResult
 } from "../../src/application/generation/generation-confirmation-service.js";
 import {
-  GenerationOperationError
+  GenerationOperationError,
+  hashGenerationBinding
 } from "../../src/application/generation/generation-starter.js";
 import {
   GenerationPromptCancelledError
@@ -84,6 +85,7 @@ interface Harness {
   requestManual: Mock;
   observe: Mock;
   finalize: Mock;
+  assertConfigIdentity: Mock;
 }
 
 function harness(signal?: AbortSignal): Harness {
@@ -133,6 +135,7 @@ function harness(signal?: AbortSignal): Harness {
     metaPath: "/project/journeys/generated.meta.json",
     replayed: true
   }));
+  const assertConfigIdentity = vi.fn(() => Promise.resolve());
   const readSession = vi.fn(() => Promise.resolve({
     revision: 4,
     candidateSteps: [{}]
@@ -177,7 +180,8 @@ function harness(signal?: AbortSignal): Harness {
       executor: { execute },
       observer: { observe },
       finalizer: { finalize },
-      readSession
+      readSession,
+      assertConfigIdentity
     })),
     readJson: vi.fn((path: string) => Promise.resolve(
       path.endsWith("input.json")
@@ -202,7 +206,8 @@ function harness(signal?: AbortSignal): Harness {
     findPendingManual,
     requestManual,
     observe,
-    finalize
+    finalize,
+    assertConfigIdentity
   };
 }
 
@@ -214,7 +219,9 @@ function internals(value: unknown): Record<string, unknown> {
 
 describe("generation JSON process protocol", () => {
   it("shares one Store identity and exact idle config across production services", async () => {
-    const read = vi.fn(() => Promise.resolve({ id: "store-sentinel" }));
+    const read = vi.fn<() => Promise<unknown>>(
+      () => Promise.resolve({ id: "store-sentinel" })
+    );
     const store = { read } as unknown as GenerationSessionStore;
     const generationStoreFactory = vi.fn(() => store);
     const dependencies = createProductionDependencies(undefined, {
@@ -250,6 +257,16 @@ describe("generation JSON process protocol", () => {
       store
     );
     expect(internals(runtime?.executor).idle).toBe(config.idle);
+    read.mockResolvedValueOnce({
+      bindings: { configHash: hashGenerationBinding(config) }
+    });
+    await expect(runtime?.assertConfigIdentity("generation-1"))
+      .resolves.toBeUndefined();
+    read.mockResolvedValueOnce({
+      bindings: { configHash: hashGenerationBinding(runtimeConfig) }
+    });
+    await expect(runtime?.assertConfigIdentity("generation-1"))
+      .rejects.toMatchObject({ code: "CONFIG_INVALID" });
     await runtime?.readSession("generation-1");
     expect(read).toHaveBeenCalledWith("generation-1");
   });
@@ -288,6 +305,41 @@ describe("generation JSON process protocol", () => {
     expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
     expect(test.stderr.value).toBe("");
     expect(test.exitCodes).toEqual([0]);
+  });
+
+  it.each([
+    ["observe", []],
+    ["step", ["--input", "input.json"]],
+    ["confirm", ["--challenge", "challenge-1"]],
+    ["manual", ["--action", "wait"]]
+  ])("rejects config identity mismatch before generation %s side effects", async (
+    command,
+    extraArguments
+  ) => {
+    const test = harness();
+    test.assertConfigIdentity.mockRejectedValueOnce(
+      new GenerationOperationError("CONFIG_INVALID", "config mismatch")
+    );
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", command,
+      "--project", "/project",
+      "--session", "generation-1",
+      ...extraArguments,
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "error",
+      exitCode: 2,
+      failure: { code: "CONFIG_INVALID" }
+    });
+    expect(test.request).not.toHaveBeenCalled();
+    expect(test.confirmStored).not.toHaveBeenCalled();
+    expect(test.findPendingManual).not.toHaveBeenCalled();
+    expect(test.requestManual).not.toHaveBeenCalled();
+    expect(test.observe).not.toHaveBeenCalled();
+    expect(test.execute).not.toHaveBeenCalled();
   });
 
   it("rejects unknown planner envelope fields before requesting confirmation", async () => {

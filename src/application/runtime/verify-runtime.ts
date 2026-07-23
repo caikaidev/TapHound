@@ -31,6 +31,7 @@ export interface VerifyInput {
   deviceSerial: string;
   toolVersions: Record<string, string>;
   requireFocusedInput?: boolean | undefined;
+  generatedReplayPolicy?: boolean | undefined;
   signal?: AbortSignal | undefined;
 }
 
@@ -368,7 +369,10 @@ export class VerifyRuntime {
           idle: input.config.idle,
           ...(input.requireFocusedInput === undefined
             ? {}
-            : { requireFocusedInput: input.requireFocusedInput })
+            : { requireFocusedInput: input.requireFocusedInput }),
+          ...(input.generatedReplayPolicy === undefined
+            ? {}
+            : { generatedReplayPolicy: input.generatedReplayPolicy })
         });
         for (const [index, step] of input.journey.steps.entries()) {
           const result = await runner.run(step, index, input.signal);

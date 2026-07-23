@@ -10,6 +10,9 @@ import {
 import {
   GenerationOperationError
 } from "../../application/generation/generation-starter.js";
+import type {
+  RuntimeObservation
+} from "../../application/generation/runtime-observer.js";
 import {
   ProjectConfigurationError
 } from "../../application/project/project-describer.js";
@@ -277,6 +280,13 @@ function requireRuntime(
   return dependencies.generationRuntime({ projectRoot, config });
 }
 
+async function assertRuntimeConfig(
+  runtime: NonNullable<ReturnType<NonNullable<CliDependencies["generationRuntime"]>>>,
+  generationId: string
+): Promise<void> {
+  await runtime.assertConfigIdentity(generationId);
+}
+
 function createStartCommand(dependencies: CliDependencies): Command {
   return new Command("start")
     .description("Start a Core-owned generation session")
@@ -401,14 +411,29 @@ function createObserveCommand(dependencies: CliDependencies): Command {
     .action(async (options: GenerationObserveOptions): Promise<void> => {
       try {
         const generationId = GenerationSessionIdSchema.parse(options.session);
-        await loadConfig(dependencies, options);
-        const observation = await dependencies.runtimeObserver.observe({
-          projectRoot: options.project,
-          generationId,
-          ...(dependencies.signal === undefined
-            ? {}
-            : { signal: dependencies.signal })
-        });
+        const config = await loadConfig(dependencies, options);
+        const observation = dependencies.generationRuntime === undefined
+          ? await dependencies.runtimeObserver.observe({
+              projectRoot: options.project,
+              generationId,
+              ...(dependencies.signal === undefined
+                ? {}
+                : { signal: dependencies.signal })
+            })
+          : await (async (): Promise<RuntimeObservation> => {
+              const runtime = requireRuntime(
+                dependencies,
+                options.project,
+                config
+              );
+              await assertRuntimeConfig(runtime, generationId);
+              return runtime.observer.observe({
+                generationId,
+                ...(dependencies.signal === undefined
+                  ? {}
+                  : { signal: dependencies.signal })
+              });
+            })();
         const output = {
           status: "observed" as const,
           exitCode: 0 as const,
@@ -473,6 +498,8 @@ function createStepCommand(dependencies: CliDependencies): Command {
     try {
       const generationId = GenerationSessionIdSchema.parse(options.session);
       const config = await loadConfig(dependencies, options);
+      const runtime = requireRuntime(dependencies, options.project, config);
+      await assertRuntimeConfig(runtime, generationId);
       let envelope: z.infer<typeof PlannerEnvelopeSchema>;
       try {
         envelope = PlannerEnvelopeSchema.parse(await dependencies.readJson(
@@ -484,7 +511,6 @@ function createStepCommand(dependencies: CliDependencies): Command {
           errorMessage(error)
         );
       }
-      const runtime = requireRuntime(dependencies, options.project, config);
       const confirmation = await runtime.confirmation.request({
         generationId,
         proposal: envelope.proposal,
@@ -526,6 +552,7 @@ function createConfirmCommand(dependencies: CliDependencies): Command {
       const challengeId = GenerationSessionIdSchema.parse(options.challenge);
       const config = await loadConfig(dependencies, options);
       const runtime = requireRuntime(dependencies, options.project, config);
+      await assertRuntimeConfig(runtime, generationId);
       const approved = await runtime.confirmation.confirmStored({
         generationId,
         challengeId,
@@ -557,6 +584,7 @@ function createManualCommand(dependencies: CliDependencies): Command {
       const action = ManualActionSchema.parse(options.action);
       const config = await loadConfig(dependencies, options);
       const runtime = requireRuntime(dependencies, options.project, config);
+      await assertRuntimeConfig(runtime, generationId);
       const existing = await runtime.confirmation.findPendingManual({
         generationId,
         action

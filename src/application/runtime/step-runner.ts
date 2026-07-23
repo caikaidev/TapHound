@@ -29,6 +29,7 @@ export interface StepRunnerOptions {
   deviceSerial: string;
   idle: IdleConfig;
   requireFocusedInput?: boolean;
+  generatedReplayPolicy?: boolean | undefined;
 }
 
 export type StepRunResult =
@@ -81,8 +82,93 @@ export class StepRunner {
       actionExecutor: this.actionExecutor,
       idleWaiter: this.idleWaiter,
       deviceSerial: options.deviceSerial,
-      idle: options.idle
+      idle: options.idle,
+      ...(options.generatedReplayPolicy === true
+        ? {
+            readLayout: async (): Promise<readonly import("../../domain/layout.js").LayoutElement[]> => (
+              this.captureGeneratedLayout(this.currentSignal)
+            ),
+            beforeMutation: async (): Promise<void> => {
+              await this.assertGeneratedForeground(
+                undefined,
+                "ACTIVITY_BEFORE_MISMATCH",
+                this.currentSignal
+              );
+            },
+            requireLiveContainerCapability: true
+          }
+        : {})
     });
+  }
+
+  private readonly identity = (signal?: AbortSignal): {
+    packageName: string;
+    deviceSerial: string;
+    signal?: AbortSignal;
+    timeoutMs: number;
+  } => ({
+    packageName: this.options.packageName,
+    deviceSerial: this.options.deviceSerial,
+    ...(signal === undefined ? {} : { signal }),
+    timeoutMs: this.options.idle.timeoutMs
+  });
+
+  private async generatedForeground(
+    expectedActivity: string,
+    code: "ACTIVITY_BEFORE_MISMATCH" | "ACTIVITY_AFTER_MISMATCH",
+    signal?: AbortSignal
+  ): Promise<{ packageName: string; activity: string }> {
+    const foreground = await this.options.adb.foregroundComponent(
+      this.identity(signal)
+    );
+    if (
+      foreground.packageName !== this.options.packageName
+      || foreground.activity !== expectedActivity
+    ) {
+      throw Object.assign(new Error(
+        `Expected foreground ${this.options.packageName}/${expectedActivity}, found ${
+          foreground.packageName
+        }/${foreground.activity}`
+      ), { code });
+    }
+    return foreground;
+  }
+
+  private async assertGeneratedForeground(
+    expectedActivity?: string,
+    code: "ACTIVITY_BEFORE_MISMATCH" | "ACTIVITY_AFTER_MISMATCH" =
+      "ACTIVITY_BEFORE_MISMATCH",
+    signal?: AbortSignal
+  ): Promise<void> {
+    await this.generatedForeground(
+      expectedActivity ?? this.currentExpectedActivity,
+      code,
+      signal
+    );
+  }
+
+  private currentExpectedActivity = "";
+  private currentSignal: AbortSignal | undefined;
+
+  private async captureGeneratedLayout(
+    signal?: AbortSignal
+  ): Promise<readonly import("../../domain/layout.js").LayoutElement[]> {
+    await this.assertGeneratedForeground(
+      this.currentExpectedActivity,
+      "ACTIVITY_BEFORE_MISMATCH",
+      signal
+    );
+    const layout = await this.options.androidCli.layout({
+      deviceSerial: this.options.deviceSerial,
+      ...(signal === undefined ? {} : { signal }),
+      timeoutMs: this.options.idle.timeoutMs
+    });
+    await this.assertGeneratedForeground(
+      this.currentExpectedActivity,
+      "ACTIVITY_BEFORE_MISMATCH",
+      signal
+    );
+    return layout;
   }
 
   public async run(
@@ -151,13 +237,29 @@ export class StepRunner {
       return finish("cancelled");
     }
 
-    const identity = {
-      packageName: this.options.packageName,
-      deviceSerial: this.options.deviceSerial,
-      ...(signal === undefined ? {} : { signal }),
-      timeoutMs: this.options.idle.timeoutMs
-    };
-    const before = await this.options.adb.currentActivity(identity);
+    const identity = this.identity(signal);
+    this.currentExpectedActivity = step.activity.before;
+    this.currentSignal = signal;
+    let before: string;
+    try {
+      before = this.options.generatedReplayPolicy === true
+        ? (await this.generatedForeground(
+            step.activity.before,
+            "ACTIVITY_BEFORE_MISMATCH",
+            signal
+          )).activity
+        : await this.options.adb.currentActivity(identity);
+    } catch (error) {
+      if (
+        error !== null
+        && typeof error === "object"
+        && "code" in error
+        && error.code === "ACTIVITY_BEFORE_MISMATCH"
+      ) {
+        return fail("ACTIVITY_BEFORE_MISMATCH", errorMessage(error));
+      }
+      throw error;
+    }
     activityReport.before = {
       status: before === step.activity.before ? "passed" : "failed",
       expected: step.activity.before,
@@ -195,11 +297,26 @@ export class StepRunner {
         return fail(scroll.code, scroll.message);
       }
     } else {
-      const layout = await this.options.androidCli.layout({
-        deviceSerial: this.options.deviceSerial,
-        ...(signal === undefined ? {} : { signal }),
-        timeoutMs: this.options.idle.timeoutMs
-      });
+      let layout: Awaited<ReturnType<AndroidCliPort["layout"]>>;
+      try {
+        layout = this.options.generatedReplayPolicy === true
+          ? await this.captureGeneratedLayout(signal)
+          : await this.options.androidCli.layout({
+              deviceSerial: this.options.deviceSerial,
+              ...(signal === undefined ? {} : { signal }),
+              timeoutMs: this.options.idle.timeoutMs
+            });
+      } catch (error) {
+        if (
+          error !== null
+          && typeof error === "object"
+          && "code" in error
+          && error.code === "ACTIVITY_BEFORE_MISMATCH"
+        ) {
+          return fail("ACTIVITY_BEFORE_MISMATCH", errorMessage(error));
+        }
+        throw error;
+      }
       if (
         step.action === "click"
         || step.action === "longClick"
@@ -268,6 +385,17 @@ export class StepRunner {
           "inputText requires exactly one enabled focused Layout element"
         );
       }
+      if (this.options.generatedReplayPolicy === true) {
+        try {
+          await this.assertGeneratedForeground(
+            step.activity.before,
+            "ACTIVITY_BEFORE_MISMATCH",
+            signal
+          );
+        } catch (error) {
+          return fail("ACTIVITY_BEFORE_MISMATCH", errorMessage(error));
+        }
+      }
       const action = await this.actionExecutor.execute(step, target, signal);
       if (action.status === "failed") {
         return fail(action.code, action.message);
@@ -301,7 +429,26 @@ export class StepRunner {
       return fail("APP_CRASHED", "App process is no longer running");
     }
 
-    const after = await this.options.adb.currentActivity(identity);
+    let after: string;
+    try {
+      after = this.options.generatedReplayPolicy === true
+        ? (await this.generatedForeground(
+            step.activity.after,
+            "ACTIVITY_AFTER_MISMATCH",
+            signal
+          )).activity
+        : await this.options.adb.currentActivity(identity);
+    } catch (error) {
+      if (
+        error !== null
+        && typeof error === "object"
+        && "code" in error
+        && error.code === "ACTIVITY_AFTER_MISMATCH"
+      ) {
+        return fail("ACTIVITY_AFTER_MISMATCH", errorMessage(error));
+      }
+      throw error;
+    }
     activityReport.after = {
       status: after === step.activity.after ? "passed" : "failed",
       expected: step.activity.after,
@@ -342,6 +489,17 @@ export class StepRunner {
             code: expectation.code,
             message: expectation.message
           };
+      if (this.options.generatedReplayPolicy === true) {
+        try {
+          await this.assertGeneratedForeground(
+            step.activity.after,
+            "ACTIVITY_AFTER_MISMATCH",
+            signal
+          );
+        } catch (error) {
+          return fail("ACTIVITY_AFTER_MISMATCH", errorMessage(error));
+        }
+      }
       if (expectation.status === "failed") {
         return fail(expectation.code, expectation.message);
       }
@@ -349,4 +507,8 @@ export class StepRunner {
 
     return finish("passed");
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

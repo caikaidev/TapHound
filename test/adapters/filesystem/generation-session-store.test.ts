@@ -2072,4 +2072,62 @@ describe("FileSystemGenerationSessionStore", () => {
       "INVALID_SESSION"
     );
   });
+
+  it("lists immutable evidence deterministically without internal files", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(validSession());
+    await store.writeTextEvidence("generation-1", "z-last.txt", "last");
+    await store.writeEvidence("generation-1", "evidence/a.json", { a: 1 });
+    await store.writeTextEvidence("generation-1", "manifest.json", "self");
+
+    await expect(store.listEvidence("generation-1")).resolves.toEqual([
+      {
+        path: "evidence/a.json",
+        bytes: Buffer.from('{\n  "a": 1\n}\n')
+      },
+      { path: "z-last.txt", bytes: Buffer.from("last") }
+    ]);
+  });
+
+  it("rejects symlinks while listing evidence", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(validSession());
+    await writeFile(join(root, "outside.txt"), "outside", "utf8");
+    await symlink(
+      join(root, "outside.txt"),
+      join(activeDirectory(root), "linked.txt")
+    );
+
+    await expectStoreError(
+      store.listEvidence("generation-1"),
+      "INVALID_EVIDENCE_PATH"
+    );
+  });
+
+  it("rejects evidence substitution after no-follow open while listing", async () => {
+    const root = await temporaryRoot();
+    let substitute = false;
+    const store = new FileSystemGenerationSessionStore(root, {
+      hooks: {
+        afterEvidenceOpen: async (path): Promise<void> => {
+          if (substitute && path === "evidence.json") {
+            substitute = false;
+            const evidencePath = join(activeDirectory(root), path);
+            await rename(evidencePath, `${evidencePath}.moved`);
+            await writeFile(evidencePath, "replacement", "utf8");
+          }
+        }
+      }
+    });
+    await store.create(validSession());
+    await store.writeEvidence("generation-1", "evidence.json", { ok: true });
+    substitute = true;
+
+    await expectStoreError(
+      store.listEvidence("generation-1"),
+      "INVALID_EVIDENCE_PATH"
+    );
+  });
 });

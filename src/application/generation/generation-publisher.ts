@@ -43,7 +43,7 @@ function sha256(bytes: string | Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-function manifestEntry(path: string, bytes: string): {
+function manifestEntry(path: string, bytes: string | Buffer): {
   path: string;
   bytes: number;
   sha256: string;
@@ -101,7 +101,7 @@ export interface GenerationBundleContent {
 export interface GenerationPublisherDependencies {
   store: Pick<
     GenerationSessionStore,
-    "writeTextEvidence" | "readEvidence" | "publish"
+    "writeTextEvidence" | "readEvidence" | "listEvidence" | "publish"
   >;
   journeyWriter: ProjectBoundJourneyWriterPort;
   metaWriter: ProjectBoundGenerationMetaWriterPort;
@@ -156,10 +156,13 @@ export class GenerationPublisher {
       );
     }
 
+    const evidenceFiles = await this.dependencies.store.listEvidence(
+      input.generationId
+    );
     const manifest = GenerationBundleManifestSchema.parse({
       version: 1,
       generationId: input.generationId,
-      files: files.map(([path, bytes]) => manifestEntry(path, bytes))
+      files: evidenceFiles.map(({ path, bytes }) => manifestEntry(path, bytes))
     });
     await ensureEvidence(
       this.dependencies.store,
@@ -172,6 +175,7 @@ export class GenerationPublisher {
   };
 
   public readonly publish = async (generationId: string): Promise<string> => {
+    await this.verifyPublishedManifest(generationId);
     const bundlePath = await this.dependencies.store.publish(generationId);
     await this.verifyPublishedManifest(generationId);
     return bundlePath;
@@ -258,11 +262,27 @@ export class GenerationPublisher {
     manifest: GenerationBundleManifest
   ): Promise<void> => {
     GenerationBundleManifestSchema.parse(manifest);
-    for (const file of manifest.files) {
-      const bytes = await this.dependencies.store.readEvidence(
-        generationId,
-        file.path
+    const evidenceFiles = await this.dependencies.store.listEvidence(
+      generationId
+    );
+    const manifestPaths = manifest.files.map((file) => file.path);
+    const evidencePaths = evidenceFiles.map((file) => file.path);
+    if (JSON.stringify(manifestPaths) !== JSON.stringify(evidencePaths)) {
+      throw new GenerationSessionStoreError(
+        "INVALID_EVIDENCE",
+        "Manifest does not exactly enumerate immutable generation evidence"
       );
+    }
+    for (const file of manifest.files) {
+      const bytes = evidenceFiles.find(
+        (candidate) => candidate.path === file.path
+      )?.bytes;
+      if (bytes === undefined) {
+        throw new GenerationSessionStoreError(
+          "INVALID_EVIDENCE",
+          `Manifest content is missing: ${file.path}`
+        );
+      }
       if (bytes.byteLength !== file.bytes || sha256(bytes) !== file.sha256) {
         throw new GenerationSessionStoreError(
           "INVALID_EVIDENCE",

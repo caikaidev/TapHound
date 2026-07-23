@@ -5,6 +5,7 @@ import {
   lstat,
   mkdir,
   open,
+  readdir,
   realpath,
   rename,
   rm,
@@ -48,6 +49,7 @@ export interface FileSystemGenerationSessionStoreHooks {
   beforePublishRename?: () => Promise<void> | void;
   beforeEvidenceInstall?: () => Promise<void> | void;
   afterEvidenceInstall?: () => Promise<void> | void;
+  afterEvidenceOpen?: (path: string) => Promise<void> | void;
   afterDirectorySync?: (path: string) => Promise<void> | void;
 }
 
@@ -70,6 +72,7 @@ const HOOK_NAMES = [
   "beforePublishRename",
   "beforeEvidenceInstall",
   "afterEvidenceInstall",
+  "afterEvidenceOpen",
   "afterDirectorySync"
 ] as const satisfies readonly (keyof FileSystemGenerationSessionStoreHooks)[];
 
@@ -2014,6 +2017,123 @@ implements GenerationSessionStore {
       } finally {
         await handle.close();
       }
+    });
+  };
+
+  public readonly listEvidence = async (
+    id: string
+  ): Promise<readonly { path: string; bytes: Buffer }[]> => {
+    assertId(id);
+    await this.ensureGenerationRoot();
+    return this.withLock(id, async () => {
+      const finalDirectory = this.finalDirectory(id);
+      const activeDirectory = this.activeDirectory(id);
+      const directory = await pathExists(finalDirectory)
+        ? finalDirectory
+        : activeDirectory;
+      if (!await pathExists(directory)) {
+        throw new GenerationSessionStoreError(
+          "SESSION_NOT_FOUND",
+          `Generation session does not exist: ${id}`
+        );
+      }
+      const rootEvidence = await captureStoreDirectory(directory);
+      await readBoundState(
+        directory,
+        id,
+        this.hooks.afterStateOpen,
+        rootEvidence
+      );
+      const files: { path: string; bytes: Buffer }[] = [];
+
+      const visit = async (
+        currentPath: string,
+        segments: readonly string[],
+        expectedIdentity?: FileIdentity
+      ): Promise<void> => {
+        const directoryEvidence = await captureStoreDirectory(currentPath);
+        if (
+          expectedIdentity !== undefined
+          && !sameIdentity(directoryEvidence.identity, expectedIdentity)
+        ) {
+          throw new GenerationSessionStoreError(
+            "INVALID_EVIDENCE_PATH",
+            `Generation evidence directory identity changed: ${
+              segments.join("/")
+            }`
+          );
+        }
+        assertContained(rootEvidence.canonicalPath, directoryEvidence.canonicalPath, true);
+        const entries = (await readdir(currentPath, { withFileTypes: true }))
+          .sort((left, right) => left.name.localeCompare(right.name));
+        for (const entry of entries) {
+          const childSegments = [...segments, entry.name];
+          const relativePath = childSegments.join("/");
+          if (
+            segments.length === 0
+            && (entry.name === "state.json" || entry.name === "manifest.json")
+          ) {
+            continue;
+          }
+          const childPath = join(currentPath, entry.name);
+          const stats = await lstat(childPath, { bigint: true });
+          if (stats.isSymbolicLink()) {
+            throw new GenerationSessionStoreError(
+              "INVALID_EVIDENCE_PATH",
+              `Generation evidence contains a symbolic link: ${relativePath}`
+            );
+          }
+          if (stats.isDirectory()) {
+            await visit(
+              childPath,
+              childSegments,
+              { dev: stats.dev, ino: stats.ino }
+            );
+            continue;
+          }
+          if (!stats.isFile()) {
+            throw new GenerationSessionStoreError(
+              "INVALID_EVIDENCE_PATH",
+              `Generation evidence is not a regular file: ${relativePath}`
+            );
+          }
+          const handle = await open(
+            childPath,
+            constants.O_RDONLY | constants.O_NOFOLLOW
+          );
+          try {
+            const opened = await handle.stat({ bigint: true });
+            if (!opened.isFile()) {
+              throw new GenerationSessionStoreError(
+                "INVALID_EVIDENCE_PATH",
+                `Generation evidence is not a regular file: ${relativePath}`
+              );
+            }
+            const openedIdentity = { dev: opened.dev, ino: opened.ino };
+            await this.hooks.afterEvidenceOpen?.(relativePath);
+            await verifyStoreDirectory(rootEvidence);
+            await verifyStoreDirectory(directoryEvidence);
+            const pathIdentity = await fileIdentity(childPath);
+            if (!sameIdentity(openedIdentity, pathIdentity)) {
+              throw new GenerationSessionStoreError(
+                "INVALID_EVIDENCE_PATH",
+                `Generation evidence identity changed: ${relativePath}`
+              );
+            }
+            files.push({
+              path: relativePath,
+              bytes: await handle.readFile()
+            });
+          } finally {
+            await handle.close();
+          }
+        }
+        await verifyStoreDirectory(rootEvidence);
+        await verifyStoreDirectory(directoryEvidence);
+      };
+
+      await visit(directory, []);
+      return files.sort((left, right) => left.path.localeCompare(right.path));
     });
   };
 

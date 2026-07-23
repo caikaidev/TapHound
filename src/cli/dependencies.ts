@@ -35,6 +35,8 @@ import {
 } from "../application/generation/generation-publisher.js";
 import {
   GenerationStarter,
+  GenerationOperationError,
+  hashGenerationBinding,
   type GenerationStartInput
 } from "../application/generation/generation-starter.js";
 import {
@@ -69,6 +71,7 @@ export interface GenerationCliRuntime {
   observer: Pick<RuntimeObserver, "observe">;
   finalizer: Pick<GenerationFinalizer, "finalize">;
   readSession: (id: string) => Promise<GenerationSession>;
+  assertConfigIdentity: (id: string) => Promise<void>;
 }
 
 export interface CliDependencies {
@@ -289,7 +292,16 @@ export function createProductionDependencies(
         executor,
         observer,
         finalizer,
-        readSession: (id): Promise<GenerationSession> => store.read(id)
+        readSession: (id): Promise<GenerationSession> => store.read(id),
+        assertConfigIdentity: async (id): Promise<void> => {
+          const session = await store.read(id);
+          if (hashGenerationBinding(config) !== session.bindings.configHash) {
+            throw new GenerationOperationError(
+              "CONFIG_INVALID",
+              "Generation configuration does not match the authoritative session"
+            );
+          }
+        }
       };
     },
     readJson: async (path): Promise<unknown> => JSON.parse(

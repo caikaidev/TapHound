@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { z } from "zod";
 
 import {
@@ -122,6 +124,28 @@ function executionPath(
   return `evidence/steps/${String(inFlight.stepIndex)}-${
     inFlight.attemptId
   }/${suffix}`;
+}
+
+function sha256(value: Buffer): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function canonicalEvidenceBytes(value: unknown): Buffer {
+  const canonicalize = (input: unknown): unknown => {
+    if (Array.isArray(input)) return input.map(canonicalize);
+    if (input !== null && typeof input === "object") {
+      return Object.fromEntries(
+        Object.keys(input)
+          .sort((left, right) => left.localeCompare(right))
+          .map((key) => [
+            key,
+            canonicalize((input as Record<string, unknown>)[key])
+          ])
+      );
+    }
+    return input;
+  };
+  return Buffer.from(`${JSON.stringify(canonicalize(value), null, 2)}\n`);
 }
 
 function asFailure(error: unknown): GenerationStepFailure {
@@ -442,6 +466,31 @@ export class GenerationStepExecutor {
       await this.markRecovery(session.id, inFlight);
       return cancellation();
     }
+    const proposalEvidencePath = executionPath(inFlight, "proposal.json");
+    const snapshotEvidencePath = executionPath(inFlight, "snapshot.json");
+    let proposalEvidenceSha256: string;
+    let snapshotEvidenceSha256: string;
+    try {
+      await this.dependencies.store.writeEvidence(
+        session.id,
+        proposalEvidencePath,
+        proposal
+      );
+      proposalEvidenceSha256 = sha256(canonicalEvidenceBytes(proposal));
+      await this.dependencies.store.writeEvidence(
+        session.id,
+        snapshotEvidencePath,
+        snapshot
+      );
+      snapshotEvidenceSha256 = sha256(canonicalEvidenceBytes(snapshot));
+    } catch (error) {
+      await this.markRecovery(session.id, inFlight);
+      throw error;
+    }
+    if (isCancelled(input.signal)) {
+      await this.markRecovery(session.id, inFlight);
+      return cancellation();
+    }
 
     const logcat = new LogcatCollector(
       this.dependencies.adb,
@@ -497,7 +546,16 @@ export class GenerationStepExecutor {
               input.signal
             );
             return guarded.layout;
-          }
+          },
+          beforeMutation: async (): Promise<void> => {
+            await this.assertForegroundIdentity(
+              session,
+              authoritativePid,
+              proposal.activity.before,
+              input.signal
+            );
+          },
+          requireLiveContainerCapability: true
         }).execute(provisional, input.signal, preAction.layout);
         throwIfCancelled(input.signal);
         if (scroll.status === "cancelled") {
@@ -519,6 +577,13 @@ export class GenerationStepExecutor {
           }
         }
         if (outcome === undefined) {
+          throwIfCancelled(input.signal);
+          await this.assertForegroundIdentity(
+            session,
+            authoritativePid,
+            proposal.activity.before,
+            input.signal
+          );
           throwIfCancelled(input.signal);
           const action = await actionExecutor.execute(
             provisional,
@@ -589,8 +654,6 @@ export class GenerationStepExecutor {
                 message: "Expectation evaluation was cancelled"
               }
             };
-          } else if (expectation.status === "failed") {
-            fail(expectation.code, expectation.message);
           }
           throwIfCancelled(input.signal);
           await this.observeLive(
@@ -600,6 +663,9 @@ export class GenerationStepExecutor {
             input.signal
           );
           throwIfCancelled(input.signal);
+          if (expectation.status === "failed") {
+            fail(expectation.code, expectation.message);
+          }
         }
       }
     } catch (error) {
@@ -669,6 +735,14 @@ export class GenerationStepExecutor {
           snapshotHash: inFlight.snapshotHash,
           attemptId: inFlight.attemptId,
           source,
+          proposalEvidence: {
+            path: proposalEvidencePath,
+            sha256: proposalEvidenceSha256
+          },
+          snapshotEvidence: {
+            path: snapshotEvidencePath,
+            sha256: snapshotEvidenceSha256
+          },
           outcome,
           ...(stopFailure === undefined
             ? {}
@@ -815,6 +889,35 @@ export class GenerationStepExecutor {
       pid,
       layout
     };
+  }
+
+  private async assertForegroundIdentity(
+    session: GenerationSession,
+    expectedPid: number,
+    expectedActivity: string,
+    signal?: AbortSignal
+  ): Promise<void> {
+    const identity = {
+      packageName: session.target.packageName,
+      deviceSerial: session.target.deviceSerial,
+      ...(signal === undefined ? {} : { signal }),
+      timeoutMs: this.dependencies.idle.timeoutMs
+    };
+    const foreground = await this.dependencies.adb.foregroundComponent(
+      identity
+    );
+    throwIfCancelled(signal);
+    if (foreground.packageName !== session.target.packageName) {
+      fail("PACKAGE_ESCAPE", "Foreground package escaped generation target");
+    }
+    if (foreground.activity !== expectedActivity) {
+      fail("SNAPSHOT_STALE", "Generation Activity changed before mutation");
+    }
+    const pid = await this.dependencies.adb.pid(identity);
+    throwIfCancelled(signal);
+    if (pid === null || pid !== expectedPid) {
+      fail("APP_CRASHED", "Generation process identity changed");
+    }
   }
 
   private async markRecovery(

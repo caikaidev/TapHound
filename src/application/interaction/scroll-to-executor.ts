@@ -23,11 +23,39 @@ export interface ScrollToExecutorOptions {
   idleWaiter: Pick<IdleWaiter, "waitUntilIdle">;
   deviceSerial: string;
   idle: IdleConfig;
+  readLayout?: (() => Promise<readonly LayoutElement[]>) | undefined;
   beforeSwipe?: (() => Promise<readonly LayoutElement[]>) | undefined;
+  beforeMutation?: (() => Promise<void>) | undefined;
+  requireLiveContainerCapability?: boolean | undefined;
 }
 
 function isCancelled(signal?: AbortSignal): boolean {
   return signal?.aborted === true;
+}
+
+function callbackFailure(
+  error: unknown,
+  swipesUsed: number
+): Extract<ScrollToExecutionResult, { status: "failed" }> | undefined {
+  if (
+    error !== null
+    && typeof error === "object"
+    && "code" in error
+    && typeof error.code === "string"
+    && [
+      "ACTIVITY_BEFORE_MISMATCH",
+      "ACTIVITY_AFTER_MISMATCH",
+      "ACTION_FAILED"
+    ].includes(error.code)
+  ) {
+    return {
+      status: "failed",
+      code: error.code as FailureCode,
+      message: error instanceof Error ? error.message : error.code,
+      swipesUsed
+    };
+  }
+  return undefined;
 }
 
 export class ScrollToExecutor {
@@ -44,11 +72,19 @@ export class ScrollToExecutor {
     if (isCancelled(signal)) {
         return { status: "cancelled", swipesUsed };
       }
-      layout ??= await this.options.androidCli.layout({
-        deviceSerial: this.options.deviceSerial,
-        ...(signal === undefined ? {} : { signal }),
-        timeoutMs: this.options.idle.timeoutMs
-      });
+      try {
+        layout ??= this.options.readLayout === undefined
+          ? await this.options.androidCli.layout({
+              deviceSerial: this.options.deviceSerial,
+              ...(signal === undefined ? {} : { signal }),
+              timeoutMs: this.options.idle.timeoutMs
+            })
+          : await this.options.readLayout();
+      } catch (error) {
+        const failed = callbackFailure(error, swipesUsed);
+        if (failed !== undefined) return failed;
+        throw error;
+      }
       if (isCancelled(signal)) {
         return { status: "cancelled", swipesUsed };
       }
@@ -98,7 +134,13 @@ export class ScrollToExecutor {
         };
       }
       if (this.options.beforeSwipe !== undefined) {
-        layout = await this.options.beforeSwipe();
+        try {
+          layout = await this.options.beforeSwipe();
+        } catch (error) {
+          const failed = callbackFailure(error, swipesUsed);
+          if (failed !== undefined) return failed;
+          throw error;
+        }
         if (isCancelled(signal)) {
           return { status: "cancelled", swipesUsed };
         }
@@ -139,6 +181,30 @@ export class ScrollToExecutor {
             swipesUsed
           };
         }
+      }
+      if (isCancelled(signal)) {
+        return { status: "cancelled", swipesUsed };
+      }
+      if (
+        this.options.requireLiveContainerCapability === true
+        && (
+          !container.element.enabled
+          || container.element.scrollable !== true
+        )
+      ) {
+        return {
+          status: "failed",
+          code: "ACTION_FAILED",
+          message: "scroll container lost enabled scrollable bounds",
+          swipesUsed
+        };
+      }
+      try {
+        await this.options.beforeMutation?.();
+      } catch (error) {
+        const failed = callbackFailure(error, swipesUsed);
+        if (failed !== undefined) return failed;
+        throw error;
       }
       if (isCancelled(signal)) {
         return { status: "cancelled", swipesUsed };

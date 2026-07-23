@@ -159,7 +159,7 @@ function dependencies(): {
         path.includes("journey")
           ? runtimeJourney
           : path.includes("context")
-            ? { version: 1, opaque: "passed to validator" }
+            ? generationContext
             : runtimeConfig
       )),
       cwd: () => "/project",
@@ -641,7 +641,7 @@ describe("TapHound CLI commands", () => {
       expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
       expect(test.stderr.value).toBe("");
       expect(test.value.contextValidator.validate).toHaveBeenCalledWith({
-        context: { version: 1, opaque: "passed to validator" },
+        context: generationContext,
         projectRoot: "/project",
         config: runtimeConfig
       });
@@ -650,11 +650,12 @@ describe("TapHound CLI commands", () => {
   );
 
   it.each([
-    ["config read", "taphound.config.json"],
-    ["context read", "project.context.json"]
+    ["config read", "taphound.config.json", "CONFIG_INVALID"],
+    ["context read", "project.context.json", "CONTEXT_INVALID"]
   ])("isolates context %s failures to one JSON stdout value", async (
     _case,
-    failingPath
+    failingPath,
+    expectedCode
   ) => {
     const test = dependencies();
     vi.mocked(test.value.readJson).mockImplementation((path: string) => (
@@ -674,7 +675,7 @@ describe("TapHound CLI commands", () => {
     expect(JSON.parse(test.stdout.value)).toMatchObject({
       status: "error",
       exitCode: 2,
-      failure: { code: "CONFIG_INVALID" }
+      failure: { code: expectedCode }
     });
     expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
     expect(test.stderr.value).toBe("");

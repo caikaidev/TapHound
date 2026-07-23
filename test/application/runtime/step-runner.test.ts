@@ -60,6 +60,7 @@ function fixture(overrides: {
   androidCli?: AndroidCliPort;
   idle?: StepRunnerOptions["idle"];
   requireFocusedInput?: boolean;
+  generatedReplayPolicy?: boolean;
 } = {}): {
   runner: StepRunner;
   adb: AdbPort;
@@ -91,7 +92,10 @@ function fixture(overrides: {
       },
       ...(overrides.requireFocusedInput === undefined
         ? {}
-        : { requireFocusedInput: overrides.requireFocusedInput })
+        : { requireFocusedInput: overrides.requireFocusedInput }),
+      ...(overrides.generatedReplayPolicy === undefined
+        ? {}
+        : { generatedReplayPolicy: overrides.generatedReplayPolicy })
     }),
     adb,
     androidCli: cli,
@@ -517,5 +521,105 @@ describe("scrollTo replay", () => {
 
     expect(result.status).toBe("passed");
     expect(adb.inputText).toHaveBeenCalledOnce();
+  });
+
+  it("blocks generated click replay when the foreground package is foreign", async () => {
+    const adb = adbPort();
+    vi.mocked(adb.foregroundComponent).mockResolvedValue({
+      packageName: "com.foreign.app",
+      activity: checkpoint.before
+    });
+    const { runner } = fixture({ adb, generatedReplayPolicy: true });
+
+    await expect(runner.run(clickStep(), 0)).resolves.toMatchObject({
+      status: "failed",
+      failure: { code: "ACTIVITY_BEFORE_MISMATCH" }
+    });
+    expect(adb.currentActivity).not.toHaveBeenCalled();
+    expect(adb.tap).not.toHaveBeenCalled();
+  });
+
+  it("sandwiches generated target Layout capture before click mutation", async () => {
+    const adb = adbPort();
+    vi.mocked(adb.foregroundComponent)
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: checkpoint.before
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: checkpoint.before
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.foreign.app",
+        activity: checkpoint.before
+      });
+    const { runner } = fixture({ adb, generatedReplayPolicy: true });
+
+    await expect(runner.run(clickStep(), 0)).resolves.toMatchObject({
+      status: "failed",
+      failure: { code: "ACTIVITY_BEFORE_MISMATCH" }
+    });
+    expect(adb.tap).not.toHaveBeenCalled();
+  });
+
+  it("detects generated package escape after click and idle", async () => {
+    const adb = adbPort();
+    vi.mocked(adb.foregroundComponent)
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: checkpoint.before
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: checkpoint.before
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: checkpoint.before
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: checkpoint.before
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.foreign.app",
+        activity: checkpoint.after
+      });
+    const { runner } = fixture({ adb, generatedReplayPolicy: true });
+
+    await expect(runner.run(clickStep(), 0)).resolves.toMatchObject({
+      status: "failed",
+      failure: { code: "ACTIVITY_AFTER_MISMATCH" }
+    });
+    expect(adb.tap).toHaveBeenCalledOnce();
+  });
+
+  it("blocks generated scroll when live container capability drifts", async () => {
+    const adb = mainActivityAdb();
+    vi.mocked(adb.foregroundComponent).mockResolvedValue({
+      packageName: "com.example.app",
+      activity: "com.example.app.MainActivity"
+    });
+    const cli = scrollCli("absent");
+    vi.mocked(cli.layout).mockResolvedValue([{
+      id: "message_list",
+      resourceId: "message_list",
+      scrollable: false,
+      enabled: true,
+      bounds: { left: 0, top: 0, right: 100, bottom: 400 },
+      children: []
+    }]);
+    const { runner } = fixture({
+      adb,
+      androidCli: cli,
+      generatedReplayPolicy: true
+    });
+
+    await expect(runner.run(scrollStep, 0)).resolves.toMatchObject({
+      status: "failed",
+      failure: { code: "ACTION_FAILED" }
+    });
+    expect(adb.swipe).not.toHaveBeenCalled();
   });
 });

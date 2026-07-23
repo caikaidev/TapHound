@@ -37,6 +37,11 @@ export class GenerationSessionStoreError extends Error {
   }
 }
 
+export interface GenerationEvidenceFile {
+  path: string;
+  bytes: Buffer;
+}
+
 export interface GenerationSessionStore {
   create: (session: GenerationSession) => Promise<void>;
   read: (id: string) => Promise<GenerationSession>;
@@ -108,5 +113,6 @@ export interface GenerationSessionStore {
     produce: (temporaryPath: string) => Promise<void>
   ) => Promise<void>;
   readEvidence: (id: string, relativePath: string) => Promise<Buffer>;
+  listEvidence: (id: string) => Promise<readonly GenerationEvidenceFile[]>;
   publish: (id: string) => Promise<string>;
 }

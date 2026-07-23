@@ -225,19 +225,18 @@ function sameJson(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function expectedLocatorMatch(
+function locatorMatchIsEligible(
+  matchedBy: "resourceId" | "text" | "contentDescription" | undefined,
   step: Journey["steps"][number]
-): "resourceId" | "text" | "contentDescription" | undefined {
+): boolean {
   if (
     step.action !== "click"
     && step.action !== "longClick"
     && step.action !== "swipe"
   ) {
-    return undefined;
+    return matchedBy === undefined;
   }
-  if (step.locator.resourceId !== undefined) return "resourceId";
-  if (step.locator.text !== undefined) return "text";
-  return "contentDescription";
+  return matchedBy !== undefined && step.locator[matchedBy] !== undefined;
 }
 
 function failure(
@@ -382,6 +381,7 @@ export class GenerationFinalizer {
           deviceSerial: input.deviceSerial,
           toolVersions: input.toolVersions,
           requireFocusedInput: true,
+          generatedReplayPolicy: true,
           ...(input.signal === undefined ? {} : { signal: input.signal })
         } satisfies VerifyInput);
         replayed = true;
@@ -779,7 +779,9 @@ export class GenerationFinalizer {
     for (const [index, candidate] of journey.steps.entries()) {
       const step = report.steps[index];
       const expectationType = candidate.expect?.type;
-      const locatorMatch = expectedLocatorMatch(candidate);
+      const hasLocator = candidate.action === "click"
+        || candidate.action === "longClick"
+        || candidate.action === "swipe";
       const isScrollTo = candidate.action === "scrollTo";
       if (
         step === undefined
@@ -803,13 +805,13 @@ export class GenerationFinalizer {
               )
         )
         || (
-          locatorMatch === undefined
+          !hasLocator
             ? step.locator !== undefined
             : (
             step.locator === undefined
             || step.locator.status !== "found"
             || step.locator.fallbackUsed
-            || step.locator.matchedBy !== locatorMatch
+            || !locatorMatchIsEligible(step.locator.matchedBy, candidate)
           )
         )
         || step.locator?.fallbackUsed === true

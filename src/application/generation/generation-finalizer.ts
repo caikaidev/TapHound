@@ -31,8 +31,9 @@ import {
   type TapHoundConfig
 } from "../../domain/config.js";
 import type { AdbPort } from "../../ports/adb.js";
-import type {
-  GenerationSessionStore
+import {
+  GenerationSessionStoreError,
+  type GenerationSessionStore
 } from "../../ports/generation-session-store.js";
 import type {
   ContextValidator
@@ -313,7 +314,17 @@ export class GenerationFinalizer {
             | undefined;
           try {
             reconciled = session.verification.status === "running"
-              ? await this.reconcilePassedVerification(session, expected)
+              ? await this.reconcilePassedVerification(
+                  session,
+                  expected,
+                  () => this.revalidate(
+                    input,
+                    config,
+                    context,
+                    project,
+                    session
+                  )
+                )
               : undefined;
           } catch (error) {
             await this.persistFailedVerification(session, error);
@@ -415,7 +426,17 @@ export class GenerationFinalizer {
         | { session: GenerationSession; report: TapHoundReport }
         | undefined;
       try {
-        reconciled = await this.reconcilePassedVerification(session, expected);
+        reconciled = await this.reconcilePassedVerification(
+          session,
+          expected,
+          () => this.revalidate(
+            input,
+            config,
+            context,
+            project,
+            session
+          )
+        );
       } catch (error) {
         await this.persistFailedVerification(session, error);
         throw failure(
@@ -835,18 +856,10 @@ export class GenerationFinalizer {
     expected: ExpectedVerification
   ): Promise<GenerationSession> {
     if (running.verification.status !== "running") {
-      const reconciled = await this.reconcilePassedVerification(
-        running,
-        expected
-      );
-      if (reconciled !== undefined) {
-        return reconciled.session;
-      }
       throw failure(
-        "FINALIZATION_IN_PROGRESS",
+        "RECOVERY_REQUIRED",
         "verification",
-        "Another finalizer owns verification",
-        true
+        "Verification cannot pass without exact running-attempt ownership"
       );
     }
     const reportBytes = serializeJson(report);
@@ -899,7 +912,8 @@ export class GenerationFinalizer {
 
   private async reconcilePassedVerification(
     running: GenerationSession,
-    expected: ExpectedVerification
+    expected: ExpectedVerification,
+    revalidateCurrent: () => Promise<void>
   ): Promise<{ session: GenerationSession; report: TapHoundReport } | undefined> {
     if (running.verification.status !== "running") {
       return undefined;
@@ -910,8 +924,20 @@ export class GenerationFinalizer {
         running.id,
         GENERATION_BUNDLE_PATHS.verificationReceipt
       );
-    } catch {
-      return undefined;
+    } catch (error) {
+      if (
+        error instanceof GenerationSessionStoreError
+        && error.code === "EVIDENCE_NOT_FOUND"
+      ) {
+        return undefined;
+      }
+      throw failure(
+        "VERIFICATION_FAILED",
+        "verification",
+        "Immutable verification receipt cannot be safely read",
+        false,
+        error
+      );
     }
     let receipt: VerificationReceipt;
     let reportBytes: Buffer;
@@ -971,6 +997,7 @@ export class GenerationFinalizer {
             error
           );
     }
+    await revalidateCurrent();
     return {
       session: await this.persistPassedVerification(running, report, expected),
       report
@@ -984,7 +1011,12 @@ export class GenerationFinalizer {
     const latest = GenerationSessionSchema.parse(
       await this.dependencies.store.read(running.id)
     );
-    if (latest.verification.status !== "running") {
+    if (
+      running.verification.status !== "running"
+      || latest.verification.status !== "running"
+      || latest.revision !== running.revision
+      || latest.verification.attemptId !== running.verification.attemptId
+    ) {
       return;
     }
     const failed = GenerationSessionSchema.parse({

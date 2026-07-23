@@ -928,6 +928,17 @@ async function fileIdentity(path: string): Promise<FileIdentity> {
   return { dev: stats.dev, ino: stats.ino };
 }
 
+function evidenceNotFound(
+  relativePath: string,
+  cause: unknown
+): GenerationSessionStoreError {
+  return new GenerationSessionStoreError(
+    "EVIDENCE_NOT_FOUND",
+    `Generation evidence does not exist: ${relativePath}`,
+    { cause }
+  );
+}
+
 async function readStateFromDirectory(
   directory: string,
   afterOpen?: () => Promise<void> | void,
@@ -1955,17 +1966,33 @@ implements GenerationSessionStore {
       const directories: DirectoryEvidence[] = [rootEvidence];
       for (const segment of segments.slice(0, -1)) {
         current = join(current, segment);
-        const evidence = await captureDirectoryEvidence(current);
+        let evidence: DirectoryEvidence;
+        try {
+          evidence = await captureDirectoryEvidence(current);
+        } catch (error) {
+          if (isNodeError(error) && error.code === "ENOENT") {
+            throw evidenceNotFound(relativePath, error);
+          }
+          throw error;
+        }
         assertContained(rootEvidence.canonicalPath, evidence.canonicalPath);
         directories.push(evidence);
       }
       const path = join(current, segments.at(-1) as string);
       assertContained(directory, path);
       await verifyDirectoryEvidence(rootEvidence.canonicalPath, directories);
-      const handle = await open(
-        path,
-        constants.O_RDONLY | constants.O_NOFOLLOW
-      );
+      let handle: Awaited<ReturnType<typeof open>>;
+      try {
+        handle = await open(
+          path,
+          constants.O_RDONLY | constants.O_NOFOLLOW
+        );
+      } catch (error) {
+        if (isNodeError(error) && error.code === "ENOENT") {
+          throw evidenceNotFound(relativePath, error);
+        }
+        throw error;
+      }
       try {
         const stats = await handle.stat({ bigint: true });
         if (!stats.isFile()) {

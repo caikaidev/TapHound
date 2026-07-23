@@ -1788,6 +1788,38 @@ describe("FileSystemGenerationSessionStore", () => {
     await expect(readdir(outside)).resolves.toEqual([]);
   });
 
+  it("types only a genuinely absent evidence file as not found", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(validSession());
+
+    await expectStoreError(
+      store.readEvidence("generation-1", "verification/receipt.json"),
+      "EVIDENCE_NOT_FOUND"
+    );
+  });
+
+  it("does not type a substituted evidence parent as not found", async () => {
+    const root = await temporaryRoot();
+    const outside = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(validSession());
+    const workDirectory = join(
+      root,
+      ".taphound",
+      "generations",
+      ".generation-1.work"
+    );
+    await import("node:fs/promises").then(async ({ symlink }) => {
+      await symlink(outside, join(workDirectory, "verification"));
+    });
+
+    await expectStoreError(
+      store.readEvidence("generation-1", "verification/receipt.json"),
+      "INVALID_EVIDENCE_PATH"
+    );
+  });
+
   it("publishes only a completed, successfully published session", async () => {
     const root = await temporaryRoot();
     const store = new FileSystemGenerationSessionStore(root);

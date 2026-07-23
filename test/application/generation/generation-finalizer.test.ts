@@ -5,6 +5,7 @@ import {
   readFile,
   readdir,
   realpath,
+  rename,
   rm,
   symlink,
   writeFile
@@ -43,6 +44,9 @@ import type { TapHoundConfig } from "../../../src/domain/config.js";
 import type {
   GenerationSession
 } from "../../../src/domain/generation.js";
+import {
+  GenerationSessionStoreError
+} from "../../../src/ports/generation-session-store.js";
 import type {
   ProjectContext
 } from "../../../src/domain/project-context.js";
@@ -70,6 +74,7 @@ import { commandResult } from "../../fakes/process-runner.js";
 
 const roots: string[] = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(roots.splice(0).map(
     (root) => rm(root, { recursive: true, force: true })
   ));
@@ -349,6 +354,46 @@ function input(root: string): {
   };
 }
 
+async function writeCrashRecoveryEvidence(
+  test: FinalizerFixture
+): Promise<void> {
+  const running = await test.store.beginVerification(
+    "generation-1",
+    0,
+    "verification-attempt"
+  );
+  const verificationReport = report(test.canonicalRoot);
+  const reportBytes = `${JSON.stringify(verificationReport, null, 2)}\n`;
+  await test.store.writeTextEvidence(
+    "generation-1",
+    "verification/report.json",
+    reportBytes
+  );
+  await test.store.writeTextEvidence(
+    "generation-1",
+    "verification/receipt.json",
+    `${JSON.stringify({
+      version: 1,
+      generationId: "generation-1",
+      attemptId: "verification-attempt",
+      journey: verificationReport.journey,
+      project: {
+        root: test.canonicalRoot,
+        packageName: "com.example.app",
+        launchActivity: "com.example.app.MainActivity"
+      },
+      deviceSerial: "emulator-5554",
+      bindings: running.bindings,
+      tools: { adb: "1" },
+      report: {
+        path: "verification/report.json",
+        sha256: sha256(reportBytes),
+        runId: verificationReport.runId
+      }
+    }, null, 2)}\n`
+  );
+}
+
 describe("GenerationFinalizer", () => {
   it("replays exactly once and publishes a verified immutable bundle", async () => {
     const test = await fixture();
@@ -468,6 +513,160 @@ describe("GenerationFinalizer", () => {
     release?.();
     await expect(first).resolves.toMatchObject({ status: "verified" });
     expect(test.verify).toHaveBeenCalledOnce();
+  });
+
+  it("revalidates current manifest sources before recovering a crash receipt", async () => {
+    const test = await fixture();
+    const manifestPath = join(
+      test.root,
+      "app/src/main/AndroidManifest.xml"
+    );
+    await mkdir(join(test.root, "app/src/main"), { recursive: true });
+    await writeFile(manifestPath, "original", "utf8");
+    test.validateContext.mockImplementation(async () => (
+      await readFile(manifestPath, "utf8") === "original"
+        ? { status: "valid" as const }
+        : {
+            status: "stale" as const,
+            reason: {
+              code: "EVIDENCE_HASH_MISMATCH" as const,
+              message: "manifest source changed"
+            }
+          }
+    ));
+    await writeCrashRecoveryEvidence(test);
+    await writeFile(manifestPath, "changed after replay crash", "utf8");
+
+    await expect(test.finalize.finalize(input(test.root))).rejects.toMatchObject({
+      code: "VERIFICATION_FAILED"
+    });
+    await expect(test.store.read("generation-1")).resolves.toMatchObject({
+      verification: {
+        status: "failed",
+        failure: { code: "CONTEXT_STALE" }
+      }
+    });
+    expect(test.verify).not.toHaveBeenCalled();
+    expect(test.validateContext).toHaveBeenCalledOnce();
+  });
+
+  it("leaves a running attempt in progress when its receipt is truly absent", async () => {
+    const test = await fixture();
+    await test.store.beginVerification(
+      "generation-1",
+      0,
+      "verification-attempt"
+    );
+
+    await expect(test.finalize.finalize(input(test.root))).rejects.toMatchObject({
+      code: "FINALIZATION_IN_PROGRESS"
+    });
+    await expect(test.store.read("generation-1")).resolves.toMatchObject({
+      verification: { status: "running" }
+    });
+    expect(test.verify).not.toHaveBeenCalled();
+  });
+
+  it("durably fails a running attempt whose receipt parent is substituted", async () => {
+    const test = await fixture();
+    await writeCrashRecoveryEvidence(test);
+    const workRoot = join(
+      test.root,
+      ".taphound/generations/.generation-1.work"
+    );
+    const outside = await mkdtemp(join(tmpdir(), "taphound-receipt-outside-"));
+    roots.push(outside);
+    await rename(
+      join(workRoot, "verification"),
+      join(workRoot, "verification-moved")
+    );
+    await symlink(outside, join(workRoot, "verification"));
+
+    await expect(test.finalize.finalize(input(test.root))).rejects.toMatchObject({
+      code: "VERIFICATION_FAILED"
+    });
+    await expect(test.store.read("generation-1")).resolves.toMatchObject({
+      verification: { status: "failed" }
+    });
+    expect(test.verify).not.toHaveBeenCalled();
+  });
+
+  it("durably fails a running attempt with malformed receipt JSON", async () => {
+    const test = await fixture();
+    await test.store.beginVerification(
+      "generation-1",
+      0,
+      "verification-attempt"
+    );
+    await test.store.writeTextEvidence(
+      "generation-1",
+      "verification/receipt.json",
+      "{not-json"
+    );
+
+    await expect(test.finalize.finalize(input(test.root))).rejects.toMatchObject({
+      code: "VERIFICATION_FAILED"
+    });
+    await expect(test.store.read("generation-1")).resolves.toMatchObject({
+      verification: { status: "failed" }
+    });
+  });
+
+  it("durably fails a running attempt on non-missing receipt I/O errors", async () => {
+    const test = await fixture();
+    await test.store.beginVerification(
+      "generation-1",
+      0,
+      "verification-attempt"
+    );
+    vi.spyOn(test.store, "readEvidence").mockRejectedValueOnce(
+      new GenerationSessionStoreError(
+        "IO_ERROR",
+        "permission denied while reading receipt"
+      )
+    );
+
+    await expect(test.finalize.finalize(input(test.root))).rejects.toMatchObject({
+      code: "VERIFICATION_FAILED"
+    });
+    await expect(test.store.read("generation-1")).resolves.toMatchObject({
+      verification: { status: "failed" }
+    });
+    expect(test.verify).not.toHaveBeenCalled();
+  });
+
+  it("does not fail a different running attempt during recovery", async () => {
+    const test = await fixture();
+    const running = await test.store.beginVerification(
+      "generation-1",
+      0,
+      "verification-attempt"
+    );
+    vi.spyOn(test.store, "read")
+      .mockResolvedValueOnce(running)
+      .mockResolvedValueOnce({
+        ...running,
+        verification: {
+          status: "running",
+          attemptId: "replacement-attempt"
+        }
+      });
+    vi.spyOn(test.store, "readEvidence").mockRejectedValueOnce(
+      new GenerationSessionStoreError(
+        "IO_ERROR",
+        "permission denied while reading receipt"
+      )
+    );
+
+    await expect(test.finalize.finalize(input(test.root))).rejects.toMatchObject({
+      code: "VERIFICATION_FAILED"
+    });
+    await expect(test.store.read("generation-1")).resolves.toMatchObject({
+      verification: {
+        status: "running",
+        attemptId: "verification-attempt"
+      }
+    });
   });
 
   it.each([

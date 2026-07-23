@@ -80,6 +80,7 @@ interface Harness {
   request: Mock<() => Promise<ConfirmationRequestResult>>;
   execute: Mock;
   confirmStored: Mock;
+  findPendingManual: Mock;
   requestManual: Mock;
   observe: Mock;
   finalize: Mock;
@@ -113,6 +114,7 @@ function harness(signal?: AbortSignal): Harness {
     status: "approved" as const,
     proposal
   }));
+  const findPendingManual = vi.fn(() => Promise.resolve(null));
   const observe = vi.fn(() => Promise.resolve({
     binding: proposal.binding,
     snapshot,
@@ -166,7 +168,12 @@ function harness(signal?: AbortSignal): Harness {
     generationStarter: { start: vi.fn() },
     runtimeObserver: { observe: vi.fn() },
     generationRuntime: vi.fn(() => ({
-      confirmation: { request, requestManual, confirmStored },
+      confirmation: {
+        request,
+        requestManual,
+        confirmStored,
+        findPendingManual
+      },
       executor: { execute },
       observer: { observe },
       finalizer: { finalize },
@@ -192,6 +199,7 @@ function harness(signal?: AbortSignal): Harness {
     request,
     execute,
     confirmStored,
+    findPendingManual,
     requestManual,
     observe,
     finalize
@@ -439,6 +447,45 @@ describe("generation JSON process protocol", () => {
     expect(test.exitCodes).toEqual([0]);
   });
 
+  it("surfaces a recovered planner challenge without executing an action", async () => {
+    const test = harness();
+    test.request.mockResolvedValueOnce({
+      status: "confirmationRequired",
+      challenge: {
+        challengeId: "lost-response",
+        stepIndex: 0,
+        proposalHash: "a".repeat(64),
+        snapshotHash: "b".repeat(64),
+        evidenceHash: "e".repeat(64),
+        actionSummary: "Wait",
+        expiresAt: "2026-07-23T00:05:00.000Z",
+        status: "pending"
+      }
+    });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "step",
+      "--project", "/project",
+      "--input", "input.json",
+      "--session", "generation-1",
+      "--json"
+    ]);
+
+    expect(test.request).toHaveBeenCalledWith({
+      generationId: "generation-1",
+      proposal,
+      snapshot,
+      source: "planner"
+    });
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "confirmationRequired",
+      exitCode: 0,
+      challenge: { challengeId: "lost-response" }
+    });
+    expect(test.execute).not.toHaveBeenCalled();
+    expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
+  });
+
   it.each([
     ["SNAPSHOT_STALE" as const, "stale snapshot"],
     ["ACTION_FORBIDDEN" as const, "forbidden action"],
@@ -621,6 +668,100 @@ describe("generation JSON process protocol", () => {
       failure: { code: "RECOVERY_REQUIRED" }
     });
     expect(test.exitCodes).toEqual([1]);
+    expect(test.execute).not.toHaveBeenCalled();
+  });
+
+  it("maps manual resolve-and-abort to one exit-1 JSON result", async () => {
+    const controller = new AbortController();
+    const test = harness(controller.signal);
+    test.requestManual.mockImplementationOnce(() => {
+      controller.abort();
+      return Promise.reject(new GenerationPromptCancelledError());
+    });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "manual",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--action", "wait",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "error",
+      exitCode: 1,
+      failure: { code: "RECOVERY_REQUIRED" }
+    });
+    expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
+    expect(test.exitCodes).toEqual([1]);
+    expect(test.execute).not.toHaveBeenCalled();
+  });
+
+  it("returns an existing manual challenge before observe or prompt", async () => {
+    const test = harness();
+    test.findPendingManual.mockResolvedValueOnce({
+      status: "confirmationRequired",
+      challenge: {
+        challengeId: "manual-lost-response",
+        stepIndex: 0,
+        proposalHash: "a".repeat(64),
+        snapshotHash: "b".repeat(64),
+        evidenceHash: "e".repeat(64),
+        actionSummary: "Wait",
+        expiresAt: "2026-07-23T00:05:00.000Z",
+        status: "pending"
+      }
+    });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "manual",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--action", "wait",
+      "--json"
+    ]);
+
+    expect(test.findPendingManual).toHaveBeenCalledWith({
+      generationId: "generation-1",
+      action: "wait"
+    });
+    expect(test.observe).not.toHaveBeenCalled();
+    expect(test.requestManual).not.toHaveBeenCalled();
+    expect(test.execute).not.toHaveBeenCalled();
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "confirmationRequired",
+      exitCode: 0,
+      challenge: { challengeId: "manual-lost-response" }
+    });
+  });
+
+  it("rejects mismatched manual challenge discovery before side effects", async () => {
+    const test = harness();
+    test.findPendingManual.mockRejectedValueOnce(
+      new GenerationOperationError(
+        "RISK_CONFIRMATION_REQUIRED",
+        "Pending manual confirmation does not match the requested action"
+      )
+    );
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "manual",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--action", "wait",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toEqual({
+      status: "error",
+      exitCode: 1,
+      failure: {
+        code: "RISK_CONFIRMATION_REQUIRED",
+        message: "Pending manual confirmation does not match the requested action"
+      }
+    });
+    expect(test.observe).not.toHaveBeenCalled();
+    expect(test.requestManual).not.toHaveBeenCalled();
     expect(test.execute).not.toHaveBeenCalled();
   });
 

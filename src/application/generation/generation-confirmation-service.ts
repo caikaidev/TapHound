@@ -68,12 +68,19 @@ export interface ManualConfirmationRequestInput {
   signal?: AbortSignal | undefined;
 }
 
+export interface PendingManualConfirmationInput {
+  generationId: string;
+  action: ManualProposalInput["action"];
+}
+
+export interface ConfirmationRequiredResult {
+  status: "confirmationRequired";
+  challenge: PendingConfirmation;
+}
+
 export type ConfirmationRequestResult =
   | { status: "approved"; proposal: ProposedStep }
-  | {
-    status: "confirmationRequired";
-    challenge: PendingConfirmation;
-  };
+  | ConfirmationRequiredResult;
 
 export interface StoredConfirmationApproveResult {
   status: "approved";
@@ -151,10 +158,35 @@ export class GenerationConfirmationService {
     const session = GenerationSessionSchema.parse(
       await this.dependencies.store.read(input.generationId)
     );
+    const submittedEvidence = GenerationConfirmationEvidenceSchema.parse({
+      version: 1,
+      proposal: input.proposal,
+      snapshot: input.snapshot,
+      source: input.source ?? "planner"
+    });
+    if (
+      session.pendingConfirmation !== null
+      && session.pendingConfirmation.status === "pending"
+    ) {
+      const storedEvidence = await this.readStoredEvidence({
+        generationId: session.id,
+        challengeId: session.pendingConfirmation.challengeId
+      });
+      if (JSON.stringify(storedEvidence) !== JSON.stringify(submittedEvidence)) {
+        throw bindingFailure(
+          "Pending generation confirmation does not match submitted evidence"
+        );
+      }
+      const challenge = this.requireExactPendingChallenge(
+        session,
+        storedEvidence
+      );
+      return { status: "confirmationRequired", challenge };
+    }
     const proposal = this.validator.validate({
       session,
-      snapshot: input.snapshot,
-      proposal: input.proposal
+      snapshot: submittedEvidence.snapshot,
+      proposal: submittedEvidence.proposal
     });
     const risk = this.riskEvaluator.evaluate(
       proposal.action,
@@ -176,8 +208,8 @@ export class GenerationConfirmationService {
     const evidence = GenerationConfirmationEvidenceSchema.parse({
       version: 1,
       proposal,
-      snapshot: input.snapshot,
-      source: input.source ?? "planner"
+      snapshot: submittedEvidence.snapshot,
+      source: submittedEvidence.source
     });
     const challenge = {
       challengeId: this.dependencies.generateChallengeId(),
@@ -217,12 +249,41 @@ export class GenerationConfirmationService {
       input.manual,
       input.signal
     );
+    if (input.signal?.aborted === true) {
+      throw new GenerationPromptCancelledError();
+    }
     return this.request({
       generationId: input.generationId,
       proposal,
       snapshot: input.snapshot,
       source: "manualOverride"
     });
+  };
+
+  public readonly findPendingManual = async (
+    input: PendingManualConfirmationInput
+  ): Promise<ConfirmationRequiredResult | null> => {
+    const session = GenerationSessionSchema.parse(
+      await this.dependencies.store.read(input.generationId)
+    );
+    const pending = session.pendingConfirmation;
+    if (pending === null || pending.status !== "pending") {
+      return null;
+    }
+    const evidence = await this.readStoredEvidence({
+      generationId: session.id,
+      challengeId: pending.challengeId
+    });
+    if (
+      evidence.source !== "manualOverride"
+      || evidence.proposal.action !== input.action
+    ) {
+      throw bindingFailure(
+        "Pending manual confirmation does not match the requested action"
+      );
+    }
+    const challenge = this.requireExactPendingChallenge(session, evidence);
+    return { status: "confirmationRequired", challenge };
   };
 
   public readonly confirmStored = async (
@@ -450,6 +511,60 @@ export class GenerationConfirmationService {
   ): Promise<never> {
     await this.clearExactChallenge(generationId, token);
     throw new GenerationPromptCancelledError();
+  }
+
+  private requireExactPendingChallenge(
+    session: GenerationSession,
+    evidence: GenerationConfirmationEvidence
+  ): PendingConfirmation {
+    const challenge = session.pendingConfirmation;
+    const proposal = evidence.proposal;
+    const snapshot = evidence.snapshot;
+    if (
+      challenge === null
+      || challenge.status !== "pending"
+      || session.revision !== proposal.binding.baseRevision + 1
+    ) {
+      throw bindingFailure(
+        "Pending generation confirmation is no longer authoritative"
+      );
+    }
+    try {
+      const baseSession = GenerationSessionSchema.parse({
+        ...session,
+        revision: proposal.binding.baseRevision,
+        pendingConfirmation: null
+      });
+      this.validator.validate({
+        session: baseSession,
+        snapshot,
+        proposal
+      });
+    } catch {
+      throw bindingFailure(
+        "Pending generation confirmation is no longer authoritative"
+      );
+    }
+    const risk = this.riskEvaluator.evaluate(
+      proposal.action,
+      session.target.interactionPolicy
+    );
+    if (
+      risk.effectiveRisk !== "confirmationRequired"
+      || challenge.stepIndex !== session.candidateSteps.length
+      || challenge.proposalHash !== hashProposedStep(proposal)
+      || challenge.snapshotHash !== hashRuntimeSnapshot(snapshot)
+      || challenge.snapshotHash !== proposal.binding.snapshotHash
+      || challenge.evidenceHash !== hashGenerationConfirmationEvidence(evidence)
+      || challenge.actionSummary !== summarizeProposedStep(proposal)
+      || this.dependencies.now().getTime()
+        >= new Date(challenge.expiresAt).getTime()
+    ) {
+      throw bindingFailure(
+        "Pending generation confirmation does not match stored evidence"
+      );
+    }
+    return challenge;
   }
 
   private async updateConfirmationReconciled(

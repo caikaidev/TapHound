@@ -63,7 +63,7 @@ export interface TextOutput {
 export interface GenerationCliRuntime {
   confirmation: Pick<
     GenerationConfirmationService,
-    "request" | "requestManual" | "confirmStored"
+    "request" | "requestManual" | "confirmStored" | "findPendingManual"
   >;
   executor: Pick<GenerationStepExecutor, "execute">;
   observer: Pick<RuntimeObserver, "observe">;

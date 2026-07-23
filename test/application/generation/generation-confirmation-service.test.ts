@@ -336,6 +336,87 @@ describe("GenerationConfirmationService", () => {
     expect(test.confirm).not.toHaveBeenCalled();
   });
 
+  it("discovers an exact pending challenge after its install response was lost", async () => {
+    const runtime = snapshot();
+    const test = harness();
+    const storeError = new GenerationSessionStoreError(
+      "IO_ERROR",
+      "directory sync failed after state rename"
+    );
+    test.updateConfirmation.mockImplementationOnce((
+      _id,
+      expectedRevision,
+      next
+    ) => {
+      expect(test.current().revision).toBe(expectedRevision);
+      test.mutate(() => next);
+      test.read.mockRejectedValueOnce(
+        new Error("authoritative reconciliation read failed")
+      );
+      return Promise.reject(storeError);
+    });
+
+    await expect(test.service.request({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime,
+      source: "planner"
+    })).rejects.toBe(storeError);
+    const installed = test.current().pendingConfirmation;
+    expect(installed).not.toBeNull();
+
+    const retry = await test.service.request({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(retry).toEqual({
+      status: "confirmationRequired",
+      challenge: installed
+    });
+    expect(test.evidence.size).toBe(1);
+    expect(test.updateConfirmation).toHaveBeenCalledTimes(1);
+    expect(test.confirm).not.toHaveBeenCalled();
+  });
+
+  it("does not disclose a pending challenge to a different proposal or source", async () => {
+    const runtime = snapshot();
+    const test = harness();
+    await test.service.request({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime,
+      source: "planner"
+    });
+    const differentProposal: ProposedStep = {
+      ...proposal(runtime),
+      action: "wait"
+    };
+
+    await expect(test.service.request({
+      generationId: "generation-1",
+      proposal: differentProposal,
+      snapshot: runtime,
+      source: "planner"
+    })).rejects.toMatchObject({
+      code: "RISK_CONFIRMATION_REQUIRED"
+    });
+    await expect(test.service.request({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime,
+      source: "manualOverride"
+    })).rejects.toMatchObject({
+      code: "RISK_CONFIRMATION_REQUIRED"
+    });
+
+    expect(test.evidence.size).toBe(1);
+    expect(test.updateConfirmation).toHaveBeenCalledTimes(1);
+    expect(test.confirm).not.toHaveBeenCalled();
+  });
+
   it("confirms only through the local prompt and marks the challenge approved", async () => {
     const runtime = snapshot();
     const test = harness();
@@ -578,6 +659,33 @@ describe("GenerationConfirmationService", () => {
 
     await expect(manual).rejects.toThrow(/cancelled/i);
     expect(test.current()).toEqual(session(runtime));
+  });
+
+  it("cancels when manual proposal construction resolves while aborting", async () => {
+    const runtime = snapshot();
+    const test = harness();
+    const controller = new AbortController();
+    test.buildManualProposal.mockImplementationOnce(() => {
+      controller.abort();
+      return Promise.resolve(proposal(runtime));
+    });
+
+    await expect(test.service.requestManual({
+      generationId: "generation-1",
+      snapshot: runtime,
+      manual: {
+        action: "back",
+        binding: proposal(runtime).binding,
+        before: activity,
+        layout: runtime.layout
+      },
+      signal: controller.signal
+    })).rejects.toBeInstanceOf(GenerationPromptCancelledError);
+
+    expect(test.current()).toEqual(session(runtime));
+    expect(test.evidence.size).toBe(0);
+    expect(test.updateConfirmation).not.toHaveBeenCalled();
+    expect(test.confirm).not.toHaveBeenCalled();
   });
 
   it("rejects tampered provenance evidence before prompting", async () => {
@@ -849,6 +957,68 @@ describe("GenerationConfirmationService", () => {
       challengeId: "challenge-1",
       status: "pending"
     });
+  });
+
+  it("discovers an exact manual pending challenge before another prompt", async () => {
+    const runtime = snapshot();
+    const test = harness();
+    await test.service.request({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime,
+      source: "manualOverride"
+    });
+    const installed = test.current().pendingConfirmation;
+
+    const result = await test.service.findPendingManual({
+      generationId: "generation-1",
+      action: "back"
+    });
+
+    expect(result).toEqual({
+      status: "confirmationRequired",
+      challenge: installed
+    });
+    expect(test.evidence.size).toBe(1);
+    expect(test.updateConfirmation).toHaveBeenCalledTimes(1);
+    expect(test.buildManualProposal).not.toHaveBeenCalled();
+    expect(test.confirm).not.toHaveBeenCalled();
+  });
+
+  it("rejects manual discovery for a different action or source", async () => {
+    const runtime = snapshot();
+    const differentAction = harness();
+    await differentAction.service.request({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime,
+      source: "manualOverride"
+    });
+    await expect(differentAction.service.findPendingManual({
+      generationId: "generation-1",
+      action: "wait"
+    })).rejects.toMatchObject({
+      code: "RISK_CONFIRMATION_REQUIRED"
+    });
+
+    const planner = harness();
+    await planner.service.request({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime,
+      source: "planner"
+    });
+    await expect(planner.service.findPendingManual({
+      generationId: "generation-1",
+      action: "back"
+    })).rejects.toMatchObject({
+      code: "RISK_CONFIRMATION_REQUIRED"
+    });
+
+    expect(differentAction.evidence.size).toBe(1);
+    expect(planner.evidence.size).toBe(1);
+    expect(differentAction.buildManualProposal).not.toHaveBeenCalled();
+    expect(planner.buildManualProposal).not.toHaveBeenCalled();
   });
 
   it("routes manual proposals through the same validation and risk pipeline", async () => {

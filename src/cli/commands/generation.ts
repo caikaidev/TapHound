@@ -432,16 +432,10 @@ function createObserveCommand(dependencies: CliDependencies): Command {
           return;
         }
         if (
-          (
-            error instanceof GenerationOperationError
-            && error.code === "SNAPSHOT_STALE"
-          )
-          || (
-            error instanceof GenerationSessionStoreError
-            && (
-              error.code === "REVISION_CONFLICT"
-              || error.code === "INVALID_TRANSITION"
-            )
+          error instanceof GenerationSessionStoreError
+          && (
+            error.code === "REVISION_CONFLICT"
+            || error.code === "INVALID_TRANSITION"
           )
         ) {
           writeFailure(
@@ -563,6 +557,21 @@ function createManualCommand(dependencies: CliDependencies): Command {
       const action = ManualActionSchema.parse(options.action);
       const config = await loadConfig(dependencies, options);
       const runtime = requireRuntime(dependencies, options.project, config);
+      const existing = await runtime.confirmation.findPendingManual({
+        generationId,
+        action
+      });
+      if (existing !== null) {
+        const session = await runtime.readSession(generationId);
+        writeSuccess(dependencies, options, {
+          status: "confirmationRequired",
+          exitCode: 0,
+          generationId,
+          revision: session.revision,
+          challenge: existing.challenge
+        }, `Confirmation required: ${existing.challenge.challengeId}`);
+        return;
+      }
       const observation = await runtime.observer.observe({
         generationId,
         ...(dependencies.signal === undefined

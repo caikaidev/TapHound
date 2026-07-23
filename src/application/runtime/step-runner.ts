@@ -13,7 +13,10 @@ import { ActionExecutor, type ActionTarget } from "../interaction/action-executo
 import { FallbackResolver } from "../interaction/fallback-resolver.js";
 import { ScrollToExecutor } from "../interaction/scroll-to-executor.js";
 import { resolveLocator } from "../locator/locator-resolver.js";
-import { ExpectationEvaluator } from "../assertion/expectation-evaluator.js";
+import {
+  ExpectationEvaluator,
+  type ExpectationObservationInput
+} from "../assertion/expectation-evaluator.js";
 import { IdleWaiter, type IdleConfig } from "../wait/idle-waiter.js";
 import {
   hasExactlyOneEnabledFocusedElement
@@ -150,6 +153,82 @@ export class StepRunner {
   private currentExpectedActivity = "";
   private currentSignal: AbortSignal | undefined;
 
+  private async observeExpectedActivity(
+    expectedActivity: string,
+    expectedPid: number,
+    input: ExpectationObservationInput
+  ): Promise<
+    | { status: "observed"; activity: string }
+    | { status: "failed"; message: string }
+  > {
+    const deadline = this.options.clock.now() + input.timeoutMs;
+    const identity = (): ReturnType<StepRunner["identity"]> => ({
+      packageName: this.options.packageName,
+      deviceSerial: this.options.deviceSerial,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      timeoutMs: Math.max(1, deadline - this.options.clock.now())
+    });
+    const foreground = await this.options.adb.foregroundComponent(identity());
+    if (
+      foreground.packageName !== this.options.packageName
+      || foreground.activity !== expectedActivity
+    ) {
+      return {
+        status: "failed",
+        message: `Generated Expect foreground changed to ${
+          foreground.packageName
+        }/${foreground.activity}`
+      };
+    }
+    const pid = await this.options.adb.pid(identity());
+    if (pid !== expectedPid) {
+      return {
+        status: "failed",
+        message: `Generated Expect process changed from ${
+          String(expectedPid)
+        } to ${String(pid)}`
+      };
+    }
+    return { status: "observed", activity: foreground.activity };
+  }
+
+  private async observeExpectedLayout(
+    expectedActivity: string,
+    expectedPid: number,
+    input: ExpectationObservationInput
+  ): Promise<
+    | {
+      status: "observed";
+      layout: Awaited<ReturnType<AndroidCliPort["layout"]>>;
+    }
+    | { status: "failed"; message: string }
+  > {
+    const deadline = this.options.clock.now() + input.timeoutMs;
+    const observationInput = (): ExpectationObservationInput => ({
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      timeoutMs: Math.max(1, deadline - this.options.clock.now())
+    });
+    const before = await this.observeExpectedActivity(
+      expectedActivity,
+      expectedPid,
+      observationInput()
+    );
+    if (before.status === "failed") return before;
+    const layout = await this.options.androidCli.layout({
+      deviceSerial: this.options.deviceSerial,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      timeoutMs: observationInput().timeoutMs
+    });
+    const after = await this.observeExpectedActivity(
+      expectedActivity,
+      expectedPid,
+      observationInput()
+    );
+    return after.status === "failed"
+      ? after
+      : { status: "observed", layout };
+  }
+
   private async captureGeneratedLayout(
     signal?: AbortSignal
   ): Promise<readonly import("../../domain/layout.js").LayoutElement[]> {
@@ -270,6 +349,15 @@ export class StepRunner {
         "ACTIVITY_BEFORE_MISMATCH",
         `Expected Activity ${step.activity.before}, found ${before}`
       );
+    }
+    const generatedPid = this.options.generatedReplayPolicy === true
+      ? await this.options.adb.pid(identity)
+      : undefined;
+    if (
+      this.options.generatedReplayPolicy === true
+      && generatedPid === null
+    ) {
+      return fail("APP_CRASHED", "Generated replay process is not running");
     }
 
     let target: ActionTarget | undefined;
@@ -428,6 +516,13 @@ export class StepRunner {
     if (pid === null) {
       return fail("APP_CRASHED", "App process is no longer running");
     }
+    if (
+      generatedPid !== undefined
+      && generatedPid !== null
+      && pid !== generatedPid
+    ) {
+      return fail("APP_CRASHED", "Generated replay process identity changed");
+    }
 
     let after: string;
     try {
@@ -469,7 +564,25 @@ export class StepRunner {
           deviceSerial: this.options.deviceSerial,
           stepStartedAt: startedAt
         },
-        signal
+        signal,
+        generatedPid === undefined || generatedPid === null
+          ? {}
+          : {
+              activity: (input): ReturnType<
+                StepRunner["observeExpectedActivity"]
+              > => this.observeExpectedActivity(
+                step.activity.after,
+                generatedPid,
+                input
+              ),
+              layout: (input): ReturnType<
+                StepRunner["observeExpectedLayout"]
+              > => this.observeExpectedLayout(
+                step.activity.after,
+                generatedPid,
+                input
+              )
+            }
       );
       if (expectation.status === "cancelled") {
         report.expectation = {
@@ -489,6 +602,9 @@ export class StepRunner {
             code: expectation.code,
             message: expectation.message
           };
+      if (expectation.status === "failed") {
+        return fail(expectation.code, expectation.message);
+      }
       if (this.options.generatedReplayPolicy === true) {
         try {
           await this.assertGeneratedForeground(
@@ -496,12 +612,16 @@ export class StepRunner {
             "ACTIVITY_AFTER_MISMATCH",
             signal
           );
+          const guardedPid = await this.options.adb.pid(identity);
+          if (guardedPid !== generatedPid) {
+            return await fail(
+              "ACTIVITY_AFTER_MISMATCH",
+              "Generated replay process changed after Expect"
+            );
+          }
         } catch (error) {
           return fail("ACTIVITY_AFTER_MISMATCH", errorMessage(error));
         }
-      }
-      if (expectation.status === "failed") {
-        return fail(expectation.code, expectation.message);
       }
     }
 

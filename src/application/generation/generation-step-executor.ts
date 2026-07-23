@@ -27,7 +27,10 @@ import type { AdbPort } from "../../ports/adb.js";
 import type { AndroidCliPort } from "../../ports/android-cli.js";
 import type { Clock } from "../../ports/clock.js";
 import type { GenerationSessionStore } from "../../ports/generation-session-store.js";
-import { ExpectationEvaluator } from "../assertion/expectation-evaluator.js";
+import {
+  ExpectationEvaluator,
+  type ExpectationObservationInput
+} from "../assertion/expectation-evaluator.js";
 import { LogcatCollector } from "../collector/logcat-collector.js";
 import { ActionExecutor, type ActionTarget } from "../interaction/action-executor.js";
 import { ScrollToExecutor } from "../interaction/scroll-to-executor.js";
@@ -645,7 +648,59 @@ export class GenerationStepExecutor {
             packageName: session.target.packageName,
             deviceSerial: session.target.deviceSerial,
             stepStartedAt
-          }, input.signal);
+          }, input.signal, {
+            activity: async (
+              observation: ExpectationObservationInput
+            ): Promise<
+              | { status: "observed"; activity: string }
+              | { status: "failed"; message: string }
+            > => {
+              try {
+                await this.assertForegroundIdentity(
+                  session,
+                  authoritativePid,
+                  after.activity,
+                  observation.signal,
+                  observation.timeoutMs
+                );
+                return { status: "observed", activity: after.activity };
+              } catch (error) {
+                if (error instanceof StepCancelledError) throw error;
+                return {
+                  status: "failed",
+                  message: error instanceof Error
+                    ? error.message
+                    : "Generated Expect Activity observation failed"
+                };
+              }
+            },
+            layout: async (
+              observation: ExpectationObservationInput
+            ): Promise<
+              | { status: "observed"; layout: readonly LayoutElement[] }
+              | { status: "failed"; message: string }
+            > => {
+              try {
+                const guarded = await this.observeLive(
+                  session,
+                  authoritativePid,
+                  after.activity,
+                  observation.signal,
+                  undefined,
+                  observation.timeoutMs
+                );
+                return { status: "observed", layout: guarded.layout };
+              } catch (error) {
+                if (error instanceof StepCancelledError) throw error;
+                return {
+                  status: "failed",
+                  message: error instanceof Error
+                    ? error.message
+                    : "Generated Expect Layout observation failed"
+                };
+              }
+            }
+          });
           if (expectation.status === "cancelled") {
             outcome = {
               status: "cancelled",
@@ -816,22 +871,29 @@ export class GenerationStepExecutor {
     expectedPid: number,
     expectedActivity: string | undefined,
     signal?: AbortSignal,
-    authoritativeSnapshot?: RuntimeSnapshot
+    authoritativeSnapshot?: RuntimeSnapshot,
+    timeoutMs = this.dependencies.idle.timeoutMs
   ): Promise<LiveRuntime> {
-    const identity = {
+    const deadline = this.dependencies.clock.now() + timeoutMs;
+    const identity = (): {
+      packageName: string;
+      deviceSerial: string;
+      signal?: AbortSignal;
+      timeoutMs: number;
+    } => ({
       packageName: session.target.packageName,
       deviceSerial: session.target.deviceSerial,
       ...(signal === undefined ? {} : { signal }),
-      timeoutMs: this.dependencies.idle.timeoutMs
-    };
+      timeoutMs: Math.max(1, deadline - this.dependencies.clock.now())
+    });
     const foreground = await this.dependencies.adb.foregroundComponent(
-      identity
+      identity()
     );
     throwIfCancelled(signal);
     if (foreground.packageName !== session.target.packageName) {
       fail("PACKAGE_ESCAPE", "Foreground package escaped generation target");
     }
-    const pid = await this.dependencies.adb.pid(identity);
+    const pid = await this.dependencies.adb.pid(identity());
     throwIfCancelled(signal);
     if (pid === null || pid !== expectedPid) {
       fail("APP_CRASHED", "Generation process identity changed");
@@ -845,16 +907,16 @@ export class GenerationStepExecutor {
     const layout = await this.dependencies.androidCli.layout({
       deviceSerial: session.target.deviceSerial,
       ...(signal === undefined ? {} : { signal }),
-      timeoutMs: this.dependencies.idle.timeoutMs
+      timeoutMs: Math.max(1, deadline - this.dependencies.clock.now())
     });
     throwIfCancelled(signal);
     const confirmedForeground = await this.dependencies.adb
-      .foregroundComponent(identity);
+      .foregroundComponent(identity());
     throwIfCancelled(signal);
     if (confirmedForeground.packageName !== session.target.packageName) {
       fail("PACKAGE_ESCAPE", "Foreground package escaped generation target");
     }
-    const confirmedPid = await this.dependencies.adb.pid(identity);
+    const confirmedPid = await this.dependencies.adb.pid(identity());
     throwIfCancelled(signal);
     if (confirmedPid === null || confirmedPid !== expectedPid) {
       fail("APP_CRASHED", "Generation process identity changed");
@@ -895,16 +957,23 @@ export class GenerationStepExecutor {
     session: GenerationSession,
     expectedPid: number,
     expectedActivity: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    timeoutMs = this.dependencies.idle.timeoutMs
   ): Promise<void> {
-    const identity = {
+    const deadline = this.dependencies.clock.now() + timeoutMs;
+    const identity = (): {
+      packageName: string;
+      deviceSerial: string;
+      signal?: AbortSignal;
+      timeoutMs: number;
+    } => ({
       packageName: session.target.packageName,
       deviceSerial: session.target.deviceSerial,
       ...(signal === undefined ? {} : { signal }),
-      timeoutMs: this.dependencies.idle.timeoutMs
-    };
+      timeoutMs: Math.max(1, deadline - this.dependencies.clock.now())
+    });
     const foreground = await this.dependencies.adb.foregroundComponent(
-      identity
+      identity()
     );
     throwIfCancelled(signal);
     if (foreground.packageName !== session.target.packageName) {
@@ -913,7 +982,7 @@ export class GenerationStepExecutor {
     if (foreground.activity !== expectedActivity) {
       fail("SNAPSHOT_STALE", "Generation Activity changed before mutation");
     }
-    const pid = await this.dependencies.adb.pid(identity);
+    const pid = await this.dependencies.adb.pid(identity());
     throwIfCancelled(signal);
     if (pid === null || pid !== expectedPid) {
       fail("APP_CRASHED", "Generation process identity changed");

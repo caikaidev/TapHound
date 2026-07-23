@@ -2084,9 +2084,14 @@ describe("FileSystemGenerationSessionStore", () => {
     await expect(store.listEvidence("generation-1")).resolves.toEqual([
       {
         path: "evidence/a.json",
-        bytes: Buffer.from('{\n  "a": 1\n}\n')
+        contentBase64: Buffer.from('{\n  "a": 1\n}\n').toString("base64"),
+        byteLength: 13
       },
-      { path: "z-last.txt", bytes: Buffer.from("last") }
+      {
+        path: "z-last.txt",
+        contentBase64: Buffer.from("last").toString("base64"),
+        byteLength: 4
+      }
     ]);
   });
 
@@ -2111,7 +2116,7 @@ describe("FileSystemGenerationSessionStore", () => {
     let substitute = false;
     const store = new FileSystemGenerationSessionStore(root, {
       hooks: {
-        afterEvidenceOpen: async (path): Promise<void> => {
+        afterEvidenceRead: async (path): Promise<void> => {
           if (substitute && path === "evidence.json") {
             substitute = false;
             const evidencePath = join(activeDirectory(root), path);
@@ -2124,6 +2129,127 @@ describe("FileSystemGenerationSessionStore", () => {
     await store.create(validSession());
     await store.writeEvidence("generation-1", "evidence.json", { ok: true });
     substitute = true;
+
+    await expectStoreError(
+      store.listEvidence("generation-1"),
+      "INVALID_EVIDENCE_PATH"
+    );
+  });
+
+  it("rejects same-inode evidence mutation during snapshot read", async () => {
+    const root = await temporaryRoot();
+    let mutate = false;
+    const evidencePath = join(activeDirectory(root), "evidence.json");
+    const store = new FileSystemGenerationSessionStore(root, {
+      hooks: {
+        afterEvidenceOpen: async (path): Promise<void> => {
+          if (mutate && path === "evidence.json") {
+            mutate = false;
+            await writeFile(evidencePath, "x".repeat(17), "utf8");
+          }
+        }
+      }
+    });
+    await store.create(validSession());
+    await store.writeEvidence("generation-1", "evidence.json", { ok: true });
+    mutate = true;
+
+    await expectStoreError(
+      store.listEvidence("generation-1"),
+      "INVALID_EVIDENCE_PATH"
+    );
+  });
+
+  it("rejects a sibling added after the first evidence directory read", async () => {
+    const root = await temporaryRoot();
+    let addSibling = false;
+    const hook = async (path: string, phase: string): Promise<void> => {
+      if (addSibling && path === "" && phase === "beforeTraversal") {
+        addSibling = false;
+        await writeFile(
+          join(activeDirectory(root), "unlisted.json"),
+          "{}\n",
+          "utf8"
+        );
+      }
+    };
+    const store = new FileSystemGenerationSessionStore(root, {
+      hooks: { afterEvidenceDirectoryRead: hook }
+    });
+    await store.create(validSession());
+    await store.writeEvidence("generation-1", "evidence.json", { ok: true });
+    addSibling = true;
+
+    await expectStoreError(
+      store.listEvidence("generation-1"),
+      "INVALID_EVIDENCE_PATH"
+    );
+  });
+
+  it("rejects a sibling removed after the first evidence directory read", async () => {
+    const root = await temporaryRoot();
+    let removeSibling = false;
+    const hook = async (path: string, phase: string): Promise<void> => {
+      if (removeSibling && path === "" && phase === "beforeTraversal") {
+        removeSibling = false;
+        await unlink(join(activeDirectory(root), "removed.json"));
+      }
+    };
+    const store = new FileSystemGenerationSessionStore(root, {
+      hooks: { afterEvidenceDirectoryRead: hook }
+    });
+    await store.create(validSession());
+    await store.writeEvidence("generation-1", "evidence.json", { ok: true });
+    await store.writeEvidence("generation-1", "removed.json", { ok: true });
+    removeSibling = true;
+
+    await expectStoreError(
+      store.listEvidence("generation-1"),
+      "INVALID_EVIDENCE_PATH"
+    );
+  });
+
+  it("rejects an entry type swap after the first directory read", async () => {
+    const root = await temporaryRoot();
+    let swapType = false;
+    const hook = async (path: string, phase: string): Promise<void> => {
+      if (swapType && path === "" && phase === "beforeTraversal") {
+        swapType = false;
+        const evidencePath = join(activeDirectory(root), "evidence.json");
+        await unlink(evidencePath);
+        await mkdir(evidencePath);
+      }
+    };
+    const store = new FileSystemGenerationSessionStore(root, {
+      hooks: { afterEvidenceDirectoryRead: hook }
+    });
+    await store.create(validSession());
+    await store.writeEvidence("generation-1", "evidence.json", { ok: true });
+    swapType = true;
+
+    await expectStoreError(
+      store.listEvidence("generation-1"),
+      "INVALID_EVIDENCE_PATH"
+    );
+  });
+
+  it("rejects directory metadata churn even when names remain identical", async () => {
+    const root = await temporaryRoot();
+    let churnDirectory = false;
+    const hook = async (path: string, phase: string): Promise<void> => {
+      if (churnDirectory && path === "" && phase === "afterTraversal") {
+        churnDirectory = false;
+        const temporaryPath = join(activeDirectory(root), "transient");
+        await writeFile(temporaryPath, "temporary", "utf8");
+        await unlink(temporaryPath);
+      }
+    };
+    const store = new FileSystemGenerationSessionStore(root, {
+      hooks: { afterEvidenceDirectoryRead: hook }
+    });
+    await store.create(validSession());
+    await store.writeEvidence("generation-1", "evidence.json", { ok: true });
+    churnDirectory = true;
 
     await expectStoreError(
       store.listEvidence("generation-1"),

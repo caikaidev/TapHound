@@ -52,6 +52,111 @@ function logcatOptions(adb: AdbPort): LogcatOptions {
 }
 
 describe("ExpectationEvaluator", () => {
+  it("fails immediately when an injected Activity observation guard rejects", async () => {
+    const adb = adbPort();
+    vi.mocked(adb.currentActivity).mockResolvedValue(
+      "com.example.app.SearchActivity"
+    );
+    const clock = new FakeClock();
+    const evaluator = new ExpectationEvaluator(
+      adb,
+      androidCli(),
+      new LogcatCollector(adb, clock),
+      clock
+    );
+    await expect(evaluator.evaluate({
+      type: "activity",
+      value: "com.example.app.SearchActivity",
+      timeoutMs: 200
+    }, context, undefined, {
+      activity: () => Promise.resolve({
+        status: "failed",
+        message: "Foreground package escaped generated replay"
+      })
+    })).resolves.toMatchObject({
+      status: "failed",
+      code: "EXPECT_ACTIVITY_FAILED",
+      message: "Foreground package escaped generated replay",
+      durationMs: 0
+    });
+    expect(adb.currentActivity).not.toHaveBeenCalled();
+  });
+
+  it("fails on a guarded later Element poll without accepting raw Layout", async () => {
+    const adb = adbPort();
+    const cli = androidCli();
+    vi.mocked(cli.layout).mockResolvedValue([{
+      id: "target",
+      resourceId: "target",
+      enabled: true,
+      bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+      children: []
+    }]);
+    const clock = new FakeClock();
+    const evaluator = new ExpectationEvaluator(
+      adb,
+      cli,
+      new LogcatCollector(adb, clock),
+      clock,
+      100
+    );
+    const layoutObservation = vi.fn()
+      .mockResolvedValueOnce({
+        status: "observed",
+        layout: []
+      })
+      .mockResolvedValueOnce({
+        status: "failed",
+        message: "Generated replay PID changed during Layout"
+      });
+    await expect(evaluator.evaluate({
+      type: "element",
+      locator: { resourceId: "target" },
+      timeoutMs: 200
+    }, context, undefined, {
+      layout: layoutObservation
+    })).resolves.toMatchObject({
+      status: "failed",
+      code: "EXPECT_ELEMENT_FAILED",
+      message: "Generated replay PID changed during Layout",
+      durationMs: 100
+    });
+    expect(layoutObservation).toHaveBeenCalledTimes(2);
+    expect(layoutObservation).toHaveBeenNthCalledWith(1, { timeoutMs: 200 });
+    expect(layoutObservation).toHaveBeenNthCalledWith(2, { timeoutMs: 100 });
+    expect(cli.layout).not.toHaveBeenCalled();
+  });
+
+  it("does not pass when a guarded observation aborts during its command", async () => {
+    const adb = adbPort();
+    const clock = new FakeClock();
+    const evaluator = new ExpectationEvaluator(
+      adb,
+      androidCli(),
+      new LogcatCollector(adb, clock),
+      clock
+    );
+    const controller = new AbortController();
+
+    await expect(evaluator.evaluate({
+      type: "activity",
+      value: "com.example.app.SearchActivity",
+      timeoutMs: 200
+    }, context, controller.signal, {
+      activity: () => {
+        controller.abort();
+        return Promise.resolve({
+          status: "observed",
+          activity: "com.example.app.SearchActivity"
+        });
+      }
+    })).resolves.toMatchObject({
+      status: "cancelled",
+      type: "activity",
+      durationMs: 0
+    });
+  });
+
   it("polls until the expected Activity is resumed", async () => {
     const adb = adbPort();
     vi.mocked(adb.currentActivity)

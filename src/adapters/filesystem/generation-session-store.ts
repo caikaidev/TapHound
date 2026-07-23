@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { BigIntStats, Dirent } from "node:fs";
 import {
   constants,
   link,
@@ -50,6 +51,11 @@ export interface FileSystemGenerationSessionStoreHooks {
   beforeEvidenceInstall?: () => Promise<void> | void;
   afterEvidenceInstall?: () => Promise<void> | void;
   afterEvidenceOpen?: (path: string) => Promise<void> | void;
+  afterEvidenceRead?: (path: string) => Promise<void> | void;
+  afterEvidenceDirectoryRead?: (
+    path: string,
+    phase: "beforeTraversal" | "afterTraversal"
+  ) => Promise<void> | void;
   afterDirectorySync?: (path: string) => Promise<void> | void;
 }
 
@@ -73,6 +79,8 @@ const HOOK_NAMES = [
   "beforeEvidenceInstall",
   "afterEvidenceInstall",
   "afterEvidenceOpen",
+  "afterEvidenceRead",
+  "afterEvidenceDirectoryRead",
   "afterDirectorySync"
 ] as const satisfies readonly (keyof FileSystemGenerationSessionStoreHooks)[];
 
@@ -152,6 +160,49 @@ interface LockOwner {
 interface FileIdentity {
   dev: bigint;
   ino: bigint;
+}
+
+interface FileSnapshotMetadata extends FileIdentity {
+  size: bigint;
+  mtimeNs: bigint;
+  ctimeNs: bigint;
+}
+
+function snapshotMetadata(stats: BigIntStats): FileSnapshotMetadata {
+  return {
+    dev: stats.dev,
+    ino: stats.ino,
+    size: stats.size,
+    mtimeNs: stats.mtimeNs,
+    ctimeNs: stats.ctimeNs
+  };
+}
+
+function sameSnapshotMetadata(
+  left: FileSnapshotMetadata,
+  right: FileSnapshotMetadata
+): boolean {
+  return (
+    sameIdentity(left, right)
+    && left.size === right.size
+    && left.mtimeNs === right.mtimeNs
+    && left.ctimeNs === right.ctimeNs
+  );
+}
+
+function evidenceEntryType(entry: Dirent): string {
+  if (entry.isFile()) return "file";
+  if (entry.isDirectory()) return "directory";
+  if (entry.isSymbolicLink()) return "symlink";
+  return "other";
+}
+
+function evidenceEntrySnapshot(
+  entries: readonly Dirent[]
+): readonly string[] {
+  return entries
+    .map((entry) => `${entry.name}\0${evidenceEntryType(entry)}`)
+    .sort();
 }
 
 interface DirectoryEvidence {
@@ -2022,7 +2073,11 @@ implements GenerationSessionStore {
 
   public readonly listEvidence = async (
     id: string
-  ): Promise<readonly { path: string; bytes: Buffer }[]> => {
+  ): Promise<readonly {
+    path: string;
+    contentBase64: string;
+    byteLength: number;
+  }[]> => {
     assertId(id);
     await this.ensureGenerationRoot();
     return this.withLock(id, async () => {
@@ -2044,13 +2099,29 @@ implements GenerationSessionStore {
         this.hooks.afterStateOpen,
         rootEvidence
       );
-      const files: { path: string; bytes: Buffer }[] = [];
+      const files: {
+        path: string;
+        contentBase64: string;
+        byteLength: number;
+      }[] = [];
 
       const visit = async (
         currentPath: string,
         segments: readonly string[],
         expectedIdentity?: FileIdentity
       ): Promise<void> => {
+        const initialDirectoryStats = await lstat(currentPath, {
+          bigint: true
+        });
+        if (!initialDirectoryStats.isDirectory()) {
+          throw new GenerationSessionStoreError(
+            "INVALID_EVIDENCE_PATH",
+            `Generation evidence directory changed type: ${segments.join("/")}`
+          );
+        }
+        const initialDirectoryMetadata = snapshotMetadata(
+          initialDirectoryStats
+        );
         const directoryEvidence = await captureStoreDirectory(currentPath);
         if (
           expectedIdentity !== undefined
@@ -2066,6 +2137,11 @@ implements GenerationSessionStore {
         assertContained(rootEvidence.canonicalPath, directoryEvidence.canonicalPath, true);
         const entries = (await readdir(currentPath, { withFileTypes: true }))
           .sort((left, right) => left.name.localeCompare(right.name));
+        const initialEntries = evidenceEntrySnapshot(entries);
+        await this.hooks.afterEvidenceDirectoryRead?.(
+          segments.join("/"),
+          "beforeTraversal"
+        );
         for (const entry of entries) {
           const childSegments = [...segments, entry.name];
           const relativePath = childSegments.join("/");
@@ -2076,7 +2152,20 @@ implements GenerationSessionStore {
             continue;
           }
           const childPath = join(currentPath, entry.name);
-          const stats = await lstat(childPath, { bigint: true });
+          let stats: BigIntStats;
+          try {
+            stats = await lstat(childPath, { bigint: true });
+          } catch (error) {
+            if (isNodeError(error) && error.code === "ENOENT") {
+              throw new GenerationSessionStoreError(
+                "INVALID_EVIDENCE_PATH",
+                `Generation evidence disappeared during snapshot: ${
+                  relativePath
+                }`
+              );
+            }
+            throw error;
+          }
           if (stats.isSymbolicLink()) {
             throw new GenerationSessionStoreError(
               "INVALID_EVIDENCE_PATH",
@@ -2103,30 +2192,81 @@ implements GenerationSessionStore {
           );
           try {
             const opened = await handle.stat({ bigint: true });
-            if (!opened.isFile()) {
+            const initialFileMetadata = snapshotMetadata(opened);
+            if (
+              !opened.isFile()
+              || !sameSnapshotMetadata(
+                snapshotMetadata(stats),
+                initialFileMetadata
+              )
+            ) {
               throw new GenerationSessionStoreError(
                 "INVALID_EVIDENCE_PATH",
-                `Generation evidence is not a regular file: ${relativePath}`
+                `Generation evidence changed before read: ${relativePath}`
               );
             }
-            const openedIdentity = { dev: opened.dev, ino: opened.ino };
             await this.hooks.afterEvidenceOpen?.(relativePath);
             await verifyStoreDirectory(rootEvidence);
             await verifyStoreDirectory(directoryEvidence);
-            const pathIdentity = await fileIdentity(childPath);
-            if (!sameIdentity(openedIdentity, pathIdentity)) {
+            const bytes = await handle.readFile();
+            await this.hooks.afterEvidenceRead?.(relativePath);
+            const finalDescriptorStats = await handle.stat({ bigint: true });
+            const finalPathStats = await lstat(childPath, { bigint: true });
+            if (
+              !finalDescriptorStats.isFile()
+              || !finalPathStats.isFile()
+              || !sameSnapshotMetadata(
+                initialFileMetadata,
+                snapshotMetadata(finalDescriptorStats)
+              )
+              || !sameSnapshotMetadata(
+                initialFileMetadata,
+                snapshotMetadata(finalPathStats)
+              )
+            ) {
               throw new GenerationSessionStoreError(
                 "INVALID_EVIDENCE_PATH",
-                `Generation evidence identity changed: ${relativePath}`
+                `Generation evidence changed during read: ${relativePath}`
               );
             }
             files.push({
               path: relativePath,
-              bytes: await handle.readFile()
+              contentBase64: bytes.toString("base64"),
+              byteLength: bytes.byteLength
             });
           } finally {
             await handle.close();
           }
+        }
+        await this.hooks.afterEvidenceDirectoryRead?.(
+          segments.join("/"),
+          "afterTraversal"
+        );
+        const finalEntriesRaw = await readdir(currentPath, {
+          withFileTypes: true
+        });
+        const finalDirectoryStats = await lstat(currentPath, {
+          bigint: true
+        });
+        const finalEntries = evidenceEntrySnapshot(finalEntriesRaw);
+        if (
+          !finalDirectoryStats.isDirectory()
+          || !sameSnapshotMetadata(
+            initialDirectoryMetadata,
+            snapshotMetadata(finalDirectoryStats)
+          )
+          || initialEntries.length !== finalEntries.length
+          || initialEntries.some((
+            entry,
+            index
+          ) => entry !== finalEntries[index])
+        ) {
+          throw new GenerationSessionStoreError(
+            "INVALID_EVIDENCE_PATH",
+            `Generation evidence directory changed during snapshot: ${
+              segments.join("/")
+            }`
+          );
         }
         await verifyStoreDirectory(rootEvidence);
         await verifyStoreDirectory(directoryEvidence);

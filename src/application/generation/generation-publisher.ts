@@ -162,7 +162,10 @@ export class GenerationPublisher {
     const manifest = GenerationBundleManifestSchema.parse({
       version: 1,
       generationId: input.generationId,
-      files: evidenceFiles.map(({ path, bytes }) => manifestEntry(path, bytes))
+      files: evidenceFiles.map((file) => manifestEntry(
+        file.path,
+        Buffer.from(file.contentBase64, "base64")
+      ))
     });
     await ensureEvidence(
       this.dependencies.store,
@@ -274,16 +277,21 @@ export class GenerationPublisher {
       );
     }
     for (const file of manifest.files) {
-      const bytes = evidenceFiles.find(
+      const evidence = evidenceFiles.find(
         (candidate) => candidate.path === file.path
-      )?.bytes;
-      if (bytes === undefined) {
+      );
+      if (evidence === undefined) {
         throw new GenerationSessionStoreError(
           "INVALID_EVIDENCE",
           `Manifest content is missing: ${file.path}`
         );
       }
-      if (bytes.byteLength !== file.bytes || sha256(bytes) !== file.sha256) {
+      const bytes = Buffer.from(evidence.contentBase64, "base64");
+      if (
+        bytes.byteLength !== evidence.byteLength
+        || bytes.byteLength !== file.bytes
+        || sha256(bytes) !== file.sha256
+      ) {
         throw new GenerationSessionStoreError(
           "INVALID_EVIDENCE",
           `Manifest content verification failed: ${file.path}`

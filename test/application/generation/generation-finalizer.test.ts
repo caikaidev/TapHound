@@ -26,7 +26,8 @@ import {
   FileSystemGenerationMetaWriter
 } from "../../../src/adapters/filesystem/generation-meta-writer.js";
 import {
-  FileSystemGenerationSessionStore
+  FileSystemGenerationSessionStore,
+  type FileSystemGenerationSessionStoreOptions
 } from "../../../src/adapters/filesystem/generation-session-store.js";
 import {
   FileSystemJourneyWriter
@@ -287,12 +288,13 @@ async function fixture(
   metaWriter: ProjectBoundGenerationMetaWriterPort = (
     new FileSystemGenerationMetaWriter()
   ),
-  journeyWriter: ProjectBoundJourneyWriterPort = new FileSystemJourneyWriter()
+  journeyWriter: ProjectBoundJourneyWriterPort = new FileSystemJourneyWriter(),
+  storeOptions: FileSystemGenerationSessionStoreOptions = {}
 ): Promise<FinalizerFixture> {
   const root = await mkdtemp(join(tmpdir(), "taphound-finalizer-"));
   const canonicalRoot = await realpath(root);
   roots.push(root);
-  const store = new FileSystemGenerationSessionStore(root);
+  const store = new FileSystemGenerationSessionStore(root, storeOptions);
   await store.create(session(root));
   const verify = vi.fn<VerifyFunction>(() => Promise.resolve({
     status: "passed" as const,
@@ -435,6 +437,37 @@ describe("GenerationFinalizer", () => {
       join(test.root, "journeys/generated.meta.json"),
       "utf8"
     )).resolves.toContain('"status": "verified"');
+  });
+
+  it("does not create a manifest or publish a racing evidence snapshot", async () => {
+    let candidatePath = "";
+    let mutate = true;
+    const test = await fixture(undefined, undefined, {
+      hooks: {
+        afterEvidenceRead: async (path): Promise<void> => {
+          if (mutate && path === "candidate/journey.json") {
+            mutate = false;
+            await writeFile(candidatePath, "mutated", "utf8");
+          }
+        }
+      }
+    });
+    candidatePath = join(
+      test.root,
+      ".taphound/generations/.generation-1.work/candidate/journey.json"
+    );
+
+    await expect(test.finalize.finalize(input(test.root))).rejects.toBeInstanceOf(
+      Error
+    );
+    await expect(readFile(join(
+      test.root,
+      ".taphound/generations/.generation-1.work/manifest.json"
+    ))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(join(
+      test.root,
+      ".taphound/generations/generation-1/manifest.json"
+    ))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("retries a failed meta export without replaying verification", async () => {

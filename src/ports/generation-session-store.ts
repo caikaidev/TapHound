@@ -39,7 +39,8 @@ export class GenerationSessionStoreError extends Error {
 
 export interface GenerationEvidenceFile {
   path: string;
-  bytes: Buffer;
+  contentBase64: string;
+  byteLength: number;
 }
 
 export interface GenerationSessionStore {

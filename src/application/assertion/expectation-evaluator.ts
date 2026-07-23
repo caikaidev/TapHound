@@ -1,6 +1,7 @@
 import type { FailureCode } from "../../domain/failure.js";
 import type { Expectation } from "../../domain/journey.js";
 import type {
+  LayoutElement,
   Locator
 } from "../../domain/layout.js";
 import type { AdbPort } from "../../ports/adb.js";
@@ -16,6 +17,28 @@ export interface ExpectationContext {
   packageName: string;
   deviceSerial: string;
   stepStartedAt: number;
+}
+
+export interface ExpectationObservationInput {
+  timeoutMs: number;
+  signal?: AbortSignal | undefined;
+}
+
+export type ActivityExpectationObservation =
+  | { status: "observed"; activity: string }
+  | { status: "failed"; message: string };
+
+export type LayoutExpectationObservation =
+  | { status: "observed"; layout: readonly LayoutElement[] }
+  | { status: "failed"; message: string };
+
+export interface ExpectationObservationBoundary {
+  activity?: (input: ExpectationObservationInput) => Promise<
+    ActivityExpectationObservation
+  >;
+  layout?: (input: ExpectationObservationInput) => Promise<
+    LayoutExpectationObservation
+  >;
 }
 
 export type ExpectationResult =
@@ -89,7 +112,8 @@ export class ExpectationEvaluator {
   public async evaluate(
     expectation: Expectation,
     context: ExpectationContext,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    observations: ExpectationObservationBoundary = {}
   ): Promise<ExpectationResult> {
     const startedAt = this.clock.now();
     const logPattern = expectation.type === "logcat"
@@ -117,13 +141,38 @@ export class ExpectationEvaluator {
 
       try {
         switch (expectation.type) {
-        case "activity":
-          actual = await this.adb.currentActivity({
-            packageName: context.packageName,
-            deviceSerial: context.deviceSerial,
-            ...(signal === undefined ? {} : { signal }),
-            timeoutMs: commandTimeoutMs
-          });
+        case "activity": {
+          const observation = observations.activity === undefined
+            ? {
+                status: "observed" as const,
+                activity: await this.adb.currentActivity({
+                  packageName: context.packageName,
+                  deviceSerial: context.deviceSerial,
+                  ...(signal === undefined ? {} : { signal }),
+                  timeoutMs: commandTimeoutMs
+                })
+              }
+            : await observations.activity({
+                timeoutMs: commandTimeoutMs,
+                ...(signal === undefined ? {} : { signal })
+              });
+          if (isAborted(signal)) {
+            return {
+              status: "cancelled",
+              type: expectation.type,
+              durationMs: this.clock.now() - startedAt
+            };
+          }
+          if (observation.status === "failed") {
+            return {
+              status: "failed",
+              type: expectation.type,
+              code: "EXPECT_ACTIVITY_FAILED",
+              message: observation.message,
+              durationMs: this.clock.now() - startedAt
+            };
+          }
+          actual = observation.activity;
           if (actual === expectation.value) {
             return {
               status: "passed",
@@ -133,12 +182,38 @@ export class ExpectationEvaluator {
             };
           }
           break;
-        case "element":
-          if (hasElement(await this.androidCli.layout({
-            deviceSerial: context.deviceSerial,
-            ...(signal === undefined ? {} : { signal }),
-            timeoutMs: commandTimeoutMs
-          }), expectation.locator)) {
+        }
+        case "element": {
+          const observation = observations.layout === undefined
+            ? {
+                status: "observed" as const,
+                layout: await this.androidCli.layout({
+                  deviceSerial: context.deviceSerial,
+                  ...(signal === undefined ? {} : { signal }),
+                  timeoutMs: commandTimeoutMs
+                })
+              }
+            : await observations.layout({
+                timeoutMs: commandTimeoutMs,
+                ...(signal === undefined ? {} : { signal })
+              });
+          if (isAborted(signal)) {
+            return {
+              status: "cancelled",
+              type: expectation.type,
+              durationMs: this.clock.now() - startedAt
+            };
+          }
+          if (observation.status === "failed") {
+            return {
+              status: "failed",
+              type: expectation.type,
+              code: "EXPECT_ELEMENT_FAILED",
+              message: observation.message,
+              durationMs: this.clock.now() - startedAt
+            };
+          }
+          if (hasElement(observation.layout, expectation.locator)) {
             return {
               status: "passed",
               type: expectation.type,
@@ -146,6 +221,7 @@ export class ExpectationEvaluator {
             };
           }
           break;
+        }
         case "logcat": {
           const matched = this.logcat
             .linesBetween(context.stepStartedAt, this.clock.now())

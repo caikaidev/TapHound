@@ -646,6 +646,124 @@ describe("scrollTo replay", () => {
     expect(adb.currentActivity).not.toHaveBeenCalled();
   });
 
+  it("lets a generated Activity Expect poll from checkpoint A to expected B", async () => {
+    const adb = adbPort();
+    let actionCompleted = false;
+    let postActionObservations = 0;
+    vi.mocked(adb.tap).mockImplementationOnce(() => {
+      actionCompleted = true;
+      return Promise.resolve(commandResult());
+    });
+    vi.mocked(adb.foregroundComponent).mockImplementation(() => {
+      const observation = actionCompleted ? ++postActionObservations : 0;
+      return Promise.resolve({
+        packageName: "com.example.app",
+        activity: observation >= 3
+          ? "com.example.app.ResultsActivity"
+          : (
+              actionCompleted
+                ? checkpoint.after
+                : checkpoint.before
+            )
+      });
+    });
+    const { runner } = fixture({ adb, generatedReplayPolicy: true });
+
+    await expect(runner.run({
+      ...clickStep(),
+      expect: {
+        type: "activity",
+        value: "com.example.app.ResultsActivity",
+        timeoutMs: 200
+      }
+    }, 0)).resolves.toMatchObject({
+      status: "passed",
+      report: {
+        expectation: {
+          type: "activity",
+          status: "passed"
+        }
+      }
+    });
+    expect(postActionObservations).toBe(4);
+  });
+
+  it("keeps a persistent foreign Activity Expect failure as EXPECT_ACTIVITY_FAILED", async () => {
+    const adb = adbPort();
+    let actionCompleted = false;
+    let postActionObservations = 0;
+    vi.mocked(adb.tap).mockImplementationOnce(() => {
+      actionCompleted = true;
+      return Promise.resolve(commandResult());
+    });
+    vi.mocked(adb.foregroundComponent).mockImplementation(() => {
+      const observation = actionCompleted ? ++postActionObservations : 0;
+      return Promise.resolve({
+        packageName: observation >= 2
+          ? "com.foreign.app"
+          : "com.example.app",
+        activity: observation >= 2
+          ? "com.example.app.ResultsActivity"
+          : (
+              actionCompleted
+                ? checkpoint.after
+                : checkpoint.before
+            )
+      });
+    });
+    const { runner } = fixture({ adb, generatedReplayPolicy: true });
+
+    await expect(runner.run({
+      ...clickStep(),
+      expect: {
+        type: "activity",
+        value: "com.example.app.ResultsActivity",
+        timeoutMs: 200
+      }
+    }, 0)).resolves.toMatchObject({
+      status: "failed",
+      failure: {
+        code: "EXPECT_ACTIVITY_FAILED",
+        message: "Generated Expect foreground changed to com.foreign.app/com.example.app.ResultsActivity"
+      }
+    });
+  });
+
+  it("keeps a persistent Activity Expect PID replacement as EXPECT_ACTIVITY_FAILED", async () => {
+    const adb = adbPort();
+    let actionCompleted = false;
+    let postActionPidObservations = 0;
+    vi.mocked(adb.tap).mockImplementationOnce(() => {
+      actionCompleted = true;
+      return Promise.resolve(commandResult());
+    });
+    vi.mocked(adb.foregroundComponent).mockImplementation(() => (
+      Promise.resolve({
+        packageName: "com.example.app",
+        activity: actionCompleted ? checkpoint.after : checkpoint.before
+      })
+    ));
+    vi.mocked(adb.pid).mockImplementation(() => Promise.resolve(
+      actionCompleted && ++postActionPidObservations >= 2 ? 99 : 42
+    ));
+    const { runner } = fixture({ adb, generatedReplayPolicy: true });
+
+    await expect(runner.run({
+      ...clickStep(),
+      expect: {
+        type: "activity",
+        value: "com.example.app.ResultsActivity",
+        timeoutMs: 200
+      }
+    }, 0)).resolves.toMatchObject({
+      status: "failed",
+      failure: {
+        code: "EXPECT_ACTIVITY_FAILED",
+        message: "Generated Expect process changed from 42 to 99"
+      }
+    });
+  });
+
   it("rejects a foreign package on a later generated Element poll", async () => {
     const adb = adbPort();
     vi.mocked(adb.foregroundComponent)

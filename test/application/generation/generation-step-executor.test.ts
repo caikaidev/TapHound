@@ -1244,6 +1244,163 @@ describe("GenerationStepExecutor", () => {
     });
   });
 
+  it("lets an Activity Expect poll from checkpoint A to expected B", async () => {
+    const runtime = snapshot();
+    const test = harness(session(runtime));
+    let actionCompleted = false;
+    let postActionForegroundObservations = 0;
+    test.adb.tap.mockImplementationOnce((() => {
+      actionCompleted = true;
+      return Promise.resolve(ok);
+    }) as never);
+    test.adb.foregroundComponent.mockImplementation((() => {
+      const observation = actionCompleted
+        ? ++postActionForegroundObservations
+        : 0;
+      return Promise.resolve({
+        packageName: "com.example.app",
+        activity: observation >= 4
+          ? "com.example.app.ResultsActivity"
+          : (actionCompleted ? afterActivity : activity)
+      });
+    }) as never);
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: {
+        ...proposal(runtime),
+        expect: {
+          type: "activity",
+          value: "com.example.app.ResultsActivity",
+          timeoutMs: 200
+        }
+      },
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result).toMatchObject({
+      status: "succeeded",
+      step: {
+        activity: {
+          before: activity,
+          after: afterActivity
+        },
+        expect: {
+          type: "activity",
+          value: "com.example.app.ResultsActivity"
+        }
+      }
+    });
+    expect(postActionForegroundObservations).toBe(6);
+  });
+
+  it("preserves persistent foreign Activity Expect failure evidence", async () => {
+    const runtime = snapshot();
+    const test = harness(session(runtime));
+    let actionCompleted = false;
+    let postActionForegroundObservations = 0;
+    test.adb.tap.mockImplementationOnce((() => {
+      actionCompleted = true;
+      return Promise.resolve(ok);
+    }) as never);
+    test.adb.foregroundComponent.mockImplementation((() => {
+      const observation = actionCompleted
+        ? ++postActionForegroundObservations
+        : 0;
+      return Promise.resolve({
+        packageName: observation >= 3
+          ? "com.foreign.app"
+          : "com.example.app",
+        activity: observation >= 3
+          ? "com.example.app.ResultsActivity"
+          : (actionCompleted ? afterActivity : activity)
+      });
+    }) as never);
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: {
+        ...proposal(runtime),
+        expect: {
+          type: "activity",
+          value: "com.example.app.ResultsActivity",
+          timeoutMs: 200
+        }
+      },
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: {
+        code: "EXPECT_ACTIVITY_FAILED",
+        message: "Foreground package escaped generation target"
+      }
+    });
+    expect(test.current()).toMatchObject({
+      state: "recoveryRequired",
+      candidateSteps: []
+    });
+    expect(test.evidence.get(
+      "evidence/steps/0-attempt-1/result.json"
+    )).toMatchObject({
+      outcome: {
+        status: "failed",
+        failure: { code: "EXPECT_ACTIVITY_FAILED" }
+      }
+    });
+  });
+
+  it("preserves persistent Activity Expect PID failure evidence", async () => {
+    const runtime = snapshot();
+    const test = harness(session(runtime));
+    let actionCompleted = false;
+    let postActionPidObservations = 0;
+    test.adb.tap.mockImplementationOnce((() => {
+      actionCompleted = true;
+      return Promise.resolve(ok);
+    }) as never);
+    test.adb.pid.mockImplementation((() => Promise.resolve(
+      actionCompleted && ++postActionPidObservations >= 3 ? 99 : 42
+    )) as never);
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: {
+        ...proposal(runtime),
+        expect: {
+          type: "activity",
+          value: "com.example.app.ResultsActivity",
+          timeoutMs: 200
+        }
+      },
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: {
+        code: "EXPECT_ACTIVITY_FAILED",
+        message: "Generation process identity changed"
+      }
+    });
+    expect(test.current()).toMatchObject({
+      state: "recoveryRequired",
+      candidateSteps: []
+    });
+    expect(test.evidence.get(
+      "evidence/steps/0-attempt-1/result.json"
+    )).toMatchObject({
+      outcome: {
+        status: "failed",
+        failure: { code: "EXPECT_ACTIVITY_FAILED" }
+      }
+    });
+  });
+
   it("fails an Activity Expect on a transient foreign foreground package", async () => {
     const runtime = snapshot();
     const test = harness(session(runtime));
@@ -1299,7 +1456,7 @@ describe("GenerationStepExecutor", () => {
       return Promise.resolve(ok);
     }) as never);
     test.adb.pid.mockImplementation((() => Promise.resolve(
-      actionCompleted && ++postActionPidObservations === 4 ? 99 : 42
+      actionCompleted && ++postActionPidObservations >= 4 ? 99 : 42
     )) as never);
 
     const result = await test.execute({
@@ -1321,6 +1478,70 @@ describe("GenerationStepExecutor", () => {
       failure: { code: "EXPECT_ELEMENT_FAILED" }
     });
     expect(test.current().state).toBe("recoveryRequired");
+    expect(test.evidence.get(
+      "evidence/steps/0-attempt-1/result.json"
+    )).toMatchObject({
+      outcome: {
+        status: "failed",
+        failure: { code: "EXPECT_ELEMENT_FAILED" }
+      }
+    });
+  });
+
+  it("preserves persistent Element Layout Activity guard failure", async () => {
+    const runtime = snapshot();
+    const test = harness(session(runtime));
+    let actionCompleted = false;
+    let postActionForegroundObservations = 0;
+    test.adb.tap.mockImplementationOnce((() => {
+      actionCompleted = true;
+      return Promise.resolve(ok);
+    }) as never);
+    test.adb.foregroundComponent.mockImplementation((() => {
+      const observation = actionCompleted
+        ? ++postActionForegroundObservations
+        : 0;
+      return Promise.resolve({
+        packageName: "com.example.app",
+        activity: observation >= 4
+          ? "com.example.app.OtherActivity"
+          : (actionCompleted ? afterActivity : activity)
+      });
+    }) as never);
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: {
+        ...proposal(runtime),
+        expect: {
+          type: "element",
+          locator: { resourceId: "missing" },
+          timeoutMs: 200
+        }
+      },
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: {
+        code: "EXPECT_ELEMENT_FAILED",
+        message: "Generation Activity changed unexpectedly"
+      }
+    });
+    expect(test.current()).toMatchObject({
+      state: "recoveryRequired",
+      candidateSteps: []
+    });
+    expect(test.evidence.get(
+      "evidence/steps/0-attempt-1/result.json"
+    )).toMatchObject({
+      outcome: {
+        status: "failed",
+        failure: { code: "EXPECT_ELEMENT_FAILED" }
+      }
+    });
   });
 
   it("accepts durable completion when the completion call throws afterward", async () => {

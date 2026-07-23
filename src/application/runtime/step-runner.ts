@@ -154,7 +154,7 @@ export class StepRunner {
   private currentSignal: AbortSignal | undefined;
 
   private async observeExpectedActivity(
-    expectedActivity: string,
+    expectedActivity: string | undefined,
     expectedPid: number,
     input: ExpectationObservationInput
   ): Promise<
@@ -171,7 +171,10 @@ export class StepRunner {
     const foreground = await this.options.adb.foregroundComponent(identity());
     if (
       foreground.packageName !== this.options.packageName
-      || foreground.activity !== expectedActivity
+      || (
+        expectedActivity !== undefined
+        && foreground.activity !== expectedActivity
+      )
     ) {
       return {
         status: "failed",
@@ -571,7 +574,7 @@ export class StepRunner {
               activity: (input): ReturnType<
                 StepRunner["observeExpectedActivity"]
               > => this.observeExpectedActivity(
-                step.activity.after,
+                undefined,
                 generatedPid,
                 input
               ),
@@ -606,9 +609,12 @@ export class StepRunner {
         return fail(expectation.code, expectation.message);
       }
       if (this.options.generatedReplayPolicy === true) {
+        const expectedActivity = step.expect.type === "activity"
+          ? step.expect.value
+          : step.activity.after;
         try {
           await this.assertGeneratedForeground(
-            step.activity.after,
+            expectedActivity,
             "ACTIVITY_AFTER_MISMATCH",
             signal
           );

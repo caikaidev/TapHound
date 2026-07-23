@@ -656,14 +656,14 @@ export class GenerationStepExecutor {
               | { status: "failed"; message: string }
             > => {
               try {
-                await this.assertForegroundIdentity(
+                const activity = await this.assertForegroundIdentity(
                   session,
                   authoritativePid,
-                  after.activity,
+                  undefined,
                   observation.signal,
                   observation.timeoutMs
                 );
-                return { status: "observed", activity: after.activity };
+                return { status: "observed", activity };
               } catch (error) {
                 if (error instanceof StepCancelledError) throw error;
                 return {
@@ -709,17 +709,19 @@ export class GenerationStepExecutor {
                 message: "Expectation evaluation was cancelled"
               }
             };
-          }
-          throwIfCancelled(input.signal);
-          await this.observeLive(
-            session,
-            authoritativePid,
-            after.activity,
-            input.signal
-          );
-          throwIfCancelled(input.signal);
-          if (expectation.status === "failed") {
+          } else if (expectation.status === "failed") {
             fail(expectation.code, expectation.message);
+          } else {
+            throwIfCancelled(input.signal);
+            await this.observeLive(
+              session,
+              authoritativePid,
+              finalStep.expect.type === "activity"
+                ? finalStep.expect.value
+                : after.activity,
+              input.signal
+            );
+            throwIfCancelled(input.signal);
           }
         }
       }
@@ -956,10 +958,10 @@ export class GenerationStepExecutor {
   private async assertForegroundIdentity(
     session: GenerationSession,
     expectedPid: number,
-    expectedActivity: string,
+    expectedActivity: string | undefined,
     signal?: AbortSignal,
     timeoutMs = this.dependencies.idle.timeoutMs
-  ): Promise<void> {
+  ): Promise<string> {
     const deadline = this.dependencies.clock.now() + timeoutMs;
     const identity = (): {
       packageName: string;
@@ -979,7 +981,10 @@ export class GenerationStepExecutor {
     if (foreground.packageName !== session.target.packageName) {
       fail("PACKAGE_ESCAPE", "Foreground package escaped generation target");
     }
-    if (foreground.activity !== expectedActivity) {
+    if (
+      expectedActivity !== undefined
+      && foreground.activity !== expectedActivity
+    ) {
       fail("SNAPSHOT_STALE", "Generation Activity changed before mutation");
     }
     const pid = await this.dependencies.adb.pid(identity());
@@ -987,6 +992,7 @@ export class GenerationStepExecutor {
     if (pid === null || pid !== expectedPid) {
       fail("APP_CRASHED", "Generation process identity changed");
     }
+    return foreground.activity;
   }
 
   private async markRecovery(

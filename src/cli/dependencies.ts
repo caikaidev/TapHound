@@ -52,6 +52,9 @@ import { ReportWriter } from "../application/report/report-writer.js";
 import { VerifyRuntime, type VerifyInput, type VerifyResult } from "../application/runtime/verify-runtime.js";
 import type { TapHoundConfig } from "../domain/config.js";
 import type { GenerationSession } from "../domain/generation.js";
+import type {
+  GenerationSessionStore
+} from "../ports/generation-session-store.js";
 
 export interface TextOutput {
   write: (content: string) => void;
@@ -106,18 +109,29 @@ export interface CliDependencies {
   setExitCode: (code: number) => void;
 }
 
+export interface ProductionDependencyOptions {
+  generationStoreFactory?: (
+    projectRoot: string
+  ) => GenerationSessionStore;
+}
+
 function runId(): string {
   return `${new Date().toISOString().replaceAll(":", "-")}-${randomUUID()}`;
 }
 
 export function createProductionDependencies(
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  options: ProductionDependencyOptions = {}
 ): CliDependencies {
   const runner = new NodeProcessRunner();
   const adb = new AdbAdapter(runner);
   const androidCli = new AndroidCliAdapter(runner);
   const gradle = new GradleAdapter(runner);
   const clock = new SystemClock();
+  const generationStoreFactory = options.generationStoreFactory
+    ?? ((projectRoot: string): GenerationSessionStore => (
+      new FileSystemGenerationSessionStore(projectRoot)
+    ));
   const contextValidator = new ContextValidator(new NodeProjectFileInspector());
   return {
     ...(signal === undefined ? {} : { signal }),
@@ -191,7 +205,7 @@ export function createProductionDependencies(
         Awaited<ReturnType<GenerationStarter["start"]>>
       > => new GenerationStarter({
         contextValidator,
-        store: new FileSystemGenerationSessionStore(input.projectRoot),
+        store: generationStoreFactory(input.projectRoot),
         now: (): Date => new Date(),
         generateId: randomUUID,
         randomBytes
@@ -200,7 +214,7 @@ export function createProductionDependencies(
     runtimeObserver: {
       observe: async ({ projectRoot, ...input }): Promise<RuntimeObservation> => (
         new RuntimeObserver({
-          store: new FileSystemGenerationSessionStore(projectRoot),
+          store: generationStoreFactory(projectRoot),
           adb,
           androidCli,
           now: () => new Date(),
@@ -209,7 +223,7 @@ export function createProductionDependencies(
       )
     },
     generationRuntime: ({ projectRoot, config }): GenerationCliRuntime => {
-      const store = new FileSystemGenerationSessionStore(projectRoot);
+      const store = generationStoreFactory(projectRoot);
       const prompt = new InquirerGenerationPrompt();
       const observer = new RuntimeObserver({
         store,
@@ -239,7 +253,14 @@ export function createProductionDependencies(
         clock,
         idle: config.idle,
         now: (): Date => new Date(),
-        generateAttemptId: randomUUID
+        generateAttemptId: randomUUID,
+        clearApprovedConfirmation: async (
+          generationId,
+          challenge
+        ): Promise<void> => confirmation.clearApproved({
+          generationId,
+          challenge
+        })
       });
       const publisher = new GenerationPublisher({
         store,

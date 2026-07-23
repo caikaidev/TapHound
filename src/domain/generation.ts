@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { z } from "zod";
 
 import { JourneyStepSchema } from "./journey.js";
@@ -65,6 +67,7 @@ export const PendingConfirmationSchema = z.strictObject({
   stepIndex: z.number().int().nonnegative(),
   proposalHash: Sha256Schema,
   snapshotHash: Sha256Schema,
+  evidenceHash: Sha256Schema,
   actionSummary: z.string().trim().min(1),
   expiresAt: z.iso.datetime(),
   status: z.enum(["pending", "approved"])
@@ -217,6 +220,33 @@ export const GenerationConfirmationEvidenceSchema = z.strictObject({
 export type GenerationConfirmationEvidence = z.infer<
   typeof GenerationConfirmationEvidenceSchema
 >;
+
+function canonicalizeConfirmationEvidence(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(canonicalizeConfirmationEvidence);
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, item]) => item !== undefined)
+        .sort(([left], [right]) => (
+          left < right ? -1 : left > right ? 1 : 0
+        ))
+        .map(([key, item]) => [
+          key,
+          canonicalizeConfirmationEvidence(item)
+        ])
+    );
+  }
+  return value;
+}
+
+export function hashGenerationConfirmationEvidence(value: unknown): string {
+  const evidence = GenerationConfirmationEvidenceSchema.parse(value);
+  return createHash("sha256")
+    .update(JSON.stringify(canonicalizeConfirmationEvidence(evidence)))
+    .digest("hex");
+}
 
 const BundleRelativePathSchema = z.string().min(1).superRefine(
   (path, context) => {

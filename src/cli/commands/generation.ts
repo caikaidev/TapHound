@@ -15,12 +15,16 @@ import {
 } from "../../application/project/project-describer.js";
 import { TapHoundConfigSchema } from "../../domain/config.js";
 import type { TapHoundConfig } from "../../domain/config.js";
+import { GenerationSessionIdSchema } from "../../domain/generation.js";
 import { ProjectContextSchema } from "../../domain/project-context.js";
 import { ProposedStepSchema } from "../../domain/proposed-step.js";
 import { RuntimeSnapshotSchema } from "../../domain/runtime-snapshot.js";
 import {
   GenerationSessionStoreError
 } from "../../ports/generation-session-store.js";
+import {
+  GenerationPromptCancelledError
+} from "../../ports/generation-prompt.js";
 import type { CliDependencies } from "../dependencies.js";
 import {
   errorMessage,
@@ -154,6 +158,10 @@ function mappedFailure(
   options: GenerationOptions,
   error: unknown
 ): void {
+  if (error instanceof z.ZodError || error instanceof SyntaxError) {
+    writeFailure(dependencies, options, 2, "CONTEXT_INVALID", error);
+    return;
+  }
   if (dependencies.signal?.aborted === true) {
     writeFailure(
       dependencies,
@@ -191,16 +199,21 @@ function mappedFailure(
     writeFailure(dependencies, options, exitCode, error.code, error);
     return;
   }
-  if (error instanceof z.ZodError || error instanceof SyntaxError) {
-    writeFailure(dependencies, options, 2, "CONTEXT_INVALID", error);
+  if (
+    error instanceof GenerationPromptCancelledError
+  ) {
+    writeFailure(
+      dependencies,
+      options,
+      1,
+      "RECOVERY_REQUIRED",
+      error
+    );
     return;
   }
   if (
     error instanceof Error
-    && (
-      error.message.includes("requires local TTY")
-      || error.message.includes("Prompt was cancelled")
-    )
+    && error.message.includes("requires local TTY")
   ) {
     writeFailure(
       dependencies,
@@ -387,10 +400,11 @@ function createObserveCommand(dependencies: CliDependencies): Command {
     .option("--json", "Emit one machine-readable JSON value")
     .action(async (options: GenerationObserveOptions): Promise<void> => {
       try {
+        const generationId = GenerationSessionIdSchema.parse(options.session);
         await loadConfig(dependencies, options);
         const observation = await dependencies.runtimeObserver.observe({
           projectRoot: options.project,
-          generationId: options.session,
+          generationId,
           ...(dependencies.signal === undefined
             ? {}
             : { signal: dependencies.signal })
@@ -463,6 +477,7 @@ function createStepCommand(dependencies: CliDependencies): Command {
     dependencies
   ).action(async (options: GenerationStepOptions): Promise<void> => {
     try {
+      const generationId = GenerationSessionIdSchema.parse(options.session);
       const config = await loadConfig(dependencies, options);
       let envelope: z.infer<typeof PlannerEnvelopeSchema>;
       try {
@@ -477,24 +492,24 @@ function createStepCommand(dependencies: CliDependencies): Command {
       }
       const runtime = requireRuntime(dependencies, options.project, config);
       const confirmation = await runtime.confirmation.request({
-        generationId: options.session,
+        generationId,
         proposal: envelope.proposal,
         snapshot: envelope.snapshot,
         source: "planner"
       });
       if (confirmation.status === "confirmationRequired") {
-        const session = await runtime.readSession(options.session);
+        const session = await runtime.readSession(generationId);
         writeSuccess(dependencies, options, {
           status: "confirmationRequired",
           exitCode: 0,
-          generationId: options.session,
+          generationId,
           revision: session.revision,
           challenge: confirmation.challenge
         }, `Confirmation required: ${confirmation.challenge.challengeId}`);
         return;
       }
       await executeApproved(dependencies, options, runtime, {
-        generationId: options.session,
+        generationId,
         proposal: confirmation.proposal,
         snapshot: envelope.snapshot,
         source: "planner"
@@ -513,14 +528,19 @@ function createConfirmCommand(dependencies: CliDependencies): Command {
     dependencies
   ).action(async (options: GenerationConfirmOptions): Promise<void> => {
     try {
+      const generationId = GenerationSessionIdSchema.parse(options.session);
+      const challengeId = GenerationSessionIdSchema.parse(options.challenge);
       const config = await loadConfig(dependencies, options);
       const runtime = requireRuntime(dependencies, options.project, config);
       const approved = await runtime.confirmation.confirmStored({
-        generationId: options.session,
-        challengeId: options.challenge
+        generationId,
+        challengeId,
+        ...(dependencies.signal === undefined
+          ? {}
+          : { signal: dependencies.signal })
       });
       await executeApproved(dependencies, options, runtime, {
-        generationId: options.session,
+        generationId,
         proposal: approved.proposal,
         snapshot: approved.snapshot,
         source: approved.source
@@ -539,38 +559,42 @@ function createManualCommand(dependencies: CliDependencies): Command {
     dependencies
   ).action(async (options: GenerationManualOptions): Promise<void> => {
     try {
+      const generationId = GenerationSessionIdSchema.parse(options.session);
       const action = ManualActionSchema.parse(options.action);
       const config = await loadConfig(dependencies, options);
       const runtime = requireRuntime(dependencies, options.project, config);
       const observation = await runtime.observer.observe({
-        generationId: options.session,
+        generationId,
         ...(dependencies.signal === undefined
           ? {}
           : { signal: dependencies.signal })
       });
       const confirmation = await runtime.confirmation.requestManual({
-        generationId: options.session,
+        generationId,
         snapshot: observation.snapshot,
         manual: {
           action,
           binding: observation.binding,
           before: observation.snapshot.activity,
           layout: observation.snapshot.layout
-        }
+        },
+        ...(dependencies.signal === undefined
+          ? {}
+          : { signal: dependencies.signal })
       });
       if (confirmation.status === "confirmationRequired") {
-        const session = await runtime.readSession(options.session);
+        const session = await runtime.readSession(generationId);
         writeSuccess(dependencies, options, {
           status: "confirmationRequired",
           exitCode: 0,
-          generationId: options.session,
+          generationId,
           revision: session.revision,
           challenge: confirmation.challenge
         }, `Confirmation required: ${confirmation.challenge.challengeId}`);
         return;
       }
       await executeApproved(dependencies, options, runtime, {
-        generationId: options.session,
+        generationId,
         proposal: confirmation.proposal,
         snapshot: observation.snapshot,
         source: "manualOverride"
@@ -592,6 +616,7 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
     dependencies
   ).action(async (options: GenerationFinalizeOptions): Promise<void> => {
     try {
+      const generationId = GenerationSessionIdSchema.parse(options.session);
       const config = await loadConfig(dependencies, options);
       let context: z.infer<typeof ProjectContextSchema>;
       try {
@@ -644,7 +669,7 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
       });
       const runtime = requireRuntime(dependencies, options.project, config);
       const result = await runtime.finalizer.finalize({
-        generationId: options.session,
+        generationId,
         projectRoot: options.project,
         config,
         context,
@@ -660,7 +685,7 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
       writeSuccess(dependencies, options, {
         status: "verified",
         exitCode: 0,
-        generationId: options.session,
+        generationId,
         bundlePath: result.bundlePath,
         journeyPath: result.journeyPath,
         metaPath: result.metaPath,

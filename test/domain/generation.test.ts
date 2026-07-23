@@ -8,7 +8,8 @@ import {
   GenerationSessionSchema,
   bindGenerationVariables,
   expandProposedStepVariables,
-  generationCoreIdentity
+  generationCoreIdentity,
+  hashGenerationConfirmationEvidence
 } from "../../src/domain/generation.js";
 
 const hashes = {
@@ -37,6 +38,46 @@ const passedVerification = {
   reportSha256: "f".repeat(64),
   runId: "verification-run"
 };
+
+describe("generation confirmation evidence", () => {
+  it("authenticates canonical evidence including provenance", () => {
+    const envelope = {
+      version: 1 as const,
+      proposal: {
+        action: "wait" as const,
+        binding: proposalBinding,
+        activity: { before: "com.example.app.MainActivity" }
+      },
+      snapshot: {
+        version: 1 as const,
+        generationId: "generation-1",
+        baseRevision: 1,
+        deviceSerial: "emulator-5554",
+        expectedPackageName: "com.example.app",
+        foregroundPackageName: "com.example.app",
+        activity: "com.example.app.MainActivity",
+        pid: 42,
+        capturedAt: "2026-07-22T12:00:00.000Z",
+        layout: []
+      },
+      source: "planner" as const
+    };
+
+    expect(hashGenerationConfirmationEvidence(envelope)).toMatch(
+      /^[a-f\d]{64}$/
+    );
+    expect(hashGenerationConfirmationEvidence({
+      ...envelope,
+      source: "manualOverride"
+    })).not.toBe(hashGenerationConfirmationEvidence(envelope));
+    expect(hashGenerationConfirmationEvidence({
+      source: envelope.source,
+      snapshot: envelope.snapshot,
+      proposal: envelope.proposal,
+      version: envelope.version
+    })).toBe(hashGenerationConfirmationEvidence(envelope));
+  });
+});
 
 function validSession(): unknown {
   return {
@@ -262,6 +303,7 @@ describe("GenerationSessionSchema", () => {
         stepIndex: 1,
         proposalHash: "c".repeat(64),
         snapshotHash: "b".repeat(64),
+        evidenceHash: "e".repeat(64),
         actionSummary: "Back from com.example.app.MainActivity",
         expiresAt: "2026-07-22T12:00:30.000Z",
         status: "pending"

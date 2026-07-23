@@ -2,6 +2,7 @@ import {
   GenerationConfirmationEvidenceSchema,
   GenerationSessionIdSchema,
   GenerationSessionSchema,
+  hashGenerationConfirmationEvidence,
   type GenerationConfirmationEvidence,
   type PendingConfirmation
 } from "../../domain/generation.js";
@@ -47,17 +48,20 @@ export interface ConfirmationRequestInput {
 
 export interface ConfirmationApproveInput extends ConfirmationRequestInput {
   challengeId: string;
+  signal?: AbortSignal | undefined;
 }
 
 export interface StoredConfirmationApproveInput {
   generationId: string;
   challengeId: string;
+  signal?: AbortSignal | undefined;
 }
 
 export interface ManualConfirmationRequestInput {
   generationId: string;
   snapshot: RuntimeSnapshot;
   manual: ManualProposalInput;
+  signal?: AbortSignal | undefined;
 }
 
 export type ConfirmationRequestResult =
@@ -165,11 +169,18 @@ export class GenerationConfirmationService {
       throw bindingFailure("Generation revision cannot create a challenge");
     }
 
+    const evidence = GenerationConfirmationEvidenceSchema.parse({
+      version: 1,
+      proposal,
+      snapshot: input.snapshot,
+      source: input.source ?? "planner"
+    });
     const challenge = {
       challengeId: this.dependencies.generateChallengeId(),
       stepIndex: session.candidateSteps.length,
       proposalHash: hashProposedStep(proposal),
       snapshotHash: proposal.binding.snapshotHash,
+      evidenceHash: hashGenerationConfirmationEvidence(evidence),
       actionSummary: summarizeProposedStep(proposal),
       expiresAt: new Date(
         this.dependencies.now().getTime()
@@ -181,12 +192,6 @@ export class GenerationConfirmationService {
       ...session,
       revision: session.revision + 1,
       pendingConfirmation: challenge
-    });
-    const evidence = GenerationConfirmationEvidenceSchema.parse({
-      version: 1,
-      proposal,
-      snapshot: input.snapshot,
-      source: input.source ?? "planner"
     });
     await this.dependencies.store.writeEvidence(
       session.id,
@@ -205,7 +210,8 @@ export class GenerationConfirmationService {
     input: ManualConfirmationRequestInput
   ): Promise<ConfirmationRequestResult> => {
     const proposal = await this.dependencies.prompt.buildManualProposal(
-      input.manual
+      input.manual,
+      input.signal
     );
     return this.request({
       generationId: input.generationId,
@@ -224,7 +230,8 @@ export class GenerationConfirmationService {
       challengeId: input.challengeId,
       proposal: evidence.proposal,
       snapshot: evidence.snapshot,
-      source: evidence.source
+      source: evidence.source,
+      signal: input.signal
     });
     return {
       status: "approved",
@@ -242,22 +249,22 @@ export class GenerationConfirmationService {
     );
     const proposal = ProposedStepSchema.parse(input.proposal);
     const snapshot = RuntimeSnapshotSchema.parse(input.snapshot);
+    const evidence = GenerationConfirmationEvidenceSchema.parse({
+      version: 1,
+      proposal,
+      snapshot,
+      source: input.source ?? "planner"
+    });
+    const evidenceHash = hashGenerationConfirmationEvidence(evidence);
     const challenge = session.pendingConfirmation;
     if (challenge === null) {
       throw bindingFailure("No pending generation confirmation exists");
     }
-    if (challenge.status !== "pending") {
-      throw bindingFailure("Generation confirmation was already used");
-    }
+    const expectedRevision = proposal.binding.baseRevision
+      + (challenge.status === "pending" ? 1 : 2);
     const cleanupToken: PendingChallengeToken = {
-      expectedRevision: proposal.binding.baseRevision + 1,
-      expectedChallenge: {
-        ...challenge,
-        challengeId: input.challengeId,
-        proposalHash: hashProposedStep(proposal),
-        snapshotHash: hashRuntimeSnapshot(snapshot),
-        status: "pending"
-      }
+      expectedRevision,
+      expectedChallenge: challenge
     };
 
     const expired = this.dependencies.now().getTime()
@@ -265,6 +272,7 @@ export class GenerationConfirmationService {
     const challengeMatches = challenge.challengeId === input.challengeId;
     const proposalMatches = challenge.proposalHash
       === hashProposedStep(proposal);
+    const evidenceMatches = challenge.evidenceHash === evidenceHash;
     const snapshotMatches = challenge.snapshotHash
       === hashRuntimeSnapshot(snapshot)
       && challenge.snapshotHash === proposal.binding.snapshotHash
@@ -273,7 +281,7 @@ export class GenerationConfirmationService {
       && session.inFlight === null
       && session.verification.status === "notRun"
       && session.publication.status === "notRun"
-      && session.revision === proposal.binding.baseRevision + 1
+      && session.revision === expectedRevision
       && challenge.stepIndex === session.candidateSteps.length
       && challenge.actionSummary === summarizeProposedStep(proposal);
 
@@ -281,12 +289,20 @@ export class GenerationConfirmationService {
       expired
       || !challengeMatches
       || !proposalMatches
+      || !evidenceMatches
       || !snapshotMatches
       || !stateMatches
     ) {
-      await this.clearPendingChallenge(session.id, cleanupToken);
+      if (challengeMatches) {
+        await this.clearExactChallenge(session.id, cleanupToken);
+      }
       if (expired) {
         throw bindingFailure("Generation confirmation challenge expired");
+      }
+      if (!evidenceMatches) {
+        throw bindingFailure(
+          "Generation confirmation evidence hash is not authoritative"
+        );
       }
       throw bindingFailure(
         "Generation confirmation binding is no longer authoritative"
@@ -305,21 +321,28 @@ export class GenerationConfirmationService {
         proposal
       });
     } catch {
-      await this.clearPendingChallenge(session.id, cleanupToken);
+      await this.clearExactChallenge(session.id, cleanupToken);
       throw bindingFailure(
         "Generation proposal or runtime state changed before confirmation"
       );
     }
 
+    if (challenge.status === "approved") {
+      return { status: "approved", proposal };
+    }
+
     let confirmed: boolean;
     try {
-      confirmed = await this.dependencies.prompt.confirm(challenge);
+      confirmed = await this.dependencies.prompt.confirm(
+        challenge,
+        input.signal
+      );
     } catch (error) {
-      await this.clearPendingChallenge(session.id, cleanupToken);
+      await this.clearExactChallenge(session.id, cleanupToken);
       throw error;
     }
     if (!confirmed) {
-      await this.clearPendingChallenge(session.id, cleanupToken);
+      await this.clearExactChallenge(session.id, cleanupToken);
       throw bindingFailure("Generation action confirmation was declined");
     }
 
@@ -332,13 +355,13 @@ export class GenerationConfirmationService {
       && this.dependencies.now().getTime()
         < new Date(challenge.expiresAt).getTime();
     if (!stillAuthoritative) {
-      await this.clearPendingChallenge(session.id, cleanupToken);
+      await this.clearExactChallenge(session.id, cleanupToken);
       throw bindingFailure(
         "Generation confirmation state changed while prompting"
       );
     }
     if (latest.revision === Number.MAX_SAFE_INTEGER) {
-      await this.clearPendingChallenge(session.id, cleanupToken);
+      await this.clearExactChallenge(session.id, cleanupToken);
       throw bindingFailure("Generation revision cannot approve challenge");
     }
     const approved = GenerationSessionSchema.parse({
@@ -357,7 +380,28 @@ export class GenerationConfirmationService {
     return { status: "approved", proposal };
   };
 
-  private async clearPendingChallenge(
+  public readonly clearApproved = async (input: {
+    generationId: string;
+    challenge: PendingConfirmation;
+  }): Promise<void> => {
+    const session = GenerationSessionSchema.parse(
+      await this.dependencies.store.read(input.generationId)
+    );
+    const challenge = session.pendingConfirmation;
+    if (
+      challenge === null
+      || JSON.stringify(challenge) !== JSON.stringify(input.challenge)
+      || challenge.status !== "approved"
+    ) {
+      return;
+    }
+    await this.clearExactChallenge(session.id, {
+      expectedRevision: session.revision,
+      expectedChallenge: challenge
+    });
+  };
+
+  private async clearExactChallenge(
     generationId: string,
     token: PendingChallengeToken
   ): Promise<void> {
@@ -368,7 +412,6 @@ export class GenerationConfirmationService {
     if (
       latest.revision !== token.expectedRevision
       || pending === null
-      || pending.status !== "pending"
       || JSON.stringify(pending) !== JSON.stringify(token.expectedChallenge)
     ) {
       return;

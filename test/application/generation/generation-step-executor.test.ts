@@ -8,6 +8,7 @@ import {
 } from "../../../src/ports/generation-session-store.js";
 import {
   GenerationSessionSchema,
+  hashGenerationConfirmationEvidence,
   type GenerationSession
 } from "../../../src/domain/generation.js";
 import {
@@ -68,6 +69,19 @@ function proposal(runtime = snapshot()): ProposedStep {
     },
     activity: { before: activity }
   };
+}
+
+function confirmationEvidenceHash(
+  step: ProposedStep,
+  runtime: RuntimeSnapshot,
+  source: "planner" | "manualOverride" = "planner"
+): string {
+  return hashGenerationConfirmationEvidence({
+    version: 1,
+    proposal: step,
+    snapshot: runtime,
+    source
+  });
 }
 
 function session(
@@ -140,6 +154,7 @@ function harness(
   writeTextEvidence: ReturnType<typeof vi.fn>;
   beginStep: ReturnType<typeof vi.fn>;
   completeStep: ReturnType<typeof vi.fn>;
+  clearApproved: ReturnType<typeof vi.fn>;
   recover: () => void;
   replaceCurrent: (next: GenerationSession) => void;
   afterBegin: (callback: () => void) => void;
@@ -186,6 +201,24 @@ function harness(
     layout: vi.fn(() => Promise.resolve(snapshot().layout)),
     layoutDiff: vi.fn(() => Promise.resolve([]))
   };
+  const clearApproved = vi.fn((
+    generationId: string,
+    challenge: NonNullable<GenerationSession["pendingConfirmation"]>
+  ): Promise<void> => {
+    if (
+      current.id === generationId
+      && JSON.stringify(current.pendingConfirmation)
+        === JSON.stringify(challenge)
+      && challenge.status === "approved"
+    ) {
+      current = GenerationSessionSchema.parse({
+        ...current,
+        revision: current.revision + 1,
+        pendingConfirmation: null
+      });
+    }
+    return Promise.resolve();
+  });
   const store = {
     read: vi.fn(() => Promise.resolve(current)),
     beginStep: vi.fn((
@@ -253,7 +286,8 @@ function harness(
     },
     idle: { pollIntervalMs: 1, stablePolls: 1, timeoutMs: 10 },
     now: (): Date => now,
-    generateAttemptId
+    generateAttemptId,
+    clearApprovedConfirmation: clearApproved
   });
   return {
     execute: executor.execute,
@@ -268,6 +302,7 @@ function harness(
     writeTextEvidence: store.writeTextEvidence,
     beginStep: store.beginStep,
     completeStep: store.completeStep,
+    clearApproved,
     recover: (): void => {
       current = GenerationSessionSchema.parse({
         ...current,
@@ -327,6 +362,7 @@ describe("GenerationStepExecutor", () => {
       stepIndex: 0,
       proposalHash: hashProposedStep(step),
       snapshotHash: hashRuntimeSnapshot(runtime),
+      evidenceHash: confirmationEvidenceHash(step, runtime),
       actionSummary: "Back from com.example.app.MainActivity",
       expiresAt: "2026-07-22T12:00:30.000Z",
       status: "approved" as const
@@ -342,6 +378,7 @@ describe("GenerationStepExecutor", () => {
       snapshot: runtime,
       source: "planner"
     })).resolves.toMatchObject({ status: "succeeded" });
+    expect(test.clearApproved).not.toHaveBeenCalled();
     await expect(test.execute({
       generationId: "generation-1",
       proposal: step,
@@ -351,11 +388,17 @@ describe("GenerationStepExecutor", () => {
   });
 
   it.each([
-    ["expired", { expiresAt: "2026-07-22T12:00:00.000Z" }],
-    ["proposal mismatch", { proposalHash: "f".repeat(64) }],
-    ["snapshot mismatch", { snapshotHash: "f".repeat(64) }],
-    ["pending", { status: "pending" as const }]
-  ])("rejects %s confirmation before freshness or action", async (_name, change) => {
+    ["expired", { expiresAt: "2026-07-22T12:00:00.000Z" }, 4],
+    ["proposal mismatch", { proposalHash: "f".repeat(64) }, 4],
+    ["snapshot mismatch", { snapshotHash: "f".repeat(64) }, 4],
+    ["evidence mismatch", { evidenceHash: "f".repeat(64) }, 4],
+    ["pending", { status: "pending" as const }, 4],
+    ["revision mismatch", {}, 5]
+  ])("rejects %s confirmation before freshness or action", async (
+    _name,
+    change,
+    revision
+  ) => {
     const runtime = snapshot();
     const step: ProposedStep = {
       action: "back",
@@ -363,12 +406,13 @@ describe("GenerationStepExecutor", () => {
       activity: { before: activity }
     };
     const test = harness(session(runtime, {
-      revision: 4,
+      revision,
       pendingConfirmation: {
         challengeId: "challenge-1",
         stepIndex: 0,
         proposalHash: hashProposedStep(step),
         snapshotHash: hashRuntimeSnapshot(runtime),
+        evidenceHash: confirmationEvidenceHash(step, runtime),
         actionSummary: "Back from com.example.app.MainActivity",
         expiresAt: "2026-07-22T12:00:30.000Z",
         status: "approved",
@@ -383,6 +427,216 @@ describe("GenerationStepExecutor", () => {
       source: "planner"
     })).rejects.toMatchObject({ code: "RISK_CONFIRMATION_REQUIRED" });
     expect(test.guard).not.toHaveBeenCalled();
+    expect(test.adb.back).not.toHaveBeenCalled();
+    if (
+      _name === "expired"
+      || _name === "evidence mismatch"
+      || _name === "revision mismatch"
+    ) {
+      expect(test.clearApproved).toHaveBeenCalledTimes(1);
+      expect(test.current().pendingConfirmation).toBeNull();
+    }
+  });
+
+  it("rejects provenance tampering and clears only the exact approval", async () => {
+    const runtime = snapshot();
+    const step: ProposedStep = {
+      action: "back",
+      binding: proposal(runtime).binding,
+      activity: { before: activity }
+    };
+    const approved = {
+      challengeId: "challenge-1",
+      stepIndex: 0,
+      proposalHash: hashProposedStep(step),
+      snapshotHash: hashRuntimeSnapshot(runtime),
+      evidenceHash: confirmationEvidenceHash(
+        step,
+        runtime,
+        "manualOverride"
+      ),
+      actionSummary: "Back from com.example.app.MainActivity",
+      expiresAt: "2026-07-22T12:00:30.000Z",
+      status: "approved" as const
+    };
+    const test = harness(session(runtime, {
+      revision: 4,
+      pendingConfirmation: approved
+    }));
+
+    await expect(test.execute({
+      generationId: "generation-1",
+      proposal: step,
+      snapshot: runtime,
+      source: "planner"
+    })).rejects.toMatchObject({ code: "RISK_CONFIRMATION_REQUIRED" });
+    expect(test.guard).not.toHaveBeenCalled();
+    expect(test.current().pendingConfirmation).toBeNull();
+  });
+
+  it("clears the exact approval when freshness fails before durable begin", async () => {
+    const runtime = snapshot();
+    const step: ProposedStep = {
+      action: "back",
+      binding: proposal(runtime).binding,
+      activity: { before: activity }
+    };
+    const approved = {
+      challengeId: "challenge-1",
+      stepIndex: 0,
+      proposalHash: hashProposedStep(step),
+      snapshotHash: hashRuntimeSnapshot(runtime),
+      evidenceHash: confirmationEvidenceHash(step, runtime),
+      actionSummary: "Back from com.example.app.MainActivity",
+      expiresAt: "2026-07-22T12:00:30.000Z",
+      status: "approved" as const
+    };
+    const test = harness(session(runtime, {
+      revision: 4,
+      pendingConfirmation: approved
+    }));
+    test.guard.mockRejectedValueOnce(new Error("Runtime changed"));
+
+    await expect(test.execute({
+      generationId: "generation-1",
+      proposal: step,
+      snapshot: runtime,
+      source: "planner"
+    })).rejects.toThrow(/runtime changed/i);
+    expect(test.beginStep).not.toHaveBeenCalled();
+    expect(test.clearApproved).toHaveBeenCalledWith(
+      "generation-1",
+      approved
+    );
+    expect(test.current().pendingConfirmation).toBeNull();
+    expect(test.adb.back).not.toHaveBeenCalled();
+  });
+
+  it("clears the exact approval when cancelled during freshness", async () => {
+    const runtime = snapshot();
+    const step: ProposedStep = {
+      action: "back",
+      binding: proposal(runtime).binding,
+      activity: { before: activity }
+    };
+    const approved = {
+      challengeId: "challenge-1",
+      stepIndex: 0,
+      proposalHash: hashProposedStep(step),
+      snapshotHash: hashRuntimeSnapshot(runtime),
+      evidenceHash: confirmationEvidenceHash(step, runtime),
+      actionSummary: "Back from com.example.app.MainActivity",
+      expiresAt: "2026-07-22T12:00:30.000Z",
+      status: "approved" as const
+    };
+    const controller = new AbortController();
+    const test = harness(session(runtime, {
+      revision: 4,
+      pendingConfirmation: approved
+    }));
+    test.guard.mockImplementationOnce(((
+      _binding: unknown,
+      signal?: AbortSignal
+    ): Promise<RuntimeSnapshot> => new Promise((_resolve, reject) => {
+      signal?.addEventListener("abort", () => {
+        reject(new Error("Freshness cancelled"));
+      }, { once: true });
+    })) as never);
+    const execution = test.execute({
+      generationId: "generation-1",
+      proposal: step,
+      snapshot: runtime,
+      source: "planner",
+      signal: controller.signal
+    });
+    await vi.waitFor(() => {
+      expect(test.guard).toHaveBeenCalledTimes(1);
+    });
+
+    controller.abort();
+
+    await expect(execution).resolves.toMatchObject({ status: "cancelled" });
+    expect(test.beginStep).not.toHaveBeenCalled();
+    expect(test.current().pendingConfirmation).toBeNull();
+    expect(test.adb.back).not.toHaveBeenCalled();
+  });
+
+  it("clears the exact approval when already cancelled before execution", async () => {
+    const runtime = snapshot();
+    const step: ProposedStep = {
+      action: "back",
+      binding: proposal(runtime).binding,
+      activity: { before: activity }
+    };
+    const approved = {
+      challengeId: "challenge-1",
+      stepIndex: 0,
+      proposalHash: hashProposedStep(step),
+      snapshotHash: hashRuntimeSnapshot(runtime),
+      evidenceHash: confirmationEvidenceHash(step, runtime),
+      actionSummary: "Back from com.example.app.MainActivity",
+      expiresAt: "2026-07-22T12:00:30.000Z",
+      status: "approved" as const
+    };
+    const controller = new AbortController();
+    controller.abort();
+    const test = harness(session(runtime, {
+      revision: 4,
+      pendingConfirmation: approved
+    }));
+
+    await expect(test.execute({
+      generationId: "generation-1",
+      proposal: step,
+      snapshot: runtime,
+      source: "planner",
+      signal: controller.signal
+    })).resolves.toMatchObject({ status: "cancelled" });
+    expect(test.guard).not.toHaveBeenCalled();
+    expect(test.current().pendingConfirmation).toBeNull();
+    expect(test.adb.back).not.toHaveBeenCalled();
+  });
+
+  it("preserves a concurrent replacement when pre-begin cleanup runs", async () => {
+    const runtime = snapshot();
+    const step: ProposedStep = {
+      action: "back",
+      binding: proposal(runtime).binding,
+      activity: { before: activity }
+    };
+    const approved = {
+      challengeId: "challenge-1",
+      stepIndex: 0,
+      proposalHash: hashProposedStep(step),
+      snapshotHash: hashRuntimeSnapshot(runtime),
+      evidenceHash: confirmationEvidenceHash(step, runtime),
+      actionSummary: "Back from com.example.app.MainActivity",
+      expiresAt: "2026-07-22T12:00:30.000Z",
+      status: "approved" as const
+    };
+    const replacement = {
+      ...approved,
+      challengeId: "challenge-2"
+    };
+    const test = harness(session(runtime, {
+      revision: 4,
+      pendingConfirmation: approved
+    }));
+    test.guard.mockImplementationOnce(((): Promise<RuntimeSnapshot> => {
+      test.replaceCurrent(session(runtime, {
+        revision: 5,
+        pendingConfirmation: replacement
+      }));
+      return Promise.reject(new Error("Runtime changed"));
+    }) as never);
+
+    await expect(test.execute({
+      generationId: "generation-1",
+      proposal: step,
+      snapshot: runtime,
+      source: "planner"
+    })).rejects.toThrow(/runtime changed/i);
+    expect(test.current().pendingConfirmation).toEqual(replacement);
     expect(test.adb.back).not.toHaveBeenCalled();
   });
 
@@ -770,6 +1024,7 @@ describe("GenerationStepExecutor", () => {
       stepIndex: 0,
       proposalHash: hashProposedStep(step),
       snapshotHash: hashRuntimeSnapshot(runtime),
+      evidenceHash: confirmationEvidenceHash(step, runtime),
       actionSummary: "Back from com.example.app.MainActivity",
       expiresAt: "2026-07-22T12:00:30.000Z",
       status: "approved" as const
@@ -791,6 +1046,7 @@ describe("GenerationStepExecutor", () => {
     })).rejects.toThrow(/expired/);
 
     expect(test.current().inFlight).toBeNull();
+    expect(test.current().pendingConfirmation).toBeNull();
     expect(test.adb.back).not.toHaveBeenCalled();
   });
 

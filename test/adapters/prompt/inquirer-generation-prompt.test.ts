@@ -101,6 +101,7 @@ describe("InquirerGenerationPrompt", () => {
       stepIndex: 0,
       proposalHash: "b".repeat(64),
       snapshotHash: "a".repeat(64),
+      evidenceHash: "e".repeat(64),
       actionSummary: "Back from com.example.app.MainActivity",
       expiresAt: "2026-07-22T12:00:30.000Z",
       status: "pending"
@@ -117,6 +118,119 @@ describe("InquirerGenerationPrompt", () => {
       expect.objectContaining({ default: false }),
       { input: io.input, output: io.output }
     );
+  });
+
+  it("propagates active confirmation abort through the prompt context", async () => {
+    const io = streams();
+    const controller = new AbortController();
+    const injected = functions([]);
+    vi.mocked(injected.confirm).mockImplementation((
+      _config,
+      context
+    ): Promise<unknown> => {
+      if (context.signal === undefined) {
+        return Promise.reject(new Error("Missing abort signal"));
+      }
+      return new Promise((_resolve, reject) => {
+      context.signal?.addEventListener("abort", () => {
+        reject(Object.assign(new Error("Prompt aborted"), {
+          name: "AbortPromptError"
+        }));
+      }, { once: true });
+      });
+    });
+    const prompt = new InquirerGenerationPrompt(
+      injected,
+      io.input,
+      io.output
+    );
+    const confirmation = prompt.confirm({
+      challengeId: "challenge-1",
+      stepIndex: 0,
+      proposalHash: "b".repeat(64),
+      snapshotHash: "a".repeat(64),
+      evidenceHash: "e".repeat(64),
+      actionSummary: "Wait",
+      expiresAt: "2026-07-22T12:00:30.000Z",
+      status: "pending"
+    }, controller.signal);
+    await vi.waitFor(() => {
+      expect(injected.confirm).toHaveBeenCalledTimes(1);
+    });
+
+    controller.abort();
+
+    await expect(confirmation).rejects.toThrow(/cancelled/i);
+    expect(vi.mocked(injected.confirm).mock.calls[0]?.[1]).toMatchObject({
+      input: io.input,
+      output: io.output,
+      signal: controller.signal
+    });
+  });
+
+  it("propagates active manual abort and does not continue prompting", async () => {
+    const io = streams();
+    const controller = new AbortController();
+    const injected = functions([]);
+    vi.mocked(injected.select).mockImplementation((
+      _config,
+      context
+    ): Promise<unknown> => {
+      if (context.signal === undefined) {
+        return Promise.reject(new Error("Missing abort signal"));
+      }
+      return new Promise((_resolve, reject) => {
+      context.signal?.addEventListener("abort", () => {
+        reject(Object.assign(new Error("Prompt aborted"), {
+          name: "AbortPromptError"
+        }));
+      }, { once: true });
+      });
+    });
+    const prompt = new InquirerGenerationPrompt(
+      injected,
+      io.input,
+      io.output
+    );
+    const manual = prompt.buildManualProposal(
+      input("click"),
+      controller.signal
+    );
+    await vi.waitFor(() => {
+      expect(injected.select).toHaveBeenCalledTimes(1);
+    });
+
+    controller.abort();
+
+    await expect(manual).rejects.toThrow(/cancelled/i);
+    expect(injected.input).not.toHaveBeenCalled();
+    expect(injected.number).not.toHaveBeenCalled();
+  });
+
+  it("rejects already-aborted prompts before invoking Inquirer", async () => {
+    const io = streams();
+    const injected = functions([true]);
+    const prompt = new InquirerGenerationPrompt(
+      injected,
+      io.input,
+      io.output
+    );
+    const signal = AbortSignal.abort();
+
+    await expect(prompt.confirm({
+      challengeId: "challenge-1",
+      stepIndex: 0,
+      proposalHash: "b".repeat(64),
+      snapshotHash: "a".repeat(64),
+      evidenceHash: "e".repeat(64),
+      actionSummary: "Wait",
+      expiresAt: "2026-07-22T12:00:30.000Z",
+      status: "pending"
+    }, signal)).rejects.toThrow(/cancelled/i);
+    await expect(prompt.buildManualProposal(input("click"), signal))
+      .rejects.toThrow(/cancelled/i);
+    expect(injected.confirm).not.toHaveBeenCalled();
+    expect(injected.select).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -139,6 +253,7 @@ describe("InquirerGenerationPrompt", () => {
       stepIndex: 0,
       proposalHash: "b".repeat(64),
       snapshotHash: "a".repeat(64),
+      evidenceHash: "e".repeat(64),
       actionSummary: "Wait",
       expiresAt: "2026-07-22T12:00:30.000Z",
       status: "pending"

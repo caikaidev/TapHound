@@ -1,11 +1,13 @@
 import { describe, expect, it, vi, type Mock } from "vitest";
 
 import {
-  GenerationConfirmationService
+  GenerationConfirmationService,
+  confirmationEvidencePath
 } from "../../../src/application/generation/generation-confirmation-service.js";
 import {
   GenerationSessionSchema,
-  type GenerationSession
+  type GenerationSession,
+  type PendingConfirmation
 } from "../../../src/domain/generation.js";
 import type { ProposedStep } from "../../../src/domain/proposed-step.js";
 import {
@@ -82,15 +84,30 @@ function harness(confirmResult = true): {
   service: GenerationConfirmationService;
   current: () => GenerationSession;
   mutate: (change: (current: GenerationSession) => GenerationSession) => void;
-  confirm: Mock<() => Promise<boolean>>;
-  buildManualProposal: Mock<() => Promise<ProposedStep>>;
+  confirm: Mock<(
+    challenge: PendingConfirmation,
+    signal?: AbortSignal
+  ) => Promise<boolean>>;
+  buildManualProposal: Mock<(
+    input: unknown,
+    signal?: AbortSignal
+  ) => Promise<ProposedStep>>;
+  evidence: Map<string, Buffer>;
+  setNow: (value: Date) => void;
 } {
   let current = session();
+  let now = new Date("2026-07-22T12:00:00.000Z");
   const evidence = new Map<string, Buffer>();
-  const confirm = vi.fn<() => Promise<boolean>>(
+  const confirm = vi.fn<(
+    challenge: PendingConfirmation,
+    signal?: AbortSignal
+  ) => Promise<boolean>>(
     () => Promise.resolve(confirmResult)
   );
-  const buildManualProposal = vi.fn<() => Promise<ProposedStep>>(
+  const buildManualProposal = vi.fn<(
+    input: unknown,
+    signal?: AbortSignal
+  ) => Promise<ProposedStep>>(
     () => Promise.resolve(proposal())
   );
   const store = {
@@ -129,7 +146,7 @@ function harness(confirmResult = true): {
         confirm,
         buildManualProposal
       },
-      now: () => new Date("2026-07-22T12:00:00.000Z"),
+      now: () => now,
       generateChallengeId: () => "challenge-1",
       confirmationTtlMs: 30_000
     }),
@@ -138,7 +155,11 @@ function harness(confirmResult = true): {
       current = GenerationSessionSchema.parse(change(current));
     },
     confirm,
-    buildManualProposal
+    buildManualProposal,
+    evidence,
+    setNow: (value): void => {
+      now = value;
+    }
   };
 }
 
@@ -241,6 +262,158 @@ describe("GenerationConfirmationService", () => {
     });
   });
 
+  it("resumes an exact approved challenge without prompting twice", async () => {
+    const runtime = snapshot();
+    const test = harness();
+    await test.service.request({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime
+    });
+    await test.service.confirmStored({
+      generationId: "generation-1",
+      challengeId: "challenge-1"
+    });
+
+    const resumed = await test.service.confirmStored({
+      generationId: "generation-1",
+      challengeId: "challenge-1"
+    });
+
+    expect(resumed).toMatchObject({
+      status: "approved",
+      proposal: proposal(runtime),
+      source: "planner"
+    });
+    expect(test.confirm).toHaveBeenCalledTimes(1);
+    expect(test.current().pendingConfirmation).toMatchObject({
+      challengeId: "challenge-1",
+      status: "approved"
+    });
+  });
+
+  it("aborts an active confirmation prompt without approving the challenge", async () => {
+    const runtime = snapshot();
+    const test = harness();
+    const controller = new AbortController();
+    test.confirm.mockImplementationOnce((
+      _challenge,
+      signal
+    ): Promise<boolean> => {
+      if (signal === undefined) {
+        return Promise.reject(new Error("Missing abort signal"));
+      }
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => {
+          reject(new Error("Generation prompt was cancelled"));
+        }, { once: true });
+      });
+    });
+    await test.service.request({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime
+    });
+    const confirmation = test.service.confirmStored({
+      generationId: "generation-1",
+      challengeId: "challenge-1",
+      signal: controller.signal
+    });
+    await vi.waitFor(() => {
+      expect(test.confirm).toHaveBeenCalledTimes(1);
+    });
+
+    controller.abort();
+
+    await expect(confirmation).rejects.toThrow(/cancelled/i);
+    expect(test.current().pendingConfirmation).toBeNull();
+  });
+
+  it("aborts active manual proposal construction without creating a challenge", async () => {
+    const runtime = snapshot();
+    const test = harness();
+    const controller = new AbortController();
+    test.buildManualProposal.mockImplementationOnce((
+      _input,
+      signal
+    ): Promise<ProposedStep> => {
+      if (signal === undefined) {
+        return Promise.reject(new Error("Missing abort signal"));
+      }
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => {
+          reject(new Error("Generation prompt was cancelled"));
+        }, { once: true });
+      });
+    });
+    const manual = test.service.requestManual({
+      generationId: "generation-1",
+      snapshot: runtime,
+      manual: {
+        action: "back",
+        binding: proposal(runtime).binding,
+        before: activity,
+        layout: runtime.layout
+      },
+      signal: controller.signal
+    });
+    await vi.waitFor(() => {
+      expect(test.buildManualProposal).toHaveBeenCalledTimes(1);
+    });
+
+    controller.abort();
+
+    await expect(manual).rejects.toThrow(/cancelled/i);
+    expect(test.current()).toEqual(session(runtime));
+  });
+
+  it("rejects tampered provenance evidence before prompting", async () => {
+    const runtime = snapshot();
+    const test = harness();
+    await test.service.request({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime,
+      source: "planner"
+    });
+    const path = confirmationEvidencePath("challenge-1");
+    const stored = JSON.parse(
+      test.evidence.get(path)?.toString("utf8") ?? "null"
+    ) as Record<string, unknown>;
+    test.evidence.set(path, Buffer.from(JSON.stringify({
+      ...stored,
+      source: "manualOverride"
+    })));
+
+    await expect(test.service.confirmStored({
+      generationId: "generation-1",
+      challengeId: "challenge-1"
+    })).rejects.toThrow(/evidence/i);
+    expect(test.confirm).not.toHaveBeenCalled();
+  });
+
+  it("clears an expired approved challenge without prompting or acting", async () => {
+    const runtime = snapshot();
+    const test = harness();
+    await test.service.request({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime
+    });
+    await test.service.confirmStored({
+      generationId: "generation-1",
+      challengeId: "challenge-1"
+    });
+    test.setNow(new Date("2026-07-22T12:00:31.000Z"));
+
+    await expect(test.service.confirmStored({
+      generationId: "generation-1",
+      challengeId: "challenge-1"
+    })).rejects.toThrow(/expired/i);
+    expect(test.confirm).toHaveBeenCalledTimes(1);
+    expect(test.current().pendingConfirmation).toBeNull();
+  });
+
   it("decline clears the challenge deterministically", async () => {
     const runtime = snapshot();
     const test = harness(false);
@@ -326,7 +499,6 @@ describe("GenerationConfirmationService", () => {
   });
 
   it.each([
-    ["challenge replay", (value: ProposedStep): ProposedStep => value, "challenge-1"],
     ["proposal change", (value: ProposedStep): ProposedStep => ({
       ...value,
       activity: { before: "com.example.app.OtherActivity" }
@@ -344,20 +516,53 @@ describe("GenerationConfirmationService", () => {
       proposal: proposal(runtime),
       snapshot: runtime
     });
-    if (_name === "challenge replay") {
-      await test.service.confirm({
-        generationId: "generation-1",
-        challengeId,
-        proposal: proposal(runtime),
-        snapshot: runtime
-      });
-    }
     await expect(test.service.confirm({
       generationId: "generation-1",
       challengeId,
       proposal: mutate(proposal(runtime)),
       snapshot: runtime
     })).rejects.toThrow();
+  });
+
+  it("rejects approval reuse after the exact challenge is consumed", async () => {
+    const runtime = snapshot();
+    const test = harness();
+    await test.service.request({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime
+    });
+    await test.service.confirm({
+      generationId: "generation-1",
+      challengeId: "challenge-1",
+      proposal: proposal(runtime),
+      snapshot: runtime
+    });
+    test.mutate((current) => {
+      const approved = current.pendingConfirmation;
+      if (approved === null) {
+        throw new Error("Expected approved challenge");
+      }
+      return {
+        ...current,
+        revision: current.revision + 1,
+        pendingConfirmation: null,
+        inFlight: {
+          stepIndex: approved.stepIndex,
+          proposalHash: approved.proposalHash,
+          snapshotHash: approved.snapshotHash,
+          attemptId: "attempt-1"
+        }
+      };
+    });
+
+    await expect(test.service.confirm({
+      generationId: "generation-1",
+      challengeId: "challenge-1",
+      proposal: proposal(runtime),
+      snapshot: runtime
+    })).rejects.toThrow(/no pending/i);
+    expect(test.confirm).toHaveBeenCalledTimes(1);
   });
 
   it("clears the challenge when prompting fails", async () => {

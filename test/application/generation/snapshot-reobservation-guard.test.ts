@@ -188,6 +188,7 @@ describe("SnapshotReobservationGuard", () => {
       stepIndex: 0,
       proposalHash: "c".repeat(64),
       snapshotHash: binding(test).snapshotHash,
+      evidenceHash: "e".repeat(64),
       actionSummary: "click submit",
       expiresAt: "2026-07-22T12:20:00.000Z",
       status: "approved" as const
@@ -204,6 +205,12 @@ describe("SnapshotReobservationGuard", () => {
       binding(test),
       undefined,
       { ...approved, challengeId: "challenge-2" }
+    )).rejects.toMatchObject({ code: "SNAPSHOT_STALE" });
+    test.current.revision = 4;
+    await expect(test.guard.assertFresh(
+      binding(test),
+      undefined,
+      approved
     )).rejects.toMatchObject({ code: "SNAPSHOT_STALE" });
   });
 });

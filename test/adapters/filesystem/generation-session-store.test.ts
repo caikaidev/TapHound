@@ -109,6 +109,7 @@ function pendingConfirmation(challengeId: string): NonNullable<
     stepIndex: 0,
     proposalHash: "c".repeat(64),
     snapshotHash: "b".repeat(64),
+    evidenceHash: "e".repeat(64),
     actionSummary: "Back from com.example.app.MainActivity",
     expiresAt: "2026-07-22T12:00:30.000Z",
     status: "pending"
@@ -396,6 +397,13 @@ describe("FileSystemGenerationSessionStore", () => {
       store.beginStep("generation-1", 0, inFlight, {
         ...approved,
         challengeId: "challenge-2"
+      }),
+      "INVALID_TRANSITION"
+    );
+    await expectStoreError(
+      store.beginStep("generation-1", 0, inFlight, {
+        ...approved,
+        evidenceHash: "d".repeat(64)
       }),
       "INVALID_TRANSITION"
     );

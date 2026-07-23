@@ -6,6 +6,9 @@ import type {
 import {
   GenerationOperationError
 } from "../../src/application/generation/generation-starter.js";
+import {
+  GenerationPromptCancelledError
+} from "../../src/ports/generation-prompt.js";
 import { createProgram } from "../../src/cli/program.js";
 import type {
   CliDependencies,
@@ -14,6 +17,9 @@ import type {
 import {
   createProductionDependencies
 } from "../../src/cli/dependencies.js";
+import type {
+  GenerationSessionStore
+} from "../../src/ports/generation-session-store.js";
 import { hashRuntimeSnapshot } from "../../src/domain/runtime-snapshot.js";
 import { runtimeConfig } from "../fakes/runtime-fixture.js";
 
@@ -79,7 +85,7 @@ interface Harness {
   finalize: Mock;
 }
 
-function harness(): Harness {
+function harness(signal?: AbortSignal): Harness {
   const stdout = new BufferOutput();
   const stderr = new BufferOutput();
   const exitCodes: number[] = [];
@@ -130,6 +136,7 @@ function harness(): Harness {
     candidateSteps: [{}]
   }));
   const dependencies = {
+    ...(signal === undefined ? {} : { signal }),
     doctor: {
       run: vi.fn(() => Promise.resolve({
         status: "passed" as const,
@@ -191,12 +198,31 @@ function harness(): Harness {
   };
 }
 
+function internals(value: unknown): Record<string, unknown> {
+  return (value as {
+    dependencies: Record<string, unknown>;
+  }).dependencies;
+}
+
 describe("generation JSON process protocol", () => {
-  it("composes all production generation services per invocation", () => {
-    const dependencies = createProductionDependencies();
+  it("shares one Store identity and exact idle config across production services", async () => {
+    const read = vi.fn(() => Promise.resolve({ id: "store-sentinel" }));
+    const store = { read } as unknown as GenerationSessionStore;
+    const generationStoreFactory = vi.fn(() => store);
+    const dependencies = createProductionDependencies(undefined, {
+      generationStoreFactory
+    });
+    const config = {
+      ...runtimeConfig,
+      idle: {
+        timeoutMs: 12_345,
+        pollIntervalMs: 67,
+        stablePolls: 4
+      }
+    };
     const runtime = dependencies.generationRuntime?.({
       projectRoot: "/project",
-      config: runtimeConfig
+      config
     });
 
     expect(runtime).toBeDefined();
@@ -206,6 +232,18 @@ describe("generation JSON process protocol", () => {
     expect(runtime?.observer.observe).toBeTypeOf("function");
     expect(runtime?.finalizer.finalize).toBeTypeOf("function");
     expect(runtime?.readSession).toBeTypeOf("function");
+    expect(generationStoreFactory).toHaveBeenCalledTimes(1);
+    expect(generationStoreFactory).toHaveBeenCalledWith("/project");
+    expect(internals(runtime?.confirmation).store).toBe(store);
+    expect(internals(runtime?.executor).store).toBe(store);
+    expect(internals(runtime?.observer).store).toBe(store);
+    expect(internals(runtime?.finalizer).store).toBe(store);
+    expect(internals(internals(runtime?.finalizer).publisher).store).toBe(
+      store
+    );
+    expect(internals(runtime?.executor).idle).toBe(config.idle);
+    await runtime?.readSession("generation-1");
+    expect(read).toHaveBeenCalledWith("generation-1");
   });
 
   it("executes a strict planner envelope and emits exactly one JSON value", async () => {
@@ -272,6 +310,97 @@ describe("generation JSON process protocol", () => {
     expect(test.exitCodes).toEqual([2]);
   });
 
+  it.each([
+    ["observe", ["generation", "observe", "--session", "../invalid"]],
+    [
+      "step",
+      [
+        "generation", "step", "--session", "../invalid",
+        "--input", "input.json"
+      ]
+    ],
+    [
+      "confirm",
+      [
+        "generation", "confirm", "--session", "../invalid",
+        "--challenge", "challenge-1"
+      ]
+    ],
+    [
+      "manual",
+      [
+        "generation", "manual", "--session", "../invalid",
+        "--action", "wait"
+      ]
+    ],
+    [
+      "finalize",
+      [
+        "generation", "finalize", "--session", "../invalid",
+        "--context", "context.json", "--output", "journey.json"
+      ]
+    ]
+  ])("rejects invalid %s session IDs before side effects", async (
+    _command,
+    args
+  ) => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", ...args, "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "error",
+      exitCode: 2
+    });
+    expect(test.dependencies.readJson).not.toHaveBeenCalled();
+    expect(test.dependencies.runtimeObserver.observe).not.toHaveBeenCalled();
+    expect(test.dependencies.doctor.run).not.toHaveBeenCalled();
+    expect(test.request).not.toHaveBeenCalled();
+    expect(test.confirmStored).not.toHaveBeenCalled();
+    expect(test.observe).not.toHaveBeenCalled();
+    expect(test.finalize).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed challenge IDs as validation, not confirmation risk", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "confirm",
+      "--session", "generation-1",
+      "--challenge", "../invalid",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "error",
+      exitCode: 2
+    });
+    expect(test.dependencies.readJson).not.toHaveBeenCalled();
+    expect(test.confirmStored).not.toHaveBeenCalled();
+  });
+
+  it("keeps malformed IDs as exit 2 when the signal is aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const test = harness(controller.signal);
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "confirm",
+      "--session", "../invalid",
+      "--challenge", "challenge-1",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "error",
+      exitCode: 2
+    });
+    expect(test.dependencies.readJson).not.toHaveBeenCalled();
+    expect(test.confirmStored).not.toHaveBeenCalled();
+  });
+
   it("returns confirmationRequired without executing an action", async () => {
     const test = harness();
     test.request.mockResolvedValueOnce({
@@ -281,6 +410,7 @@ describe("generation JSON process protocol", () => {
         stepIndex: 0,
         proposalHash: "a".repeat(64),
         snapshotHash: "b".repeat(64),
+        evidenceHash: "e".repeat(64),
         actionSummary: "Wait",
         expiresAt: "2026-07-23T00:05:00.000Z",
         status: "pending"
@@ -425,6 +555,70 @@ describe("generation JSON process protocol", () => {
       exitCode: 1,
       failure: { code: "RISK_CONFIRMATION_REQUIRED" }
     });
+    expect(test.execute).not.toHaveBeenCalled();
+  });
+
+  it("maps confirmation prompt cancellation to one exit-1 JSON result", async () => {
+    const controller = new AbortController();
+    const test = harness(controller.signal);
+    test.confirmStored.mockRejectedValueOnce(
+      new GenerationPromptCancelledError()
+    );
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "confirm",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--challenge", "challenge-1",
+      "--json"
+    ]);
+
+    expect(test.confirmStored).toHaveBeenCalledWith({
+      generationId: "generation-1",
+      challengeId: "challenge-1",
+      signal: controller.signal
+    });
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "error",
+      exitCode: 1,
+      failure: { code: "RECOVERY_REQUIRED" }
+    });
+    expect(test.exitCodes).toEqual([1]);
+    expect(test.execute).not.toHaveBeenCalled();
+  });
+
+  it("maps manual prompt cancellation and propagates the signal", async () => {
+    const controller = new AbortController();
+    const test = harness(controller.signal);
+    test.requestManual.mockRejectedValueOnce(
+      new GenerationPromptCancelledError()
+    );
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "manual",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--action", "wait",
+      "--json"
+    ]);
+
+    expect(test.requestManual).toHaveBeenCalledWith({
+      generationId: "generation-1",
+      snapshot,
+      manual: {
+        action: "wait",
+        binding: proposal.binding,
+        before: snapshot.activity,
+        layout: snapshot.layout
+      },
+      signal: controller.signal
+    });
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "error",
+      exitCode: 1,
+      failure: { code: "RECOVERY_REQUIRED" }
+    });
+    expect(test.exitCodes).toEqual([1]);
     expect(test.execute).not.toHaveBeenCalled();
   });
 

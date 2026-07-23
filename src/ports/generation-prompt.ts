@@ -17,8 +17,20 @@ export interface ManualProposalInput {
 }
 
 export interface GenerationPromptPort {
-  confirm: (challenge: PendingConfirmation) => Promise<boolean>;
+  confirm: (
+    challenge: PendingConfirmation,
+    signal?: AbortSignal
+  ) => Promise<boolean>;
   buildManualProposal: (
-    input: ManualProposalInput
+    input: ManualProposalInput,
+    signal?: AbortSignal
   ) => Promise<ProposedStep>;
+}
+
+export class GenerationPromptCancelledError extends Error {
+  public override readonly name = "GenerationPromptCancelledError";
+
+  public constructor() {
+    super("Generation prompt was cancelled");
+  }
 }

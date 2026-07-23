@@ -235,6 +235,7 @@ export class SnapshotReobservationGuard {
               )
             : (
                 approvedConfirmation.status !== "approved"
+                || session.revision !== binding.baseRevision + 2
                 || JSON.stringify(session.pendingConfirmation)
                   !== JSON.stringify(approvedConfirmation)
               )

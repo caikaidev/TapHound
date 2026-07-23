@@ -4,6 +4,7 @@ import {
   GenerationSessionSchema,
   GenerationInFlightSchema,
   expandProposedStepVariables,
+  hashGenerationConfirmationEvidence,
   type GenerationInFlight,
   type GenerationSession,
   type PendingConfirmation
@@ -77,6 +78,10 @@ export interface GenerationStepExecutorDependencies {
   idle: IdleConfig;
   now: () => Date;
   generateAttemptId: () => string;
+  clearApprovedConfirmation: (
+    generationId: string,
+    challenge: PendingConfirmation
+  ) => Promise<void>;
 }
 
 interface LiveRuntime {
@@ -152,16 +157,24 @@ function exactApprovedChallenge(
   session: GenerationSession,
   proposal: ProposedStep,
   snapshot: RuntimeSnapshot,
+  source: GenerationCandidateSource,
   now: Date
 ): PendingConfirmation {
   const challenge = session.pendingConfirmation;
   if (
     challenge === null
     || challenge.status !== "approved"
+    || session.revision !== proposal.binding.baseRevision + 2
     || challenge.stepIndex !== session.candidateSteps.length
     || challenge.proposalHash !== hashProposedStep(proposal)
     || challenge.snapshotHash !== hashRuntimeSnapshot(snapshot)
     || challenge.snapshotHash !== proposal.binding.snapshotHash
+    || challenge.evidenceHash !== hashGenerationConfirmationEvidence({
+      version: 1,
+      proposal,
+      snapshot,
+      source
+    })
     || challenge.actionSummary !== summarizeProposedStep(proposal)
     || now.getTime() >= new Date(challenge.expiresAt).getTime()
   ) {
@@ -171,6 +184,21 @@ function exactApprovedChallenge(
     );
   }
   return challenge;
+}
+
+function isBoundApprovedChallenge(
+  challenge: PendingConfirmation | null,
+  session: GenerationSession,
+  proposal: ProposedStep,
+  snapshot: RuntimeSnapshot
+): challenge is PendingConfirmation {
+  return challenge !== null
+    && challenge.status === "approved"
+    && challenge.stepIndex === session.candidateSteps.length
+    && challenge.proposalHash === hashProposedStep(proposal)
+    && challenge.snapshotHash === hashRuntimeSnapshot(snapshot)
+    && challenge.snapshotHash === proposal.binding.snapshotHash
+    && challenge.actionSummary === summarizeProposedStep(proposal);
 }
 
 function assertBaseAuthorization(
@@ -277,9 +305,6 @@ export class GenerationStepExecutor {
     const session = GenerationSessionSchema.parse(
       await this.dependencies.store.read(input.generationId)
     );
-    if (isCancelled(input.signal)) {
-      return cancellation();
-    }
     assertBaseAuthorization(session, proposal, snapshot);
     const risk = this.riskEvaluator.evaluate(
       proposal.action,
@@ -293,12 +318,28 @@ export class GenerationStepExecutor {
     }
     let approved: PendingConfirmation | undefined;
     if (risk.effectiveRisk === "confirmationRequired") {
-      approved = exactApprovedChallenge(
-        session,
-        proposal,
-        snapshot,
-        this.dependencies.now()
-      );
+      try {
+        approved = exactApprovedChallenge(
+          session,
+          proposal,
+          snapshot,
+          source,
+          this.dependencies.now()
+        );
+      } catch (error) {
+        if (isBoundApprovedChallenge(
+          session.pendingConfirmation,
+          session,
+          proposal,
+          snapshot
+        )) {
+          await this.dependencies.clearApprovedConfirmation(
+            session.id,
+            session.pendingConfirmation
+          );
+        }
+        throw error;
+      }
     } else if (
       session.revision !== proposal.binding.baseRevision
       || session.pendingConfirmation !== null
@@ -309,27 +350,52 @@ export class GenerationStepExecutor {
       );
     }
 
-    const fresh = await this.dependencies.freshnessGuard.assertFresh(
-      proposal.binding,
-      input.signal,
-      approved
-    );
+    const clearApproved = async (): Promise<void> => {
+      if (approved !== undefined) {
+        await this.dependencies.clearApprovedConfirmation(
+          session.id,
+          approved
+        );
+      }
+    };
     if (isCancelled(input.signal)) {
+      await clearApproved();
+      return cancellation();
+    }
+    let fresh: RuntimeSnapshot;
+    try {
+      fresh = await this.dependencies.freshnessGuard.assertFresh(
+        proposal.binding,
+        input.signal,
+        approved
+      );
+    } catch (error) {
+      await clearApproved();
+      if (isCancelled(input.signal)) {
+        return cancellation();
+      }
+      throw error;
+    }
+    if (isCancelled(input.signal)) {
+      await clearApproved();
       return cancellation();
     }
     if (fresh.foregroundPackageName !== session.target.packageName) {
+      await clearApproved();
       throw new GenerationOperationError(
         "PACKAGE_ESCAPE",
         "Fresh foreground package escaped the generation target"
       );
     }
     if (fresh.pid === null) {
+      await clearApproved();
       throw new GenerationOperationError(
         "APP_CRASHED",
         "Fresh generation process is not running"
       );
     }
     if (fresh.activity !== proposal.activity.before) {
+      await clearApproved();
       throw new GenerationOperationError(
         "SNAPSHOT_STALE",
         "Fresh Activity does not match the accepted proposal"
@@ -337,13 +403,20 @@ export class GenerationStepExecutor {
     }
     const authoritativePid = fresh.pid;
 
-    const inFlight = GenerationInFlightSchema.parse({
-      stepIndex: session.candidateSteps.length,
-      snapshotHash: proposal.binding.snapshotHash,
-      proposalHash: hashProposedStep(proposal),
-      attemptId: this.dependencies.generateAttemptId()
-    });
+    let inFlight: GenerationInFlight;
+    try {
+      inFlight = GenerationInFlightSchema.parse({
+        stepIndex: session.candidateSteps.length,
+        snapshotHash: proposal.binding.snapshotHash,
+        proposalHash: hashProposedStep(proposal),
+        attemptId: this.dependencies.generateAttemptId()
+      });
+    } catch (error) {
+      await clearApproved();
+      throw error;
+    }
     if (isCancelled(input.signal)) {
+      await clearApproved();
       return cancellation();
     }
     let begun: GenerationSession;
@@ -360,6 +433,8 @@ export class GenerationStepExecutor {
       );
       if (JSON.stringify(latest.inFlight) === JSON.stringify(inFlight)) {
         await this.markRecovery(session.id, inFlight);
+      } else {
+        await clearApproved();
       }
       throw error;
     }

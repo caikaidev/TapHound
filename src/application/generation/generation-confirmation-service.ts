@@ -4,6 +4,7 @@ import {
   GenerationSessionSchema,
   hashGenerationConfirmationEvidence,
   type GenerationConfirmationEvidence,
+  type GenerationSession,
   type PendingConfirmation
 } from "../../domain/generation.js";
 import {
@@ -16,8 +17,11 @@ import {
   hashRuntimeSnapshot,
   type RuntimeSnapshot
 } from "../../domain/runtime-snapshot.js";
-import type { GenerationPromptPort } from "../../ports/generation-prompt.js";
-import type { ManualProposalInput } from "../../ports/generation-prompt.js";
+import {
+  GenerationPromptCancelledError,
+  type GenerationPromptPort,
+  type ManualProposalInput
+} from "../../ports/generation-prompt.js";
 import type {
   GenerationSessionStore
 } from "../../ports/generation-session-store.js";
@@ -198,7 +202,7 @@ export class GenerationConfirmationService {
       confirmationEvidencePath(challenge.challengeId),
       evidence
     );
-    await this.dependencies.store.updateConfirmation(
+    await this.updateConfirmationReconciled(
       session.id,
       session.revision,
       next
@@ -341,6 +345,9 @@ export class GenerationConfirmationService {
       await this.clearExactChallenge(session.id, cleanupToken);
       throw error;
     }
+    if (input.signal?.aborted === true) {
+      await this.cancelPrompt(session.id, cleanupToken);
+    }
     if (!confirmed) {
       await this.clearExactChallenge(session.id, cleanupToken);
       throw bindingFailure("Generation action confirmation was declined");
@@ -349,6 +356,9 @@ export class GenerationConfirmationService {
     const latest = GenerationSessionSchema.parse(
       await this.dependencies.store.read(input.generationId)
     );
+    if (input.signal?.aborted === true) {
+      await this.cancelPrompt(session.id, cleanupToken);
+    }
     const stillAuthoritative = latest.revision === session.revision
       && JSON.stringify(latest.pendingConfirmation)
         === JSON.stringify(challenge)
@@ -363,6 +373,9 @@ export class GenerationConfirmationService {
     if (latest.revision === Number.MAX_SAFE_INTEGER) {
       await this.clearExactChallenge(session.id, cleanupToken);
       throw bindingFailure("Generation revision cannot approve challenge");
+    }
+    if (input.signal?.aborted === true) {
+      await this.cancelPrompt(session.id, cleanupToken);
     }
     const approved = GenerationSessionSchema.parse({
       ...latest,
@@ -424,11 +437,46 @@ export class GenerationConfirmationService {
       revision: latest.revision + 1,
       pendingConfirmation: null
     });
-    await this.dependencies.store.updateConfirmation(
+    await this.updateConfirmationReconciled(
       latest.id,
       latest.revision,
       cleared
     );
+  }
+
+  private async cancelPrompt(
+    generationId: string,
+    token: PendingChallengeToken
+  ): Promise<never> {
+    await this.clearExactChallenge(generationId, token);
+    throw new GenerationPromptCancelledError();
+  }
+
+  private async updateConfirmationReconciled(
+    generationId: string,
+    expectedRevision: number,
+    intended: GenerationSession
+  ): Promise<void> {
+    try {
+      await this.dependencies.store.updateConfirmation(
+        generationId,
+        expectedRevision,
+        intended
+      );
+    } catch (error) {
+      let authoritative: GenerationSession;
+      try {
+        authoritative = GenerationSessionSchema.parse(
+          await this.dependencies.store.read(generationId)
+        );
+      } catch {
+        throw error;
+      }
+      if (JSON.stringify(authoritative) === JSON.stringify(intended)) {
+        return;
+      }
+      throw error;
+    }
   }
 
   private async readStoredEvidence(

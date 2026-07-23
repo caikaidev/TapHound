@@ -561,9 +561,10 @@ describe("generation JSON process protocol", () => {
   it("maps confirmation prompt cancellation to one exit-1 JSON result", async () => {
     const controller = new AbortController();
     const test = harness(controller.signal);
-    test.confirmStored.mockRejectedValueOnce(
-      new GenerationPromptCancelledError()
-    );
+    test.confirmStored.mockImplementationOnce(() => {
+      controller.abort();
+      return Promise.reject(new GenerationPromptCancelledError());
+    });
 
     await createProgram(test.dependencies).parseAsync([
       "node", "taphound", "generation", "confirm",
@@ -584,6 +585,7 @@ describe("generation JSON process protocol", () => {
       failure: { code: "RECOVERY_REQUIRED" }
     });
     expect(test.exitCodes).toEqual([1]);
+    expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
     expect(test.execute).not.toHaveBeenCalled();
   });
 

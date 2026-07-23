@@ -1,5 +1,12 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it, vi, type Mock } from "vitest";
 
+import {
+  FileSystemGenerationSessionStore
+} from "../../../src/adapters/filesystem/generation-session-store.js";
 import {
   GenerationConfirmationService,
   confirmationEvidencePath
@@ -14,6 +21,12 @@ import {
   hashRuntimeSnapshot,
   type RuntimeSnapshot
 } from "../../../src/domain/runtime-snapshot.js";
+import {
+  GenerationPromptCancelledError
+} from "../../../src/ports/generation-prompt.js";
+import {
+  GenerationSessionStoreError
+} from "../../../src/ports/generation-session-store.js";
 
 const activity = "com.example.app.MainActivity";
 
@@ -37,7 +50,7 @@ function proposal(runtime = snapshot()): ProposedStep {
     action: "back",
     binding: {
       generationId: "generation-1",
-      baseRevision: 2,
+      baseRevision: runtime.baseRevision,
       snapshotHash: hashRuntimeSnapshot(runtime)
     },
     activity: { before: activity }
@@ -48,7 +61,7 @@ function session(runtime = snapshot()): GenerationSession {
   return {
     version: 1,
     id: "generation-1",
-    revision: 2,
+    revision: runtime.baseRevision,
     state: "active",
     bindings: {
       projectHash: "a".repeat(64),
@@ -94,6 +107,12 @@ function harness(confirmResult = true): {
   ) => Promise<ProposedStep>>;
   evidence: Map<string, Buffer>;
   setNow: (value: Date) => void;
+  read: Mock<() => Promise<GenerationSession>>;
+  updateConfirmation: Mock<(
+    id: string,
+    expectedRevision: number,
+    next: GenerationSession
+  ) => Promise<void>>;
 } {
   let current = session();
   let now = new Date("2026-07-22T12:00:00.000Z");
@@ -157,6 +176,8 @@ function harness(confirmResult = true): {
     confirm,
     buildManualProposal,
     evidence,
+    read: store.read,
+    updateConfirmation: store.updateConfirmation,
     setNow: (value): void => {
       now = value;
     }
@@ -182,6 +203,90 @@ function deferred<T>(): {
 }
 
 describe("GenerationConfirmationService", () => {
+  it("reconciles a pending challenge installed before directory sync fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "taphound-confirmation-"));
+    const runtime = { ...snapshot(), baseRevision: 1 };
+    let armed = false;
+    let stateRenameStarted = false;
+    const store = new FileSystemGenerationSessionStore(root, {
+      hooks: {
+        beforeStateRename: (): void => {
+          if (armed) {
+            stateRenameStarted = true;
+          }
+        },
+        afterDirectorySync: (path): void => {
+          if (
+            armed
+            && stateRenameStarted
+            && path.endsWith(".generation-1.work")
+          ) {
+            armed = false;
+            throw new Error("directory sync failed after state rename");
+          }
+        }
+      }
+    });
+    const confirm = vi.fn(() => Promise.resolve(true));
+    const writeEvidence = vi.fn(store.writeEvidence);
+    try {
+      const active = session(runtime);
+      await store.create({
+        ...active,
+        revision: 0,
+        bindings: {
+          ...active.bindings,
+          snapshotHash: null
+        }
+      });
+      await store.commitSnapshot("generation-1", 0, active);
+      armed = true;
+      const service = new GenerationConfirmationService({
+        store: {
+          read: store.read,
+          updateConfirmation: store.updateConfirmation,
+          writeEvidence,
+          readEvidence: store.readEvidence
+        },
+        prompt: {
+          confirm,
+          buildManualProposal: vi.fn(() => Promise.resolve(proposal()))
+        },
+        now: (): Date => new Date("2026-07-22T12:00:00.000Z"),
+        generateChallengeId: (): string => "challenge-1",
+        confirmationTtlMs: 30_000
+      });
+
+      const result = await service.request({
+        generationId: "generation-1",
+        proposal: proposal(runtime),
+        snapshot: runtime
+      });
+
+      expect(result).toMatchObject({
+        status: "confirmationRequired",
+        challenge: {
+          challengeId: "challenge-1",
+          status: "pending"
+        }
+      });
+      expect(await store.read("generation-1")).toMatchObject({
+        revision: 2,
+        pendingConfirmation: result.status === "confirmationRequired"
+          ? result.challenge
+          : null
+      });
+      await expect(store.readEvidence(
+        "generation-1",
+        confirmationEvidencePath("challenge-1")
+      )).resolves.toBeInstanceOf(Buffer);
+      expect(writeEvidence).toHaveBeenCalledTimes(1);
+      expect(confirm).not.toHaveBeenCalled();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("binds and persists a short-lived exact next-step challenge", async () => {
     const runtime = snapshot();
     const test = harness();
@@ -210,6 +315,25 @@ describe("GenerationConfirmationService", () => {
       revision: 3,
       pendingConfirmation: result.challenge
     });
+  });
+
+  it("propagates the original conflict when pending state was not installed", async () => {
+    const runtime = snapshot();
+    const test = harness();
+    const conflict = new GenerationSessionStoreError(
+      "REVISION_CONFLICT",
+      "competing confirmation won"
+    );
+    test.updateConfirmation.mockRejectedValueOnce(conflict);
+
+    await expect(test.service.request({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime
+    })).rejects.toBe(conflict);
+
+    expect(test.current()).toEqual(session(runtime));
+    expect(test.confirm).not.toHaveBeenCalled();
   });
 
   it("confirms only through the local prompt and marks the challenge approved", async () => {
@@ -327,6 +451,95 @@ describe("GenerationConfirmationService", () => {
 
     await expect(confirmation).rejects.toThrow(/cancelled/i);
     expect(test.current().pendingConfirmation).toBeNull();
+  });
+
+  it("does not approve when the signal aborts as the prompt returns true", async () => {
+    const runtime = snapshot();
+    const test = harness();
+    const controller = new AbortController();
+    test.confirm.mockImplementationOnce(() => {
+      controller.abort();
+      return Promise.resolve(true);
+    });
+    await test.service.request({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime
+    });
+
+    await expect(test.service.confirmStored({
+      generationId: "generation-1",
+      challengeId: "challenge-1",
+      signal: controller.signal
+    })).rejects.toBeInstanceOf(GenerationPromptCancelledError);
+
+    expect(test.current().pendingConfirmation).toBeNull();
+    expect(test.updateConfirmation.mock.calls.map(
+      ([, , next]) => next.pendingConfirmation?.status
+    )).not.toContain("approved");
+  });
+
+  it("reconciles ambiguous exact cleanup and still reports cancellation", async () => {
+    const runtime = snapshot();
+    const test = harness();
+    const controller = new AbortController();
+    test.confirm.mockImplementationOnce(() => {
+      controller.abort();
+      return Promise.resolve(true);
+    });
+    await test.service.request({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime
+    });
+    test.updateConfirmation.mockImplementationOnce((
+      _id,
+      expectedRevision,
+      next
+    ) => {
+      expect(test.current().revision).toBe(expectedRevision);
+      test.mutate(() => next);
+      return Promise.reject(new Error("directory sync failed after cleanup"));
+    });
+
+    await expect(test.service.confirmStored({
+      generationId: "generation-1",
+      challengeId: "challenge-1",
+      signal: controller.signal
+    })).rejects.toBeInstanceOf(GenerationPromptCancelledError);
+
+    expect(test.current().pendingConfirmation).toBeNull();
+    expect(test.updateConfirmation.mock.calls.map(
+      ([, , next]) => next.pendingConfirmation?.status
+    )).not.toContain("approved");
+  });
+
+  it("does not approve when the signal aborts during latest-session read", async () => {
+    const runtime = snapshot();
+    const test = harness();
+    const controller = new AbortController();
+    test.read.mockImplementation(() => {
+      if (test.read.mock.calls.length === 3) {
+        controller.abort();
+      }
+      return Promise.resolve(test.current());
+    });
+    await test.service.request({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime
+    });
+
+    await expect(test.service.confirmStored({
+      generationId: "generation-1",
+      challengeId: "challenge-1",
+      signal: controller.signal
+    })).rejects.toBeInstanceOf(GenerationPromptCancelledError);
+
+    expect(test.current().pendingConfirmation).toBeNull();
+    expect(test.updateConfirmation.mock.calls.map(
+      ([, , next]) => next.pendingConfirmation?.status
+    )).not.toContain("approved");
   });
 
   it("aborts active manual proposal construction without creating a challenge", async () => {

@@ -1,4 +1,14 @@
-import { readFile, rm, mkdtemp } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  symlink,
+  writeFile
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -41,8 +51,11 @@ import {
   type TapHoundReport
 } from "../../../src/domain/report.js";
 import type {
-  GenerationMetaWriterPort
+  ProjectBoundGenerationMetaWriterPort
 } from "../../../src/ports/generation-meta-writer.js";
+import type {
+  ProjectBoundJourneyWriterPort
+} from "../../../src/ports/journey-writer.js";
 import type {
   AppIdentity
 } from "../../../src/ports/adb.js";
@@ -61,6 +74,10 @@ afterEach(async () => {
     (root) => rm(root, { recursive: true, force: true })
   ));
 });
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
 
 const config: TapHoundConfig = {
   version: 1,
@@ -114,7 +131,7 @@ function project(root: string): {
   };
 }
 
-function report(fallbackUsed = false): TapHoundReport {
+function report(root: string, fallbackUsed = false): TapHoundReport {
   const journey = {
     version: 1 as const,
     name: "generated",
@@ -123,6 +140,11 @@ function report(fallbackUsed = false): TapHoundReport {
       activity: {
         before: "com.example.app.MainActivity",
         after: "com.example.app.MainActivity"
+      },
+      expect: {
+        type: "activity" as const,
+        value: "com.example.app.MainActivity",
+        timeoutMs: 100
       }
     }]
   };
@@ -134,7 +156,7 @@ function report(fallbackUsed = false): TapHoundReport {
     finishedAt: "2026-07-23T00:00:01.000Z",
     durationMs: 1_000,
     project: {
-      root: "/project",
+      root,
       packageName: "com.example.app",
       launchActivity: "com.example.app.MainActivity"
     },
@@ -157,7 +179,27 @@ function report(fallbackUsed = false): TapHoundReport {
       status: "passed",
       startedAtMs: 0,
       finishedAtMs: 1,
-      durationMs: 1
+      durationMs: 1,
+      idle: {
+        status: "stable",
+        polls: 1
+      },
+      activity: {
+        before: {
+          status: "passed",
+          expected: "com.example.app.MainActivity",
+          actual: "com.example.app.MainActivity"
+        },
+        after: {
+          status: "passed",
+          expected: "com.example.app.MainActivity",
+          actual: "com.example.app.MainActivity"
+        }
+      },
+      expectation: {
+        type: "activity",
+        status: "passed"
+      }
     }],
     artifacts: {
       directory: "/reports/verify-run",
@@ -199,6 +241,11 @@ function session(root: string): GenerationSession {
       activity: {
         before: "com.example.app.MainActivity",
         after: "com.example.app.MainActivity"
+      },
+      expect: {
+        type: "activity",
+        value: "com.example.app.MainActivity",
+        timeoutMs: 100
       }
     }],
     candidateSources: ["manualOverride"],
@@ -214,51 +261,69 @@ type ForceStopFunction = (identity: AppIdentity) => Promise<CommandResult>;
 
 interface FinalizerFixture {
   root: string;
+  canonicalRoot: string;
   store: FileSystemGenerationSessionStore;
   finalize: GenerationFinalizer;
   verify: Mock<VerifyFunction>;
   forceStop: Mock<ForceStopFunction>;
+  validateContext: Mock<() => Promise<
+    | { status: "valid" }
+    | {
+        status: "stale";
+        reason: {
+          code: "EVIDENCE_HASH_MISMATCH";
+          message: string;
+        };
+      }
+  >>;
 }
 
-async function fixture(metaWriter: GenerationMetaWriterPort = (
-  new FileSystemGenerationMetaWriter()
-)): Promise<FinalizerFixture> {
+async function fixture(
+  metaWriter: ProjectBoundGenerationMetaWriterPort = (
+    new FileSystemGenerationMetaWriter()
+  ),
+  journeyWriter: ProjectBoundJourneyWriterPort = new FileSystemJourneyWriter()
+): Promise<FinalizerFixture> {
   const root = await mkdtemp(join(tmpdir(), "taphound-finalizer-"));
+  const canonicalRoot = await realpath(root);
   roots.push(root);
   const store = new FileSystemGenerationSessionStore(root);
   await store.create(session(root));
   const verify = vi.fn<VerifyFunction>(() => Promise.resolve({
     status: "passed" as const,
     exitCode: 0 as const,
-    report: report(),
+    report: report(canonicalRoot),
     reportPath: "/reports/report.json",
     summaryPath: "/reports/summary.txt"
   }));
   const forceStop = vi.fn<ForceStopFunction>(
     () => Promise.resolve(commandResult())
   );
+  const validateContext = vi.fn(
+    () => Promise.resolve({ status: "valid" as const })
+  );
   const publisher = new GenerationPublisher({
     store,
-    journeyWriter: new FileSystemJourneyWriter(),
+    journeyWriter,
     metaWriter
   });
   return {
     root,
+    canonicalRoot,
     store,
     verify,
     forceStop,
     finalize: new GenerationFinalizer({
       store,
       contextValidator: {
-        validate: vi.fn(
-          () => Promise.resolve({ status: "valid" as const })
-        )
+        validate: validateContext
       },
       adb: { forceStop },
       verifyRuntime: { verify },
       publisher,
       generateAttemptId: (): string => "verification-attempt"
-    })
+    }),
+    validateContext
   };
 }
 
@@ -322,9 +387,11 @@ describe("GenerationFinalizer", () => {
   });
 
   it("retries a failed meta export without replaying verification", async () => {
-    const failingMeta: GenerationMetaWriterPort = {
-      write: vi.fn((): Promise<void> => Promise.reject(new Error("disk full")))
-    };
+    const failingMeta = new FileSystemGenerationMetaWriter({
+      beforeBoundInstall: (): never => {
+        throw new Error("disk full");
+      }
+    });
     const test = await fixture(failingMeta);
 
     await expect(test.finalize.finalize(input(test.root))).rejects.toMatchObject({
@@ -362,7 +429,7 @@ describe("GenerationFinalizer", () => {
     test.verify.mockResolvedValue({
       status: "passed",
       exitCode: 0,
-      report: report(true),
+      report: report(test.canonicalRoot, true),
       reportPath: "/reports/report.json",
       summaryPath: "/reports/summary.txt"
     });
@@ -384,7 +451,7 @@ describe("GenerationFinalizer", () => {
         resolve({
           status: "passed",
           exitCode: 0,
-          report: report(),
+          report: report(test.canonicalRoot),
           reportPath: "/reports/report.json",
           summaryPath: "/reports/summary.txt"
         });
@@ -403,6 +470,71 @@ describe("GenerationFinalizer", () => {
     expect(test.verify).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    ["generation", (receipt: Record<string, unknown>): void => {
+      receipt.generationId = "other-generation";
+    }],
+    ["Context binding", (receipt: Record<string, unknown>): void => {
+      const bindings = receipt.bindings as Record<string, unknown>;
+      bindings.contextHash = "9".repeat(64);
+    }]
+  ] as const)("fails closed on a cross-bound %s receipt", async (
+    _description,
+    mutate
+  ) => {
+    const test = await fixture();
+    const running = await test.store.beginVerification(
+      "generation-1",
+      0,
+      "verification-attempt"
+    );
+    const verificationReport = report(test.canonicalRoot);
+    const reportBytes = `${JSON.stringify(verificationReport, null, 2)}\n`;
+    await test.store.writeTextEvidence(
+      "generation-1",
+      "verification/report.json",
+      reportBytes
+    );
+    const receipt: Record<string, unknown> = {
+      version: 1,
+      generationId: "generation-1",
+      attemptId: "verification-attempt",
+      journey: verificationReport.journey,
+      project: {
+        root: test.canonicalRoot,
+        packageName: "com.example.app",
+        launchActivity: "com.example.app.MainActivity"
+      },
+      deviceSerial: "emulator-5554",
+      bindings: {
+        projectHash: running.bindings.projectHash,
+        configHash: running.bindings.configHash,
+        contextHash: running.bindings.contextHash,
+        snapshotHash: running.bindings.snapshotHash
+      },
+      tools: { adb: "1" },
+      report: {
+        path: "verification/report.json",
+        sha256: sha256(reportBytes),
+        runId: verificationReport.runId
+      }
+    };
+    mutate(receipt);
+    await test.store.writeTextEvidence(
+      "generation-1",
+      "verification/receipt.json",
+      `${JSON.stringify(receipt, null, 2)}\n`
+    );
+
+    await expect(test.finalize.finalize(input(test.root))).rejects.toMatchObject({
+      code: "VERIFICATION_FAILED"
+    });
+    await expect(test.store.read("generation-1")).resolves.toMatchObject({
+      verification: { status: "failed" }
+    });
+    expect(test.verify).not.toHaveBeenCalled();
+  });
+
   it("rejects changed project bindings before process reset", async () => {
     const test = await fixture();
     const changed = input(test.root);
@@ -417,6 +549,109 @@ describe("GenerationFinalizer", () => {
     });
     expect(test.forceStop).not.toHaveBeenCalled();
     expect(test.verify).not.toHaveBeenCalled();
+  });
+
+  it("fails verification when Context changes after replay", async () => {
+    const test = await fixture();
+    test.validateContext
+      .mockResolvedValueOnce({ status: "valid" })
+      .mockResolvedValueOnce({
+        status: "stale",
+        reason: {
+          code: "EVIDENCE_HASH_MISMATCH",
+          message: "context changed"
+        }
+      });
+
+    await expect(test.finalize.finalize(input(test.root))).rejects.toMatchObject({
+      code: "CONTEXT_STALE"
+    });
+    await expect(test.store.read("generation-1")).resolves.toMatchObject({
+      verification: { status: "failed" }
+    });
+  });
+
+  it.each([
+    ["Journey", (value: TapHoundReport): void => {
+      value.journey.name = "other";
+    }],
+    ["project root", (value: TapHoundReport): void => {
+      value.project.root = "/other";
+    }],
+    ["package", (value: TapHoundReport): void => {
+      value.project.packageName = "com.other.app";
+    }],
+    ["launch Activity", (value: TapHoundReport): void => {
+      value.project.launchActivity = "com.example.app.OtherActivity";
+    }],
+    ["device", (value: TapHoundReport): void => {
+      value.environment.deviceSerial = "other-device";
+    }],
+    ["tools", (value: TapHoundReport): void => {
+      value.environment.tools = { adb: "different" };
+    }],
+    ["layer", (value: TapHoundReport): void => {
+      value.layers.collection = "failed";
+    }],
+    ["step action", (value: TapHoundReport): void => {
+      const step = value.steps[0];
+      if (step !== undefined) step.action = "back";
+    }],
+    ["step status", (value: TapHoundReport): void => {
+      const step = value.steps[0];
+      if (step !== undefined) step.status = "failed";
+    }],
+    ["step Activity", (value: TapHoundReport): void => {
+      const step = value.steps[0];
+      if (step?.activity !== undefined) {
+        step.activity.after.actual = "com.example.app.OtherActivity";
+      }
+    }],
+    ["expectation", (value: TapHoundReport): void => {
+      const step = value.steps[0];
+      if (step?.expectation !== undefined) {
+        step.expectation.status = "failed";
+      }
+    }],
+    ["secondary errors", (value: TapHoundReport): void => {
+      value.secondaryErrors.push({
+        code: "COLLECTION_FAILED",
+        message: "late collection failure",
+        phase: "collection"
+      });
+    }],
+    ["primary failure", (value: TapHoundReport): void => {
+      value.primaryFailure = {
+        code: "ACTION_FAILED",
+        message: "unexpected primary failure",
+        phase: "replay",
+        stepIndex: 0
+      };
+    }],
+    ["fallback", (value: TapHoundReport): void => {
+      value.fallbackUsed = true;
+    }]
+  ] as const)("never passes a report with mismatched %s", async (
+    _description,
+    mutate
+  ) => {
+    const test = await fixture();
+    const mismatched = structuredClone(report(test.canonicalRoot));
+    mutate(mismatched);
+    test.verify.mockResolvedValue({
+      status: "passed",
+      exitCode: 0,
+      report: mismatched,
+      reportPath: "/reports/report.json",
+      summaryPath: "/reports/summary.txt"
+    });
+
+    await expect(test.finalize.finalize(input(test.root))).rejects.toMatchObject({
+      code: "VERIFICATION_FAILED"
+    });
+    await expect(test.store.read("generation-1")).resolves.toMatchObject({
+      verification: { status: "failed" }
+    });
   });
 
   it("rejects output paths that overlap the authoritative generation bundle", async () => {
@@ -441,6 +676,120 @@ describe("GenerationFinalizer", () => {
     })).rejects.toMatchObject({
       code: "RECOVERY_REQUIRED",
       stage: "verification"
+    });
+    expect(test.verify).toHaveBeenCalledOnce();
+  });
+
+  it("does not export through a parent symlink outside the project", async () => {
+    const test = await fixture();
+    const outside = await mkdtemp(join(tmpdir(), "taphound-export-outside-"));
+    roots.push(outside);
+    await symlink(outside, join(test.root, "journeys"));
+
+    await expect(test.finalize.finalize(input(test.root))).rejects.toMatchObject({
+      code: "EXPORT_FAILED"
+    });
+    await expect(readdir(outside)).resolves.toEqual([]);
+    const manifestPath = join(
+      test.root,
+      ".taphound/generations/generation-1/manifest.json"
+    );
+    const manifest = await readFile(manifestPath, "utf8");
+    await expect(test.finalize.finalize(input(test.root))).rejects.toMatchObject({
+      code: "EXPORT_FAILED"
+    });
+    await expect(readFile(manifestPath, "utf8")).resolves.toBe(manifest);
+    expect(test.verify).toHaveBeenCalledOnce();
+  });
+
+  it("does not export through an alias into the authority bundle", async () => {
+    const test = await fixture();
+    await symlink(
+      join(test.root, ".taphound/generations/generation-1"),
+      join(test.root, "journeys")
+    );
+
+    await expect(test.finalize.finalize(input(test.root))).rejects.toMatchObject({
+      code: "EXPORT_FAILED"
+    });
+    await expect(readFile(join(
+      test.root,
+      ".taphound/generations/generation-1/manifest.json"
+    ), "utf8")).resolves.toContain('"generationId": "generation-1"');
+  });
+
+  it("does not follow Journey or meta destination symlinks", async () => {
+    const test = await fixture();
+    const outside = await mkdtemp(join(tmpdir(), "taphound-export-outside-"));
+    roots.push(outside);
+    await mkdir(join(test.root, "journeys"));
+    const victim = join(outside, "victim.json");
+    await writeFile(victim, "unchanged", "utf8");
+    await symlink(victim, join(test.root, "journeys/generated.meta.json"));
+
+    await expect(test.finalize.finalize(input(test.root))).rejects.toMatchObject({
+      code: "EXPORT_FAILED"
+    });
+    await expect(readFile(victim, "utf8")).resolves.toBe("unchanged");
+    await expect(readFile(
+      join(test.root, "journeys/generated.json"),
+      "utf8"
+    )).resolves.toContain('"version": 1');
+  });
+
+  it("detects authority mutation immediately after Journey export", async () => {
+    const base = new FileSystemJourneyWriter();
+    const mutatingWriter = {
+      write: base.write.bind(base),
+      readProjectBound: base.readProjectBound.bind(base),
+      writeProjectBound: async (
+        bound: Parameters<typeof base.writeProjectBound>[0]
+      ): Promise<void> => {
+        await base.writeProjectBound(bound);
+        await writeFile(
+          join(
+            bound.authorityRoot,
+            "generations/generation-1/manifest.json"
+          ),
+          "mutated",
+          "utf8"
+        );
+      }
+    } satisfies ProjectBoundJourneyWriterPort;
+    const test = await fixture(
+      new FileSystemGenerationMetaWriter(),
+      mutatingWriter
+    );
+
+    await expect(test.finalize.finalize(input(test.root))).rejects.toMatchObject({
+      code: "EXPORT_FAILED"
+    });
+    expect(test.verify).toHaveBeenCalledOnce();
+  });
+
+  it("detects authority mutation immediately after meta export", async () => {
+    const base = new FileSystemGenerationMetaWriter();
+    const mutatingWriter = {
+      write: base.write.bind(base),
+      readProjectBound: base.readProjectBound.bind(base),
+      writeProjectBound: async (
+        bound: Parameters<typeof base.writeProjectBound>[0]
+      ): Promise<void> => {
+        await base.writeProjectBound(bound);
+        await writeFile(
+          join(
+            bound.authorityRoot,
+            "generations/generation-1/manifest.json"
+          ),
+          "mutated",
+          "utf8"
+        );
+      }
+    } satisfies ProjectBoundGenerationMetaWriterPort;
+    const test = await fixture(mutatingWriter);
+
+    await expect(test.finalize.finalize(input(test.root))).rejects.toMatchObject({
+      code: "EXPORT_FAILED"
     });
     expect(test.verify).toHaveBeenCalledOnce();
   });

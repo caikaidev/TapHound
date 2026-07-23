@@ -1,8 +1,12 @@
 import { createHash } from "node:crypto";
+import { realpath } from "node:fs/promises";
 import { basename, extname } from "node:path";
 
 import { z } from "zod";
 
+import {
+  normalizeActivity
+} from "../../domain/activity.js";
 import {
   GenerationMetaSchema,
   GenerationReportSchema,
@@ -63,11 +67,43 @@ const ProjectDescriptionSchema: z.ZodType<ProjectDescription> = z.strictObject({
 
 const VerificationReceiptSchema = z.strictObject({
   version: z.literal(1),
+  generationId: z.string().min(1),
   attemptId: z.string().min(1),
-  reportPath: z.literal(GENERATION_BUNDLE_PATHS.verificationReport),
-  reportSha256: Sha256Schema,
-  runId: z.string().min(1)
+  journey: z.strictObject({
+    name: z.string().min(1),
+    sha256: Sha256Schema
+  }),
+  project: z.strictObject({
+    root: z.string().min(1),
+    packageName: z.string().min(1),
+    launchActivity: z.string().min(1)
+  }),
+  deviceSerial: z.string().min(1),
+  bindings: z.strictObject({
+    projectHash: Sha256Schema,
+    configHash: Sha256Schema,
+    contextHash: Sha256Schema,
+    snapshotHash: Sha256Schema.nullable()
+  }),
+  tools: z.record(z.string(), z.string()),
+  report: z.strictObject({
+    path: z.literal(GENERATION_BUNDLE_PATHS.verificationReport),
+    sha256: Sha256Schema,
+    runId: z.string().min(1)
+  })
 });
+
+type VerificationReceipt = z.infer<typeof VerificationReceiptSchema>;
+
+interface ExpectedVerification {
+  generationId: string;
+  attemptId: string;
+  journey: VerificationReceipt["journey"];
+  project: VerificationReceipt["project"];
+  deviceSerial: string;
+  bindings: VerificationReceipt["bindings"];
+  tools: Record<string, string>;
+}
 
 const GenerationOutputPathSchema = ProjectRelativePathSchema.refine(
   (path) => path.split("/").every(
@@ -177,6 +213,32 @@ function sameSession(
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+function canonicalTools(input: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(z.record(z.string(), z.string()).parse(input))
+      .sort(([left], [right]) => left.localeCompare(right))
+  );
+}
+
+function sameJson(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function expectedLocatorMatch(
+  step: Journey["steps"][number]
+): "resourceId" | "text" | "contentDescription" | undefined {
+  if (
+    step.action !== "click"
+    && step.action !== "longClick"
+    && step.action !== "swipe"
+  ) {
+    return undefined;
+  }
+  if (step.locator.resourceId !== undefined) return "resourceId";
+  if (step.locator.text !== undefined) return "text";
+  return "contentDescription";
+}
+
 function failure(
   code: GenerationErrorCode,
   stage: GenerationFinalizationStage,
@@ -204,6 +266,7 @@ export class GenerationFinalizer {
     const config = TapHoundConfigSchema.parse(input.config);
     const context = ProjectContextSchema.parse(input.context);
     const project = ProjectDescriptionSchema.parse(input.project);
+    const canonicalProjectRoot = await realpath(input.projectRoot);
     const outputPath = GenerationOutputPathSchema.parse(input.outputPath);
     const name = input.name === undefined
       ? derivedJourneyName(outputPath)
@@ -224,13 +287,46 @@ export class GenerationFinalizer {
     if (session.verification.status === "notRun") {
       const begun = await this.beginVerification(session);
       session = begun.session;
+      if (
+        !begun.owned
+        && session.verification.status === "failed"
+      ) {
+        throw failure(
+          "VERIFICATION_FAILED",
+          "verification",
+          session.verification.failure.message
+        );
+      }
+      const expected = this.expectedVerification(
+        session,
+        journey,
+        config,
+        canonicalProjectRoot,
+        input.toolVersions
+      );
       if (!begun.owned) {
         if (session.verification.status === "passed") {
-          verificationReport = await this.readVerifiedReport(session);
+          verificationReport = await this.readVerifiedReport(session, expected);
         } else {
-          const reconciled = session.verification.status === "running"
-            ? await this.reconcilePassedVerification(session)
-            : undefined;
+          let reconciled:
+            | { session: GenerationSession; report: TapHoundReport }
+            | undefined;
+          try {
+            reconciled = session.verification.status === "running"
+              ? await this.reconcilePassedVerification(session, expected)
+              : undefined;
+          } catch (error) {
+            await this.persistFailedVerification(session, error);
+            throw failure(
+              "VERIFICATION_FAILED",
+              "verification",
+              error instanceof Error
+                ? error.message
+                : "Immutable verification receipt is invalid",
+              false,
+              error
+            );
+          }
           if (reconciled === undefined) {
             throw failure(
               "FINALIZATION_IN_PROGRESS",
@@ -271,7 +367,7 @@ export class GenerationFinalizer {
         const result = await this.dependencies.verifyRuntime.verify({
           config,
           journey,
-          projectRoot: input.projectRoot,
+          projectRoot: canonicalProjectRoot,
           deviceSerial: input.deviceSerial,
           toolVersions: input.toolVersions,
           requireFocusedInput: true,
@@ -279,11 +375,12 @@ export class GenerationFinalizer {
         } satisfies VerifyInput);
         replayed = true;
         await this.revalidate(input, config, context, project, session);
-        this.assertEligible(result, journey, session);
+        this.assertEligible(result, journey, expected);
         verificationReport = TapHoundReportSchema.parse(result.report);
         session = await this.persistPassedVerification(
           session,
-          verificationReport
+          verificationReport,
+          expected
         );
         } catch (error) {
           if (
@@ -307,7 +404,30 @@ export class GenerationFinalizer {
         }
       }
     } else if (session.verification.status === "running") {
-      const reconciled = await this.reconcilePassedVerification(session);
+      const expected = this.expectedVerification(
+        session,
+        journey,
+        config,
+        canonicalProjectRoot,
+        input.toolVersions
+      );
+      let reconciled:
+        | { session: GenerationSession; report: TapHoundReport }
+        | undefined;
+      try {
+        reconciled = await this.reconcilePassedVerification(session, expected);
+      } catch (error) {
+        await this.persistFailedVerification(session, error);
+        throw failure(
+          "VERIFICATION_FAILED",
+          "verification",
+          error instanceof Error
+            ? error.message
+            : "Immutable verification receipt is invalid",
+          false,
+          error
+        );
+      }
       if (reconciled === undefined) {
         throw failure(
           "FINALIZATION_IN_PROGRESS",
@@ -325,7 +445,16 @@ export class GenerationFinalizer {
         session.verification.failure.message
       );
     } else {
-      verificationReport = await this.readVerifiedReport(session);
+      verificationReport = await this.readVerifiedReport(
+        session,
+        this.expectedVerification(
+          session,
+          journey,
+          config,
+          canonicalProjectRoot,
+          input.toolVersions
+        )
+      );
     }
 
     if (verificationReport === undefined) {
@@ -335,7 +464,18 @@ export class GenerationFinalizer {
         "Verification completed without durable report evidence"
       );
     }
-    this.assertReportMatchesJourney(verificationReport, journey, session);
+    this.assertReport(
+      verificationReport,
+      journey,
+      this.expectedVerification(
+        session,
+        journey,
+        config,
+        canonicalProjectRoot,
+        input.toolVersions
+      ),
+      "RECOVERY_REQUIRED"
+    );
     this.assertBindings(session, input, config, context, project);
     const meta = this.buildMeta(session, outputPath, verificationReport);
     const generationReport = GenerationReportSchema.parse({
@@ -419,6 +559,7 @@ export class GenerationFinalizer {
 
     try {
       const exported = await this.dependencies.publisher.export({
+        generationId: session.id,
         projectRoot: input.projectRoot,
         journeyPath: outputPath,
         journey,
@@ -454,7 +595,12 @@ export class GenerationFinalizer {
     if (
       input.projectRoot !== project.projectRoot
       || input.deviceSerial !== session.target.deviceSerial
+      || project.packageName !== session.target.packageName
       || session.target.packageName !== config.run.packageName
+      || normalizeActivity(
+        project.packageName,
+        project.launchActivity
+      ) !== normalizeActivity(config.run.packageName, config.run.activity)
       || session.inFlight !== null
       || session.pendingConfirmation !== null
       || session.state !== "active"
@@ -526,58 +672,173 @@ export class GenerationFinalizer {
     }
   }
 
-  private assertEligible(
-    result: VerifyResult,
+  private expectedVerification(
+    session: GenerationSession,
     journey: Journey,
-    session: GenerationSession
-  ): void {
+    config: TapHoundConfig,
+    canonicalProjectRoot: string,
+    tools: Record<string, string>
+  ): ExpectedVerification {
     if (
-      result.status !== "passed"
-      || result.exitCode !== 0
-      || result.report.status !== "passed"
-      || result.report.fallbackUsed
-      || result.report.journey.name !== journey.name
-      || result.report.journey.sha256 !== hashJourney(journey)
-      || result.report.project.packageName !== session.target.packageName
-      || result.report.environment.deviceSerial !== session.target.deviceSerial
-      || result.report.steps.length !== journey.steps.length
-    ) {
-      throw failure(
-        "VERIFICATION_FAILED",
-        "verification",
-        result.report.fallbackUsed
-          ? "Generated replay used annotated fallback"
-          : "Generated replay did not pass cleanly"
-      );
-    }
-  }
-
-  private assertReportMatchesJourney(
-    report: TapHoundReport,
-    journey: Journey,
-    session: GenerationSession
-  ): void {
-    if (
-      report.journey.name !== journey.name
-      || report.journey.sha256 !== hashJourney(journey)
-      || report.project.packageName !== session.target.packageName
-      || report.environment.deviceSerial !== session.target.deviceSerial
-      || report.steps.length !== journey.steps.length
+      session.verification.status !== "running"
+      && session.verification.status !== "passed"
     ) {
       throw failure(
         "RECOVERY_REQUIRED",
         "verification",
-        "Verification report does not match the exact generated Journey"
+        "Generation verification attempt identity is unavailable"
       );
     }
+    return {
+      generationId: session.id,
+      attemptId: session.verification.attemptId,
+      journey: {
+        name: journey.name,
+        sha256: hashJourney(journey)
+      },
+      project: {
+        root: canonicalProjectRoot,
+        packageName: session.target.packageName,
+        launchActivity: normalizeActivity(
+          session.target.packageName,
+          config.run.activity
+        )
+      },
+      deviceSerial: session.target.deviceSerial,
+      bindings: { ...session.bindings },
+      tools: canonicalTools(tools)
+    };
+  }
+
+  private assertEligible(
+    result: VerifyResult,
+    journey: Journey,
+    expected: ExpectedVerification
+  ): void {
+    if (
+      result.status !== "passed"
+      || result.exitCode !== 0
+    ) {
+      throw failure(
+        "VERIFICATION_FAILED",
+        "verification",
+        "Generated replay did not pass cleanly"
+      );
+    }
+    this.assertReport(result.report, journey, expected, "VERIFICATION_FAILED");
+  }
+
+  private assertReport(
+    report: TapHoundReport,
+    journey: Journey,
+    expected: ExpectedVerification,
+    code: "VERIFICATION_FAILED" | "RECOVERY_REQUIRED"
+  ): void {
+    if (
+      report.status !== "passed"
+      || report.fallbackUsed
+      || report.primaryFailure !== undefined
+      || report.secondaryErrors.length !== 0
+      || Object.values(report.layers).some((status) => status !== "passed")
+      || report.journey.name !== journey.name
+      || report.journey.sha256 !== hashJourney(journey)
+      || report.project.root !== expected.project.root
+      || report.project.packageName !== expected.project.packageName
+      || report.project.launchActivity !== expected.project.launchActivity
+      || report.environment.deviceSerial !== expected.deviceSerial
+      || !sameJson(canonicalTools(report.environment.tools), expected.tools)
+      || report.steps.length !== journey.steps.length
+    ) {
+      throw failure(
+        code,
+        "verification",
+        "Verification report does not match the exact generated replay"
+      );
+    }
+    for (const [index, candidate] of journey.steps.entries()) {
+      const step = report.steps[index];
+      const expectationType = candidate.expect?.type;
+      const locatorMatch = expectedLocatorMatch(candidate);
+      const isScrollTo = candidate.action === "scrollTo";
+      if (
+        step === undefined
+        || step.index !== index
+        || step.action !== candidate.action
+        || step.status !== "passed"
+        || step.activity === undefined
+        || step.activity.before.status !== "passed"
+        || step.activity.before.expected !== candidate.activity.before
+        || step.activity.before.actual !== candidate.activity.before
+        || step.activity.after.status !== "passed"
+        || step.activity.after.expected !== candidate.activity.after
+        || step.activity.after.actual !== candidate.activity.after
+        || (
+          expectationType === undefined
+            ? step.expectation !== undefined
+            : (
+                step.expectation === undefined
+                || step.expectation.type !== expectationType
+                || step.expectation.status !== "passed"
+              )
+        )
+        || (
+          locatorMatch === undefined
+            ? step.locator !== undefined
+            : (
+            step.locator === undefined
+            || step.locator.status !== "found"
+            || step.locator.fallbackUsed
+            || step.locator.matchedBy !== locatorMatch
+          )
+        )
+        || step.locator?.fallbackUsed === true
+        || (
+          isScrollTo
+            ? (
+                step.scroll === undefined
+                || step.scroll.maxSwipes !== candidate.maxSwipes
+                || step.scroll.swipesUsed > candidate.maxSwipes
+                || step.idle !== undefined
+              )
+            : (
+                step.scroll !== undefined
+                || step.idle === undefined
+                || step.idle.status !== "stable"
+              )
+        )
+      ) {
+        throw failure(
+          code,
+          "verification",
+          `Verification report step ${String(index)} does not match the candidate`
+        );
+      }
+    }
+  }
+
+  private receiptMatches(
+    receipt: VerificationReceipt,
+    expected: ExpectedVerification
+  ): boolean {
+    return receipt.generationId === expected.generationId
+      && receipt.attemptId === expected.attemptId
+      && sameJson(receipt.journey, expected.journey)
+      && sameJson(receipt.project, expected.project)
+      && receipt.deviceSerial === expected.deviceSerial
+      && sameJson(receipt.bindings, expected.bindings)
+      && sameJson(canonicalTools(receipt.tools), expected.tools);
   }
 
   private async persistPassedVerification(
     running: GenerationSession,
-    report: TapHoundReport
+    report: TapHoundReport,
+    expected: ExpectedVerification
   ): Promise<GenerationSession> {
     if (running.verification.status !== "running") {
-      const reconciled = await this.reconcilePassedVerification(running);
+      const reconciled = await this.reconcilePassedVerification(
+        running,
+        expected
+      );
       if (reconciled !== undefined) {
         return reconciled.session;
       }
@@ -596,10 +857,12 @@ export class GenerationFinalizer {
     );
     const receipt = VerificationReceiptSchema.parse({
       version: 1,
-      attemptId: running.verification.attemptId,
-      reportPath: GENERATION_BUNDLE_PATHS.verificationReport,
-      reportSha256: sha256(reportBytes),
-      runId: report.runId
+      ...expected,
+      report: {
+        path: GENERATION_BUNDLE_PATHS.verificationReport,
+        sha256: sha256(reportBytes),
+        runId: report.runId
+      }
     });
     await this.ensureVerificationEvidence(
       running.id,
@@ -612,9 +875,9 @@ export class GenerationFinalizer {
       verification: {
         status: "passed",
         attemptId: running.verification.attemptId,
-        reportPath: receipt.reportPath,
-        reportSha256: receipt.reportSha256,
-        runId: receipt.runId
+        reportPath: receipt.report.path,
+        reportSha256: receipt.report.sha256,
+        runId: receipt.report.runId
       }
     });
     try {
@@ -635,45 +898,81 @@ export class GenerationFinalizer {
   }
 
   private async reconcilePassedVerification(
-    running: GenerationSession
+    running: GenerationSession,
+    expected: ExpectedVerification
   ): Promise<{ session: GenerationSession; report: TapHoundReport } | undefined> {
     if (running.verification.status !== "running") {
       return undefined;
     }
-    let receipt: z.infer<typeof VerificationReceiptSchema>;
-    let reportBytes: Buffer;
+    let receiptBytes: Buffer;
     try {
-      receipt = VerificationReceiptSchema.parse(JSON.parse(
-        (await this.dependencies.store.readEvidence(
-          running.id,
-          GENERATION_BUNDLE_PATHS.verificationReceipt
-        )).toString("utf8")
-      ) as unknown);
-      reportBytes = await this.dependencies.store.readEvidence(
+      receiptBytes = await this.dependencies.store.readEvidence(
         running.id,
-        receipt.reportPath
+        GENERATION_BUNDLE_PATHS.verificationReceipt
       );
     } catch {
       return undefined;
     }
-    if (
-      receipt.attemptId !== running.verification.attemptId
-      || sha256(reportBytes) !== receipt.reportSha256
-    ) {
-      return undefined;
+    let receipt: VerificationReceipt;
+    let reportBytes: Buffer;
+    try {
+      receipt = VerificationReceiptSchema.parse(
+        JSON.parse(receiptBytes.toString("utf8")) as unknown
+      );
+      reportBytes = await this.dependencies.store.readEvidence(
+        running.id,
+        receipt.report.path
+      );
+    } catch (error) {
+      throw failure(
+        "VERIFICATION_FAILED",
+        "verification",
+        "Immutable verification receipt or report is invalid",
+        false,
+        error
+      );
     }
-    const report = TapHoundReportSchema.parse(
-      JSON.parse(reportBytes.toString("utf8")) as unknown
-    );
     if (
-      report.runId !== receipt.runId
-      || report.status !== "passed"
-      || report.fallbackUsed
+      !this.receiptMatches(receipt, expected)
+      || sha256(reportBytes) !== receipt.report.sha256
     ) {
-      return undefined;
+      throw failure(
+        "VERIFICATION_FAILED",
+        "verification",
+        "Immutable verification receipt does not match this generation"
+      );
+    }
+    let report: TapHoundReport;
+    try {
+      report = TapHoundReportSchema.parse(
+        JSON.parse(reportBytes.toString("utf8")) as unknown
+      );
+      if (report.runId !== receipt.report.runId) {
+        throw new Error("Verification Report run ID does not match receipt");
+      }
+      this.assertReport(
+        report,
+        {
+          version: 1,
+          name: expected.journey.name,
+          steps: running.candidateSteps
+        },
+        expected,
+        "VERIFICATION_FAILED"
+      );
+    } catch (error) {
+      throw error instanceof GenerationFinalizationError
+        ? error
+        : failure(
+            "VERIFICATION_FAILED",
+            "verification",
+            "Immutable verification Report does not match the receipt",
+            false,
+            error
+          );
     }
     return {
-      session: await this.persistPassedVerification(running, report),
+      session: await this.persistPassedVerification(running, report, expected),
       report
     };
   }
@@ -724,7 +1023,8 @@ export class GenerationFinalizer {
   }
 
   private async readVerifiedReport(
-    session: GenerationSession
+    session: GenerationSession,
+    expected: ExpectedVerification
   ): Promise<TapHoundReport> {
     if (
       session.verification.status !== "passed"
@@ -735,24 +1035,46 @@ export class GenerationFinalizer {
         "Passed verification state lacks immutable report evidence"
       );
     }
-    const bytes = await this.dependencies.store.readEvidence(
-      session.id,
-      session.verification.reportPath
-    );
-    if (sha256(bytes) !== session.verification.reportSha256) {
+    let receipt: VerificationReceipt;
+    let bytes: Buffer;
+    try {
+      receipt = VerificationReceiptSchema.parse(JSON.parse(
+        (await this.dependencies.store.readEvidence(
+          session.id,
+          GENERATION_BUNDLE_PATHS.verificationReceipt
+        )).toString("utf8")
+      ) as unknown);
+      bytes = await this.dependencies.store.readEvidence(
+        session.id,
+        receipt.report.path
+      );
+    } catch (error) {
       throw failure(
         "RECOVERY_REQUIRED",
         "verification",
-        "Immutable verification report hash does not match durable state"
+        "Passed verification state lacks a valid immutable receipt",
+        false,
+        error
+      );
+    }
+    if (
+      !this.receiptMatches(receipt, expected)
+      || receipt.report.path !== session.verification.reportPath
+      || receipt.report.sha256 !== session.verification.reportSha256
+      || receipt.report.runId !== session.verification.runId
+      || sha256(bytes) !== receipt.report.sha256
+    ) {
+      throw failure(
+        "RECOVERY_REQUIRED",
+        "verification",
+        "Immutable verification receipt does not match durable state"
       );
     }
     const report = TapHoundReportSchema.parse(
       JSON.parse(bytes.toString("utf8")) as unknown
     );
     if (
-      report.runId !== session.verification.runId
-      || report.status !== "passed"
-      || report.fallbackUsed
+      report.runId !== receipt.report.runId
     ) {
       throw failure(
         "RECOVERY_REQUIRED",
@@ -760,6 +1082,16 @@ export class GenerationFinalizer {
         "Immutable verification report is not a clean passed replay"
       );
     }
+    this.assertReport(
+      report,
+      {
+        version: 1,
+        name: expected.journey.name,
+        steps: session.candidateSteps
+      },
+      expected,
+      "RECOVERY_REQUIRED"
+    );
     return report;
   }
 

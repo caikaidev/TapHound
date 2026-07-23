@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import { extname, isAbsolute, relative, resolve } from "node:path";
+import { extname, resolve } from "node:path";
 
 import {
   GenerationBundleManifestSchema,
@@ -16,13 +15,15 @@ import {
   type TapHoundReport
 } from "../../domain/report.js";
 import type {
-  GenerationMetaWriterPort
+  ProjectBoundGenerationMetaWriterPort
 } from "../../ports/generation-meta-writer.js";
 import {
   GenerationSessionStoreError,
   type GenerationSessionStore
 } from "../../ports/generation-session-store.js";
-import type { JourneyWriterPort } from "../../ports/journey-writer.js";
+import type {
+  ProjectBoundJourneyWriterPort
+} from "../../ports/journey-writer.js";
 
 export const GENERATION_BUNDLE_PATHS = {
   candidateJourney: "candidate/journey.json",
@@ -82,19 +83,6 @@ async function ensureEvidence(
   }
 }
 
-function containedOutput(projectRoot: string, projectRelativePath: string): string {
-  const output = resolve(projectRoot, projectRelativePath);
-  const fromRoot = relative(resolve(projectRoot), output);
-  if (
-    fromRoot.length === 0
-    || fromRoot.startsWith("..")
-    || isAbsolute(fromRoot)
-  ) {
-    throw new Error("Generation output path must stay within the project");
-  }
-  return output;
-}
-
 export function generationMetaOutputPath(journeyOutputPath: string): string {
   const extension = extname(journeyOutputPath);
   return extension.toLowerCase() === ".json"
@@ -115,8 +103,8 @@ export interface GenerationPublisherDependencies {
     GenerationSessionStore,
     "writeTextEvidence" | "readEvidence" | "publish"
   >;
-  journeyWriter: JourneyWriterPort;
-  metaWriter: GenerationMetaWriterPort;
+  journeyWriter: ProjectBoundJourneyWriterPort;
+  metaWriter: ProjectBoundGenerationMetaWriterPort;
 }
 
 export class GenerationPublisher {
@@ -185,6 +173,71 @@ export class GenerationPublisher {
 
   public readonly publish = async (generationId: string): Promise<string> => {
     const bundlePath = await this.dependencies.store.publish(generationId);
+    await this.verifyPublishedManifest(generationId);
+    return bundlePath;
+  };
+
+  public readonly export = async (input: {
+    generationId: string;
+    projectRoot: string;
+    journeyPath: string;
+    journey: Journey;
+    meta: GenerationMeta;
+  }): Promise<{ journeyPath: string; metaPath: string }> => {
+    const journey = JourneySchema.parse(input.journey);
+    const meta = GenerationMetaSchema.parse(input.meta);
+    const journeyPath = resolve(input.projectRoot, input.journeyPath);
+    const metaPath = generationMetaOutputPath(journeyPath);
+    const authorityRoot = resolve(input.projectRoot, ".taphound");
+    try {
+      await this.dependencies.journeyWriter.writeProjectBound({
+        projectRoot: input.projectRoot,
+        authorityRoot,
+        outputPath: journeyPath,
+        journey
+      });
+      const expectedJourney = Buffer.from(serializeJson(journey));
+      const actualJourney = await this.dependencies.journeyWriter
+        .readProjectBound({
+          projectRoot: input.projectRoot,
+          authorityRoot,
+          outputPath: journeyPath
+        });
+      if (!actualJourney.equals(expectedJourney)) {
+        throw new Error("Exported Journey bytes do not match verified evidence");
+      }
+      await this.verifyPublishedManifest(input.generationId);
+    } catch (error) {
+      await this.verifyPublishedManifest(input.generationId);
+      throw error;
+    }
+    try {
+      await this.dependencies.metaWriter.writeProjectBound({
+        projectRoot: input.projectRoot,
+        authorityRoot,
+        outputPath: metaPath,
+        meta
+      });
+      const expectedMeta = Buffer.from(serializeJson(meta));
+      const actualMeta = await this.dependencies.metaWriter.readProjectBound({
+        projectRoot: input.projectRoot,
+        authorityRoot,
+        outputPath: metaPath
+      });
+      if (!actualMeta.equals(expectedMeta)) {
+        throw new Error("Exported generation meta bytes do not match evidence");
+      }
+      await this.verifyPublishedManifest(input.generationId);
+    } catch (error) {
+      await this.verifyPublishedManifest(input.generationId);
+      throw error;
+    }
+    return { journeyPath, metaPath };
+  };
+
+  private readonly verifyPublishedManifest = async (
+    generationId: string
+  ): Promise<void> => {
     const manifest = GenerationBundleManifestSchema.parse(JSON.parse(
       (await this.dependencies.store.readEvidence(
         generationId,
@@ -198,32 +251,6 @@ export class GenerationPublisher {
       );
     }
     await this.verifyManifest(generationId, manifest);
-    return bundlePath;
-  };
-
-  public readonly export = async (input: {
-    projectRoot: string;
-    journeyPath: string;
-    journey: Journey;
-    meta: GenerationMeta;
-  }): Promise<{ journeyPath: string; metaPath: string }> => {
-    const journey = JourneySchema.parse(input.journey);
-    const meta = GenerationMetaSchema.parse(input.meta);
-    const journeyPath = containedOutput(input.projectRoot, input.journeyPath);
-    const metaPath = generationMetaOutputPath(journeyPath);
-    await this.dependencies.journeyWriter.write(journeyPath, journey);
-    const expectedJourney = Buffer.from(serializeJson(journey));
-    const actualJourney = await readFile(journeyPath);
-    if (!actualJourney.equals(expectedJourney)) {
-      throw new Error("Exported Journey bytes do not match verified evidence");
-    }
-    await this.dependencies.metaWriter.write(metaPath, meta);
-    const expectedMeta = Buffer.from(serializeJson(meta));
-    const actualMeta = await readFile(metaPath);
-    if (!actualMeta.equals(expectedMeta)) {
-      throw new Error("Exported generation meta bytes do not match evidence");
-    }
-    return { journeyPath, metaPath };
   };
 
   private readonly verifyManifest = async (

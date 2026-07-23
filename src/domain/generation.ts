@@ -19,7 +19,11 @@ export const GENERATION_ERROR_CODES = [
   "RISK_CONFIRMATION_REQUIRED",
   "ACTION_FORBIDDEN",
   "EXPECT_UNSUPPORTED",
-  "RECOVERY_REQUIRED"
+  "RECOVERY_REQUIRED",
+  "VERIFICATION_FAILED",
+  "PUBLICATION_FAILED",
+  "EXPORT_FAILED",
+  "FINALIZATION_IN_PROGRESS"
 ] as const;
 
 export const GenerationErrorCodeSchema = z.enum(GENERATION_ERROR_CODES);
@@ -72,8 +76,17 @@ const GenerationFailureSchema = z.strictObject({
 
 const VerificationSchema = z.discriminatedUnion("status", [
   z.strictObject({ status: z.literal("notRun") }),
-  z.strictObject({ status: z.literal("running") }),
-  z.strictObject({ status: z.literal("passed") }),
+  z.strictObject({
+    status: z.literal("running"),
+    attemptId: GenerationSessionIdSchema
+  }),
+  z.strictObject({
+    status: z.literal("passed"),
+    attemptId: GenerationSessionIdSchema,
+    reportPath: z.string().min(1),
+    reportSha256: Sha256Schema,
+    runId: z.string().min(1)
+  }),
   z.strictObject({
     status: z.literal("failed"),
     failure: GenerationFailureSchema
@@ -192,6 +205,101 @@ export type GenerationVariables = z.infer<typeof GenerationVariablesSchema>;
 export type GenerationInFlight = z.infer<typeof GenerationInFlightSchema>;
 export type PendingConfirmation = z.infer<typeof PendingConfirmationSchema>;
 export type GenerationSession = z.infer<typeof GenerationSessionSchema>;
+
+const BundleRelativePathSchema = z.string().min(1).superRefine(
+  (path, context) => {
+    if (
+      path.includes("\\")
+      || path.includes("\0")
+      || path.startsWith("/")
+      || /^[A-Za-z]:/.test(path)
+      || path.split("/").some(
+        (segment) => segment.length === 0 || segment === "." || segment === ".."
+      )
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Path must be a safe bundle-relative path"
+      });
+    }
+  }
+);
+
+export const GenerationMetaSchema = z.strictObject({
+  version: z.literal(1),
+  status: z.literal("verified"),
+  generationId: GenerationSessionIdSchema,
+  journeyPath: ProjectRelativePathSchema,
+  bindings: z.strictObject({
+    projectHash: Sha256Schema,
+    configHash: Sha256Schema,
+    contextHash: Sha256Schema
+  }),
+  verification: z.strictObject({
+    reportPath: BundleRelativePathSchema,
+    reportSha256: Sha256Schema,
+    runId: z.string().min(1),
+    runs: z.literal(1)
+  }),
+  manualOverrideStepIndexes: z.array(z.number().int().nonnegative())
+});
+
+export const GenerationReportSchema = z.strictObject({
+  version: z.literal(1),
+  generationId: GenerationSessionIdSchema,
+  status: z.literal("verified"),
+  steps: z.array(z.strictObject({
+    index: z.number().int().nonnegative(),
+    source: z.enum(["planner", "manualOverride"])
+  })).min(1)
+}).superRefine((report, context) => {
+  for (const [index, step] of report.steps.entries()) {
+    if (step.index !== index) {
+      context.addIssue({
+        code: "custom",
+        path: ["steps", index, "index"],
+        message: "Generation report step indexes must be contiguous"
+      });
+    }
+  }
+});
+
+export const GenerationBundleManifestEntrySchema = z.strictObject({
+  path: BundleRelativePathSchema,
+  bytes: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  sha256: Sha256Schema
+});
+
+export const GenerationBundleManifestSchema = z.strictObject({
+  version: z.literal(1),
+  generationId: GenerationSessionIdSchema,
+  files: z.array(GenerationBundleManifestEntrySchema).min(1)
+}).superRefine((manifest, context) => {
+  const paths = new Set<string>();
+  for (const [index, file] of manifest.files.entries()) {
+    if (file.path === "manifest.json") {
+      context.addIssue({
+        code: "custom",
+        path: ["files", index, "path"],
+        message: "Manifest cannot include itself"
+      });
+    }
+    if (paths.has(file.path)) {
+      context.addIssue({
+        code: "custom",
+        path: ["files", index, "path"],
+        message: "Manifest file paths must be unique"
+      });
+    }
+    paths.add(file.path);
+  }
+});
+
+export type GenerationMeta = z.infer<typeof GenerationMetaSchema>;
+export type GenerationReport = z.infer<typeof GenerationReportSchema>;
+export type GenerationBundleManifest = z.infer<
+  typeof GenerationBundleManifestSchema
+>;
 export interface GenerationCoreIdentity {
   id: GenerationSession["id"];
   bindings: Pick<

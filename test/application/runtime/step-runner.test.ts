@@ -59,6 +59,7 @@ function fixture(overrides: {
   adb?: AdbPort;
   androidCli?: AndroidCliPort;
   idle?: StepRunnerOptions["idle"];
+  requireFocusedInput?: boolean;
 } = {}): {
   runner: StepRunner;
   adb: AdbPort;
@@ -87,7 +88,10 @@ function fixture(overrides: {
         pollIntervalMs: 100,
         stablePolls: 1,
         timeoutMs: 500
-      }
+      },
+      ...(overrides.requireFocusedInput === undefined
+        ? {}
+        : { requireFocusedInput: overrides.requireFocusedInput })
     }),
     adb,
     androidCli: cli,
@@ -481,5 +485,37 @@ describe("scrollTo replay", () => {
       expect(result.failure.code).toBe("LOCATOR_NOT_FOUND");
     }
     expect(adb.swipe).not.toHaveBeenCalled();
+  });
+
+  it("requires exactly one enabled focused element for generated input replay", async () => {
+    const cli = androidCli();
+    const { runner, adb } = fixture({
+      androidCli: cli,
+      requireFocusedInput: true
+    });
+    const result = await runner.run({
+      action: "inputText",
+      text: "hello",
+      activity: checkpoint
+    }, 0);
+
+    expect(result.status).toBe("failed");
+    if (result.status === "failed") {
+      expect(result.failure.code).toBe("ACTION_FAILED");
+      expect(result.failure.message).toContain("exactly one enabled focused");
+    }
+    expect(adb.inputText).not.toHaveBeenCalled();
+  });
+
+  it("keeps ordinary input replay behavior unchanged", async () => {
+    const { runner, adb } = fixture();
+    const result = await runner.run({
+      action: "inputText",
+      text: "hello",
+      activity: checkpoint
+    }, 0);
+
+    expect(result.status).toBe("passed");
+    expect(adb.inputText).toHaveBeenCalledOnce();
   });
 });

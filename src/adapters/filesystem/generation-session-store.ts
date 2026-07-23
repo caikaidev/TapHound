@@ -425,6 +425,8 @@ function assertSnapshotTransition(
     current.state !== "active"
     || current.inFlight !== null
     || current.pendingConfirmation !== null
+    || current.verification.status !== "notRun"
+    || current.publication.status !== "notRun"
     || next.state !== "active"
     || next.inFlight !== null
     || next.pendingConfirmation !== null
@@ -451,6 +453,17 @@ function assertOrdinaryTransition(
 ): void {
   assertCoreIdentityPreserved(current, next);
   assertLatestSnapshotPreserved(current, next);
+  if (
+    current.verification.status !== "notRun"
+    || current.publication.status !== "notRun"
+    || JSON.stringify(current.verification) !== JSON.stringify(next.verification)
+    || JSON.stringify(current.publication) !== JSON.stringify(next.publication)
+  ) {
+    throw new GenerationSessionStoreError(
+      "INVALID_TRANSITION",
+      "Verification and publication require explicit transitions"
+    );
+  }
   if (current.state === "recoveryRequired") {
     throw new GenerationSessionStoreError(
       "INVALID_TRANSITION",
@@ -493,6 +506,83 @@ function assertOrdinaryTransition(
   }
 }
 
+function verificationStableState(
+  session: GenerationSession
+): Record<string, unknown> {
+  return {
+    ...transitionStableState(session),
+    verification: undefined
+  };
+}
+
+function assertVerificationCompletionTransition(
+  current: GenerationSession,
+  next: GenerationSession,
+  status: "passed" | "failed"
+): void {
+  assertCoreIdentityPreserved(current, next);
+  assertLatestSnapshotPreserved(current, next);
+  if (
+    current.state !== "active"
+    || next.state !== "active"
+    || current.inFlight !== null
+    || next.inFlight !== null
+    || current.pendingConfirmation !== null
+    || next.pendingConfirmation !== null
+    || current.verification.status !== "running"
+    || next.verification.status !== status
+    || next.publication.status !== "notRun"
+    || JSON.stringify(verificationStableState(current))
+      !== JSON.stringify(verificationStableState(next))
+  ) {
+    throw new GenerationSessionStoreError(
+      "INVALID_TRANSITION",
+      `Verification completion must record ${status} from the running attempt`
+    );
+  }
+  if (
+    next.verification.status === "passed"
+    && next.verification.attemptId !== current.verification.attemptId
+  ) {
+    throw new GenerationSessionStoreError(
+      "INVALID_TRANSITION",
+      "Verification completion attempt does not match"
+    );
+  }
+}
+
+function assertBundlePublishableTransition(
+  current: GenerationSession,
+  next: GenerationSession
+): void {
+  assertCoreIdentityPreserved(current, next);
+  assertLatestSnapshotPreserved(current, next);
+  if (
+    current.state !== "active"
+    || next.state !== "active"
+    || current.inFlight !== null
+    || next.inFlight !== null
+    || current.pendingConfirmation !== null
+    || next.pendingConfirmation !== null
+    || current.verification.status !== "passed"
+    || JSON.stringify(current.verification) !== JSON.stringify(next.verification)
+    || current.publication.status !== "notRun"
+    || next.publication.status !== "published"
+    || JSON.stringify({
+      ...transitionStableState(current),
+      publication: undefined
+    }) !== JSON.stringify({
+      ...transitionStableState(next),
+      publication: undefined
+    })
+  ) {
+    throw new GenerationSessionStoreError(
+      "INVALID_TRANSITION",
+      "Bundle publication must be explicitly marked after passed verification"
+    );
+  }
+}
+
 function confirmationStableState(
   session: GenerationSession
 ): Record<string, unknown> {
@@ -511,6 +601,8 @@ function assertConfirmationTransition(
     || next.state !== "active"
     || current.inFlight !== null
     || next.inFlight !== null
+    || current.verification.status !== "notRun"
+    || current.publication.status !== "notRun"
     || JSON.stringify(confirmationStableState(current))
       !== JSON.stringify(confirmationStableState(next))
   ) {
@@ -1487,6 +1579,155 @@ implements GenerationSessionStore {
     });
   };
 
+  public readonly beginVerification = async (
+    id: string,
+    expectedRevision: number,
+    attemptId: string
+  ): Promise<GenerationSession> => {
+    assertId(id);
+    validateExpectedRevision(expectedRevision);
+    assertId(attemptId);
+    if (expectedRevision > Number.MAX_SAFE_INTEGER - 3) {
+      throw new GenerationSessionStoreError(
+        "INVALID_REVISION",
+        "Verification must reserve revisions for completion and publication"
+      );
+    }
+    await this.ensureGenerationRoot();
+    return this.withLock(id, async () => {
+      const activeDirectory = this.activeDirectory(id);
+      if (!await pathExists(activeDirectory)) {
+        if (await pathExists(this.finalDirectory(id))) {
+          throw new GenerationSessionStoreError(
+            "SESSION_PUBLISHED",
+            `Published generation session cannot begin verification: ${id}`
+          );
+        }
+        throw new GenerationSessionStoreError(
+          "SESSION_NOT_FOUND",
+          `Generation session does not exist: ${id}`
+        );
+      }
+      const activeEvidence = await captureStoreDirectory(activeDirectory);
+      const current = await readBoundState(
+        activeDirectory,
+        id,
+        this.hooks.afterStateOpen,
+        activeEvidence
+      );
+      if (current.revision !== expectedRevision) {
+        throw new GenerationSessionStoreError(
+          "REVISION_CONFLICT",
+          `Expected generation revision ${String(expectedRevision)}, found ${
+            String(current.revision)
+          }`
+        );
+      }
+      if (
+        current.state !== "active"
+        || current.inFlight !== null
+        || current.pendingConfirmation !== null
+        || current.candidateSteps.length === 0
+        || current.candidateSources.length !== current.candidateSteps.length
+        || current.verification.status !== "notRun"
+        || current.publication.status !== "notRun"
+      ) {
+        throw new GenerationSessionStoreError(
+          "INVALID_TRANSITION",
+          "Verification requires a complete non-empty active candidate"
+        );
+      }
+      const next = GenerationSessionSchema.parse({
+        ...current,
+        revision: current.revision + 1,
+        verification: { status: "running", attemptId }
+      });
+      await writeStateAtomically(
+        activeDirectory,
+        next,
+        this.syncDirectory,
+        this.hooks.beforeStateRename,
+        activeEvidence
+      );
+      return next;
+    });
+  };
+
+  public readonly completeVerification = async (
+    id: string,
+    expectedRevision: number,
+    input: GenerationSession
+  ): Promise<void> => {
+    await this.writeVerificationTransition(
+      id,
+      expectedRevision,
+      input,
+      "passed"
+    );
+  };
+
+  public readonly failVerification = async (
+    id: string,
+    expectedRevision: number,
+    input: GenerationSession
+  ): Promise<void> => {
+    await this.writeVerificationTransition(
+      id,
+      expectedRevision,
+      input,
+      "failed"
+    );
+  };
+
+  public readonly markBundlePublishable = async (
+    id: string,
+    expectedRevision: number,
+    input: GenerationSession
+  ): Promise<void> => {
+    assertId(id);
+    const next = parseSession(input, true);
+    validateNextRevision(id, expectedRevision, next);
+    await this.ensureGenerationRoot();
+    await this.withLock(id, async () => {
+      const activeDirectory = this.activeDirectory(id);
+      if (!await pathExists(activeDirectory)) {
+        if (await pathExists(this.finalDirectory(id))) {
+          throw new GenerationSessionStoreError(
+            "SESSION_PUBLISHED",
+            `Published generation session cannot be marked publishable: ${id}`
+          );
+        }
+        throw new GenerationSessionStoreError(
+          "SESSION_NOT_FOUND",
+          `Generation session does not exist: ${id}`
+        );
+      }
+      const activeEvidence = await captureStoreDirectory(activeDirectory);
+      const current = await readBoundState(
+        activeDirectory,
+        id,
+        this.hooks.afterStateOpen,
+        activeEvidence
+      );
+      if (current.revision !== expectedRevision) {
+        throw new GenerationSessionStoreError(
+          "REVISION_CONFLICT",
+          `Expected generation revision ${String(expectedRevision)}, found ${
+            String(current.revision)
+          }`
+        );
+      }
+      assertBundlePublishableTransition(current, next);
+      await writeStateAtomically(
+        activeDirectory,
+        next,
+        this.syncDirectory,
+        this.hooks.beforeStateRename,
+        activeEvidence
+      );
+    });
+  };
+
   public readonly writeEvidence = async (
     id: string,
     relativePath: string,
@@ -1570,12 +1811,18 @@ implements GenerationSessionStore {
         );
       }
       const activeEvidence = await captureStoreDirectory(activeDirectory);
-      await readBoundState(
+      const state = await readBoundState(
         activeDirectory,
         id,
         this.hooks.afterStateOpen,
         activeEvidence
       );
+      if (state.publication.status === "published") {
+        throw new GenerationSessionStoreError(
+          "SESSION_PUBLISHED",
+          `Publishable generation session cannot accept evidence: ${id}`
+        );
+      }
 
       let parent = activeDirectory;
       const directoryEvidence: DirectoryEvidence[] = [
@@ -1678,6 +1925,71 @@ implements GenerationSessionStore {
     });
   };
 
+  public readonly readEvidence = async (
+    id: string,
+    relativePath: string
+  ): Promise<Buffer> => {
+    assertId(id);
+    const segments = validateEvidencePath(relativePath);
+    await this.ensureGenerationRoot();
+    return this.withLock(id, async () => {
+      const finalDirectory = this.finalDirectory(id);
+      const activeDirectory = this.activeDirectory(id);
+      const directory = await pathExists(finalDirectory)
+        ? finalDirectory
+        : activeDirectory;
+      if (!await pathExists(directory)) {
+        throw new GenerationSessionStoreError(
+          "SESSION_NOT_FOUND",
+          `Generation session does not exist: ${id}`
+        );
+      }
+      const rootEvidence = await captureStoreDirectory(directory);
+      await readBoundState(
+        directory,
+        id,
+        this.hooks.afterStateOpen,
+        rootEvidence
+      );
+      let current = directory;
+      const directories: DirectoryEvidence[] = [rootEvidence];
+      for (const segment of segments.slice(0, -1)) {
+        current = join(current, segment);
+        const evidence = await captureDirectoryEvidence(current);
+        assertContained(rootEvidence.canonicalPath, evidence.canonicalPath);
+        directories.push(evidence);
+      }
+      const path = join(current, segments.at(-1) as string);
+      assertContained(directory, path);
+      await verifyDirectoryEvidence(rootEvidence.canonicalPath, directories);
+      const handle = await open(
+        path,
+        constants.O_RDONLY | constants.O_NOFOLLOW
+      );
+      try {
+        const stats = await handle.stat({ bigint: true });
+        if (!stats.isFile()) {
+          throw new GenerationSessionStoreError(
+            "INVALID_EVIDENCE_PATH",
+            `Evidence is not a regular file: ${relativePath}`
+          );
+        }
+        const openedIdentity = { dev: stats.dev, ino: stats.ino };
+        const pathIdentity = await fileIdentity(path);
+        if (!sameIdentity(openedIdentity, pathIdentity)) {
+          throw new GenerationSessionStoreError(
+            "INVALID_EVIDENCE_PATH",
+            `Evidence file identity changed: ${relativePath}`
+          );
+        }
+        await verifyDirectoryEvidence(rootEvidence.canonicalPath, directories);
+        return await handle.readFile();
+      } finally {
+        await handle.close();
+      }
+    });
+  };
+
   public readonly publish = async (id: string): Promise<string> => {
     assertId(id);
     await this.ensureGenerationRoot();
@@ -1772,6 +2084,56 @@ implements GenerationSessionStore {
     } catch (error) {
       throw asStoreIoError(error, "initialize its generation directory");
     }
+  };
+
+  private readonly writeVerificationTransition = async (
+    id: string,
+    expectedRevision: number,
+    input: GenerationSession,
+    status: "passed" | "failed"
+  ): Promise<void> => {
+    assertId(id);
+    const next = parseSession(input, true);
+    validateNextRevision(id, expectedRevision, next);
+    await this.ensureGenerationRoot();
+    await this.withLock(id, async () => {
+      const activeDirectory = this.activeDirectory(id);
+      if (!await pathExists(activeDirectory)) {
+        if (await pathExists(this.finalDirectory(id))) {
+          throw new GenerationSessionStoreError(
+            "SESSION_PUBLISHED",
+            `Published generation session cannot complete verification: ${id}`
+          );
+        }
+        throw new GenerationSessionStoreError(
+          "SESSION_NOT_FOUND",
+          `Generation session does not exist: ${id}`
+        );
+      }
+      const activeEvidence = await captureStoreDirectory(activeDirectory);
+      const current = await readBoundState(
+        activeDirectory,
+        id,
+        this.hooks.afterStateOpen,
+        activeEvidence
+      );
+      if (current.revision !== expectedRevision) {
+        throw new GenerationSessionStoreError(
+          "REVISION_CONFLICT",
+          `Expected generation revision ${String(expectedRevision)}, found ${
+            String(current.revision)
+          }`
+        );
+      }
+      assertVerificationCompletionTransition(current, next, status);
+      await writeStateAtomically(
+        activeDirectory,
+        next,
+        this.syncDirectory,
+        this.hooks.beforeStateRename,
+        activeEvidence
+      );
+    });
   };
 
   private readonly activeDirectory = (id: string): string => (

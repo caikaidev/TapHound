@@ -125,6 +125,54 @@ function successfulWaitStep(): GenerationSession["candidateSteps"][number] {
   };
 }
 
+function verificationCandidate(
+  revision = 0,
+  overrides: Partial<GenerationSession> = {}
+): GenerationSession {
+  return validSession(revision, {
+    candidateSteps: [successfulWaitStep()],
+    candidateSources: ["planner"],
+    ...overrides
+  });
+}
+
+async function markPublishable(
+  store: FileSystemGenerationSessionStore,
+  initial: GenerationSession
+): Promise<GenerationSession> {
+  const running = await store.beginVerification(
+    initial.id,
+    initial.revision,
+    "verification-attempt"
+  );
+  const passed = {
+    ...running,
+    revision: running.revision + 1,
+    verification: {
+      status: "passed" as const,
+      attemptId: "verification-attempt",
+      reportPath: "verification/report.json",
+      reportSha256: "f".repeat(64),
+      runId: "verification-run"
+    }
+  };
+  await store.completeVerification(running.id, running.revision, passed);
+  const publishable = {
+    ...passed,
+    revision: passed.revision + 1,
+    publication: {
+      status: "published" as const,
+      journeyPath: "journeys/generated.json"
+    }
+  };
+  await store.markBundlePublishable(
+    passed.id,
+    passed.revision,
+    publishable
+  );
+  return publishable;
+}
+
 function expectStoreError(
   promise: Promise<unknown>,
   code: GenerationSessionStoreError["code"]
@@ -171,24 +219,15 @@ describe("FileSystemGenerationSessionStore", () => {
   it("rejects duplicate active and published session creation", async () => {
     const root = await temporaryRoot();
     const store = new FileSystemGenerationSessionStore(root);
-    await store.create(validSession());
+    const initial = verificationCandidate();
+    await store.create(initial);
 
     await expectStoreError(
       store.create(validSession()),
       "SESSION_ALREADY_EXISTS"
     );
 
-    await store.update(
-      "generation-1",
-      0,
-      validSession(1, {
-        verification: { status: "passed" },
-        publication: {
-          status: "published",
-          journeyPath: "journeys/generated.json"
-        }
-      })
-    );
+    await markPublishable(store, initial);
     await store.publish("generation-1");
     await expectStoreError(
       store.create(validSession()),
@@ -463,6 +502,44 @@ describe("FileSystemGenerationSessionStore", () => {
       }
     ), "INVALID_REVISION");
     await expect(store.read("generation-1")).resolves.toEqual(state);
+  });
+
+  it("reserves verification completion and publication revisions", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(verificationCandidate());
+    const state = verificationCandidate(Number.MAX_SAFE_INTEGER - 2);
+    await writeFile(
+      join(activeDirectory(root), "state.json"),
+      `${JSON.stringify(state, null, 2)}\n`,
+      "utf8"
+    );
+
+    await expectStoreError(store.beginVerification(
+      "generation-1",
+      Number.MAX_SAFE_INTEGER - 2,
+      "verification-attempt"
+    ), "INVALID_REVISION");
+    await expect(store.read("generation-1")).resolves.toEqual(state);
+  });
+
+  it("forbids ordinary update from mutating verification or publication", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    const initial = verificationCandidate();
+    await store.create(initial);
+
+    await expectStoreError(store.update(
+      "generation-1",
+      0,
+      verificationCandidate(1, {
+        verification: {
+          status: "running",
+          attemptId: "verification-attempt"
+        }
+      })
+    ), "INVALID_TRANSITION");
+    await expect(store.read("generation-1")).resolves.toEqual(initial);
   });
 
   it("starts inFlight without mutating candidate or result state", async () => {
@@ -1714,16 +1791,30 @@ describe("FileSystemGenerationSessionStore", () => {
   it("publishes only a completed, successfully published session", async () => {
     const root = await temporaryRoot();
     const store = new FileSystemGenerationSessionStore(root);
-    await store.create(validSession());
+    const initial = verificationCandidate();
+    await store.create(initial);
 
     await expectStoreError(
       store.publish("generation-1"),
       "SESSION_NOT_PUBLISHABLE"
     );
-    await store.update("generation-1", 0, validSession(1, {
-      verification: { status: "passed" },
-      publication: { status: "notRun" }
-    }));
+    const running = await store.beginVerification(
+      "generation-1",
+      0,
+      "verification-attempt"
+    );
+    const passed = {
+      ...running,
+      revision: 2,
+      verification: {
+        status: "passed" as const,
+        attemptId: "verification-attempt",
+        reportPath: "verification/report.json",
+        reportSha256: "f".repeat(64),
+        runId: "verification-run"
+      }
+    };
+    await store.completeVerification("generation-1", 1, passed);
     await expectStoreError(
       store.publish("generation-1"),
       "SESSION_NOT_PUBLISHABLE"
@@ -1733,18 +1824,12 @@ describe("FileSystemGenerationSessionStore", () => {
   it("atomically renames a publishable work bundle to its final directory", async () => {
     const root = await temporaryRoot();
     const store = new FileSystemGenerationSessionStore(root);
-    await store.create(validSession());
+    const initial = verificationCandidate();
+    await store.create(initial);
     await store.writeEvidence("generation-1", "evidence/result.json", {
       accepted: true
     });
-    const completed = validSession(1, {
-      verification: { status: "passed" },
-      publication: {
-        status: "published",
-        journeyPath: "journeys/generated.json"
-      }
-    });
-    await store.update("generation-1", 0, completed);
+    const completed = await markPublishable(store, initial);
 
     const published = await store.publish("generation-1");
 
@@ -1767,13 +1852,45 @@ describe("FileSystemGenerationSessionStore", () => {
     await expect(store.read("generation-1")).resolves.toEqual(completed);
   });
 
+  it("freezes state and evidence after a bundle is marked publishable", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    const initial = verificationCandidate();
+    await store.create(initial);
+    const completed = await markPublishable(store, initial);
+
+    await expectStoreError(
+      store.writeEvidence("generation-1", "late.json", {}),
+      "SESSION_PUBLISHED"
+    );
+    await expectStoreError(store.commitSnapshot(
+      "generation-1",
+      completed.revision,
+      {
+        ...completed,
+        revision: completed.revision + 1,
+        bindings: {
+          ...completed.bindings,
+          snapshotHash: "9".repeat(64)
+        }
+      }
+    ), "INVALID_TRANSITION");
+    await expect(store.read("generation-1")).resolves.toEqual(completed);
+  });
+
   it("rejects active-bundle substitution before publish rename", async () => {
     const root = await temporaryRoot();
     let substituteBundle = false;
     const active = activeDirectory(root);
     const movedActive = `${active}.moved`;
     const publishable = validSession(0, {
-      verification: { status: "passed" },
+      verification: {
+        status: "passed",
+        attemptId: "verification-attempt",
+        reportPath: "verification/report.json",
+        reportSha256: "f".repeat(64),
+        runId: "verification-run"
+      },
       publication: {
         status: "published",
         journeyPath: "journeys/generated.json"
@@ -1837,15 +1954,9 @@ describe("FileSystemGenerationSessionStore", () => {
         }
       }
     });
-    await store.create(validSession());
-    const completed = validSession(1, {
-      verification: { status: "passed" },
-      publication: {
-        status: "published",
-        journeyPath: "journeys/generated.json"
-      }
-    });
-    await store.update("generation-1", 0, completed);
+    const initial = verificationCandidate();
+    await store.create(initial);
+    const completed = await markPublishable(store, initial);
     const first = await store.publish("generation-1");
     synced.length = 0;
 
@@ -1865,15 +1976,9 @@ describe("FileSystemGenerationSessionStore", () => {
         }
       }
     });
-    await publisher.create(validSession());
-    const completed = validSession(1, {
-      verification: { status: "passed" },
-      publication: {
-        status: "published",
-        journeyPath: "journeys/generated.json"
-      }
-    });
-    await publisher.update("generation-1", 0, completed);
+    const initial = verificationCandidate();
+    await publisher.create(initial);
+    const completed = await markPublishable(publisher, initial);
 
     await publisher.publish("generation-1");
 

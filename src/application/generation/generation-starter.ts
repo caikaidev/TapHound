@@ -65,7 +65,7 @@ function canonicalize(value: unknown): unknown {
   return value;
 }
 
-function hashCanonicalJson(value: unknown): string {
+export function hashGenerationBinding(value: unknown): string {
   return createHash("sha256")
     .update(JSON.stringify(canonicalize(value)))
     .digest("hex");
@@ -139,9 +139,9 @@ export class GenerationStarter {
       revision: 0,
       state: "active",
       bindings: {
-        projectHash: hashCanonicalJson(input.project),
-        configHash: hashCanonicalJson(config),
-        contextHash: hashCanonicalJson(context),
+        projectHash: hashGenerationBinding(input.project),
+        configHash: hashGenerationBinding(config),
+        contextHash: hashGenerationBinding(context),
         snapshotHash: null
       },
       target: {

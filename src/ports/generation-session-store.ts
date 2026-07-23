@@ -71,6 +71,26 @@ export interface GenerationSessionStore {
     expectedRevision: number,
     next: GenerationSession
   ) => Promise<void>;
+  beginVerification: (
+    id: string,
+    expectedRevision: number,
+    attemptId: string
+  ) => Promise<GenerationSession>;
+  completeVerification: (
+    id: string,
+    expectedRevision: number,
+    next: GenerationSession
+  ) => Promise<void>;
+  failVerification: (
+    id: string,
+    expectedRevision: number,
+    next: GenerationSession
+  ) => Promise<void>;
+  markBundlePublishable: (
+    id: string,
+    expectedRevision: number,
+    next: GenerationSession
+  ) => Promise<void>;
   writeEvidence: (
     id: string,
     relativePath: string,
@@ -86,5 +106,6 @@ export interface GenerationSessionStore {
     relativePath: string,
     produce: (temporaryPath: string) => Promise<void>
   ) => Promise<void>;
+  readEvidence: (id: string, relativePath: string) => Promise<Buffer>;
   publish: (id: string) => Promise<string>;
 }

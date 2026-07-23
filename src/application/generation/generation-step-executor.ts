@@ -36,6 +36,9 @@ import {
 import { GenerationOperationError } from "./generation-starter.js";
 import type { SnapshotReobservationGuard } from "./runtime-observer.js";
 import { RiskEvaluator } from "./risk-evaluator.js";
+import {
+  hasExactlyOneEnabledFocusedElement
+} from "./focused-input.js";
 
 export type GenerationCandidateSource = "planner" | "manualOverride";
 
@@ -114,13 +117,6 @@ function executionPath(
   return `evidence/steps/${String(inFlight.stepIndex)}-${
     inFlight.attemptId
   }/${suffix}`;
-}
-
-function flatten(elements: readonly LayoutElement[]): LayoutElement[] {
-  return elements.flatMap((element) => [
-    element,
-    ...flatten(element.children)
-  ]);
 }
 
 function asFailure(error: unknown): GenerationStepFailure {
@@ -440,10 +436,7 @@ export class GenerationStepExecutor {
       } else {
         const target = requireTarget(preAction.layout, provisional);
         if (provisional.action === "inputText") {
-          const focused = flatten(preAction.layout).filter(
-            (element) => element.enabled && element.focused === true
-          );
-          if (focused.length !== 1) {
+          if (!hasExactlyOneEnabledFocusedElement(preAction.layout)) {
             fail(
               "ACTION_FAILED",
               "inputText requires exactly one enabled focused Layout element"

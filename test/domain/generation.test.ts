@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   GENERATION_ERROR_CODES,
+  GenerationBundleManifestSchema,
+  GenerationMetaSchema,
+  GenerationReportSchema,
   GenerationSessionSchema,
   bindGenerationVariables,
   expandProposedStepVariables,
@@ -25,6 +28,14 @@ const proposalBinding = {
   generationId: "generation-1",
   baseRevision: 1,
   snapshotHash: "b".repeat(64)
+};
+
+const passedVerification = {
+  status: "passed" as const,
+  attemptId: "verification-attempt",
+  reportPath: "verification/report.json",
+  reportSha256: "f".repeat(64),
+  runId: "verification-run"
 };
 
 function validSession(): unknown {
@@ -73,8 +84,63 @@ describe("generation error contract", () => {
       "RISK_CONFIRMATION_REQUIRED",
       "ACTION_FORBIDDEN",
       "EXPECT_UNSUPPORTED",
-      "RECOVERY_REQUIRED"
+      "RECOVERY_REQUIRED",
+      "VERIFICATION_FAILED",
+      "PUBLICATION_FAILED",
+      "EXPORT_FAILED",
+      "FINALIZATION_IN_PROGRESS"
     ]);
+  });
+});
+
+describe("generation finalization evidence schemas", () => {
+  it("parses aligned strict verified meta and provenance", () => {
+    expect(GenerationMetaSchema.parse({
+      version: 1,
+      status: "verified",
+      generationId: "generation-1",
+      journeyPath: "journeys/generated.json",
+      bindings: {
+        projectHash: "a".repeat(64),
+        configHash: "b".repeat(64),
+        contextHash: "c".repeat(64)
+      },
+      verification: {
+        reportPath: "verification/report.json",
+        reportSha256: "d".repeat(64),
+        runId: "verify-run",
+        runs: 1
+      },
+      manualOverrideStepIndexes: [1]
+    })).toMatchObject({ status: "verified" });
+    expect(GenerationReportSchema.parse({
+      version: 1,
+      generationId: "generation-1",
+      status: "verified",
+      steps: [
+        { index: 0, source: "planner" },
+        { index: 1, source: "manualOverride" }
+      ]
+    }).steps).toHaveLength(2);
+  });
+
+  it("rejects duplicate, escaped, and self-referential manifest paths", () => {
+    const entry = {
+      path: "verified/journey.json",
+      bytes: 1,
+      sha256: "a".repeat(64)
+    };
+    for (const files of [
+      [entry, entry],
+      [{ ...entry, path: "../journey.json" }],
+      [{ ...entry, path: "manifest.json" }]
+    ]) {
+      expect(() => GenerationBundleManifestSchema.parse({
+        version: 1,
+        generationId: "generation-1",
+        files
+      })).toThrow();
+    }
   });
 });
 
@@ -239,7 +305,7 @@ describe("GenerationSessionSchema", () => {
   ])("rejects escaped publication journey path %s", (journeyPath) => {
     expect(() => GenerationSessionSchema.parse({
       ...(validSession() as object),
-      verification: { status: "passed" },
+      verification: passedVerification,
       publication: { status: "published", journeyPath }
     })).toThrow(/within the project/i);
   });
@@ -247,7 +313,7 @@ describe("GenerationSessionSchema", () => {
   it("normalizes a safe publication journey path", () => {
     const parsed = GenerationSessionSchema.parse({
       ...(validSession() as object),
-      verification: { status: "passed" },
+      verification: passedVerification,
       publication: {
         status: "published",
         journeyPath: String.raw`journeys\generated.json`
@@ -264,7 +330,10 @@ describe("GenerationSessionSchema", () => {
     expect(() => GenerationSessionSchema.parse({
       ...(validSession() as object),
       inFlight: { stepIndex: 1, snapshotHash: "b".repeat(64), proposalHash: "c".repeat(64), attemptId: "attempt-1" },
-      verification: { status: "running" }
+      verification: {
+        status: "running",
+        attemptId: "verification-attempt"
+      }
     })).toThrow(/verification/i);
   });
 

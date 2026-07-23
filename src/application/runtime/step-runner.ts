@@ -15,6 +15,9 @@ import { ScrollToExecutor } from "../interaction/scroll-to-executor.js";
 import { resolveLocator } from "../locator/locator-resolver.js";
 import { ExpectationEvaluator } from "../assertion/expectation-evaluator.js";
 import { IdleWaiter, type IdleConfig } from "../wait/idle-waiter.js";
+import {
+  hasExactlyOneEnabledFocusedElement
+} from "../generation/focused-input.js";
 
 export interface StepRunnerOptions {
   adb: AdbPort;
@@ -25,6 +28,7 @@ export interface StepRunnerOptions {
   packageName: string;
   deviceSerial: string;
   idle: IdleConfig;
+  requireFocusedInput?: boolean;
 }
 
 export type StepRunResult =
@@ -254,6 +258,16 @@ export class StepRunner {
         }
       }
 
+      if (
+        step.action === "inputText"
+        && this.options.requireFocusedInput === true
+        && !hasExactlyOneEnabledFocusedElement(layout)
+      ) {
+        return fail(
+          "ACTION_FAILED",
+          "inputText requires exactly one enabled focused Layout element"
+        );
+      }
       const action = await this.actionExecutor.execute(step, target, signal);
       if (action.status === "failed") {
         return fail(action.code, action.message);

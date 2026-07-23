@@ -106,7 +106,7 @@ interface ExpectedVerification {
   tools: Record<string, string>;
 }
 
-const GenerationOutputPathSchema = ProjectRelativePathSchema.refine(
+export const GenerationOutputPathSchema = ProjectRelativePathSchema.refine(
   (path) => path.split("/").every(
     (segment) => segment.length > 0 && segment !== "."
   ),

@@ -7,6 +7,7 @@ import {
   ProposedStepSchema,
   type ProposedStep
 } from "./proposed-step.js";
+import { RuntimeSnapshotSchema } from "./runtime-snapshot.js";
 
 export const GENERATION_ERROR_CODES = [
   "CONFIG_INVALID",
@@ -205,6 +206,17 @@ export type GenerationVariables = z.infer<typeof GenerationVariablesSchema>;
 export type GenerationInFlight = z.infer<typeof GenerationInFlightSchema>;
 export type PendingConfirmation = z.infer<typeof PendingConfirmationSchema>;
 export type GenerationSession = z.infer<typeof GenerationSessionSchema>;
+
+export const GenerationConfirmationEvidenceSchema = z.strictObject({
+  version: z.literal(1),
+  proposal: ProposedStepSchema,
+  snapshot: RuntimeSnapshotSchema,
+  source: z.enum(["planner", "manualOverride"])
+});
+
+export type GenerationConfirmationEvidence = z.infer<
+  typeof GenerationConfirmationEvidenceSchema
+>;
 
 const BundleRelativePathSchema = z.string().min(1).superRefine(
   (path, context) => {

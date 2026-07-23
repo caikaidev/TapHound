@@ -13,21 +13,36 @@ import { AdbAdapter } from "../adapters/adb/adb-adapter.js";
 import { AndroidCliAdapter } from "../adapters/android-cli/android-cli-adapter.js";
 import { SystemClock } from "../adapters/clock/system-clock.js";
 import { FileSystemArtifactStore } from "../adapters/filesystem/artifact-store.js";
+import { FileSystemGenerationMetaWriter } from "../adapters/filesystem/generation-meta-writer.js";
 import { FileSystemGenerationSessionStore } from "../adapters/filesystem/generation-session-store.js";
 import { FileSystemJourneyWriter } from "../adapters/filesystem/journey-writer.js";
 import { NodeProjectFileInspector } from "../adapters/filesystem/project-file-inspector.js";
 import { GradleAdapter } from "../adapters/gradle/gradle-adapter.js";
 import { NodeProcessRunner } from "../adapters/process/node-process-runner.js";
 import { InquirerRecorderPrompt } from "../adapters/prompt/inquirer-recorder-prompt.js";
+import { InquirerGenerationPrompt } from "../adapters/prompt/inquirer-generation-prompt.js";
 import { ContextValidator } from "../application/context/context-validator.js";
 import { DoctorService } from "../application/doctor/doctor-service.js";
 import type { DoctorReport } from "../application/doctor/doctor-service.js";
+import {
+  GenerationConfirmationService
+} from "../application/generation/generation-confirmation-service.js";
+import {
+  GenerationFinalizer
+} from "../application/generation/generation-finalizer.js";
+import {
+  GenerationPublisher
+} from "../application/generation/generation-publisher.js";
 import {
   GenerationStarter,
   type GenerationStartInput
 } from "../application/generation/generation-starter.js";
 import {
+  GenerationStepExecutor
+} from "../application/generation/generation-step-executor.js";
+import {
   RuntimeObserver,
+  SnapshotReobservationGuard,
   type RuntimeObservation,
   type RuntimeObserveInput
 } from "../application/generation/runtime-observer.js";
@@ -35,9 +50,22 @@ import { ProjectDescriber } from "../application/project/project-describer.js";
 import { RecorderService, type RecordInput, type RecordResult } from "../application/recorder/recorder-service.js";
 import { ReportWriter } from "../application/report/report-writer.js";
 import { VerifyRuntime, type VerifyInput, type VerifyResult } from "../application/runtime/verify-runtime.js";
+import type { TapHoundConfig } from "../domain/config.js";
+import type { GenerationSession } from "../domain/generation.js";
 
 export interface TextOutput {
   write: (content: string) => void;
+}
+
+export interface GenerationCliRuntime {
+  confirmation: Pick<
+    GenerationConfirmationService,
+    "request" | "requestManual" | "confirmStored"
+  >;
+  executor: Pick<GenerationStepExecutor, "execute">;
+  observer: Pick<RuntimeObserver, "observe">;
+  finalizer: Pick<GenerationFinalizer, "finalize">;
+  readSession: (id: string) => Promise<GenerationSession>;
 }
 
 export interface CliDependencies {
@@ -67,6 +95,10 @@ export interface CliDependencies {
       input: RuntimeObserveInput & { projectRoot: string }
     ) => Promise<RuntimeObservation>;
   };
+  generationRuntime?: (input: {
+    projectRoot: string;
+    config: TapHoundConfig;
+  }) => GenerationCliRuntime;
   readJson: (path: string) => Promise<unknown>;
   cwd: () => string;
   stdout: TextOutput;
@@ -160,7 +192,7 @@ export function createProductionDependencies(
       > => new GenerationStarter({
         contextValidator,
         store: new FileSystemGenerationSessionStore(input.projectRoot),
-        now: () => new Date(),
+        now: (): Date => new Date(),
         generateId: randomUUID,
         randomBytes
       }).start(input)
@@ -175,6 +207,69 @@ export function createProductionDependencies(
           createAttemptId: randomUUID
         }).observe(input)
       )
+    },
+    generationRuntime: ({ projectRoot, config }): GenerationCliRuntime => {
+      const store = new FileSystemGenerationSessionStore(projectRoot);
+      const prompt = new InquirerGenerationPrompt();
+      const observer = new RuntimeObserver({
+        store,
+        adb,
+        androidCli,
+        now: (): Date => new Date(),
+        createAttemptId: randomUUID
+      });
+      const freshnessGuard = new SnapshotReobservationGuard({
+        store,
+        adb,
+        androidCli,
+        now: (): Date => new Date()
+      });
+      const confirmation = new GenerationConfirmationService({
+        store,
+        prompt,
+        now: (): Date => new Date(),
+        generateChallengeId: randomUUID,
+        confirmationTtlMs: 5 * 60_000
+      });
+      const executor = new GenerationStepExecutor({
+        store,
+        freshnessGuard,
+        adb,
+        androidCli,
+        clock,
+        idle: config.idle,
+        now: (): Date => new Date(),
+        generateAttemptId: randomUUID
+      });
+      const publisher = new GenerationPublisher({
+        store,
+        journeyWriter: new FileSystemJourneyWriter(),
+        metaWriter: new FileSystemGenerationMetaWriter()
+      });
+      const finalizer = new GenerationFinalizer({
+        store,
+        contextValidator,
+        adb,
+        verifyRuntime: new VerifyRuntime({
+          gradle,
+          androidCli,
+          adb,
+          clock,
+          artifactStore: new FileSystemArtifactStore(),
+          reportWriter: new ReportWriter(),
+          now: (): Date => new Date(),
+          createRunId: runId
+        }),
+        publisher,
+        generateAttemptId: randomUUID
+      });
+      return {
+        confirmation,
+        executor,
+        observer,
+        finalizer,
+        readSession: (id): Promise<GenerationSession> => store.read(id)
+      };
     },
     readJson: async (path): Promise<unknown> => JSON.parse(
       await readFile(path, "utf8")

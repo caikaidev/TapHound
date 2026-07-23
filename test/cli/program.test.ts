@@ -34,6 +34,13 @@ describe("createProgram", () => {
     expect(
       createProgram().commands.find((command) => command.name() === "generation")
         ?.commands.map((command) => command.name())
-    ).toEqual(["start", "observe"]);
+    ).toEqual([
+      "start",
+      "observe",
+      "step",
+      "confirm",
+      "manual",
+      "finalize"
+    ]);
   });
 });

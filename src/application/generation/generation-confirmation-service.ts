@@ -1,5 +1,8 @@
 import {
+  GenerationConfirmationEvidenceSchema,
+  GenerationSessionIdSchema,
   GenerationSessionSchema,
+  type GenerationConfirmationEvidence,
   type PendingConfirmation
 } from "../../domain/generation.js";
 import {
@@ -24,7 +27,7 @@ import { RiskEvaluator } from "./risk-evaluator.js";
 export interface GenerationConfirmationDependencies {
   store: Pick<
     GenerationSessionStore,
-    "read" | "updateConfirmation"
+    "read" | "updateConfirmation" | "writeEvidence" | "readEvidence"
   >;
   prompt: Pick<
     GenerationPromptPort,
@@ -39,9 +42,15 @@ export interface ConfirmationRequestInput {
   generationId: string;
   proposal: ProposedStep;
   snapshot: RuntimeSnapshot;
+  source?: "planner" | "manualOverride" | undefined;
 }
 
 export interface ConfirmationApproveInput extends ConfirmationRequestInput {
+  challengeId: string;
+}
+
+export interface StoredConfirmationApproveInput {
+  generationId: string;
   challengeId: string;
 }
 
@@ -57,6 +66,13 @@ export type ConfirmationRequestResult =
     status: "confirmationRequired";
     challenge: PendingConfirmation;
   };
+
+export interface StoredConfirmationApproveResult {
+  status: "approved";
+  proposal: ProposedStep;
+  snapshot: RuntimeSnapshot;
+  source: "planner" | "manualOverride";
+}
 
 interface PendingChallengeToken {
   expectedRevision: number;
@@ -98,6 +114,12 @@ function bindingFailure(message: string): GenerationOperationError {
     "RISK_CONFIRMATION_REQUIRED",
     message
   );
+}
+
+export function confirmationEvidencePath(challengeId: string): string {
+  return `evidence/confirmations/${
+    GenerationSessionIdSchema.parse(challengeId)
+  }.json`;
 }
 
 export class GenerationConfirmationService {
@@ -160,6 +182,17 @@ export class GenerationConfirmationService {
       revision: session.revision + 1,
       pendingConfirmation: challenge
     });
+    const evidence = GenerationConfirmationEvidenceSchema.parse({
+      version: 1,
+      proposal,
+      snapshot: input.snapshot,
+      source: input.source ?? "planner"
+    });
+    await this.dependencies.store.writeEvidence(
+      session.id,
+      confirmationEvidencePath(challenge.challengeId),
+      evidence
+    );
     await this.dependencies.store.updateConfirmation(
       session.id,
       session.revision,
@@ -177,8 +210,28 @@ export class GenerationConfirmationService {
     return this.request({
       generationId: input.generationId,
       proposal,
-      snapshot: input.snapshot
+      snapshot: input.snapshot,
+      source: "manualOverride"
     });
+  };
+
+  public readonly confirmStored = async (
+    input: StoredConfirmationApproveInput
+  ): Promise<StoredConfirmationApproveResult> => {
+    const evidence = await this.readStoredEvidence(input);
+    await this.confirm({
+      generationId: input.generationId,
+      challengeId: input.challengeId,
+      proposal: evidence.proposal,
+      snapshot: evidence.snapshot,
+      source: evidence.source
+    });
+    return {
+      status: "approved",
+      proposal: evidence.proposal,
+      snapshot: evidence.snapshot,
+      source: evidence.source
+    };
   };
 
   public readonly confirm = async (
@@ -333,5 +386,34 @@ export class GenerationConfirmationService {
       latest.revision,
       cleared
     );
+  }
+
+  private async readStoredEvidence(
+    input: StoredConfirmationApproveInput
+  ): Promise<GenerationConfirmationEvidence> {
+    try {
+      const parsed = JSON.parse((
+        await this.dependencies.store.readEvidence(
+          input.generationId,
+          confirmationEvidencePath(input.challengeId)
+        )
+      ).toString("utf8")) as unknown;
+      const evidence = GenerationConfirmationEvidenceSchema.parse(parsed);
+      if (
+        evidence.proposal.binding.generationId !== input.generationId
+        || evidence.snapshot.generationId !== input.generationId
+      ) {
+        throw new Error(
+          "Generation confirmation evidence belongs to another session"
+        );
+      }
+      return evidence;
+    } catch (error) {
+      throw bindingFailure(
+        error instanceof Error
+          ? `Generation confirmation evidence is unavailable: ${error.message}`
+          : "Generation confirmation evidence is unavailable"
+      );
+    }
   }
 }

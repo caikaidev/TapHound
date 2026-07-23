@@ -86,6 +86,7 @@ function harness(confirmResult = true): {
   buildManualProposal: Mock<() => Promise<ProposedStep>>;
 } {
   let current = session();
+  const evidence = new Map<string, Buffer>();
   const confirm = vi.fn<() => Promise<boolean>>(
     () => Promise.resolve(confirmResult)
   );
@@ -94,6 +95,23 @@ function harness(confirmResult = true): {
   );
   const store = {
     read: vi.fn(() => Promise.resolve(current)),
+    writeEvidence: vi.fn((
+      _id: string,
+      path: string,
+      value: unknown
+    ) => {
+      if (evidence.has(path)) {
+        return Promise.reject(new Error("evidence already exists"));
+      }
+      evidence.set(path, Buffer.from(`${JSON.stringify(value)}\n`));
+      return Promise.resolve();
+    }),
+    readEvidence: vi.fn((_id: string, path: string) => {
+      const value = evidence.get(path);
+      return value === undefined
+        ? Promise.reject(new Error("evidence not found"))
+        : Promise.resolve(value);
+    }),
     updateConfirmation: vi.fn((
       _id: string,
       expectedRevision: number,
@@ -196,6 +214,33 @@ describe("GenerationConfirmationService", () => {
     });
   });
 
+  it("loads exact immutable Core evidence for cross-process approval", async () => {
+    const runtime = snapshot();
+    const test = harness();
+    await test.service.request({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime,
+      source: "manualOverride"
+    });
+
+    const approved = await test.service.confirmStored({
+      generationId: "generation-1",
+      challengeId: "challenge-1"
+    });
+
+    expect(approved).toEqual({
+      status: "approved",
+      proposal: proposal(runtime),
+      snapshot: runtime,
+      source: "manualOverride"
+    });
+    expect(test.current()).toMatchObject({
+      revision: 4,
+      pendingConfirmation: { status: "approved" }
+    });
+  });
+
   it("decline clears the challenge deterministically", async () => {
     const runtime = snapshot();
     const test = harness(false);
@@ -218,8 +263,23 @@ describe("GenerationConfirmationService", () => {
     const runtime = snapshot();
     let current = session(runtime);
     const confirm = vi.fn();
+    const evidence = new Map<string, Buffer>();
     const store = {
       read: vi.fn(() => Promise.resolve(current)),
+      writeEvidence: vi.fn((
+        _id: string,
+        path: string,
+        value: unknown
+      ) => {
+        evidence.set(path, Buffer.from(`${JSON.stringify(value)}\n`));
+        return Promise.resolve();
+      }),
+      readEvidence: vi.fn((_id: string, path: string) => {
+        const value = evidence.get(path);
+        return value === undefined
+          ? Promise.reject(new Error("evidence not found"))
+          : Promise.resolve(value);
+      }),
       updateConfirmation: vi.fn((
         _id: string,
         _revision: number,

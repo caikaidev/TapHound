@@ -99,14 +99,13 @@ node dist/cli/main.js doctor \
 
 ### 2.2 让 AI 分析项目源码
 
-告诉 AI agent：
+告诉 AI agent（Skill 已加载后只需提供项目路径）：
 
 ```
 请为项目 /path/to/android-project 生成 TapHound Project Context。
-按照 prompts/analyze-project.md 的指导分析源码。
 ```
 
-AI agent 会：
+AI agent 会根据 SKILL.md Phase 1 的指令自动执行以下步骤：
 
 1. 运行 `./gradlew projects` 发现所有模块（无 wrapper 时回退到解析
    `settings.gradle`），识别 app 模块（有 `applicationId` 的模块）

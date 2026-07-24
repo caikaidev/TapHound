@@ -3,6 +3,30 @@
 Platform-neutral instructions for any AI agent (Droid, Claude Code, Cursor,
 etc.) to drive TapHound's deterministic generation protocol end-to-end.
 
+## Skill Directory
+
+All file references in this document are relative to the Skill directory:
+
+```
+.factory/skills/taphound-ai-journey/
+├── SKILL.md                              # This file (entry point)
+├── GUIDE.md                              # Detailed step-by-step usage guide
+├── prompts/
+│   ├── analyze-project.md                # Phase 1: source analysis guidance
+│   ├── generate-step.md                  # Phase 2: next-step generation guidance
+│   └── check-completion.md               # Phase 2: Goal completion check
+├── schemas/
+│   ├── project-context.json              # ProjectContext JSON Schema
+│   ├── proposed-step-envelope.json       # {version, proposal, snapshot} envelope
+│   └── observe-output.json               # generation observe --json output shape
+└── templates/
+    └── project-context.example.json      # Full Context example
+```
+
+When this document says "Read `prompts/analyze-project.md`", the full path is
+`.factory/skills/taphound-ai-journey/prompts/analyze-project.md` (relative
+to the repository root that contains the `.factory/` directory).
+
 ## How to Use This Skill
 
 This Skill lives at `.factory/skills/taphound-ai-journey/`. Entry point is

@@ -9,22 +9,66 @@ Read the project source code and produce a Context that matches
 Modern Android projects may have multiple modules. Activities, layouts, and
 source files can live in any module, not just `app/`.
 
-1. Read `settings.gradle` or `settings.gradle.kts` at the project root.
-2. Extract all module names from `include` statements:
+### 1a. Primary: `./gradlew projects`
+
+Run the Gradle wrapper to get the authoritative module tree:
+
+```bash
+cd <project-root>
+./gradlew projects --console=plain
+```
+
+This resolves the full project structure including `projectDir` overrides,
+`includeBuild` composite builds, and nested subprojects. The output looks
+like:
+
+```
+Root project 'taphound-demo'
++--- Project ':app'
++--- Project ':feature-search'
+|    \--- Project ':feature-search:sub-widget'
+\--- Project ':lib-ui'
+```
+
+For each `Project ':<path>'` line:
+- The Gradle path (`:app`, `:feature-search`) identifies the module.
+- The directory is derived from the path: replace `:` with `/`, drop the
+  leading `/`. So `:feature-search` → `feature-search/`,
+  `:feature-search:sub-widget` → `feature-search/sub-widget/`.
+- If the project uses `projectDir` overrides, the Gradle path may not
+  match the directory. In that case, check `settings.gradle(.kts)` for the
+  explicit `project(...).projectDir` mapping (see 1b).
+
+> **Note**: `./gradlew projects` runs a configuration phase which can be
+> slow on first run (downloading dependencies). Subsequent runs are fast
+> due to Gradle daemon caching. If the wrapper is not executable
+> (`./gradlew: Permission denied`), run `chmod +x gradlew` first. On
+> Windows, use `gradlew.bat projects`.
+
+### 1b. Fallback: parse `settings.gradle(.kts)`
+
+If `./gradlew projects` is unavailable (no wrapper, no JDK, or timeout),
+parse `settings.gradle` or `settings.gradle.kts` at the project root:
+
+1. Extract all module names from `include` statements:
    ```
-   include ':app'
-   include ':feature-search'
-   include ':lib-ui'
+   include ':app', ':feature-search', ':lib-ui'
    ```
-3. For each included module, note its directory path. By convention the
-   path is `<name>` (drop the leading `:`), but `project` directives may
-   override it:
+2. For each included module, check for `projectDir` overrides:
    ```
-   include ':feature-search'
    project(':feature-search').projectDir = file('features/search')
    ```
-4. If no `settings.gradle` exists, treat the project as single-module
+   If overridden, use the specified directory. Otherwise, derive the
+   directory from the path (drop `:`, replace remaining `:` with `/`).
+3. If no `settings.gradle` exists, treat the project as single-module
    with the root directory as the only module.
+
+### 1c. Identify the app module
+
+The app module (the one that produces the APK) is the one with
+`applicationId` or `applicationIdSuffix` in its `build.gradle(.kts)`, or
+a `<application>` tag in its `AndroidManifest.xml`. Library modules have
+`com.android.library` plugin instead of `com.android.application`.
 
 ## Step 2: Determine packageName
 

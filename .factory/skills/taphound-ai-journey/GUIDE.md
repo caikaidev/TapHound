@@ -108,7 +108,8 @@ node dist/cli/main.js doctor \
 
 AI agent 会：
 
-1. 读 `settings.gradle`，发现所有模块（单模块项目跳过此步）
+1. 运行 `./gradlew projects` 发现所有模块（无 wrapper 时回退到解析
+   `settings.gradle`），识别 app 模块（有 `applicationId` 的模块）
 2. 从 app 模块的 `build.gradle` 读取 `applicationId` 作为包名（旧项目从
    manifest 的 `package` 属性回退）
 3. 从 app 模块的 `AndroidManifest.xml` 识别 launch Activity（library 模块
@@ -121,7 +122,8 @@ AI agent 会：
 7. 生成符合 `schemas/project-context.json` 的 JSON
 
 > **多模块注意**：Activity 可能分布在 library/feature 模块中，布局 XML
-> 也可能在任意模块的 `res/layout/` 下。AI agent 会扫描所有模块。
+> 也可能在任意模块的 `res/layout/` 下。AI agent 通过 `./gradlew projects`
+> 获取权威模块列表，扫描所有模块。
 
 ### 2.3 写入并验证 Context
 
@@ -618,7 +620,7 @@ node dist/cli/main.js context validate \
 | 新增/删除 Activity | 是（导航逻辑变化） |
 | 修改包名（`applicationId`） | 是（packageName 变化） |
 | 修改 Logcat tag/pattern | 是（expect 候选变化） |
-| 新增/删除/修改模块（`settings.gradle`） | 是（模块结构变化，需重新扫描） |
+| 新增/删除/修改模块（`settings.gradle` / `gradlew projects`） | 是（模块结构变化，需重新扫描） |
 | 新增/删除布局 XML 文件 | 是（manifest.files 需更新） |
 | 修改 `<include>`/`<merge>` 引用关系 | 是（元素集变化） |
 | 修改业务逻辑但 UI 不变 | 否（Context 描述 UI 结构，不涉及逻辑） |

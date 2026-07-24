@@ -1,14 +1,18 @@
-# TapHound AI Journey Agent Instructions
+# TapHound AI Journey Skill
 
 Platform-neutral instructions for any AI agent (Droid, Claude Code, Cursor,
 etc.) to drive TapHound's deterministic generation protocol end-to-end.
 
-## How to Use This Package
+## How to Use This Skill
 
-- **Droid**: Place this directory under `.factory/skills/` or invoke it as a
-  Skill. Read `INSTRUCTIONS.md` and follow the phases in order.
-- **Claude Code**: Add `@agent-instructions/taphound-ai-journey/INSTRUCTIONS.md`
-  to your `CLAUDE.md`, or load it directly in the session.
+This Skill lives at `.factory/skills/taphound-ai-journey/`. Entry point is
+`SKILL.md`.
+
+- **Droid**: This Skill is automatically discovered from `.factory/skills/`.
+  Invoke it with the Skill tool when the user wants to generate or verify
+  an Android journey via AI-driven generation.
+- **Claude Code**: Add `@.factory/skills/taphound-ai-journey/SKILL.md` to
+  your `CLAUDE.md`, or load it directly in the session.
 - **Cursor / other tools**: Import this directory as a rules or instructions
   source. The agent needs to: read files, execute shell commands, and
   generate JSON matching the provided schemas.

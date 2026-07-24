@@ -28,8 +28,9 @@ and generate JSON matching provided schemas.
 ## File Structure
 
 ```
-agent-instructions/taphound-ai-journey/
-├── INSTRUCTIONS.md                    # Main orchestration entry point
+.factory/skills/taphound-ai-journey/
+├── SKILL.md                           # Main orchestration entry point
+├── GUIDE.md                           # Detailed step-by-step usage guide
 ├── schemas/
 │   ├── project-context.json           # ProjectContextSchema as JSON Schema
 │   ├── proposed-step-envelope.json    # {version, proposal, snapshot} envelope

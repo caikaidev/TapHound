@@ -87,14 +87,15 @@ node dist/cli/main.js doctor \
 
 ### 2.1 让 AI agent 读取指令
 
-在你的 AI agent 工具中加载 `agent-instructions/taphound-ai-journey/` 目录。
-具体方式取决于工具：
+在你的 AI agent 工具中加载 `.factory/skills/taphound-ai-journey/` 目录。
+入口文件是 `SKILL.md`。具体方式取决于工具：
 
-- **Droid**：将目录放入 `.factory/skills/`，或用 Skill 工具加载
+- **Droid**：Skill 已在 `.factory/skills/` 中，自动发现。用 Skill 工具
+  调用 `taphound-ai-journey` 即可
 - **Claude Code**：在 `CLAUDE.md` 中加
-  `@agent-instructions/taphound-ai-journey/INSTRUCTIONS.md`
+  `@.factory/skills/taphound-ai-journey/SKILL.md`
 - **Cursor**：将目录作为 rules 导入
-- **其他**：让 agent 直接读取 `INSTRUCTIONS.md`
+- **其他**：让 agent 直接读取 `SKILL.md`
 
 ### 2.2 让 AI 分析项目源码
 

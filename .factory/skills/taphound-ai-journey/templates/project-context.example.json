@@ -14,8 +14,7 @@
         "path": "app/build.gradle.kts",
         "sha256": "RUNTIME_COMPUTED",
         "confidence": "sourceConfirmed"
-      },
-      {
+      },      {
         "path": "app/src/main/AndroidManifest.xml",
         "sha256": "RUNTIME_COMPUTED",
         "confidence": "sourceConfirmed"

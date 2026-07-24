@@ -76,7 +76,12 @@ Modern Android projects (AGP 7.0+) no longer set the `package` attribute
 in `AndroidManifest.xml`. Determine the package name in this priority
 order:
 
-1. **`applicationId` in the app module's `build.gradle(.kts)`**:
+1. **`applicationId` in the app module's build file**:
+   Check both `build.gradle.kts` (Kotlin DSL) and `build.gradle` (Groovy
+   DSL). One of them will exist; projects do not use both in the same
+   module.
+
+   Kotlin DSL (`build.gradle.kts`) — uses `=`:
    ```kotlin
    android {
        defaultConfig {
@@ -84,6 +89,16 @@ order:
        }
    }
    ```
+
+   Groovy DSL (`build.gradle`) — no `=`:
+   ```groovy
+   android {
+       defaultConfig {
+           applicationId "dev.taphound.demo"
+       }
+   }
+   ```
+
    This is the authoritative package name. Use this if present.
 
 2. **`package` attribute in `AndroidManifest.xml`** (legacy):
@@ -91,14 +106,25 @@ order:
    <manifest xmlns:android="..."
        package="dev.taphound.demo">
    ```
-   Use this only if `applicationId` is not set in build.gradle.
+   Use this only if `applicationId` is not set in either build file.
 
-3. **`namespace` in `build.gradle(.kts)`** (fallback):
+3. **`namespace` in the build file** (fallback):
+   Same dual-syntax as above — Kotlin DSL uses `=`, Groovy does not.
+
+   Kotlin DSL:
    ```kotlin
    android {
        namespace = "dev.taphound.demo"
    }
    ```
+
+   Groovy DSL:
+   ```groovy
+   android {
+       namespace "dev.taphound.demo"
+   }
+   ```
+
    `namespace` is used for R class generation and is NOT the same as
    `applicationId` (they can differ, especially with build flavors or
    suffixes). Use `namespace` only when neither `applicationId` nor
@@ -200,15 +226,23 @@ Real Android layouts use several composition mechanisms. Handle each:
   correctly and so the step-generation prompt can make informed
   decisions.
 
-### 4c. Build files (`build.gradle` or `build.gradle.kts`)
+### 4c. Build files (Kotlin DSL or Groovy DSL)
+
+Each module has either `build.gradle.kts` (Kotlin DSL) or `build.gradle`
+(Groovy DSL), never both. Check which file exists before reading.
 
 - Read the app module's build file for `applicationId` (Step 2) and
-  `namespace`.
+  `namespace`. The syntax differs:
+  - Kotlin DSL: `applicationId = "..."`, `namespace = "..."`
+  - Groovy DSL: `applicationId "..."`, `namespace "..."`
 - Check for `buildTypes` / `productFlavors` that might affect the
-  package name (suffixes like `.debug`).
-- Note any `proguard` rules that might strip logcat tags (if Logcat
-  calls are stripped in release builds, note this — it affects
-  expectation feasibility).
+  package name (suffixes like `.debug`). In Kotlin DSL these use `=`,
+  in Groovy they do not.
+- Read `settings.gradle.kts` or `settings.gradle` (whichever exists) for
+  module includes if using the fallback method in Step 1.
+- Note any `proguard` / `proguardFiles` rules that might strip logcat
+  tags (if Logcat calls are stripped in release builds, note this — it
+  affects expectation feasibility).
 
 ## Step 5: Compute SHA-256 Hashes
 
@@ -228,8 +262,9 @@ repo root), use forward slashes, and must not start with `/` or contain
 Produce a JSON object with:
 
 - `version`: `1`
-- `packageName`: the `applicationId` from build.gradle (or `package` from
-  manifest as fallback), per Step 2.
+- `packageName`: the `applicationId` from the app module's build file
+  (`build.gradle.kts` or `build.gradle`, per Step 2), or `package` from
+  manifest as fallback.
 - `launchActivity`: fully qualified launch Activity class, per Step 3.
 - `manifest.files`: list every source file you read that is relevant to
   the UI structure. Include:
@@ -238,8 +273,10 @@ Produce a JSON object with:
     interactions, or emit logcat tags used for expectations.
   - All layout XML files that are referenced by Activities (directly via
     `setContentView` or transitively via `<include>`).
-  - The app module's `build.gradle(.kts)` (for `applicationId`).
-  - `settings.gradle(.kts)` if multi-module.
+  - The app module's build file (`build.gradle.kts` or `build.gradle`,
+    whichever exists) for `applicationId`.
+  - `settings.gradle.kts` or `settings.gradle` (whichever exists) if
+    multi-module.
   - Do NOT include build artifacts (`build/` directory), generated files,
     Gradle wrapper scripts, resource values (strings.xml, colors.xml),
     or themes unless they contain UI logic.

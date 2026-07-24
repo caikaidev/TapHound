@@ -1,3 +1,23 @@
+---
+name: taphound-ai-journey
+description: >-
+  Drive TapHound's deterministic Android journey generation protocol
+  end-to-end. Analyze Android project source to produce a Project Context,
+  then iteratively observe device state, propose and execute UI steps via
+  the TapHound CLI, and finalize a verified Journey. Use when the user
+  wants to create or verify Android test journeys using AI-driven
+  generation, record UI interactions for testing, automate Android UI
+  test scenarios, or generate TapHound Journey files from a natural-language
+  test goal.
+compatibility: >-
+  Requires Node.js 22+, Android SDK with ADB and uiautomator, one online
+  Android device (emulator or USB), and TapHound built and linked via
+  npm link.
+metadata:
+  author: TapHound
+  version: "1.0"
+---
+
 # TapHound AI Journey Skill
 
 Platform-neutral instructions for any AI agent (Droid, Claude Code, Cursor,
@@ -29,14 +49,16 @@ to the repository root that contains the `.factory/` directory).
 
 ## How to Use This Skill
 
-This Skill lives at `.factory/skills/taphound-ai-journey/`. Entry point is
-`SKILL.md`.
+This Skill lives at `.factory/skills/taphound-ai-journey/` (Droid's default
+skill directory). Some agents use `.agents/skills/` instead — symlink or
+copy the directory there if needed.
 
-- **Droid**: This Skill is automatically discovered from `.factory/skills/`.
-  Invoke it with the Skill tool when the user wants to generate or verify
-  an Android journey via AI-driven generation.
+- **Droid**: Auto-discovered from `.factory/skills/`. Invoke with the Skill
+  tool when the user wants to generate or verify an Android journey.
 - **Claude Code**: Add `@.factory/skills/taphound-ai-journey/SKILL.md` to
   your `CLAUDE.md`, or load it directly in the session.
+- **VS Code / Copilot**: Symlink to `.agents/skills/taphound-ai-journey/`
+  or add the directory to your workspace.
 - **Cursor / other tools**: Import this directory as a rules or instructions
   source. The agent needs to: read files, execute shell commands, and
   generate JSON matching the provided schemas.
@@ -80,33 +102,34 @@ templates, then call the TapHound CLI.
 
 ## Phase 1: Project Context Generation
 
-1. Read `prompts/analyze-project.md` for analysis guidance.
-2. Read the Android project source files:
-   - `AndroidManifest.xml`
-   - Kotlin/Java source under `app/src/main/java/`
-   - Layout XML under `app/src/main/res/layout/`
-3. Extract:
-   - `packageName` and `launchActivity` from the manifest.
-   - UI element `resourceId` values from layout XML (`@+id/<name>` →
-     `<name>`).
-   - Logcat tags and patterns from source (`Log.i("Tag", "pattern")`).
-   - Actionable elements and their supported actions.
-4. Compute SHA-256 for each file you include in the manifest:
+> Read `prompts/analyze-project.md` before starting — it contains detailed
+> guidance on multi-module discovery, packageName resolution, and complex
+> layout structures. Read `schemas/project-context.json` to understand the
+> required JSON structure. Use `templates/project-context.example.json`
+> as a reference template.
+
+1. Analyze the Android project source per `prompts/analyze-project.md`:
+   - Discover modules via `./gradlew projects` (fallback: parse
+     `settings.gradle`).
+   - Determine `applicationId` from the app module's build file.
+   - Identify the launch Activity from the app module's manifest.
+   - Scan all modules for Activities, click handlers, Logcat tags, layout
+     XML (resolving `<include>`, `<merge>`, `<layout>`, `<ViewStub>`).
+2. Compute SHA-256 for each file you include in the manifest:
    ```bash
    node -e "const c=require('node:crypto');const f=require('node:fs');process.stdout.write(c.createHash('sha256').update(f.readFileSync('<project>/<relative-path>')).digest('hex'))"
    ```
    NEVER guess a hash. Always compute it.
-5. Generate the Project Context JSON matching `schemas/project-context.json`.
-   Use `templates/project-context.example.json` as a reference.
-6. Write it to `<project>/.taphound/context/project-context.json`.
-7. Validate:
+3. Generate the Project Context JSON matching `schemas/project-context.json`.
+4. Write it to `<project>/.taphound/context/project-context.json`.
+5. Validate:
    ```bash
    taphound context validate \
      --project <project> \
      --context <project>/.taphound/context/project-context.json \
      --json
    ```
-8. If validation fails, read the error message, fix the JSON, and retry.
+6. If validation fails, read the error message, fix the JSON, and retry.
    Common failures:
    - Package name mismatch between manifest and Context.
    - Stale or incorrect SHA-256 hash.
@@ -114,6 +137,11 @@ templates, then call the TapHound CLI.
    - File listed in manifest but not found on disk.
 
 ## Phase 2: Journey Generation
+
+> Read `schemas/proposed-step-envelope.json` to understand the envelope
+> structure before building step proposals. Read `prompts/generate-step.md`
+> for element-matching and step-generation guidance. Read
+> `prompts/check-completion.md` for Goal-completion criteria.
 
 1. Start a generation session:
    ```bash
@@ -252,3 +280,27 @@ templates, then call the TapHound CLI.
 - A proposed step only includes `activity.before`, never `activity.after`.
   The Core determines `after` from live device observation.
 - Temp files are cleaned up after each step and at the end of the session.
+
+## Gotchas
+
+- `packageName` comes from `applicationId` in `build.gradle(.kts)`, NOT
+  from the `package` attribute in `AndroidManifest.xml` (deprecated in
+  AGP 7+). `namespace` is for R class generation and may differ from
+  `applicationId`.
+- The `resourceId` in locators is the bare name without the `id/` prefix
+  (e.g., `open_search`, not `id/open_search`).
+- The same `@+id/submit` can appear in multiple layout XML files — this is
+  normal, not a conflict. Only one layout is active at runtime; always
+  match against the `observe` snapshot, not static XML.
+- `activity.after` is NOT included in proposed steps. The Core determines
+  it from live observation. Including it will cause validation failure.
+- `inputText` steps do not include a `locator` — the Core uses the
+  currently focused element.
+- `confirmationRequired` steps must be approved by a human in a TTY
+  terminal. The agent must NOT auto-approve.
+- If `context status` returns `"stale"`, the Context must be regenerated
+  before starting a new generation session. A stale Context will cause
+  `generation start` to fail with `CONTEXT_STALE`.
+- `finalize` performs a full replay from scratch (forceStop, rebuild,
+  relaunch). It is not incremental. Do not call it until all steps are
+  complete.

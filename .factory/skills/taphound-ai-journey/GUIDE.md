@@ -107,6 +107,8 @@ tool. The entry file is `SKILL.md`. The method depends on the tool:
   Invoke it with the Skill tool using `taphound-ai-journey`.
 - **Claude Code**: Add `@.factory/skills/taphound-ai-journey/SKILL.md` to
   your `CLAUDE.md`.
+- **VS Code / Copilot**: Symlink to `.agents/skills/taphound-ai-journey/`
+  or add the directory to your workspace.
 - **Cursor**: Import the directory as a rules source.
 - **Other tools**: Have the agent read `SKILL.md` directly.
 

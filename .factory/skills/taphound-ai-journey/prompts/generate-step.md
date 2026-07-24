@@ -37,18 +37,11 @@ the observe result).
      (scrollable parent).
 
 3. **Determine activity.before**: This is `snapshot.activity` (the current
-   Activity class).
+   Activity class). The proposed step only includes `activity.before` —
+   never `activity.after`. The Core determines the after-Activity from
+   live device observation after executing the action.
 
-4. **Predict activity.after**: Based on the action:
-   - If the action navigates to a new screen (e.g., clicking a button that
-     calls `startActivity`), predict the target Activity class.
-   - If the action stays on the same screen (e.g., inputting text, clicking
-     a submit button that doesn't navigate), use the same Activity as
-     `before`.
-   - If you cannot predict with confidence, use the same Activity as
-     `before` — the Core will verify and fail if wrong.
-
-5. **Add expect (optional)**: Only if there is a deterministic, verifiable
+4. **Add expect (optional)**: Only if there is a deterministic, verifiable
    outcome:
    - `element`: a specific element should appear after the action (e.g., a
      search input field appears after clicking "open search").
@@ -72,8 +65,7 @@ Example (click):
   "action": "click",
   "locator": { "resourceId": "open_search" },
   "activity": {
-    "before": "dev.taphound.demo.MainActivity",
-    "after": "dev.taphound.demo.SearchActivity"
+    "before": "dev.taphound.demo.MainActivity"
   },
   "expect": {
     "type": "element",
@@ -89,8 +81,7 @@ Example (inputText):
   "action": "inputText",
   "text": "hello world",
   "activity": {
-    "before": "dev.taphound.demo.SearchActivity",
-    "after": "dev.taphound.demo.SearchActivity"
+    "before": "dev.taphound.demo.SearchActivity"
   }
 }
 ```
@@ -98,12 +89,18 @@ Example (inputText):
 ## Rules
 
 - Never use coordinates, visual guessing, or annotated-label fallback.
-- Never include `activity.after` in the proposal — only `before` is needed.
-  (Wait — re-read: the proposal only has `activity.before`. The Core
-  determines `after` from live observation. Do not include `after`.)
+- The proposed step only includes `activity.before`, never `activity.after`.
+  The Core determines `after` from live device observation.
 - Locator priority is fixed: `resourceId` > `text` > `contentDescription`.
   Do not use multiple fields simultaneously unless that is the only way to
   disambiguate.
+- The `snapshot.layout` from `observe` is the live device layout — it is
+  the source of truth for element matching, not the static XML files from
+  Context generation. The same `resourceId` may appear in different layout
+  XML files, but only one layout is active at runtime. Match against what
+  `observe` returns.
+- Activities from library/feature modules are valid navigation targets.
+  Use the fully qualified class name from the manifest or source.
 - Do not include `binding` — the caller adds it from the observe result.
 - Do not include `fallback` — proposals do not support fallback.
 - If no actionable element matches the Goal, return:

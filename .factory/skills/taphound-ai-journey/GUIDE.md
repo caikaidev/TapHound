@@ -108,11 +108,20 @@ node dist/cli/main.js doctor \
 
 AI agent 会：
 
-1. 读 `AndroidManifest.xml`，提取 `packageName` 和 `launchActivity`
-2. 读 Kotlin/Java 源码，识别 Activity、点击处理器、Logcat 标签
-3. 读布局 XML，提取 `android:id` 作为 locator 候选
-4. 用 shell 计算每个文件的 SHA-256（不靠猜测）
-5. 生成符合 `schemas/project-context.json` 的 JSON
+1. 读 `settings.gradle`，发现所有模块（单模块项目跳过此步）
+2. 从 app 模块的 `build.gradle` 读取 `applicationId` 作为包名（旧项目从
+   manifest 的 `package` 属性回退）
+3. 从 app 模块的 `AndroidManifest.xml` 识别 launch Activity（library 模块
+   的 Activity 通过 manifest merge 合入）
+4. 遍历所有模块的 Kotlin/Java 源码，识别 Activity、点击处理器、Logcat
+   标签、Activity 跳转
+5. 遍历所有模块的布局 XML，提取 `android:id`，递归解析 `<include>`、
+   `<merge>`、`<layout>`（Data Binding）、`<ViewStub>` 等复合结构
+6. 用 shell 计算每个文件的 SHA-256（不靠猜测）
+7. 生成符合 `schemas/project-context.json` 的 JSON
+
+> **多模块注意**：Activity 可能分布在 library/feature 模块中，布局 XML
+> 也可能在任意模块的 `res/layout/` 下。AI agent 会扫描所有模块。
 
 ### 2.3 写入并验证 Context
 
@@ -607,11 +616,15 @@ node dist/cli/main.js context validate \
 |----------|-------------------|
 | 修改 UI 元素的 `android:id` | 是（locator 候选变化） |
 | 新增/删除 Activity | 是（导航逻辑变化） |
-| 修改包名 | 是（packageName 变化） |
+| 修改包名（`applicationId`） | 是（packageName 变化） |
 | 修改 Logcat tag/pattern | 是（expect 候选变化） |
+| 新增/删除/修改模块（`settings.gradle`） | 是（模块结构变化，需重新扫描） |
+| 新增/删除布局 XML 文件 | 是（manifest.files 需更新） |
+| 修改 `<include>`/`<merge>` 引用关系 | 是（元素集变化） |
 | 修改业务逻辑但 UI 不变 | 否（Context 描述 UI 结构，不涉及逻辑） |
 | 修改主题/样式 | 否（不影响 UI 结构） |
-| 修改 Gradle 配置 | 否（除非包名变了） |
+| 修改 Gradle 依赖版本 | 否（除非包名变了） |
+| 修改 `namespace`（非 `applicationId`） | 否（不影响安装包名） |
 
 ---
 

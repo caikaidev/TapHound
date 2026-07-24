@@ -9,7 +9,9 @@ function adbPort(): AdbPort {
   const running = runningCommand();
   return {
     devices: vi.fn(),
+    foregroundComponent: vi.fn(),
     currentActivity: vi.fn(),
+    forceStop: vi.fn(),
     pid: vi.fn(),
     tap: vi.fn(),
     longClick: vi.fn(),

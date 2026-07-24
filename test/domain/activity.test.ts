@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { normalizeActivity } from "../../src/domain/activity.js";
+import {
+  normalizeActivity,
+  parseObservedActivityComponent
+} from "../../src/domain/activity.js";
 
 describe("normalizeActivity", () => {
   it("expands a relative Activity with the configured package", () => {
@@ -40,5 +43,23 @@ describe("normalizeActivity", () => {
   it("rejects an unqualified Activity without a leading dot", () => {
     expect(() => normalizeActivity("com.example.app", "MainActivity"))
       .toThrow(/activity/i);
+  });
+});
+
+describe("parseObservedActivityComponent", () => {
+  it("preserves the observed Package while normalizing the Activity", () => {
+    expect(parseObservedActivityComponent(
+      "com.android.settings/.Settings"
+    )).toEqual({
+      packageName: "com.android.settings",
+      activity: "com.android.settings.Settings"
+    });
+  });
+
+  it("rejects malformed observed components", () => {
+    expect(() => parseObservedActivityComponent("com.example.app"))
+      .toThrow(/component/i);
+    expect(() => parseObservedActivityComponent("bad package/.MainActivity"))
+      .toThrow(/component/i);
   });
 });

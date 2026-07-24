@@ -29,7 +29,9 @@ function result(exitCode = 0): CommandResult {
 function adbPort(commandResult = result()): AdbPort {
   return {
     devices: vi.fn(),
+    foregroundComponent: vi.fn(),
     currentActivity: vi.fn(),
+    forceStop: vi.fn(),
     pid: vi.fn(),
     tap: vi.fn(() => Promise.resolve(commandResult)),
     longClick: vi.fn(() => Promise.resolve(commandResult)),

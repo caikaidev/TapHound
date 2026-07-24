@@ -11,9 +11,16 @@ import type { Clock } from "../../ports/clock.js";
 import type { LogcatCollector } from "../collector/logcat-collector.js";
 import { ActionExecutor, type ActionTarget } from "../interaction/action-executor.js";
 import { FallbackResolver } from "../interaction/fallback-resolver.js";
+import { ScrollToExecutor } from "../interaction/scroll-to-executor.js";
 import { resolveLocator } from "../locator/locator-resolver.js";
-import { ExpectationEvaluator } from "../assertion/expectation-evaluator.js";
+import {
+  ExpectationEvaluator,
+  type ExpectationObservationInput
+} from "../assertion/expectation-evaluator.js";
 import { IdleWaiter, type IdleConfig } from "../wait/idle-waiter.js";
+import {
+  hasExactlyOneEnabledFocusedElement
+} from "../generation/focused-input.js";
 
 export interface StepRunnerOptions {
   adb: AdbPort;
@@ -24,6 +31,8 @@ export interface StepRunnerOptions {
   packageName: string;
   deviceSerial: string;
   idle: IdleConfig;
+  requireFocusedInput?: boolean;
+  generatedReplayPolicy?: boolean | undefined;
 }
 
 export type StepRunResult =
@@ -52,6 +61,7 @@ export class StepRunner {
   private readonly fallbackResolver: FallbackResolver;
   private readonly idleWaiter: IdleWaiter;
   private readonly expectationEvaluator: ExpectationEvaluator;
+  private readonly scrollToExecutor: ScrollToExecutor;
 
   public constructor(private readonly options: StepRunnerOptions) {
     this.actionExecutor = new ActionExecutor(options.adb, options.deviceSerial);
@@ -70,6 +80,177 @@ export class StepRunner {
       options.logcat,
       options.clock
     );
+    this.scrollToExecutor = new ScrollToExecutor({
+      androidCli: options.androidCli,
+      actionExecutor: this.actionExecutor,
+      idleWaiter: this.idleWaiter,
+      deviceSerial: options.deviceSerial,
+      idle: options.idle,
+      ...(options.generatedReplayPolicy === true
+        ? {
+            readLayout: async (): Promise<readonly import("../../domain/layout.js").LayoutElement[]> => (
+              this.captureGeneratedLayout(this.currentSignal)
+            ),
+            beforeMutation: async (): Promise<void> => {
+              await this.assertGeneratedForeground(
+                undefined,
+                "ACTIVITY_BEFORE_MISMATCH",
+                this.currentSignal
+              );
+            },
+            requireLiveContainerCapability: true
+          }
+        : {})
+    });
+  }
+
+  private readonly identity = (signal?: AbortSignal): {
+    packageName: string;
+    deviceSerial: string;
+    signal?: AbortSignal;
+    timeoutMs: number;
+  } => ({
+    packageName: this.options.packageName,
+    deviceSerial: this.options.deviceSerial,
+    ...(signal === undefined ? {} : { signal }),
+    timeoutMs: this.options.idle.timeoutMs
+  });
+
+  private async generatedForeground(
+    expectedActivity: string,
+    code: "ACTIVITY_BEFORE_MISMATCH" | "ACTIVITY_AFTER_MISMATCH",
+    signal?: AbortSignal
+  ): Promise<{ packageName: string; activity: string }> {
+    const foreground = await this.options.adb.foregroundComponent(
+      this.identity(signal)
+    );
+    if (
+      foreground.packageName !== this.options.packageName
+      || foreground.activity !== expectedActivity
+    ) {
+      throw Object.assign(new Error(
+        `Expected foreground ${this.options.packageName}/${expectedActivity}, found ${
+          foreground.packageName
+        }/${foreground.activity}`
+      ), { code });
+    }
+    return foreground;
+  }
+
+  private async assertGeneratedForeground(
+    expectedActivity?: string,
+    code: "ACTIVITY_BEFORE_MISMATCH" | "ACTIVITY_AFTER_MISMATCH" =
+      "ACTIVITY_BEFORE_MISMATCH",
+    signal?: AbortSignal
+  ): Promise<void> {
+    await this.generatedForeground(
+      expectedActivity ?? this.currentExpectedActivity,
+      code,
+      signal
+    );
+  }
+
+  private currentExpectedActivity = "";
+  private currentSignal: AbortSignal | undefined;
+
+  private async observeExpectedActivity(
+    expectedActivity: string | undefined,
+    expectedPid: number,
+    input: ExpectationObservationInput
+  ): Promise<
+    | { status: "observed"; activity: string }
+    | { status: "failed"; message: string }
+  > {
+    const deadline = this.options.clock.now() + input.timeoutMs;
+    const identity = (): ReturnType<StepRunner["identity"]> => ({
+      packageName: this.options.packageName,
+      deviceSerial: this.options.deviceSerial,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      timeoutMs: Math.max(1, deadline - this.options.clock.now())
+    });
+    const foreground = await this.options.adb.foregroundComponent(identity());
+    if (
+      foreground.packageName !== this.options.packageName
+      || (
+        expectedActivity !== undefined
+        && foreground.activity !== expectedActivity
+      )
+    ) {
+      return {
+        status: "failed",
+        message: `Generated Expect foreground changed to ${
+          foreground.packageName
+        }/${foreground.activity}`
+      };
+    }
+    const pid = await this.options.adb.pid(identity());
+    if (pid !== expectedPid) {
+      return {
+        status: "failed",
+        message: `Generated Expect process changed from ${
+          String(expectedPid)
+        } to ${String(pid)}`
+      };
+    }
+    return { status: "observed", activity: foreground.activity };
+  }
+
+  private async observeExpectedLayout(
+    expectedActivity: string,
+    expectedPid: number,
+    input: ExpectationObservationInput
+  ): Promise<
+    | {
+      status: "observed";
+      layout: Awaited<ReturnType<AndroidCliPort["layout"]>>;
+    }
+    | { status: "failed"; message: string }
+  > {
+    const deadline = this.options.clock.now() + input.timeoutMs;
+    const observationInput = (): ExpectationObservationInput => ({
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      timeoutMs: Math.max(1, deadline - this.options.clock.now())
+    });
+    const before = await this.observeExpectedActivity(
+      expectedActivity,
+      expectedPid,
+      observationInput()
+    );
+    if (before.status === "failed") return before;
+    const layout = await this.options.androidCli.layout({
+      deviceSerial: this.options.deviceSerial,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      timeoutMs: observationInput().timeoutMs
+    });
+    const after = await this.observeExpectedActivity(
+      expectedActivity,
+      expectedPid,
+      observationInput()
+    );
+    return after.status === "failed"
+      ? after
+      : { status: "observed", layout };
+  }
+
+  private async captureGeneratedLayout(
+    signal?: AbortSignal
+  ): Promise<readonly import("../../domain/layout.js").LayoutElement[]> {
+    await this.assertGeneratedForeground(
+      this.currentExpectedActivity,
+      "ACTIVITY_BEFORE_MISMATCH",
+      signal
+    );
+    const layout = await this.options.androidCli.layout({
+      deviceSerial: this.options.deviceSerial,
+      ...(signal === undefined ? {} : { signal }),
+      timeoutMs: this.options.idle.timeoutMs
+    });
+    await this.assertGeneratedForeground(
+      this.currentExpectedActivity,
+      "ACTIVITY_BEFORE_MISMATCH",
+      signal
+    );
+    return layout;
   }
 
   public async run(
@@ -138,13 +319,29 @@ export class StepRunner {
       return finish("cancelled");
     }
 
-    const identity = {
-      packageName: this.options.packageName,
-      deviceSerial: this.options.deviceSerial,
-      ...(signal === undefined ? {} : { signal }),
-      timeoutMs: this.options.idle.timeoutMs
-    };
-    const before = await this.options.adb.currentActivity(identity);
+    const identity = this.identity(signal);
+    this.currentExpectedActivity = step.activity.before;
+    this.currentSignal = signal;
+    let before: string;
+    try {
+      before = this.options.generatedReplayPolicy === true
+        ? (await this.generatedForeground(
+            step.activity.before,
+            "ACTIVITY_BEFORE_MISMATCH",
+            signal
+          )).activity
+        : await this.options.adb.currentActivity(identity);
+    } catch (error) {
+      if (
+        error !== null
+        && typeof error === "object"
+        && "code" in error
+        && error.code === "ACTIVITY_BEFORE_MISMATCH"
+      ) {
+        return fail("ACTIVITY_BEFORE_MISMATCH", errorMessage(error));
+      }
+      throw error;
+    }
     activityReport.before = {
       status: before === step.activity.before ? "passed" : "failed",
       expected: step.activity.before,
@@ -156,10 +353,19 @@ export class StepRunner {
         `Expected Activity ${step.activity.before}, found ${before}`
       );
     }
+    const generatedPid = this.options.generatedReplayPolicy === true
+      ? await this.options.adb.pid(identity)
+      : undefined;
+    if (
+      this.options.generatedReplayPolicy === true
+      && generatedPid === null
+    ) {
+      return fail("APP_CRASHED", "Generated replay process is not running");
+    }
 
     let target: ActionTarget | undefined;
     if (step.action === "scrollTo") {
-      const scroll = await this.resolveByScrolling(step, signal);
+      const scroll = await this.scrollToExecutor.execute(step, signal);
       report.scroll = {
         swipesUsed: scroll.swipesUsed,
         maxSwipes: step.maxSwipes
@@ -182,11 +388,26 @@ export class StepRunner {
         return fail(scroll.code, scroll.message);
       }
     } else {
-      const layout = await this.options.androidCli.layout({
-        deviceSerial: this.options.deviceSerial,
-        ...(signal === undefined ? {} : { signal }),
-        timeoutMs: this.options.idle.timeoutMs
-      });
+      let layout: Awaited<ReturnType<AndroidCliPort["layout"]>>;
+      try {
+        layout = this.options.generatedReplayPolicy === true
+          ? await this.captureGeneratedLayout(signal)
+          : await this.options.androidCli.layout({
+              deviceSerial: this.options.deviceSerial,
+              ...(signal === undefined ? {} : { signal }),
+              timeoutMs: this.options.idle.timeoutMs
+            });
+      } catch (error) {
+        if (
+          error !== null
+          && typeof error === "object"
+          && "code" in error
+          && error.code === "ACTIVITY_BEFORE_MISMATCH"
+        ) {
+          return fail("ACTIVITY_BEFORE_MISMATCH", errorMessage(error));
+        }
+        throw error;
+      }
       if (
         step.action === "click"
         || step.action === "longClick"
@@ -245,6 +466,27 @@ export class StepRunner {
         }
       }
 
+      if (
+        step.action === "inputText"
+        && this.options.requireFocusedInput === true
+        && !hasExactlyOneEnabledFocusedElement(layout)
+      ) {
+        return fail(
+          "ACTION_FAILED",
+          "inputText requires exactly one enabled focused Layout element"
+        );
+      }
+      if (this.options.generatedReplayPolicy === true) {
+        try {
+          await this.assertGeneratedForeground(
+            step.activity.before,
+            "ACTIVITY_BEFORE_MISMATCH",
+            signal
+          );
+        } catch (error) {
+          return fail("ACTIVITY_BEFORE_MISMATCH", errorMessage(error));
+        }
+      }
       const action = await this.actionExecutor.execute(step, target, signal);
       if (action.status === "failed") {
         return fail(action.code, action.message);
@@ -277,8 +519,34 @@ export class StepRunner {
     if (pid === null) {
       return fail("APP_CRASHED", "App process is no longer running");
     }
+    if (
+      generatedPid !== undefined
+      && generatedPid !== null
+      && pid !== generatedPid
+    ) {
+      return fail("APP_CRASHED", "Generated replay process identity changed");
+    }
 
-    const after = await this.options.adb.currentActivity(identity);
+    let after: string;
+    try {
+      after = this.options.generatedReplayPolicy === true
+        ? (await this.generatedForeground(
+            step.activity.after,
+            "ACTIVITY_AFTER_MISMATCH",
+            signal
+          )).activity
+        : await this.options.adb.currentActivity(identity);
+    } catch (error) {
+      if (
+        error !== null
+        && typeof error === "object"
+        && "code" in error
+        && error.code === "ACTIVITY_AFTER_MISMATCH"
+      ) {
+        return fail("ACTIVITY_AFTER_MISMATCH", errorMessage(error));
+      }
+      throw error;
+    }
     activityReport.after = {
       status: after === step.activity.after ? "passed" : "failed",
       expected: step.activity.after,
@@ -299,7 +567,25 @@ export class StepRunner {
           deviceSerial: this.options.deviceSerial,
           stepStartedAt: startedAt
         },
-        signal
+        signal,
+        generatedPid === undefined || generatedPid === null
+          ? {}
+          : {
+              activity: (input): ReturnType<
+                StepRunner["observeExpectedActivity"]
+              > => this.observeExpectedActivity(
+                undefined,
+                generatedPid,
+                input
+              ),
+              layout: (input): ReturnType<
+                StepRunner["observeExpectedLayout"]
+              > => this.observeExpectedLayout(
+                step.activity.after,
+                generatedPid,
+                input
+              )
+            }
       );
       if (expectation.status === "cancelled") {
         report.expectation = {
@@ -322,101 +608,33 @@ export class StepRunner {
       if (expectation.status === "failed") {
         return fail(expectation.code, expectation.message);
       }
+      if (this.options.generatedReplayPolicy === true) {
+        const expectedActivity = step.expect.type === "activity"
+          ? step.expect.value
+          : step.activity.after;
+        try {
+          await this.assertGeneratedForeground(
+            expectedActivity,
+            "ACTIVITY_AFTER_MISMATCH",
+            signal
+          );
+          const guardedPid = await this.options.adb.pid(identity);
+          if (guardedPid !== generatedPid) {
+            return await fail(
+              "ACTIVITY_AFTER_MISMATCH",
+              "Generated replay process changed after Expect"
+            );
+          }
+        } catch (error) {
+          return fail("ACTIVITY_AFTER_MISMATCH", errorMessage(error));
+        }
+      }
     }
 
     return finish("passed");
   }
+}
 
-  private async resolveByScrolling(
-    step: Extract<JourneyStep, { action: "scrollTo" }>,
-    signal?: AbortSignal
-  ): Promise<
-    | { status: "found"; swipesUsed: number }
-    | {
-        status: "failed";
-        code: FailureCode;
-        message: string;
-        swipesUsed: number;
-        idle?: { polls: number; lastDiff: readonly unknown[] };
-      }
-    | { status: "cancelled"; swipesUsed: number }
-  > {
-    let swipesUsed = 0;
-    for (;;) {
-      if (signal?.aborted === true) {
-        return { status: "cancelled", swipesUsed };
-      }
-      const layout = await this.options.androidCli.layout({
-        deviceSerial: this.options.deviceSerial,
-        ...(signal === undefined ? {} : { signal }),
-        timeoutMs: this.options.idle.timeoutMs
-      });
-      const target = resolveLocator(layout, step.locator, { requireEnabled: false });
-      if (target.status === "found") {
-        return { status: "found", swipesUsed };
-      }
-      if (target.code === "LOCATOR_AMBIGUOUS") {
-        return {
-          status: "failed",
-          code: "LOCATOR_AMBIGUOUS",
-          message: target.message,
-          swipesUsed
-        };
-      }
-      if (swipesUsed >= step.maxSwipes) {
-        return {
-          status: "failed",
-          code: "SCROLL_TARGET_NOT_FOUND",
-          message: `Target not visible after ${String(step.maxSwipes)} swipes`,
-          swipesUsed
-        };
-      }
-      const container = resolveLocator(layout, step.container, { requireEnabled: false });
-      if (container.status !== "found") {
-        return {
-          status: "failed",
-          code: container.code,
-          message: container.message,
-          swipesUsed
-        };
-      }
-      if (container.element.bounds === undefined) {
-        return {
-          status: "failed",
-          code: "ACTION_FAILED",
-          message: "scroll container has no bounds to swipe",
-          swipesUsed
-        };
-      }
-      const swipe = await this.actionExecutor.swipeBounds(
-        container.element.bounds,
-        step.direction,
-        step.distancePercent,
-        step.durationMs,
-        signal
-      );
-      if (swipe.status === "failed") {
-        return {
-          status: "failed",
-          code: swipe.code,
-          message: swipe.message,
-          swipesUsed
-        };
-      }
-      const idle = await this.idleWaiter.waitUntilIdle(this.options.idle, signal);
-      if (idle.status === "cancelled") {
-        return { status: "cancelled", swipesUsed };
-      }
-      if (idle.status === "timeout") {
-        return {
-          status: "failed",
-          code: idle.code,
-          message: "Layout did not become stable before timeout",
-          swipesUsed,
-          idle: { polls: idle.polls, lastDiff: idle.lastDiff }
-        };
-      }
-      swipesUsed += 1;
-    }
-  }
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

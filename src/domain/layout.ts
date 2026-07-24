@@ -45,6 +45,8 @@ export interface LayoutElement {
   clickable?: boolean | undefined;
   longClickable?: boolean | undefined;
   scrollable?: boolean | undefined;
+  focusable?: boolean | undefined;
+  focused?: boolean | undefined;
   enabled: boolean;
   center?: LayoutPoint | undefined;
   bounds?: Bounds | undefined;
@@ -60,6 +62,8 @@ export const LayoutElementSchema: z.ZodType<LayoutElement> = z.lazy(
     clickable: z.boolean().optional(),
     longClickable: z.boolean().optional(),
     scrollable: z.boolean().optional(),
+    focusable: z.boolean().optional(),
+    focused: z.boolean().optional(),
     enabled: z.boolean(),
     center: LayoutPointSchema.optional(),
     bounds: BoundsSchema.optional(),

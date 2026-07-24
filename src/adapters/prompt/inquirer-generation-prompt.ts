@@ -1,0 +1,377 @@
+import {
+  confirm,
+  input,
+  number as numberPrompt,
+  select
+} from "@inquirer/prompts";
+
+import {
+  listLocatableTargets,
+  listRecorderTargets,
+  type RecorderTarget
+} from "../../application/recorder/locator-selector.js";
+import type { PendingConfirmation } from "../../domain/generation.js";
+import {
+  ProposedStepSchema,
+  type ProposedStep
+} from "../../domain/proposed-step.js";
+import type {
+  GenerationPromptPort,
+  ManualProposalInput
+} from "../../ports/generation-prompt.js";
+import {
+  GenerationPromptCancelledError
+} from "../../ports/generation-prompt.js";
+
+interface SelectConfig {
+  message: string;
+  choices: readonly { name: string; value: string }[];
+}
+
+interface InputConfig {
+  message: string;
+  validate?: ((value: string) => boolean | string) | undefined;
+}
+
+interface ConfirmConfig {
+  message: string;
+  default: boolean;
+}
+
+interface NumberConfig {
+  message: string;
+  default: number;
+  min?: number | undefined;
+  max?: number | undefined;
+}
+
+export type GenerationPromptContext = NonNullable<
+  Parameters<typeof confirm>[1]
+>;
+
+export interface GenerationPromptFunctions {
+  select: (
+    config: SelectConfig,
+    context: GenerationPromptContext
+  ) => Promise<unknown>;
+  input: (
+    config: InputConfig,
+    context: GenerationPromptContext
+  ) => Promise<unknown>;
+  confirm: (
+    config: ConfirmConfig,
+    context: GenerationPromptContext
+  ) => Promise<unknown>;
+  number: (
+    config: NumberConfig,
+    context: GenerationPromptContext
+  ) => Promise<unknown>;
+}
+
+export type GenerationInputStream = NodeJS.ReadableStream & {
+  isTTY?: boolean | undefined;
+};
+
+export type GenerationDiagnosticStream = NodeJS.WritableStream & {
+  isTTY?: boolean | undefined;
+};
+
+const defaultPrompts: GenerationPromptFunctions = {
+  select: async (config, context) => select({
+    message: config.message,
+    choices: [...config.choices]
+  }, context),
+  input: async (config, context) => input({
+    message: config.message,
+    ...(config.validate === undefined ? {} : { validate: config.validate })
+  }, context),
+  confirm: async (config, context) => confirm(config, context),
+  number: async (config, context) => numberPrompt(config, context)
+};
+
+function selectedString(value: unknown, allowed?: readonly string[]): string {
+  if (
+    typeof value !== "string"
+    || (allowed !== undefined && !allowed.includes(value))
+  ) {
+    throw new Error("Prompt returned an invalid selection");
+  }
+  return value;
+}
+
+function selectedNumber(
+  value: unknown,
+  minimum: number,
+  maximum = Number.POSITIVE_INFINITY
+): number {
+  if (
+    typeof value !== "number"
+    || !Number.isFinite(value)
+    || value < minimum
+    || value > maximum
+  ) {
+    throw new Error("Prompt returned an invalid number");
+  }
+  return value;
+}
+
+function common(input: ManualProposalInput): {
+  binding: ManualProposalInput["binding"];
+  activity: { before: string };
+  expect?: ManualProposalInput["expect"];
+} {
+  return {
+    binding: input.binding,
+    activity: { before: input.before },
+    ...(input.expect === undefined ? {} : { expect: input.expect })
+  };
+}
+
+function requireTargets(targets: readonly RecorderTarget[]): void {
+  if (targets.length === 0) {
+    throw new Error("No deterministic Layout targets are available");
+  }
+}
+
+export class InquirerGenerationPrompt implements GenerationPromptPort {
+  public constructor(
+    private readonly prompts: GenerationPromptFunctions = defaultPrompts,
+    private readonly promptInput: GenerationInputStream = process.stdin,
+    private readonly diagnostics: GenerationDiagnosticStream = process.stderr
+  ) {}
+
+  public async confirm(
+    challenge: PendingConfirmation,
+    signal?: AbortSignal
+  ): Promise<boolean> {
+    this.throwIfCancelled(signal);
+    this.assertLocalTty("Generation confirmation");
+    if (challenge.status !== "pending") {
+      throw new Error("Generation confirmation challenge is not pending");
+    }
+    this.diagnostics.write(
+      `TapHound confirmation: ${challenge.actionSummary}\n`
+    );
+    const answer = await this.ask(
+      (context) => this.prompts.confirm({
+        message: `Approve action at step ${String(challenge.stepIndex)}?`,
+        default: false
+      }, context),
+      signal
+    );
+    if (typeof answer !== "boolean") {
+      throw new Error("Prompt returned an invalid confirmation");
+    }
+    return answer;
+  }
+
+  public async buildManualProposal(
+    input: ManualProposalInput,
+    signal?: AbortSignal
+  ): Promise<ProposedStep> {
+    this.throwIfCancelled(signal);
+    this.assertLocalTty("Manual generation takeover");
+    const shared = common(input);
+    if (input.action === "back" || input.action === "wait") {
+      return ProposedStepSchema.parse({ action: input.action, ...shared });
+    }
+    if (input.action === "inputText") {
+      const text = selectedString(await this.ask((context) => this.prompts.input({
+        message: "Text to enter",
+        validate: (answer) => answer.length > 0 || "Text must not be empty"
+      }, context), signal));
+      return ProposedStepSchema.parse({ action: input.action, text, ...shared });
+    }
+    if (input.action === "scrollTo") {
+      return this.buildScrollTo(input, shared, signal);
+    }
+
+    const targets = listRecorderTargets(input.layout, input.action);
+    const target = await this.selectTarget(
+      targets,
+      "Choose a deterministic Layout target",
+      signal
+    );
+    if (input.action === "click") {
+      return ProposedStepSchema.parse({
+        action: input.action,
+        locator: target.locator,
+        ...shared
+      });
+    }
+    if (input.action === "longClick") {
+      const durationMs = selectedNumber(await this.ask(
+        (context) => this.prompts.number({
+          message: "Long-click duration (ms)",
+          default: 800,
+          min: 1
+        }, context),
+        signal
+      ), 1);
+      return ProposedStepSchema.parse({
+        action: input.action,
+        locator: target.locator,
+        durationMs,
+        ...shared
+      });
+    }
+
+    const direction = await this.selectDirection(signal);
+    const options = await this.swipeOptions(signal);
+    return ProposedStepSchema.parse({
+      action: input.action,
+      locator: target.locator,
+      direction,
+      ...options,
+      ...shared
+    });
+  }
+
+  private async buildScrollTo(
+    input: ManualProposalInput,
+    shared: ReturnType<typeof common>,
+    signal?: AbortSignal
+  ): Promise<ProposedStep> {
+    const container = await this.selectTarget(
+      listRecorderTargets(input.layout, "swipe"),
+      "Choose the scrollable container",
+      signal
+    );
+    const target = await this.selectTarget(
+      listLocatableTargets(input.layout),
+      "Choose the scroll target",
+      signal
+    );
+    const direction = await this.selectDirection(signal);
+    const options = await this.swipeOptions(signal);
+    const maxSwipes = selectedNumber(await this.ask(
+      (context) => this.prompts.number({
+        message: "Maximum scroll swipes",
+        default: 20,
+        min: 1,
+        max: 30
+      }, context),
+      signal
+    ), 1, 30);
+    return ProposedStepSchema.parse({
+      action: "scrollTo",
+      locator: target.locator,
+      container: container.locator,
+      direction,
+      maxSwipes,
+      ...options,
+      ...shared
+    });
+  }
+
+  private async selectTarget(
+    targets: readonly RecorderTarget[],
+    message: string,
+    signal?: AbortSignal
+  ): Promise<RecorderTarget> {
+    requireTargets(targets);
+    const id = selectedString(await this.ask(
+      (context) => this.prompts.select({
+        message,
+        choices: targets.map((target) => ({
+          name: target.label,
+          value: target.element.id
+        }))
+      }, context),
+      signal
+    ), targets.map((target) => target.element.id));
+    const target = targets.find((candidate) => candidate.element.id === id);
+    if (target === undefined) {
+      throw new Error("Prompt returned an invalid selection");
+    }
+    return target;
+  }
+
+  private async selectDirection(
+    signal?: AbortSignal
+  ): Promise<"up" | "down" | "left" | "right"> {
+    const directions = ["up", "down", "left", "right"] as const;
+    const value = await this.ask(
+      (context) => this.prompts.select({
+        message: "Swipe direction",
+        choices: directions.map((direction) => ({
+          name: direction,
+          value: direction
+        }))
+      }, context),
+      signal
+    );
+    return selectedString(value, directions) as typeof directions[number];
+  }
+
+  private async swipeOptions(signal?: AbortSignal): Promise<{
+    distancePercent: number;
+    durationMs: number;
+  }> {
+    const distancePercent = selectedNumber(await this.ask(
+      (context) => this.prompts.number({
+        message: "Swipe distance (0–1)",
+        default: 0.6,
+        min: 0.01,
+        max: 1
+      }, context),
+      signal
+    ), 0.01, 1);
+    const durationMs = selectedNumber(await this.ask(
+      (context) => this.prompts.number({
+        message: "Swipe duration (ms)",
+        default: 300,
+        min: 1
+      }, context),
+      signal
+    ), 1);
+    return { distancePercent, durationMs };
+  }
+
+  private assertLocalTty(operation: string): void {
+    if (
+      this.promptInput.isTTY !== true
+      || this.diagnostics.isTTY !== true
+    ) {
+      throw new Error(`${operation} requires local TTY input and diagnostics`);
+    }
+  }
+
+  private async ask<T>(
+    operation: (context: GenerationPromptContext) => Promise<T>,
+    signal?: AbortSignal
+  ): Promise<T> {
+    this.throwIfCancelled(signal);
+    try {
+      return await operation(this.context(signal));
+    } catch (error) {
+      if (
+        signal?.aborted === true
+        || (
+          error instanceof Error
+          && (
+            error.name === "AbortPromptError"
+            || error.name === "ExitPromptError"
+          )
+        )
+      ) {
+        throw new GenerationPromptCancelledError();
+      }
+      throw error;
+    }
+  }
+
+  private throwIfCancelled(signal?: AbortSignal): void {
+    if (signal?.aborted === true) {
+      throw new GenerationPromptCancelledError();
+    }
+  }
+
+  private context(signal?: AbortSignal): GenerationPromptContext {
+    return {
+      input: this.promptInput,
+      output: this.diagnostics,
+      ...(signal === undefined ? {} : { signal })
+    };
+  }
+}

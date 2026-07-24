@@ -23,9 +23,11 @@ const checkpoint = {
 function adbPort(): AdbPort {
   return {
     devices: vi.fn(),
+    foregroundComponent: vi.fn(),
     currentActivity: vi.fn()
       .mockResolvedValueOnce(checkpoint.before)
       .mockResolvedValueOnce(checkpoint.after),
+    forceStop: vi.fn(),
     pid: vi.fn(() => Promise.resolve(42)),
     tap: vi.fn(() => Promise.resolve(commandResult())),
     longClick: vi.fn(() => Promise.resolve(commandResult())),
@@ -57,6 +59,8 @@ function fixture(overrides: {
   adb?: AdbPort;
   androidCli?: AndroidCliPort;
   idle?: StepRunnerOptions["idle"];
+  requireFocusedInput?: boolean;
+  generatedReplayPolicy?: boolean;
 } = {}): {
   runner: StepRunner;
   adb: AdbPort;
@@ -85,7 +89,13 @@ function fixture(overrides: {
         pollIntervalMs: 100,
         stablePolls: 1,
         timeoutMs: 500
-      }
+      },
+      ...(overrides.requireFocusedInput === undefined
+        ? {}
+        : { requireFocusedInput: overrides.requireFocusedInput }),
+      ...(overrides.generatedReplayPolicy === undefined
+        ? {}
+        : { generatedReplayPolicy: overrides.generatedReplayPolicy })
     }),
     adb,
     androidCli: cli,
@@ -478,6 +488,438 @@ describe("scrollTo replay", () => {
     if (result.status === "failed") {
       expect(result.failure.code).toBe("LOCATOR_NOT_FOUND");
     }
+    expect(adb.swipe).not.toHaveBeenCalled();
+  });
+
+  it("requires exactly one enabled focused element for generated input replay", async () => {
+    const cli = androidCli();
+    const { runner, adb } = fixture({
+      androidCli: cli,
+      requireFocusedInput: true
+    });
+    const result = await runner.run({
+      action: "inputText",
+      text: "hello",
+      activity: checkpoint
+    }, 0);
+
+    expect(result.status).toBe("failed");
+    if (result.status === "failed") {
+      expect(result.failure.code).toBe("ACTION_FAILED");
+      expect(result.failure.message).toContain("exactly one enabled focused");
+    }
+    expect(adb.inputText).not.toHaveBeenCalled();
+  });
+
+  it("keeps ordinary input replay behavior unchanged", async () => {
+    const { runner, adb } = fixture();
+    const result = await runner.run({
+      action: "inputText",
+      text: "hello",
+      activity: checkpoint
+    }, 0);
+
+    expect(result.status).toBe("passed");
+    expect(adb.inputText).toHaveBeenCalledOnce();
+  });
+
+  it("blocks generated click replay when the foreground package is foreign", async () => {
+    const adb = adbPort();
+    vi.mocked(adb.foregroundComponent).mockResolvedValue({
+      packageName: "com.foreign.app",
+      activity: checkpoint.before
+    });
+    const { runner } = fixture({ adb, generatedReplayPolicy: true });
+
+    await expect(runner.run(clickStep(), 0)).resolves.toMatchObject({
+      status: "failed",
+      failure: { code: "ACTIVITY_BEFORE_MISMATCH" }
+    });
+    expect(adb.currentActivity).not.toHaveBeenCalled();
+    expect(adb.tap).not.toHaveBeenCalled();
+  });
+
+  it("sandwiches generated target Layout capture before click mutation", async () => {
+    const adb = adbPort();
+    vi.mocked(adb.foregroundComponent)
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: checkpoint.before
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: checkpoint.before
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.foreign.app",
+        activity: checkpoint.before
+      });
+    const { runner } = fixture({ adb, generatedReplayPolicy: true });
+
+    await expect(runner.run(clickStep(), 0)).resolves.toMatchObject({
+      status: "failed",
+      failure: { code: "ACTIVITY_BEFORE_MISMATCH" }
+    });
+    expect(adb.tap).not.toHaveBeenCalled();
+  });
+
+  it("detects generated package escape after click and idle", async () => {
+    const adb = adbPort();
+    vi.mocked(adb.foregroundComponent)
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: checkpoint.before
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: checkpoint.before
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: checkpoint.before
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: checkpoint.before
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.foreign.app",
+        activity: checkpoint.after
+      });
+    const { runner } = fixture({ adb, generatedReplayPolicy: true });
+
+    await expect(runner.run(clickStep(), 0)).resolves.toMatchObject({
+      status: "failed",
+      failure: { code: "ACTIVITY_AFTER_MISMATCH" }
+    });
+    expect(adb.tap).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a foreign package seen only during generated Activity Expect", async () => {
+    const adb = adbPort();
+    vi.mocked(adb.foregroundComponent)
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: checkpoint.before
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: checkpoint.before
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: checkpoint.before
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: checkpoint.before
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: checkpoint.after
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.foreign.app",
+        activity: checkpoint.after
+      })
+      .mockResolvedValue({
+        packageName: "com.example.app",
+        activity: checkpoint.after
+      });
+    vi.mocked(adb.currentActivity).mockResolvedValue(checkpoint.after);
+    const { runner } = fixture({ adb, generatedReplayPolicy: true });
+
+    await expect(runner.run({
+      ...clickStep(),
+      expect: {
+        type: "activity",
+        value: checkpoint.after,
+        timeoutMs: 200
+      }
+    }, 0)).resolves.toMatchObject({
+      status: "failed",
+      failure: {
+        code: "EXPECT_ACTIVITY_FAILED",
+        message: "Generated Expect foreground changed to com.foreign.app/com.example.app.SearchActivity"
+      }
+    });
+    expect(adb.currentActivity).not.toHaveBeenCalled();
+  });
+
+  it("lets a generated Activity Expect poll from checkpoint A to expected B", async () => {
+    const adb = adbPort();
+    let actionCompleted = false;
+    let postActionObservations = 0;
+    vi.mocked(adb.tap).mockImplementationOnce(() => {
+      actionCompleted = true;
+      return Promise.resolve(commandResult());
+    });
+    vi.mocked(adb.foregroundComponent).mockImplementation(() => {
+      const observation = actionCompleted ? ++postActionObservations : 0;
+      return Promise.resolve({
+        packageName: "com.example.app",
+        activity: observation >= 3
+          ? "com.example.app.ResultsActivity"
+          : (
+              actionCompleted
+                ? checkpoint.after
+                : checkpoint.before
+            )
+      });
+    });
+    const { runner } = fixture({ adb, generatedReplayPolicy: true });
+
+    await expect(runner.run({
+      ...clickStep(),
+      expect: {
+        type: "activity",
+        value: "com.example.app.ResultsActivity",
+        timeoutMs: 200
+      }
+    }, 0)).resolves.toMatchObject({
+      status: "passed",
+      report: {
+        expectation: {
+          type: "activity",
+          status: "passed"
+        }
+      }
+    });
+    expect(postActionObservations).toBe(4);
+  });
+
+  it("keeps a persistent foreign Activity Expect failure as EXPECT_ACTIVITY_FAILED", async () => {
+    const adb = adbPort();
+    let actionCompleted = false;
+    let postActionObservations = 0;
+    vi.mocked(adb.tap).mockImplementationOnce(() => {
+      actionCompleted = true;
+      return Promise.resolve(commandResult());
+    });
+    vi.mocked(adb.foregroundComponent).mockImplementation(() => {
+      const observation = actionCompleted ? ++postActionObservations : 0;
+      return Promise.resolve({
+        packageName: observation >= 2
+          ? "com.foreign.app"
+          : "com.example.app",
+        activity: observation >= 2
+          ? "com.example.app.ResultsActivity"
+          : (
+              actionCompleted
+                ? checkpoint.after
+                : checkpoint.before
+            )
+      });
+    });
+    const { runner } = fixture({ adb, generatedReplayPolicy: true });
+
+    await expect(runner.run({
+      ...clickStep(),
+      expect: {
+        type: "activity",
+        value: "com.example.app.ResultsActivity",
+        timeoutMs: 200
+      }
+    }, 0)).resolves.toMatchObject({
+      status: "failed",
+      failure: {
+        code: "EXPECT_ACTIVITY_FAILED",
+        message: "Generated Expect foreground changed to com.foreign.app/com.example.app.ResultsActivity"
+      }
+    });
+  });
+
+  it("keeps a persistent Activity Expect PID replacement as EXPECT_ACTIVITY_FAILED", async () => {
+    const adb = adbPort();
+    let actionCompleted = false;
+    let postActionPidObservations = 0;
+    vi.mocked(adb.tap).mockImplementationOnce(() => {
+      actionCompleted = true;
+      return Promise.resolve(commandResult());
+    });
+    vi.mocked(adb.foregroundComponent).mockImplementation(() => (
+      Promise.resolve({
+        packageName: "com.example.app",
+        activity: actionCompleted ? checkpoint.after : checkpoint.before
+      })
+    ));
+    vi.mocked(adb.pid).mockImplementation(() => Promise.resolve(
+      actionCompleted && ++postActionPidObservations >= 2 ? 99 : 42
+    ));
+    const { runner } = fixture({ adb, generatedReplayPolicy: true });
+
+    await expect(runner.run({
+      ...clickStep(),
+      expect: {
+        type: "activity",
+        value: "com.example.app.ResultsActivity",
+        timeoutMs: 200
+      }
+    }, 0)).resolves.toMatchObject({
+      status: "failed",
+      failure: {
+        code: "EXPECT_ACTIVITY_FAILED",
+        message: "Generated Expect process changed from 42 to 99"
+      }
+    });
+  });
+
+  it("rejects a foreign package on a later generated Element poll", async () => {
+    const adb = adbPort();
+    vi.mocked(adb.foregroundComponent)
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: checkpoint.before
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: checkpoint.before
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: checkpoint.before
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: checkpoint.before
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: checkpoint.after
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: checkpoint.after
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: checkpoint.after
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.foreign.app",
+        activity: checkpoint.after
+      })
+      .mockResolvedValue({
+        packageName: "com.example.app",
+        activity: checkpoint.after
+      });
+    const cli = androidCli();
+    vi.mocked(cli.layout)
+      .mockResolvedValueOnce([{
+        id: "search",
+        resourceId: "search",
+        enabled: true,
+        bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+        children: []
+      }])
+      .mockResolvedValue([]);
+    const { runner } = fixture({
+      adb,
+      androidCli: cli,
+      generatedReplayPolicy: true
+    });
+
+    await expect(runner.run({
+      ...clickStep(),
+      expect: {
+        type: "element",
+        locator: { resourceId: "expected" },
+        timeoutMs: 200
+      }
+    }, 0)).resolves.toMatchObject({
+      status: "failed",
+      failure: {
+        code: "EXPECT_ELEMENT_FAILED",
+        message: "Generated Expect foreground changed to com.foreign.app/com.example.app.SearchActivity"
+      }
+    });
+  });
+
+  it("rejects PID replacement inside a generated Element Layout sandwich", async () => {
+    const adb = adbPort();
+    vi.mocked(adb.foregroundComponent)
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: checkpoint.before
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: checkpoint.before
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: checkpoint.before
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: checkpoint.before
+      })
+      .mockResolvedValue({
+        packageName: "com.example.app",
+        activity: checkpoint.after
+      });
+    vi.mocked(adb.pid)
+      .mockResolvedValueOnce(42)
+      .mockResolvedValueOnce(42)
+      .mockResolvedValueOnce(42)
+      .mockResolvedValueOnce(99);
+    const cli = androidCli();
+    vi.mocked(cli.layout)
+      .mockResolvedValueOnce([{
+        id: "search",
+        resourceId: "search",
+        enabled: true,
+        bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+        children: []
+      }])
+      .mockResolvedValue([]);
+    const { runner } = fixture({
+      adb,
+      androidCli: cli,
+      generatedReplayPolicy: true
+    });
+
+    await expect(runner.run({
+      ...clickStep(),
+      expect: {
+        type: "element",
+        locator: { resourceId: "expected" },
+        timeoutMs: 200
+      }
+    }, 0)).resolves.toMatchObject({
+      status: "failed",
+      failure: {
+        code: "EXPECT_ELEMENT_FAILED",
+        message: "Generated Expect process changed from 42 to 99"
+      }
+    });
+  });
+
+  it("blocks generated scroll when live container capability drifts", async () => {
+    const adb = mainActivityAdb();
+    vi.mocked(adb.foregroundComponent).mockResolvedValue({
+      packageName: "com.example.app",
+      activity: "com.example.app.MainActivity"
+    });
+    const cli = scrollCli("absent");
+    vi.mocked(cli.layout).mockResolvedValue([{
+      id: "message_list",
+      resourceId: "message_list",
+      scrollable: false,
+      enabled: true,
+      bounds: { left: 0, top: 0, right: 100, bottom: 400 },
+      children: []
+    }]);
+    const { runner } = fixture({
+      adb,
+      androidCli: cli,
+      generatedReplayPolicy: true
+    });
+
+    await expect(runner.run(scrollStep, 0)).resolves.toMatchObject({
+      status: "failed",
+      failure: { code: "ACTION_FAILED" }
+    });
     expect(adb.swipe).not.toHaveBeenCalled();
   });
 });

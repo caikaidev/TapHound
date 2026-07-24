@@ -4,7 +4,7 @@ import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { CommanderError } from "commander";
+import { CommanderError, type Command } from "commander";
 
 import {
   createProductionDependencies,
@@ -55,16 +55,21 @@ function asCommanderFailure(error: unknown): CommanderFailure | undefined {
     : undefined;
 }
 
+function overrideCommandExits(command: Command): void {
+  command.exitOverride();
+  for (const child of command.commands) {
+    overrideCommandExits(child);
+  }
+}
+
 export async function runMain(
   argv: readonly string[],
   dependencies: CliDependencies = createProductionDependencies()
 ): Promise<void> {
   const json = argv.includes("--json");
   try {
-    const program = createProgram(dependencies).exitOverride();
-    for (const command of program.commands) {
-      command.exitOverride();
-    }
+    const program = createProgram(dependencies);
+    overrideCommandExits(program);
     await program.parseAsync([...argv]);
   } catch (error) {
     const commander = asCommanderFailure(error);

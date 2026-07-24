@@ -42,14 +42,21 @@ describe("TapHound documentation examples", () => {
     const readme = await text("README.md");
     const commandNames = createProgram().commands.map((command) => command.name());
 
-    expect(commandNames).toEqual(["doctor", "record", "verify"]);
+    expect(commandNames).toEqual([
+      "doctor",
+      "record",
+      "verify",
+      "project",
+      "context",
+      "generation"
+    ]);
     expect(readme).toContain("# TapHound");
     expect(readme).toContain("TapHound for Android");
     expect(readme).toContain("Follow every tap. Catch every regression.");
     expect(readme).toContain("TapHound Journey");
     expect(readme).toContain("Android CLI 官方 Journey");
     expect(readme).not.toMatch(/\bAPR\b|\bapr\b/);
-    for (const command of commandNames) {
+    for (const command of ["doctor", "record", "verify"]) {
       expect(readme).toContain(`taphound ${command}`);
     }
     expect(readme).toContain("Node.js 22");

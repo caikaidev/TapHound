@@ -50,7 +50,8 @@ templates, then call the TapHound CLI.
 - Node.js 22+ (avoid Node 23)
 - Android SDK with ADB and `uiautomator` (Android CLI)
 - One online Android device (emulator or USB)
-- TapHound built: `npm run build` (produces `dist/cli/main.js`)
+- TapHound built and linked: `npm run build && npm link` (registers the
+  `taphound` command)
 
 ## Inputs
 
@@ -66,11 +67,12 @@ templates, then call the TapHound CLI.
 
 ## Phase 0: Preflight
 
-1. Verify `dist/cli/main.js` exists. If not, run `npm run build`.
+1. Verify `taphound` command is available. If not, run `npm run build &&
+   npm link` in the TapHound repo.
 2. Run `adb devices -l`. Confirm at least one device is online.
 3. Run:
    ```bash
-   node dist/cli/main.js doctor --project <project> --json
+   taphound doctor --project <project> --json
    ```
    Confirm `"status": "passed"`. Capture `deviceSerial` from the result.
    If `device` was supplied, use it; otherwise use the doctor's selection.
@@ -99,7 +101,7 @@ templates, then call the TapHound CLI.
 6. Write it to `<project>/.taphound/context/project-context.json`.
 7. Validate:
    ```bash
-   node dist/cli/main.js context validate \
+   taphound context validate \
      --project <project> \
      --context <project>/.taphound/context/project-context.json \
      --json
@@ -115,7 +117,7 @@ templates, then call the TapHound CLI.
 
 1. Start a generation session:
    ```bash
-   node dist/cli/main.js generation start \
+   taphound generation start \
      --project <project> \
      --config <config> \
      --context <project>/.taphound/context/project-context.json \
@@ -131,7 +133,7 @@ templates, then call the TapHound CLI.
 
    a. **Observe** the current device state:
       ```bash
-      node dist/cli/main.js generation observe \
+      taphound generation observe \
         --project <project> \
         --session <generationId> \
         --device <serial> \
@@ -166,7 +168,7 @@ templates, then call the TapHound CLI.
 
    e. **Execute the step**:
       ```bash
-      node dist/cli/main.js generation step \
+      taphound generation step \
         --project <project> \
         --session <generationId> \
         --input <envelope-path> \
@@ -180,7 +182,7 @@ templates, then call the TapHound CLI.
         (action summary, challenge ID) to the user. Wait for explicit
         human approval. If approved, run:
         ```bash
-        node dist/cli/main.js generation confirm \
+        taphound generation confirm \
           --project <project> \
           --session <generationId> \
           --challenge <challengeId> \
@@ -206,7 +208,7 @@ templates, then call the TapHound CLI.
 
 1. Run finalize:
    ```bash
-   node dist/cli/main.js generation finalize \
+   taphound generation finalize \
      --project <project> \
      --session <generationId> \
      --context <project>/.taphound/context/project-context.json \

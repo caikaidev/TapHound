@@ -46,16 +46,21 @@ Project Context 生成一次后可复用。只有项目源码发生较大变更�
 cd /path/to/TapHound
 npm ci
 npm run build
+npm link          # 注册全局 taphound 命令
 ```
 
-确认 `dist/cli/main.js` 存在：
+`npm link` 会将 `taphound` 命令链接到系统 PATH，后续所有地方直接用
+`taphound` 代替 `taphound`。确认注册成功：
 
 ```bash
-node dist/cli/main.js --help
+taphound --help
 ```
 
 应输出 `Usage: taphound` 并列出 `doctor`、`record`、`verify`、`project`、
 `context`、`generation` 命令。
+
+> 如果不想全局注册，也可以用 `npx taphound` 或 `taphound`
+> 代替下文中的 `taphound` 命令。
 
 ### 1.3 确认设备在线
 
@@ -69,7 +74,7 @@ adb devices -l
 ### 1.4 环境诊断
 
 ```bash
-node dist/cli/main.js doctor \
+taphound doctor \
   --project /path/to/android-project \
   --json
 ```
@@ -135,7 +140,7 @@ AI 生成的 Context 写入：
 然后验证：
 
 ```bash
-node dist/cli/main.js context validate \
+taphound context validate \
   --project /path/to/android-project \
   --context /path/to/android-project/.taphound/context/project-context.json \
   --json
@@ -157,7 +162,7 @@ node dist/cli/main.js context validate \
 随时可以检查 Context 是否仍然有效：
 
 ```bash
-node dist/cli/main.js context status \
+taphound context status \
   --project /path/to/android-project \
   --context /path/to/android-project/.taphound/context/project-context.json \
   --json
@@ -195,7 +200,7 @@ node dist/cli/main.js context status \
 ### 3.2 Step 1 — 启动 generation session
 
 ```bash
-node dist/cli/main.js generation start \
+taphound generation start \
   --project /path/to/android-project \
   --config taphound.config.json \
   --context .taphound/context/project-context.json \
@@ -231,7 +236,7 @@ node dist/cli/main.js generation start \
 ### 3.3 Step 2 — 观察设备当前状态
 
 ```bash
-node dist/cli/main.js generation observe \
+taphound generation observe \
   --project /path/to/android-project \
   --session <generationId> \
   --device emulator-5554 \
@@ -327,7 +332,7 @@ proposed step JSON（不含 `binding`，由调用方填充）。
 写入临时文件，然后执行：
 
 ```bash
-node dist/cli/main.js generation step \
+taphound generation step \
   --project /path/to/android-project \
   --session <generationId> \
   --input /tmp/taphound-step.json \
@@ -369,7 +374,7 @@ node dist/cli/main.js generation step \
 此时需要人工确认。在 TTY 终端运行：
 
 ```bash
-node dist/cli/main.js generation confirm \
+taphound generation confirm \
   --project /path/to/android-project \
   --session <generationId> \
   --challenge <challengeId> \
@@ -409,7 +414,7 @@ AI agent 在每一步前检查 Goal 是否已完成（读 `prompts/check-complet
 所有步骤完成后，执行 finalize：
 
 ```bash
-node dist/cli/main.js generation finalize \
+taphound generation finalize \
   --project /path/to/android-project \
   --session <generationId> \
   --context .taphound/context/project-context.json \
@@ -491,7 +496,7 @@ ls /path/to/project/.taphound/generations/<id>/
 生成的 Journey 是标准 Journey v1，可以用普通 verify 独立重放：
 
 ```bash
-node dist/cli/main.js verify \
+taphound verify \
   --project /path/to/android-project \
   --journey journeys/generated-search.json \
   --device emulator-5554 \
@@ -515,7 +520,7 @@ node dist/cli/main.js verify \
 # examples/taphound-android-demo/.taphound/context/project-context.json
 
 # 验证
-node dist/cli/main.js context validate \
+taphound context validate \
   --project examples/taphound-android-demo \
   --context examples/taphound-android-demo/.taphound/context/project-context.json \
   --json
@@ -524,7 +529,7 @@ node dist/cli/main.js context validate \
 ### 4.2 启动 session
 
 ```bash
-node dist/cli/main.js generation start \
+taphound generation start \
   --project examples/taphound-android-demo \
   --config taphound.config.json \
   --context .taphound/context/project-context.json \
@@ -547,7 +552,7 @@ node dist/cli/main.js generation start \
 ### 4.4 Finalize
 
 ```bash
-node dist/cli/main.js generation finalize \
+taphound generation finalize \
   --project examples/taphound-android-demo \
   --session <generationId> \
   --context .taphound/context/project-context.json \
@@ -579,7 +584,7 @@ TAPHOUND_ACCEPTANCE_DEVICE=1 npm run acceptance:generation
 ### 5.1 检查是否需要更新
 
 ```bash
-node dist/cli/main.js context status \
+taphound context status \
   --project /path/to/android-project \
   --context /path/to/android-project/.taphound/context/project-context.json \
   --json
@@ -605,7 +610,7 @@ node dist/cli/main.js context status \
 #  源码已更新，需要刷新哈希和 UI 元素。"
 
 # 验证新 Context
-node dist/cli/main.js context validate \
+taphound context validate \
   --project /path/to/android-project \
   --context /path/to/android-project/.taphound/context/project-context.json \
   --json

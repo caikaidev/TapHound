@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "packageName": "dev.taphound.demo",
+  "launchActivity": "dev.taphound.demo.MainActivity",
+  "manifest": {
+    "version": 1,
+    "files": [
+      {
+        "path": "app/src/main/AndroidManifest.xml",
+        "sha256": "RUNTIME_COMPUTED",
+        "confidence": "sourceConfirmed"
+      },
+      {
+        "path": "app/src/main/java/dev/taphound/demo/MainActivity.kt",
+        "sha256": "RUNTIME_COMPUTED",
+        "confidence": "sourceConfirmed"
+      },
+      {
+        "path": "app/src/main/java/dev/taphound/demo/SearchActivity.kt",
+        "sha256": "RUNTIME_COMPUTED",
+        "confidence": "sourceConfirmed"
+      },
+      {
+        "path": "app/src/main/res/layout/activity_main.xml",
+        "sha256": "RUNTIME_COMPUTED",
+        "confidence": "sourceConfirmed"
+      },
+      {
+        "path": "app/src/main/res/layout/activity_search.xml",
+        "sha256": "RUNTIME_COMPUTED",
+        "confidence": "sourceConfirmed"
+      }
+    ]
+  },
+  "interactionPolicy": {
+    "allowedActions": ["click", "inputText", "back", "wait"],
+    "confirmationRequiredActions": [],
+    "forbiddenActions": []
+  }
+}

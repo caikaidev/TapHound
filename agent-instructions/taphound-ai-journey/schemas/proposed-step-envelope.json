@@ -1,0 +1,267 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://taphound.dev/schemas/proposed-step-envelope.json",
+  "title": "TapHound Proposed Step Envelope",
+  "description": "The input envelope for `generation step --input`. The proposal field is a ProposedStep; the snapshot field is the full RuntimeSnapshot from the preceding observe call.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "proposal", "snapshot"],
+  "properties": {
+    "version": { "const": 1 },
+    "proposal": {
+      "$ref": "#/$defs/ProposedStep"
+    },
+    "snapshot": {
+      "$ref": "#/$defs/RuntimeSnapshot"
+    }
+  },
+  "$defs": {
+    "QualifiedName": {
+      "type": "string",
+      "pattern": "^(?:[A-Za-z_$][\\w$]*\\.)+[A-Za-z_$][\\w$]*$"
+    },
+    "Sha256": {
+      "type": "string",
+      "pattern": "^[a-f\\d]{64}$"
+    },
+    "GenerationId": {
+      "type": "string",
+      "pattern": "^[A-Za-z\\d](?:[A-Za-z\\d._-]*[A-Za-z\\d])?$"
+    },
+    "Locator": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "resourceId": { "type": "string", "minLength": 1 },
+        "text": { "type": "string", "minLength": 1 },
+        "contentDescription": { "type": "string", "minLength": 1 }
+      },
+      "anyOf": [
+        { "required": ["resourceId"] },
+        { "required": ["text"] },
+        { "required": ["contentDescription"] }
+      ],
+      "description": "At least one identity field is required. Priority: resourceId > text > contentDescription."
+    },
+    "ProposalBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["generationId", "baseRevision", "snapshotHash"],
+      "properties": {
+        "generationId": { "$ref": "#/$defs/GenerationId" },
+        "baseRevision": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "snapshotHash": { "$ref": "#/$defs/Sha256" }
+      }
+    },
+    "ActivityCheckpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["before"],
+      "properties": {
+        "before": { "$ref": "#/$defs/QualifiedName" }
+      },
+      "description": "Only `before` is required in a proposed step. The Core determines `after` from live device observation after execution."
+    },
+    "Expect": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "value", "timeoutMs"],
+          "properties": {
+            "type": { "const": "activity" },
+            "value": { "$ref": "#/$defs/QualifiedName" },
+            "timeoutMs": { "type": "integer", "minimum": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "locator", "timeoutMs"],
+          "properties": {
+            "type": { "const": "element" },
+            "locator": { "$ref": "#/$defs/Locator" },
+            "timeoutMs": { "type": "integer", "minimum": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "tag", "pattern", "match", "timeoutMs"],
+          "properties": {
+            "type": { "const": "logcat" },
+            "tag": { "type": "string", "minLength": 1 },
+            "level": { "enum": ["V", "D", "I", "W", "E", "F", "A"] },
+            "pattern": { "type": "string", "minLength": 1 },
+            "match": { "enum": ["literal", "regex"] },
+            "timeoutMs": { "type": "integer", "minimum": 1 }
+          }
+        }
+      ]
+    },
+    "ProposedStep": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action", "locator", "binding", "activity"],
+          "properties": {
+            "action": { "const": "click" },
+            "locator": { "$ref": "#/$defs/Locator" },
+            "binding": { "$ref": "#/$defs/ProposalBinding" },
+            "activity": { "$ref": "#/$defs/ActivityCheckpoint" },
+            "expect": { "$ref": "#/$defs/Expect" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action", "locator", "binding", "activity"],
+          "properties": {
+            "action": { "const": "longClick" },
+            "locator": { "$ref": "#/$defs/Locator" },
+            "durationMs": { "type": "integer", "minimum": 1, "default": 800 },
+            "binding": { "$ref": "#/$defs/ProposalBinding" },
+            "activity": { "$ref": "#/$defs/ActivityCheckpoint" },
+            "expect": { "$ref": "#/$defs/Expect" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action", "text", "binding", "activity"],
+          "properties": {
+            "action": { "const": "inputText" },
+            "text": { "type": "string", "minLength": 1 },
+            "binding": { "$ref": "#/$defs/ProposalBinding" },
+            "activity": { "$ref": "#/$defs/ActivityCheckpoint" },
+            "expect": { "$ref": "#/$defs/Expect" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action", "locator", "direction", "binding", "activity"],
+          "properties": {
+            "action": { "const": "swipe" },
+            "locator": { "$ref": "#/$defs/Locator" },
+            "direction": { "enum": ["up", "down", "left", "right"] },
+            "distancePercent": { "type": "number", "exclusiveMinimum": 0, "maximum": 1, "default": 0.6 },
+            "durationMs": { "type": "integer", "minimum": 1, "default": 300 },
+            "binding": { "$ref": "#/$defs/ProposalBinding" },
+            "activity": { "$ref": "#/$defs/ActivityCheckpoint" },
+            "expect": { "$ref": "#/$defs/Expect" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action", "locator", "container", "direction", "binding", "activity"],
+          "properties": {
+            "action": { "const": "scrollTo" },
+            "locator": { "$ref": "#/$defs/Locator" },
+            "container": { "$ref": "#/$defs/Locator" },
+            "direction": { "enum": ["up", "down", "left", "right"] },
+            "maxSwipes": { "type": "integer", "minimum": 1, "maximum": 30, "default": 20 },
+            "distancePercent": { "type": "number", "exclusiveMinimum": 0, "maximum": 1, "default": 0.6 },
+            "durationMs": { "type": "integer", "minimum": 1, "default": 300 },
+            "binding": { "$ref": "#/$defs/ProposalBinding" },
+            "activity": { "$ref": "#/$defs/ActivityCheckpoint" },
+            "expect": { "$ref": "#/$defs/Expect" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action", "binding", "activity"],
+          "properties": {
+            "action": { "const": "back" },
+            "binding": { "$ref": "#/$defs/ProposalBinding" },
+            "activity": { "$ref": "#/$defs/ActivityCheckpoint" },
+            "expect": { "$ref": "#/$defs/Expect" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action", "binding", "activity"],
+          "properties": {
+            "action": { "const": "wait" },
+            "binding": { "$ref": "#/$defs/ProposalBinding" },
+            "activity": { "$ref": "#/$defs/ActivityCheckpoint" },
+            "expect": { "$ref": "#/$defs/Expect" }
+          }
+        }
+      ]
+    },
+    "LayoutPoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y"],
+      "properties": {
+        "x": { "type": "integer", "minimum": 0 },
+        "y": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "Bounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["left", "top", "right", "bottom"],
+      "properties": {
+        "left": { "type": "integer", "minimum": 0 },
+        "top": { "type": "integer", "minimum": 0 },
+        "right": { "type": "integer", "exclusiveMinimum": 0 },
+        "bottom": { "type": "integer", "exclusiveMinimum": 0 }
+      }
+    },
+    "LayoutElement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "enabled", "children"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "resourceId": { "type": "string", "minLength": 1 },
+        "text": { "type": "string" },
+        "contentDescription": { "type": "string" },
+        "clickable": { "type": "boolean" },
+        "longClickable": { "type": "boolean" },
+        "scrollable": { "type": "boolean" },
+        "focusable": { "type": "boolean" },
+        "focused": { "type": "boolean" },
+        "enabled": { "type": "boolean" },
+        "center": { "$ref": "#/$defs/LayoutPoint" },
+        "bounds": { "$ref": "#/$defs/Bounds" },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/LayoutElement" }
+        }
+      }
+    },
+    "RuntimeSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "generationId", "baseRevision", "deviceSerial", "expectedPackageName", "foregroundPackageName", "activity", "pid", "capturedAt", "layout"],
+      "properties": {
+        "version": { "const": 1 },
+        "generationId": { "type": "string", "minLength": 1 },
+        "baseRevision": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "deviceSerial": { "type": "string", "minLength": 1 },
+        "expectedPackageName": { "$ref": "#/$defs/QualifiedName" },
+        "foregroundPackageName": { "$ref": "#/$defs/QualifiedName" },
+        "activity": { "$ref": "#/$defs/QualifiedName" },
+        "pid": {
+          "oneOf": [
+            { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+            { "type": "null" }
+          ]
+        },
+        "capturedAt": { "type": "string", "format": "date-time" },
+        "screenshotPath": { "type": "string", "minLength": 1 },
+        "layout": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/LayoutElement" }
+        }
+      }
+    }
+  }
+}

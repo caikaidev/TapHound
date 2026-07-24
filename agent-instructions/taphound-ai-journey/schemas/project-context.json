@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://taphound.dev/schemas/project-context.json",
+  "title": "TapHound Project Context",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "packageName", "launchActivity", "manifest", "interactionPolicy"],
+  "properties": {
+    "version": { "const": 1 },
+    "packageName": {
+      "type": "string",
+      "pattern": "^(?:[A-Za-z_$][\\w$]*\\.)+[A-Za-z_$][\\w$]*$",
+      "description": "Fully qualified Android package name"
+    },
+    "launchActivity": {
+      "type": "string",
+      "pattern": "^(?:[A-Za-z_$][\\w$]*\\.)+[A-Za-z_$][\\w$]*$",
+      "description": "Fully qualified launch Activity class"
+    },
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "files"],
+      "properties": {
+        "version": { "const": 1 },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "sha256", "confidence"],
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Project-relative path. Must not start with /, contain a drive letter, or include .. segments. Backslashes are normalized to forward slashes.",
+                "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\.\\.)[A-Za-z0-9._/\\-]+$"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f\\d]{64}$",
+                "description": "SHA-256 hex digest of the file content"
+              },
+              "confidence": {
+                "enum": ["sourceConfirmed", "runtimeConfirmed", "inferred", "unknown"]
+              }
+            }
+          },
+          "minItems": 1
+        }
+      }
+    },
+    "interactionPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowedActions", "confirmationRequiredActions", "forbiddenActions"],
+      "properties": {
+        "allowedActions": {
+          "type": "array",
+          "items": {
+            "enum": ["click", "longClick", "inputText", "swipe", "scrollTo", "back", "wait"]
+          }
+        },
+        "confirmationRequiredActions": {
+          "type": "array",
+          "items": {
+            "enum": ["click", "longClick", "inputText", "swipe", "scrollTo", "back", "wait"]
+          },
+          "description": "Each action here must also appear in allowedActions."
+        },
+        "forbiddenActions": {
+          "type": "array",
+          "items": {
+            "enum": ["click", "longClick", "inputText", "swipe", "scrollTo", "back", "wait"]
+          },
+          "description": "No action may appear in both allowedActions and forbiddenActions."
+        }
+      }
+    }
+  }
+}

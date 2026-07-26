@@ -48,7 +48,8 @@ describe("TapHound documentation examples", () => {
       "verify",
       "project",
       "context",
-      "generation"
+      "generation",
+      "init"
     ]);
     expect(readme).toContain("# TapHound");
     expect(readme).toContain("TapHound for Android");
@@ -62,7 +63,8 @@ describe("TapHound documentation examples", () => {
     for (const workflow of [
       "project describe",
       "context validate",
-      "generation start"
+      "generation start",
+      "taphound init"
     ]) {
       expect(readme).toContain(workflow);
     }
@@ -124,7 +126,7 @@ describe("TapHound documentation examples", () => {
     expect(agent).toContain("Skill");
     expect(agent).toContain("Project Context");
     expect(agent).toContain("generation observe");
-    expect(agent).toContain("npm tarball");
+    expect(agent).toContain("taphound init");
     expect(agent).not.toContain("不在 v0.2");
   });
 
@@ -165,7 +167,8 @@ describe("TapHound documentation examples", () => {
       "verify",
       "project",
       "context",
-      "generation"
+      "generation",
+      "init"
     ]) {
       expect(testing).toContain(`\`${command}\``);
     }

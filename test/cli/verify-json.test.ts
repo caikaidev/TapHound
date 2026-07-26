@@ -41,6 +41,12 @@ function baseDependencies(exitCodes: number[]): CliDependencies {
     contextValidator: {
       validate: vi.fn(() => Promise.reject(new Error("unused")))
     },
+    init: {
+      install: vi.fn(() => Promise.reject(new Error("unused")))
+    },
+    initPrompt: {
+      selectAgents: vi.fn(() => Promise.reject(new Error("unused")))
+    },
     generationStarter: {
       start: vi.fn(() => Promise.reject(new Error("unused")))
     },

@@ -21,7 +21,8 @@ describe("createProgram", () => {
       "verify",
       "project",
       "context",
-      "generation"
+      "generation",
+      "init"
     ]);
     expect(
       createProgram().commands.find((command) => command.name() === "project")

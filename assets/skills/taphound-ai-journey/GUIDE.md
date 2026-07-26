@@ -100,17 +100,19 @@ installed. Resolve the environment issue first.
 
 ### 2.1 Load the Skill in Your AI Agent
 
-Load the `.factory/skills/taphound-ai-journey/` directory in your AI agent
-tool. The entry file is `SKILL.md`. The method depends on the tool:
+Run `taphound init` to install the Skill into each agent's expected directory,
+then load it in your AI agent tool. The entry file is `SKILL.md`. The method
+depends on the tool:
 
-- **Droid**: The Skill is already in `.factory/skills/` and auto-discovered.
+- **Droid**: The Skill is auto-discovered from `.factory/skills/` in the
+  TapHound repo. Run `taphound init --agent droid` in other projects.
   Invoke it with the Skill tool using `taphound-ai-journey`.
-- **Claude Code**: Add `@.factory/skills/taphound-ai-journey/SKILL.md` to
-  your `CLAUDE.md`.
-- **VS Code / Copilot**: Symlink to `.agents/skills/taphound-ai-journey/`
-  or add the directory to your workspace.
-- **Cursor**: Import the directory as a rules source.
-- **Other tools**: Have the agent read `SKILL.md` directly.
+- **Claude Code**: Run `taphound init --agent claude` to install to
+  `.claude/skills/`, then invoke with the Skill tool.
+- **Codex**: Run `taphound init --agent codex` to install to `.agents/skills/`.
+- **Cursor**: Run `taphound init --agent cursor` to install to `.cursor/skills/`.
+- **Other tools**: Run `taphound init --agent other` to install to
+  `.agents/skills/`, or have the agent read `SKILL.md` directly.
 
 ### 2.2 Have the AI Analyze Project Source
 

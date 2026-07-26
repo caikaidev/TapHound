@@ -58,6 +58,7 @@ git diff --exit-code -- assets/brand/png
 - `project describe`：输出稳定的 Android 项目事实。
 - `context validate` / `context status`：校验或检查 Project Context。
 - `generation start` / `observe` / `step` / `confirm` / `manual` / `finalize`：管理确定性 Journey 生成会话。
+- `init`：为 AI Agent 安装 TapHound AI Journey Skill。
 
 ## 配置
 
@@ -99,7 +100,7 @@ Recorder 不自动生成业务 `expect`。Activity、Element 或 Logcat 断言�
 
 ## Agent 驱动的 Journey 生成
 
-源码仓库提供 [`taphound-ai-journey` Skill](.factory/skills/taphound-ai-journey/SKILL.md)，指导 Droid、Claude Code、Copilot、Cursor 等 Agent：
+源码仓库提供 [`taphound-ai-journey` Skill](assets/skills/taphound-ai-journey/SKILL.md)，指导 Droid、Claude Code、Copilot、Cursor 等 Agent：
 
 1. 使用 `project describe` 和 Android 项目源码生成带证据哈希的 Project Context。
 2. 使用 `context validate` / `context status` 检查 Context 的有效性和时效性。
@@ -114,9 +115,39 @@ taphound generation start \
   --json
 ```
 
-设备在 `generation start` 时绑定，后续 `observe`、`step`、`confirm` 和 `manual` 命令通过 session 使用该绑定。完整流程见 Skill 的 [`GUIDE.md`](.factory/skills/taphound-ai-journey/GUIDE.md)。
+设备在 `generation start` 时绑定，后续 `observe`、`step`、`confirm` 和 `manual` 命令通过 session 使用该绑定。完整流程见 Skill 的 [`GUIDE.md`](assets/skills/taphound-ai-journey/GUIDE.md)。
 
-Skill 当前随源码仓库提供，但 `package.json` 的 npm 文件清单尚未包含 `.factory/skills/`，因此 npm tarball 不会自动安装该 Skill。
+### 为其他 AI Agent 安装 Skill
+
+`taphound init` 将 TapHound AI Journey Skill 复制到各 Agent 的 Skill 目录。交互式多选至少选择一个 Agent：
+
+```bash
+taphound init
+```
+
+非交互模式：
+
+```bash
+taphound init --agent claude,codex,cursor,droid
+```
+
+全局安装（用户级目录）：
+
+```bash
+taphound init --agent claude --global
+```
+
+支持的 Agent 及路径：
+
+| Agent | 项目级路径 | 用户级路径 |
+|---|---|---|
+| Claude Code | `.claude/skills/` | `~/.claude/skills/` |
+| Codex | `.agents/skills/` | `~/.agents/skills/` |
+| Cursor | `.cursor/skills/` | `~/.cursor/skills/` |
+| Droid | `.factory/skills/` | `~/.factory/skills/` |
+| Other | `.agents/skills/` | `~/.agents/skills/` |
+
+Skill 随 npm 包发布，`taphound init` 从包内复制到目标目录。
 
 ## 确定性验证
 
@@ -158,5 +189,5 @@ taphound verify --project . --journey journeys/search.json --json
 - Recorder 只为 Android CLI 返回了 bounds 的 scrollable 元素提供 swipe；Replay 不会为缺失 bounds 的元素猜测滑动区域。
 - 标注截图回退只适用于 click 与 longClick，且必须显式保存 `#编号`。
 - Replay、设备操作和断言完全确定性，不包含 AI 或视觉推理。
-- 源码仓库提供 Agent Skill，但尚无专用 SubAgent 封装，npm tarball 也不会自动安装 Skill。
+- 源码仓库提供 Agent Skill，也可通过 `taphound init` 为其他 Agent 安装，但尚无专用 SubAgent 封装。
 - 普通测试不要求真实设备；Replay 与 Generation 真机验收需要显式设置 `TAPHOUND_ACCEPTANCE_DEVICE=1` 并满足外部 Android/Gradle 前提。

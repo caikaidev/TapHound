@@ -6,7 +6,7 @@ import {
   readFile,
   rm
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { AdbAdapter } from "../adapters/adb/adb-adapter.js";
@@ -17,10 +17,12 @@ import { FileSystemGenerationMetaWriter } from "../adapters/filesystem/generatio
 import { FileSystemGenerationSessionStore } from "../adapters/filesystem/generation-session-store.js";
 import { FileSystemJourneyWriter } from "../adapters/filesystem/journey-writer.js";
 import { NodeProjectFileInspector } from "../adapters/filesystem/project-file-inspector.js";
+import { FileSystemSkillInstaller } from "../adapters/filesystem/skill-installer.js";
 import { GradleAdapter } from "../adapters/gradle/gradle-adapter.js";
 import { NodeProcessRunner } from "../adapters/process/node-process-runner.js";
 import { InquirerRecorderPrompt } from "../adapters/prompt/inquirer-recorder-prompt.js";
 import { InquirerGenerationPrompt } from "../adapters/prompt/inquirer-generation-prompt.js";
+import { InquirerInitPrompt } from "../adapters/prompt/inquirer-init-prompt.js";
 import { ContextValidator } from "../application/context/context-validator.js";
 import { DoctorService } from "../application/doctor/doctor-service.js";
 import type { DoctorReport } from "../application/doctor/doctor-service.js";
@@ -48,12 +50,15 @@ import {
   type RuntimeObservation,
   type RuntimeObserveInput
 } from "../application/generation/runtime-observer.js";
+import { InitService, type InitInput } from "../application/init/init-service.js";
 import { ProjectDescriber } from "../application/project/project-describer.js";
 import { RecorderService, type RecordInput, type RecordResult } from "../application/recorder/recorder-service.js";
 import { ReportWriter } from "../application/report/report-writer.js";
 import { VerifyRuntime, type VerifyInput, type VerifyResult } from "../application/runtime/verify-runtime.js";
 import type { TapHoundConfig } from "../domain/config.js";
+import type { InitResult } from "../domain/init.js";
 import type { GenerationSession } from "../domain/generation.js";
+import type { InitPromptPort } from "../ports/init-prompt.js";
 import type {
   GenerationSessionStore
 } from "../ports/generation-session-store.js";
@@ -105,6 +110,10 @@ export interface CliDependencies {
     projectRoot: string;
     config: TapHoundConfig;
   }) => GenerationCliRuntime;
+  init: {
+    install: (input: InitInput) => Promise<InitResult>;
+  };
+  initPrompt: Pick<InitPromptPort, "selectAgents">;
   readJson: (path: string) => Promise<unknown>;
   cwd: () => string;
   stdout: TextOutput;
@@ -203,6 +212,12 @@ export function createProductionDependencies(
     }),
     projectDescriber: new ProjectDescriber(androidCli),
     contextValidator,
+    init: new InitService({
+      installer: new FileSystemSkillInstaller(),
+      cwd: process.cwd(),
+      homedir: homedir()
+    }),
+    initPrompt: new InquirerInitPrompt(),
     generationStarter: {
       start: async (input): Promise<
         Awaited<ReturnType<GenerationStarter["start"]>>

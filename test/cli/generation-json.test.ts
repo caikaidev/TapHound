@@ -168,6 +168,17 @@ function harness(signal?: AbortSignal): Harness {
       }))
     },
     contextValidator: { validate: vi.fn() },
+    init: {
+      install: vi.fn(() => Promise.resolve({
+        status: "installed" as const,
+        exitCode: 0 as const,
+        agents: ["droid"],
+        paths: [".factory/skills/taphound-ai-journey"]
+      }))
+    },
+    initPrompt: {
+      selectAgents: vi.fn(() => Promise.resolve(["droid" as const]))
+    },
     generationStarter: { start: vi.fn() },
     runtimeObserver: { observe: vi.fn() },
     generationRuntime: vi.fn(() => ({

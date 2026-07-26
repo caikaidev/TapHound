@@ -28,7 +28,7 @@ etc.) to drive TapHound's deterministic generation protocol end-to-end.
 All file references in this document are relative to the Skill directory:
 
 ```
-.factory/skills/taphound-ai-journey/
+assets/skills/taphound-ai-journey/
 ├── SKILL.md                              # This file (entry point)
 ├── GUIDE.md                              # Detailed step-by-step usage guide
 ├── prompts/
@@ -44,24 +44,34 @@ All file references in this document are relative to the Skill directory:
 ```
 
 When this document says "Read `prompts/analyze-project.md`", the full path is
-`.factory/skills/taphound-ai-journey/prompts/analyze-project.md` (relative
-to the repository root that contains the `.factory/` directory).
+`assets/skills/taphound-ai-journey/prompts/analyze-project.md` (relative
+to the repository root that contains the `assets/` directory).
 
 ## How to Use This Skill
 
-This Skill lives at `.factory/skills/taphound-ai-journey/` (Droid's default
-skill directory). Some agents use `.agents/skills/` instead — symlink or
-copy the directory there if needed.
+This Skill ships with the TapHound npm package at `assets/skills/taphound-ai-journey/`.
+Run `taphound init` to copy it into each agent's expected skill directory:
 
-- **Droid**: Auto-discovered from `.factory/skills/`. Invoke with the Skill
-  tool when the user wants to generate or verify an Android journey.
-- **Claude Code**: Add `@.factory/skills/taphound-ai-journey/SKILL.md` to
-  your `CLAUDE.md`, or load it directly in the session.
-- **VS Code / Copilot**: Symlink to `.agents/skills/taphound-ai-journey/`
-  or add the directory to your workspace.
-- **Cursor / other tools**: Import this directory as a rules or instructions
-  source. The agent needs to: read files, execute shell commands, and
-  generate JSON matching the provided schemas.
+```bash
+taphound init --agent droid,claude,codex,cursor
+```
+
+For global (user-level) installation:
+
+```bash
+taphound init --agent droid --global
+```
+
+In the TapHound source repository, `.factory/skills/taphound-ai-journey` is a
+symlink to `assets/skills/taphound-ai-journey` so Droid auto-discovers it.
+
+- **Droid**: Auto-discovered from `.factory/skills/` (or run `taphound init --agent droid`).
+  Invoke with the Skill tool when the user wants to generate or verify an Android journey.
+- **Claude Code**: Run `taphound init --agent claude` to install to `.claude/skills/`,
+  then invoke with the Skill tool.
+- **Codex**: Run `taphound init --agent codex` to install to `.agents/skills/`.
+- **Cursor**: Run `taphound init --agent cursor` to install to `.cursor/skills/`.
+- **Other agents**: Run `taphound init --agent other` to install to `.agents/skills/`.
 
 The agent does NOT need to understand TapHound's internal TypeScript code.
 It only needs to read these instructions, the schema files, and the prompt

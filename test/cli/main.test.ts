@@ -27,6 +27,12 @@ function dependencies(exitCodes: number[]): CliDependencies {
     contextValidator: {
       validate: () => Promise.reject(new Error("unused"))
     },
+    init: {
+      install: () => Promise.reject(new Error("unused"))
+    },
+    initPrompt: {
+      selectAgents: () => Promise.reject(new Error("unused"))
+    },
     generationStarter: {
       start: () => Promise.reject(new Error("unused"))
     },

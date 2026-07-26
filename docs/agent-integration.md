@@ -59,7 +59,7 @@ child.on("close", code => {
 
 ## 生成新 Journey
 
-生成流程使用仓库内的 [`taphound-ai-journey` Skill](../.factory/skills/taphound-ai-journey/SKILL.md)：
+生成流程使用仓库内的 [`taphound-ai-journey` Skill](../assets/skills/taphound-ai-journey/SKILL.md)：
 
 1. `project describe --json` 输出稳定的 Package、Activity、Variant 与 APK 信息。
 2. Agent 分析 Android 项目源码，生成带文件哈希证据的 Project Context。
@@ -83,9 +83,33 @@ taphound generation start \
 
 设备在 `generation start` 时绑定。`generation observe`、`step`、`confirm` 和 `manual` 通过 `--session` 使用该绑定，不接受 `--device`；`generation finalize` 可以显式提供 `--device`，但不得改变会话身份绑定。
 
-Generation 的 `--json` 命令同样只向 stdout 写入一个机器可读 JSON 值，并用 `exitCode` 表示结果。Agent 必须保留 `generationId`、`baseRevision`、`snapshotHash` 和完整 snapshot，不能自行伪造或重用过期绑定。完整协议、重试规则与 Context 更新策略见 Skill 的 [`GUIDE.md`](../.factory/skills/taphound-ai-journey/GUIDE.md)。
+Generation 的 `--json` 命令同样只向 stdout 写入一个机器可读 JSON 值，并用 `exitCode` 表示结果。Agent 必须保留 `generationId`、`baseRevision`、`snapshotHash` 和完整 snapshot，不能自行伪造或重用过期绑定。完整协议、重试规则与 Context 更新策略见 Skill 的 [`GUIDE.md`](../assets/skills/taphound-ai-journey/GUIDE.md)。
 
-Skill 当前位于源码仓库的 `.factory/skills/taphound-ai-journey/`。当前 `package.json` 的 npm 文件清单不包含 `.factory/skills/`，因此 npm tarball 不会自动安装该 Skill；其他 Agent 可按 Skill 中的说明复制、链接或直接加载该目录。
+## 为 AI Agent 安装 Skill
+
+`taphound init` 将 TapHound AI Journey Skill 从 npm 包复制到各 Agent 的 Skill 目录。交互式多选至少选择一个 Agent，也可以用 `--agent` 非交互指定：
+
+```bash
+taphound init --agent claude,codex,cursor,droid --json
+```
+
+全局安装（用户级目录）：
+
+```bash
+taphound init --agent claude --global
+```
+
+支持的 Agent 及路径：
+
+| Agent | 项目级路径 | 用户级路径 |
+|---|---|---|
+| Claude Code | `.claude/skills/` | `~/.claude/skills/` |
+| Codex | `.agents/skills/` | `~/.agents/skills/` |
+| Cursor | `.cursor/skills/` | `~/.cursor/skills/` |
+| Droid | `.factory/skills/` | `~/.factory/skills/` |
+| Other | `.agents/skills/` | `~/.agents/skills/` |
+
+Skill 随 npm 包发布（`assets/skills/`），`taphound init` 从包内复制到目标目录。重新运行 `init` 会覆盖已有 Skill 文件。
 
 ## 给 Claude Code 的最小指令
 

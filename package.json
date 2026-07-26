@@ -29,7 +29,8 @@
   },
   "files": [
     "dist",
-    "assets/brand/taphound-mark.svg"
+    "assets/brand/taphound-mark.svg",
+    "assets/skills"
   ],
   "engines": {
     "node": ">=22"

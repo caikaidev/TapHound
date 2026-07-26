@@ -45,7 +45,7 @@ git diff --exit-code -- assets/brand/png
 node dist/cli/main.js --help
 ```
 
-首行应为 `Usage: taphound`，并列出 `doctor`、`record`、`verify`、`project`、`context` 和 `generation`。
+首行应为 `Usage: taphound`，并列出 `doctor`、`record`、`verify`、`project`、`context`、`generation` 和 `init`。
 
 ## 3. 测试 npm tarball
 

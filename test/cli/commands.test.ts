@@ -96,6 +96,17 @@ function dependencies(): {
       contextValidator: {
         validate: vi.fn(() => Promise.resolve({ status: "valid" as const }))
       },
+      init: {
+        install: vi.fn(() => Promise.resolve({
+          status: "installed" as const,
+          exitCode: 0 as const,
+          agents: ["droid"],
+          paths: [".factory/skills/taphound-ai-journey"]
+        }))
+      },
+      initPrompt: {
+        selectAgents: vi.fn(() => Promise.resolve(["droid" as const]))
+      },
       generationStarter: {
         start: vi.fn(() => Promise.resolve({
           version: 1 as const,

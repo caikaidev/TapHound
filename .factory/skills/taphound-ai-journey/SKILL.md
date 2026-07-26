@@ -286,7 +286,10 @@ templates, then call the TapHound CLI.
 - `packageName` comes from `applicationId` in `build.gradle(.kts)`, NOT
   from the `package` attribute in `AndroidManifest.xml` (deprecated in
   AGP 7+). `namespace` is for R class generation and may differ from
-  `applicationId`.
+  `applicationId`. If `applicationId` is a variable reference (e.g.,
+  `gradle.ext.buildApplicationId`), trace it through `gradle.properties`
+  and any `.gradle` config files to find the actual string value. Include
+  all files in the resolution chain in `manifest.files`.
 - The `resourceId` in locators is the bare name without the `id/` prefix
   (e.g., `open_search`, not `id/open_search`).
 - The same `@+id/submit` can appear in multiple layout XML files — this is
@@ -298,9 +301,24 @@ templates, then call the TapHound CLI.
   currently focused element.
 - `confirmationRequired` steps must be approved by a human in a TTY
   terminal. The agent must NOT auto-approve.
+- `confirmationRequiredActions` in the interaction policy is
+  per-action-TYPE, not per-element. Listing `click` means EVERY click in
+  the app requires human approval during generation. Leave empty unless
+  ALL instances of that action are genuinely dangerous. The Core risk
+  evaluator handles per-step risk assessment at runtime.
 - If `context status` returns `"stale"`, the Context must be regenerated
   before starting a new generation session. A stale Context will cause
   `generation start` to fail with `CONTEXT_STALE`.
 - `finalize` performs a full replay from scratch (forceStop, rebuild,
   relaunch). It is not incremental. Do not call it until all steps are
   complete.
+- **Context completeness is critical**: the Context must include ALL
+  Activity source files and their layouts across ALL modules. If the AI
+  only scans a few files, the Context is useless for staleness detection
+  and the AI will not know about screens it missed. Use shell commands
+  (`find . -name AndroidManifest.xml -not -path "*/build/*"`) to
+  systematically discover all modules and Activities.
+- `settings.gradle` may use custom functions like `includeModule()` that
+  dynamically include modules. Parsing `include` statements alone will
+  miss these. Use `./gradlew projects` or `find . -name "build.gradle"
+  -not -path "*/build/*"` as a filesystem fallback.

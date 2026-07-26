@@ -60,7 +60,20 @@ parse `settings.gradle` or `settings.gradle.kts` at the project root:
    ```
    If overridden, use the specified directory. Otherwise, derive the
    directory from the path (drop `:`, replace remaining `:` with `/`).
-3. If no `settings.gradle` exists, treat the project as single-module
+3. **Watch for custom functions**: Some projects use helper functions
+   like `includeModule()` that dynamically include modules. If you see
+   function calls in `settings.gradle` that are not standard Gradle,
+   you MUST use the filesystem fallback below — parsing `include`
+   statements alone will miss modules.
+4. **Filesystem fallback** (use when `settings.gradle` has custom
+   functions or `./gradlew projects` is unavailable):
+   ```bash
+   find . -name "build.gradle" -o -name "build.gradle.kts" \
+     | grep -v '/build/' | sort
+   ```
+   Each result is a module directory. This catches all modules
+   regardless of how they are included in `settings.gradle`.
+5. If no `settings.gradle` exists, treat the project as single-module
    with the root directory as the only module.
 
 ### 1c. Identify the app module
@@ -134,6 +147,41 @@ order:
 > `applicationId` suffixes (e.g., `.debug`, `.staging`), use the base
 > `applicationId` without the suffix. TapHound verifies against the
 > installed package at runtime.
+
+### 2a. Dynamic applicationId resolution
+
+Some projects do not set `applicationId` to a string literal. Instead,
+they reference a Gradle ext property or a function call:
+
+```groovy
+// app/build.gradle
+applicationId gradle.ext.buildApplicationId
+```
+
+When you encounter a non-literal `applicationId`, trace the resolution
+chain to find the actual string value:
+
+1. Search for the variable definition in `gradle.properties`:
+   ```bash
+   grep -rn "buildApplicationId" gradle.properties
+   # Example: buildApplicationId=com.sample.tchat
+   ```
+2. If not in `gradle.properties`, search all `.gradle` files under
+   `gradle/` for the assignment:
+   ```bash
+   grep -rn "buildApplicationId" gradle/ --include="*.gradle"
+   ```
+3. If the variable is set via a function call (e.g.,
+   `gradle.ext.buildApplicationId = getApplicationId()`), find the
+   function definition and trace its return value.
+4. **Include ALL files in the resolution chain** in `manifest.files`:
+   - `gradle.properties` (if it defines the value)
+   - Any `.gradle` file that contains the variable assignment or function
+     definition (e.g., `gradle/prebuild.gradle`)
+   - `app/build.gradle` (where `applicationId` is referenced)
+
+   These files are part of the package name provenance and must be
+   tracked for staleness detection.
 
 ## Step 3: Identify Launch Activity
 
@@ -244,7 +292,88 @@ Each module has either `build.gradle.kts` (Kotlin DSL) or `build.gradle`
   tags (if Logcat calls are stripped in release builds, note this — it
   affects expectation feasibility).
 
-## Step 5: Compute SHA-256 Hashes
+## Step 5: Verify Completeness
+
+Before generating the Context JSON, verify that you have found ALL
+relevant files. Incomplete coverage makes the Context useless for
+staleness detection and leads to missing interaction policies.
+
+### 5a. Activity completeness
+
+Enumerate every `<activity>` declaration across ALL module manifests
+(not just the `app` module). Use shell commands to ensure nothing is
+missed:
+
+```bash
+# Find all manifest files (excluding build artifacts)
+find . -name "AndroidManifest.xml" -not -path "*/build/*"
+
+# Extract all activity names from all manifests
+find . -name "AndroidManifest.xml" -not -path "*/build/*" \
+  -exec grep '<activity' {} + | sed 's/.*android:name="//' | sed 's/".*//'
+```
+
+For each Activity name found:
+- If it starts with `.`, prepend the module's namespace to get the
+  fully qualified class name.
+- Find the corresponding source file (`.kt` or `.java`) on disk.
+- If the source file cannot be found (e.g., generated class, or class
+  from a third-party dependency), skip it but note it.
+
+**You MUST include every Activity source file you find.** Missing
+Activities means the Context cannot detect when those screens change,
+and the AI agent will not know about their UI elements or Logcat tags.
+
+### 5b. Layout completeness
+
+For each Activity you found, identify its layout via
+`setContentView(R.layout.<name>)` in the source. Then find the
+corresponding layout XML:
+
+```bash
+# Find all layout XML files across all modules (excluding build artifacts)
+find . -path "*/res/layout/*.xml" -not -path "*/build/*"
+```
+
+Include each layout file that is directly referenced by an Activity
+you found. Also include layouts referenced via `<include>` from those
+layouts (resolve transitively).
+
+You may EXCLUDE:
+- Layout files not referenced by any Activity (e.g., item layouts for
+  RecyclerView adapters, preference layouts) unless they contain
+  interactive elements the test Goal might touch.
+- Debug-only or developer-tool layouts.
+
+### 5c. Large project strategy
+
+For projects with many modules (10+ Activities, 50+ layouts), use
+systematic shell-based discovery rather than reading files one by one:
+
+```bash
+# Count activities per module
+find . -name "AndroidManifest.xml" -not -path "*/build/*" \
+  -exec grep -c '<activity' {} +
+
+# Count source files with Activity classes
+find . \( -name "*.kt" -o -name "*.java" \) -not -path "*/build/*" \
+  -exec grep -l "extends.*Activity\|:.*Activity(" {} +
+
+# Count layout files
+find . -path "*/res/layout/*.xml" -not -path "*/build/*" | wc -l
+```
+
+If the project has hundreds of Activities/layouts, focus on:
+- All Activities in the `app` module (these are the entry points).
+- Activities in feature modules that a normal user flow can reach
+  (navigated to from app module Activities via `startActivity`).
+- Exclude internal/debug Activities (database repair, process utilities,
+  install helpers) unless the Goal specifically targets them.
+
+But DO NOT skip entire modules — if a feature module has Activities
+reachable from the app's user flow, include them.
+
+## Step 6: Compute SHA-256 Hashes
 
 For every file you include in the Context manifest, compute its SHA-256
 using this shell command (NEVER guess a hash):
@@ -282,14 +411,21 @@ Produce a JSON object with:
     or themes unless they contain UI logic.
   - Set `confidence` to `"sourceConfirmed"` for files you directly read.
 - `interactionPolicy`:
-  - `allowedActions`: list actions the UI actually supports across all
-    screens. A Button supports `click`/`longClick`. An EditText supports
-    `inputText`. A scrollable container (ScrollView, RecyclerView)
-    supports `swipe`/`scrollTo`. System navigation supports `back`. Any
-    screen supports `wait`.
-  - `confirmationRequiredActions`: actions that modify server-side or
-    irreversible state (submit, send, delete, logout). If you cannot
-    determine this from source alone, leave empty.
+  - `allowedActions`: list ONLY actions the UI actually supports, derived
+    from source evidence. A Button supports `click`/`longClick`. An
+    EditText supports `inputText`. A scrollable container (ScrollView,
+    RecyclerView) supports `swipe`/`scrollTo`. System navigation supports
+    `back`. Any screen supports `wait`. Do NOT list all actions blindly
+    — if you found no `longClick` handlers in source, do not include
+    `longClick`.
+  - `confirmationRequiredActions`: **WARNING — this is per-action-TYPE,
+    not per-element.** Listing `click` here means EVERY click in the
+    entire app will require human TTY approval during generation, making
+    the process extremely tedious. Only list an action here if ALL
+    instances of that action in the app are potentially dangerous (e.g.,
+    an app where every click triggers a payment). In most apps, leave
+    this EMPTY — the Core risk evaluator handles per-step risk
+    assessment at runtime and will flag dangerous actions automatically.
   - `forbiddenActions`: actions that are dangerous by default (payment,
     account deletion, password changes, installing APKs, third-party app
     navigation). If none apply, leave empty.
@@ -303,12 +439,24 @@ Produce a JSON object with:
 - Paths in `manifest.files` are relative to the Android project root,
   use forward slashes, and must not start with `/` or contain `..`.
 - The `packageName` in the Context must exactly match the Android
-  `applicationId` (or legacy `package` attribute).
+  `applicationId` (or legacy `package` attribute). For dynamic
+  `applicationId` references, trace the full resolution chain and include
+  all files in that chain.
 - The `launchActivity` must exactly match the class in the manifest.
 - For multi-module projects, include files from all modules that
-  contribute to the UI — not just the `app` module.
+  contribute to the UI — not just the `app` module. Use `./gradlew
+  projects` or the filesystem fallback to discover ALL modules.
+- **Completeness is mandatory**: enumerate ALL `<activity>` entries from
+  ALL module manifests and include each Activity's source file. Missing
+  Activities means the Context cannot detect source changes and the AI
+  agent will not know about those screens.
 - For layouts using `<include>`, `<merge>`, or `<layout>`, resolve
   transitively to understand the full element set, but only hash the
   actual XML files you read.
 - Do not include build artifacts, generated code, or non-UI files in
   `manifest.files`.
+- `confirmationRequiredActions` is per-action-TYPE. Listing `click`
+  makes EVERY click require human approval. Leave empty unless ALL
+  instances of that action are dangerous.
+- `allowedActions` must be derived from source evidence, not blanket
+  inclusion. If no source evidence supports an action, do not list it.

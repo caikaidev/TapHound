@@ -49,6 +49,7 @@ TapHound Journey 是独立、自研、严格校验的 JSON 协议。默认配置
 - `longClick`：需要 `locator`，可设置正整数 `durationMs`，默认 800。
 - `inputText`：需要非空 `text`，输入到当前焦点。
 - `swipe`：需要 `locator`、`direction`；`distancePercent` 取 `(0, 1]`，默认 0.6；`durationMs` 默认 300。Recorder 只展示 Android CLI 标记为 scrollable 且提供 bounds 的元素；手写 Journey 若只定位到没有 bounds 的元素，会以 `ACTION_FAILED` 终止，不会猜测滑动区域。
+- `scrollTo`：需要目标 `locator`、滚动容器 `container` 和 `direction`；`maxSwipes` 为 1 到 30，默认 20；`distancePercent` 与 `durationMs` 默认分别为 0.6 和 300。Replay 在每次滑动前后确定性解析目标，目标唯一出现后停止，不点击目标；超过上限返回 `SCROLL_TARGET_NOT_FOUND`。容器必须唯一且提供 bounds，不支持标注回退。
 - `back`：执行 ADB BACK keyevent。
 - `wait`：只执行 Layout 稳定检测，不使用固定 sleep。
 
@@ -67,6 +68,24 @@ TapHound Journey 是独立、自研、严格校验的 JSON 协议。默认配置
   }
 }
 ```
+
+`scrollTo` 示例：
+
+```json
+{
+  "action": "scrollTo",
+  "locator": { "text": "Privacy" },
+  "container": { "resourceId": "settings_list" },
+  "direction": "up",
+  "maxSwipes": 12,
+  "activity": {
+    "before": "com.example.app.SettingsActivity",
+    "after": "com.example.app.SettingsActivity"
+  }
+}
+```
+
+完整示例见 [`examples/scroll-to.journey.json`](../examples/scroll-to.journey.json)。
 
 ## 显式标注回退
 

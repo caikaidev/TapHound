@@ -45,7 +45,7 @@ git diff --exit-code -- assets/brand/png
 node dist/cli/main.js --help
 ```
 
-首行应为 `Usage: taphound`，并列出 `doctor`、`record` 和 `verify`。
+首行应为 `Usage: taphound`，并列出 `doctor`、`record`、`verify`、`project`、`context` 和 `generation`。
 
 ## 3. 测试 npm tarball
 
@@ -101,18 +101,26 @@ node dist/cli/main.js doctor \
 TAPHOUND_ACCEPTANCE_DEVICE=1 npm run acceptance:device
 ```
 
+该命令验证已有 Journey 的完整 Replay。生成协议另有独立的真机验收入口，它会创建 Project Context，执行 `generation start → observe → step → finalize`，并要求最终状态为 `verified`：
+
+```bash
+TAPHOUND_ACCEPTANCE_DEVICE=1 npm run acceptance:generation
+```
+
+两个入口均为显式 opt-in，普通测试通过不能作为真机 Replay 或 Generation 验收通过的证据。运行前必须先完成 `npm run build`。
+
 存在多个设备时直接指定 serial：
 
 ```bash
 node dist/cli/main.js verify \
   --project examples/taphound-android-demo \
-  --config examples/taphound-android-demo/taphound.config.json \
-  --journey examples/taphound-android-demo/journeys/search.json \
+  --config taphound.config.json \
+  --journey journeys/search.json \
   --device emulator-5554 \
   --json
 ```
 
-将 `emulator-5554` 替换为 `adb devices -l` 返回的目标 serial。报告写入 `examples/taphound-android-demo/.taphound/runs/`，包含 `report.json`、`summary.txt`、截图和日志。
+将 `emulator-5554` 替换为 `adb devices -l` 返回的目标 serial。报告写入 `examples/taphound-android-demo/.taphound/runs/`，固定包含 `report.json` 和 `summary.txt`；截图、完整 Logcat 和步骤日志按运行阶段与采集结果提供，采集失败会记录为 secondary error。
 
 TapHound 使用仓库内自研的 JSON Journey；不要将其替换为 Android CLI 的 XML Journey。
 

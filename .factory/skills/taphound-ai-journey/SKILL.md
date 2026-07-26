@@ -92,7 +92,7 @@ templates, then call the TapHound CLI.
 1. Verify `taphound` command is available. If not, run `npm run build &&
    npm link` in the TapHound repo.
 2. Run `adb devices -l`. Confirm at least one device is online.
-3. Run:
+3. Run (append `--device <serial>` when the `device` input was supplied):
    ```bash
    taphound doctor --project <project> --json
    ```
@@ -106,7 +106,7 @@ templates, then call the TapHound CLI.
    ```bash
    taphound context status \
      --project <project> \
-     --context <project>/.taphound/context/project-context.json \
+     --context .taphound/context/project-context.json \
      --json
    ```
    - `"valid"`: Hashes match. Do a quick structural check (Step 5) to
@@ -158,12 +158,12 @@ templates, then call the TapHound CLI.
    ```bash
    taphound context validate \
      --project <project> \
-     --context <project>/.taphound/context/project-context.json \
+     --context .taphound/context/project-context.json \
      --json
    ```
 6. If validation fails, read the error message, fix the JSON, and retry.
    Common failures:
-   - Package name mismatch between manifest and Context.
+   - Package name mismatch between `taphound.config.json` and Context.
    - Stale or incorrect SHA-256 hash.
    - Path containing `..` or starting with `/`.
    - File listed in manifest but not found on disk.
@@ -180,12 +180,14 @@ templates, then call the TapHound CLI.
    taphound generation start \
      --project <project> \
      --config <config> \
-     --context <project>/.taphound/context/project-context.json \
+     --context .taphound/context/project-context.json \
      --device <serial> \
      --json
    ```
    Capture `generationId` from the result. The `config` path is relative to
-   the project root.
+   the project root. The selected device is bound to this session; subsequent
+   `observe`, `step`, `confirm`, and `manual` commands use the session binding
+   and do not accept `--device`.
 
 2. Initialize a `completedSteps` list (empty at start).
 
@@ -196,7 +198,6 @@ templates, then call the TapHound CLI.
       taphound generation observe \
         --project <project> \
         --session <generationId> \
-        --device <serial> \
         --json
       ```
       Parse the result. Capture:
@@ -271,7 +272,7 @@ templates, then call the TapHound CLI.
    taphound generation finalize \
      --project <project> \
      --session <generationId> \
-     --context <project>/.taphound/context/project-context.json \
+     --context .taphound/context/project-context.json \
      --output <output> \
      --device <serial> \
      --json

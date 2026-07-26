@@ -75,7 +75,7 @@ adb devices -l
 
 You should see exactly one device in `device` state. If multiple devices
 are connected, note the serial (e.g., `emulator-5554`) and use
-`--device <serial>` in subsequent commands.
+`--device <serial>` on commands that expose that option.
 
 ### 1.4 Environment Diagnostics
 
@@ -243,7 +243,9 @@ taphound generation start \
 }
 ```
 
-**Note the `generationId`** — all subsequent commands use it.
+**Note the `generationId`** — all subsequent commands use it. The selected
+device is bound to the session. Session operations such as `observe`, `step`,
+`confirm`, and `manual` use that binding and do not accept `--device`.
 
 **Failure troubleshooting**:
 
@@ -260,7 +262,6 @@ taphound generation start \
 taphound generation observe \
   --project /path/to/android-project \
   --session <generationId> \
-  --device emulator-5554 \
   --json
 ```
 
@@ -295,7 +296,8 @@ taphound generation observe \
 array describing all UI elements on the current screen).
 
 > Ensure the app is launched and on the expected initial screen. If the
-> foreground is not the target app, observe will return `SNAPSHOT_STALE`.
+> foreground is not the target app, `observe` records that state, and the
+> next proposed step is rejected with `PACKAGE_ESCAPE`.
 
 ### 3.4 Step 3 — AI Generates Next Proposed Step
 
@@ -554,7 +556,7 @@ Using `examples/taphound-android-demo` as the project, with the Goal
 # Validate
 taphound context validate \
   --project examples/taphound-android-demo \
-  --context examples/taphound-android-demo/.taphound/context/project-context.json \
+  --context .taphound/context/project-context.json \
   --json
 ```
 

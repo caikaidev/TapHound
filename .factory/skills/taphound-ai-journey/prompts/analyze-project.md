@@ -512,7 +512,7 @@ regeneration.
    ```bash
    taphound context validate \
      --project <project> \
-     --context <project>/.taphound/context/project-context.json \
+     --context .taphound/context/project-context.json \
      --json
    ```
 

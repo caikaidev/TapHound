@@ -59,9 +59,17 @@ describe("TapHound documentation examples", () => {
     for (const command of ["doctor", "record", "verify"]) {
       expect(readme).toContain(`taphound ${command}`);
     }
+    for (const workflow of [
+      "project describe",
+      "context validate",
+      "generation start"
+    ]) {
+      expect(readme).toContain(workflow);
+    }
     expect(readme).toContain("Node.js 22");
     expect(readme).toContain("macOS");
-    expect(readme).toContain("v0.2");
+    expect(readme).toContain("当前限制");
+    expect(readme).toContain("scrollTo");
   });
 
   it("documents Journey checkpoints, Actions, Expects, and explicit fallback", async () => {
@@ -72,6 +80,7 @@ describe("TapHound documentation examples", () => {
       "longClick",
       "inputText",
       "swipe",
+      "scrollTo",
       "back",
       "wait"
     ]) {
@@ -113,8 +122,10 @@ describe("TapHound documentation examples", () => {
     expect(agent).toContain("stderr");
     expect(agent).toContain("exitCode");
     expect(agent).toContain("Skill");
-    expect(agent).toContain("SubAgent");
-    expect(agent).toContain("不在 v0.2");
+    expect(agent).toContain("Project Context");
+    expect(agent).toContain("generation observe");
+    expect(agent).toContain("npm tarball");
+    expect(agent).not.toContain("不在 v0.2");
   });
 
   it("brands active schema documentation as TapHound", async () => {
@@ -145,8 +156,19 @@ describe("TapHound documentation examples", () => {
     expect(readme).toContain("TODO.md");
     expect(testing).toContain("npm test");
     expect(testing).toContain("npm run acceptance:device");
+    expect(testing).toContain("npm run acceptance:generation");
     expect(testing).toContain("taphound-0.2.0-dev.1.tgz");
     expect(testing).toContain("examples/taphound-android-demo");
+    for (const command of [
+      "doctor",
+      "record",
+      "verify",
+      "project",
+      "context",
+      "generation"
+    ]) {
+      expect(testing).toContain(`\`${command}\``);
+    }
     expect(todo).toContain("换机后");
     expect(todo).toContain("npm `dev` 预发布");
   });

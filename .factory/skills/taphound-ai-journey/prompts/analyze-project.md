@@ -1,8 +1,15 @@
 # Analyze Android Project for TapHound Context
 
-You are generating a TapHound Project Context JSON file for an Android project.
-Read the project source code and produce a Context that matches
-`schemas/project-context.json`.
+You are generating or updating a TapHound Project Context JSON file for
+an Android project. Read the project source code and produce a Context
+that matches `schemas/project-context.json`.
+
+There are two modes:
+- **Full generation** (no existing Context, or `context status` returns
+  `"invalid"`): Follow all steps below from scratch.
+- **Incremental update** (existing Context, `context status` returns
+  `"stale"`, structural counts match): Skip to the Incremental Update
+  section at the bottom. Only re-analyze changed files.
 
 ## Step 1: Discover Project Modules
 
@@ -460,3 +467,60 @@ Produce a JSON object with:
   instances of that action are dangerous.
 - `allowedActions` must be derived from source evidence, not blanket
   inclusion. If no source evidence supports an action, do not list it.
+
+## Incremental Update Mode
+
+When an existing Context is `stale` (file hashes changed) but the
+structural counts match (same number of Activities and layouts on disk
+as in the Context), you can do a targeted update instead of full
+regeneration.
+
+### Procedure
+
+1. **Identify changed files**: Compare current file hashes with the
+   Context's `manifest.files` entries. The `context status` command
+   reports which files are stale.
+
+2. **Re-hash changed files**: Recompute SHA-256 for each stale file:
+   ```bash
+   node -e "const c=require('node:crypto');const f=require('node:fs');process.stdout.write(c.createHash('sha256').update(f.readFileSync('<relative-path>')).digest('hex'))"
+   ```
+
+3. **Re-analyze changed Activity source files**: For each stale `.kt` or
+   `.java` file, re-read it and check for:
+   - New `Log.i(tag, ...)` / `Log.d(tag, ...)` calls (new expect
+     candidates)
+   - New `setOnClickListener` / `setOnCheckedChangeListener` (new
+     actionable elements)
+   - New `startActivity(Intent(...))` (new navigation targets)
+   - Removed elements (locators/expectations that no longer apply)
+   Update `interactionPolicy.allowedActions` if new action types appeared.
+
+4. **Re-analyze changed layout XML files**: For each stale layout, re-read
+   it and check for:
+   - New `android:id="@+id/<name>"` elements (new locator candidates)
+   - Removed elements
+   - Changed `android:text` or `android:contentDescription`
+   - New `<include>` / `<merge>` / `<ViewStub>` references
+   Resolve any new `<include>` references transitively.
+
+5. **Update the Context JSON**: Replace the stale hashes with new ones.
+   Update `interactionPolicy` if needed. Do NOT change `packageName` or
+   `launchActivity` unless they actually changed.
+
+6. **Validate**:
+   ```bash
+   taphound context validate \
+     --project <project> \
+     --context <project>/.taphound/context/project-context.json \
+     --json
+   ```
+
+### When NOT to use incremental update
+
+Switch to full regeneration (Steps 1-7 above) if:
+- The structural count check reveals new files on disk not in the Context.
+- An Activity or layout was deleted (file in Context but not on disk).
+- A new module was added (check `settings.gradle` or run `./gradlew
+  projects`).
+- The `packageName` or `launchActivity` changed.

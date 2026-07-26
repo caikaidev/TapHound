@@ -100,6 +100,38 @@ templates, then call the TapHound CLI.
    If `device` was supplied, use it; otherwise use the doctor's selection.
    If doctor fails, stop and report the failure.
 
+4. **Context currency check**: If a Project Context already exists at
+   `<project>/.taphound/context/project-context.json`, verify it is
+   still valid before reusing it:
+   ```bash
+   taphound context status \
+     --project <project> \
+     --context <project>/.taphound/context/project-context.json \
+     --json
+   ```
+   - `"valid"`: Hashes match. Do a quick structural check (Step 5) to
+     detect new files not in the manifest.
+   - `"stale"`: Tracked files changed. Needs incremental update or full
+     regeneration (see GUIDE.md Section 5).
+   - `"invalid"`: Needs full regeneration.
+   - If the file does not exist, proceed to Phase 1 (full generation).
+
+5. **Structural completeness check** (when status is `"valid"`):
+   `context status` only checks hashes of files already listed — it
+   cannot detect NEW files. Run a quick count comparison:
+   ```bash
+   # Count Activity source files on disk
+   find <project> \( -name "*.kt" -o -name "*.java" \) \
+     -not -path "*/build/*" \
+     -exec grep -l "extends.*Activity\|:.*Activity(" {} + | wc -l
+   ```
+   Compare with the number of Activity source files in the Context's
+   `manifest.files`. If the on-disk count is higher, new Activities were
+   added — proceed to Phase 1 for full regeneration.
+
+   If both status and structural check pass, skip Phase 1 and go directly
+   to Phase 2.
+
 ## Phase 1: Project Context Generation
 
 > Read `prompts/analyze-project.md` before starting — it contains detailed
@@ -322,3 +354,12 @@ templates, then call the TapHound CLI.
   dynamically include modules. Parsing `include` statements alone will
   miss these. Use `./gradlew projects` or `find . -name "build.gradle"
   -not -path "*/build/*"` as a filesystem fallback.
+- `context status` only detects content changes to files already listed
+  in the Context. It does NOT detect new files added to the project (new
+  Activities, new layouts, new modules). Always run a structural count
+  comparison before reusing a Context.
+- During generation, if `observe` returns unexpected elements or
+  Activities not known from the Context, the Context may be stale. Note
+  the discrepancy, adapt to the live state, and recommend a Context
+  update after the session. Do NOT abort unless the error is
+  unrecoverable.

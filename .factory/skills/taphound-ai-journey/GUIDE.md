@@ -613,11 +613,18 @@ TAPHOUND_ACCEPTANCE_DEVICE=1 npm run acceptance:generation
 
 ## 5. Updating Project Context
 
-When the Android project source changes significantly (added/removed/modified
-UI elements, Activities, package name, etc.), the Project Context needs
-regeneration.
+Android projects evolve continuously: buttons are added, layouts are
+restructured, Activities come and go. The Context needs to track these
+changes to remain useful for staleness detection and interaction policy.
 
-### 5.1 Check If Update is Needed
+There are three levels of update, from lightest to heaviest:
+
+### 5.1 Pre-Session Check (Before Every Test Run)
+
+Run this before each generation session to decide which update level is
+needed.
+
+**Step 1: Hash staleness check**
 
 ```bash
 taphound context status \
@@ -626,49 +633,144 @@ taphound context status \
   --json
 ```
 
-- `"valid"`: Context is still valid, no update needed
-- `"stale"`: Files listed in the manifest have changed (hash mismatch),
-  update needed
-- `"invalid"`: Context structure is wrong or project structure changed
-  significantly, full regeneration needed
+- `"valid"`: All tracked file hashes match. Proceed to Step 2.
+- `"stale"`: Some tracked files changed. Needs at least an incremental
+  update (Section 5.2).
+- `"invalid"`: Context structure is broken. Needs full regeneration
+  (Section 5.3).
 
-### 5.2 Update Procedure
+**Step 2: Structural completeness check**
 
-Updating means re-running the full Section 2 flow:
+`context status` only checks files already listed in the Context. It
+cannot detect NEW files added to the project. Run a quick structural
+comparison:
+
+```bash
+# Count Activities in all manifests
+ACTIVITY_COUNT=$(find . -name "AndroidManifest.xml" -not -path "*/build/*" \
+  -exec grep -c '<activity' {} + 2>/dev/null | \
+  awk -F: '{s+=$NF} END {print s}')
+
+# Count Activity source files on disk
+SRC_ACTIVITY_COUNT=$(find . \( -name "*.kt" -o -name "*.java" \) \
+  -not -path "*/build/*" \
+  -exec grep -l "extends.*Activity\|:.*Activity(" {} + 2>/dev/null | wc -l)
+
+# Count layout files on disk
+LAYOUT_COUNT=$(find . -path "*/res/layout/*.xml" -not -path "*/build/*" | wc -l)
+
+echo "Activities in manifests: $ACTIVITY_COUNT"
+echo "Activity source files:   $SRC_ACTIVITY_COUNT"
+echo "Layout files:            $LAYOUT_COUNT"
+```
+
+Compare these counts with the number of Activity source files and layout
+files actually listed in the Context's `manifest.files`. If the on-disk
+counts are significantly higher than what's in the Context, new files
+were added and a full regeneration (Section 5.3) is needed.
+
+> **Tip**: The AI agent can automate this comparison. Tell it:
+> "Check if the Project Context for /path/to/android-project is still
+> complete. Compare the Activity and layout counts on disk with what's
+> in the Context."
+
+**Decision matrix:**
+
+| `context status` | Structural counts match? | Action |
+|------------------|--------------------------|--------|
+| `valid` | Yes | Proceed to test (Section 3) |
+| `valid` | No (new files on disk) | Full regeneration (5.3) |
+| `stale` | Yes (same files, content changed) | Incremental update (5.2) |
+| `stale` | No (files added/removed) | Full regeneration (5.3) |
+| `invalid` | — | Full regeneration (5.3) |
+
+### 5.2 Incremental Update (Content-Only Changes)
+
+When `context status` returns `"stale"` but the structural counts match
+(same files, just content modified — e.g., a button's text changed, a
+layout was restructured, an Activity's click handler was updated):
+
+1. Identify which files changed (the `context status` output lists them).
+2. Recompute SHA-256 for each changed file.
+3. If any changed file is an Activity source, re-read it to check for:
+   - New Logcat tags (affects `expect` candidates)
+   - New click handlers or input fields (affects `interactionPolicy`)
+   - New `startActivity` calls (affects navigation understanding)
+4. If any changed file is a layout XML, re-read it to check for:
+   - New `android:id` elements (new locator candidates)
+   - Removed elements (locators that no longer exist)
+   - Changed `android:text` or `android:contentDescription`
+5. Update the `manifest.files` hashes and `interactionPolicy` if needed.
+6. Validate:
+   ```bash
+   taphound context validate \
+     --project /path/to/android-project \
+     --context /path/to/android-project/.taphound/context/project-context.json \
+     --json
+   ```
+
+This is fast because it only touches changed files, not the entire
+project.
+
+### 5.3 Full Regeneration (Structural Changes)
+
+When new files are added (new Activities, new layouts, new modules) or
+the Context is `invalid`, re-run the full Section 2 flow:
 
 1. Have the AI agent re-analyze the source (reads `prompts/analyze-project.md`)
-2. Recompute SHA-256 for all manifest files
-3. Update `interactionPolicy` if UI elements were added/removed
-4. Overwrite `project-context.json`
-5. Validate with `context validate`
+2. Re-discover all modules via `./gradlew projects` or filesystem fallback
+3. Re-enumerate all Activities and layouts across all modules
+4. Recompute all SHA-256 hashes
+5. Update `interactionPolicy` based on the full source analysis
+6. Overwrite `project-context.json`
+7. Validate with `context validate`
 
 ```bash
 # In the AI agent:
 # "Regenerate the TapHound Project Context for /path/to/android-project.
-#  The source has been updated and hashes/UI elements need refreshing."
+#  The source has been updated with new screens and layouts.
+#  Run a full re-analysis per prompts/analyze-project.md."
 
-# Validate the new Context
 taphound context validate \
   --project /path/to/android-project \
   --context /path/to/android-project/.taphound/context/project-context.json \
   --json
 ```
 
-### 5.3 When to Update
+### 5.4 Signs of Stale Context During Generation
 
-| Change type | Update needed? |
-|-------------|----------------|
-| Modified UI element `android:id` | Yes (locator candidates changed) |
-| Added/removed Activity | Yes (navigation logic changed) |
-| Changed package name (`applicationId`) | Yes (packageName changed) |
-| Modified Logcat tag/pattern | Yes (expect candidates changed) |
-| Added/removed/modified modules (`settings.gradle` / `gradlew projects`) | Yes (module structure changed, rescan needed) |
-| Added/removed layout XML files | Yes (manifest.files needs update) |
-| Modified `<include>`/`<merge>` references | Yes (element set changed) |
-| Modified business logic but UI unchanged | No (Context describes UI structure, not logic) |
-| Modified themes/styles | No (does not affect UI structure) |
-| Modified Gradle dependency versions | No (unless package name changed) |
-| Modified `namespace` (not `applicationId`) | No (does not affect installed package name) |
+Sometimes the pre-session check passes but the Context is still outdated
+(e.g., a layout's content changed without changing the file count). The
+AI agent may encounter these signs during generation:
+
+| Sign | Likely cause | Action |
+|------|-------------|--------|
+| `observe` shows elements not expected from Context | Layout changed (new elements) | Continue if the element is actionable; update Context after session |
+| `observe` shows a different Activity than expected | New Activity added or navigation changed | Re-observe and adapt; update Context after session |
+| `LOCATOR_NOT_FOUND` for an element that should exist | Element was removed or `android:id` changed | Re-observe, try alternative locator; update Context after session |
+| `LOCATOR_AMBIGUOUS` for a previously unique element | Duplicate ID added in another layout | Use more specific locator; update Context after session |
+| Logcat expectation fails | Log tag or message pattern changed | Check source, update expectation; update Context after session |
+
+> When any of these signs appear, the AI agent should note the discrepancy
+> and recommend a Context update after the session completes. It should
+> NOT abort the session unless the error is unrecoverable.
+
+### 5.5 When to Update
+
+| Change type | Update level |
+|-------------|-------------|
+| Modified button text or content description | Incremental (re-hash) |
+| Modified click handler logic | Incremental (re-hash, check Logcat tags) |
+| Added/removed `android:id` in existing layout | Incremental (re-hash) |
+| Added new Activity | Full regeneration |
+| Removed Activity | Full regeneration |
+| Added/removed layout XML file | Full regeneration |
+| New module added (`settings.gradle` changed) | Full regeneration |
+| Changed `applicationId` | Full regeneration |
+| Modified `<include>`/`<merge>` structure | Incremental (re-hash) |
+| Modified business logic but UI unchanged | Incremental (re-hash only) |
+| Modified themes/styles | No update needed |
+| Modified Gradle dependency versions | No update needed (unless package name changed) |
 
 ---
 

@@ -6,7 +6,6 @@ import type { AdbPort, LogcatOptions } from "../../../src/ports/adb.js";
 import type { AndroidCliPort } from "../../../src/ports/android-cli.js";
 import { FakeClock } from "../../fakes/fake-clock.js";
 import {
-  commandResult,
   runningCommand
 } from "../../fakes/process-runner.js";
 
@@ -15,8 +14,12 @@ function adbPort(): AdbPort {
     devices: vi.fn(),
     foregroundComponent: vi.fn(),
     currentActivity: vi.fn(),
+    isInstalled: vi.fn(),
+    launchActivity: vi.fn(),
     forceStop: vi.fn(),
-    pid: vi.fn(),
+    appProcesses: vi.fn(() => Promise.resolve([
+      { pid: 42, name: "com.example.app" }
+    ])),
     tap: vi.fn(),
     longClick: vi.fn(),
     swipe: vi.fn(),
@@ -28,8 +31,6 @@ function adbPort(): AdbPort {
 
 function androidCli(): AndroidCliPort {
   return {
-    describeProject: vi.fn(),
-    runApp: vi.fn(() => Promise.resolve(commandResult())),
     layout: vi.fn(),
     layoutDiff: vi.fn(),
     captureScreen: vi.fn(),
@@ -307,7 +308,8 @@ describe("ExpectationEvaluator", () => {
     const adb = adbPort();
     const clock = new FakeClock();
     const collector = new LogcatCollector(adb, clock);
-    await collector.start({ deviceSerial: context.deviceSerial, pid: 1234 });
+    await collector.start({ deviceSerial: context.deviceSerial });
+    collector.scopeToPids([1234]);
     clock.currentTime = 10;
     logcatOptions(adb).onStdoutLine(
       "07-19 15:00:00.123  1234  1235 D SearchViewModel: query=hello world"
@@ -340,7 +342,8 @@ describe("ExpectationEvaluator", () => {
     const adb = adbPort();
     const clock = new FakeClock();
     const collector = new LogcatCollector(adb, clock);
-    await collector.start({ deviceSerial: context.deviceSerial, pid: 1234 });
+    await collector.start({ deviceSerial: context.deviceSerial });
+    collector.scopeToPids([1234]);
     logcatOptions(adb).onStdoutLine(
       "07-19 15:00:00.123  1234  1235 I SearchViewModel: count=42"
     );
@@ -364,7 +367,8 @@ describe("ExpectationEvaluator", () => {
     const adb = adbPort();
     const clock = new FakeClock();
     const collector = new LogcatCollector(adb, clock);
-    await collector.start({ deviceSerial: context.deviceSerial, pid: 1234 });
+    await collector.start({ deviceSerial: context.deviceSerial });
+    collector.scopeToPids([1234]);
     logcatOptions(adb).onStdoutLine(
       "07-19 15:00:00.123  1234  1235 D SearchViewModel: stale"
     );

@@ -352,9 +352,10 @@ templates, then call the TapHound CLI.
 - If `context status` returns `"stale"`, the Context must be regenerated
   before starting a new generation session. A stale Context will cause
   `generation start` to fail with `CONTEXT_STALE`.
-- `finalize` performs a full replay from scratch (forceStop, rebuild,
-  relaunch). It is not incremental. Do not call it until all steps are
-  complete.
+- `finalize` performs a full replay from scratch (forceStop, relaunch).
+  TapHound does not build or install the APK; ensure the app is installed
+  before calling `finalize`. It is not incremental. Do not call it until
+  all steps are complete.
 - **Context completeness is critical**: the Context must include ALL
   Activity source files and their layouts across ALL modules. If the AI
   only scans a few files, the Context is useless for staleness detection

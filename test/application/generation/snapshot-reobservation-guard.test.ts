@@ -78,7 +78,7 @@ function harness(): {
   current: GenerationSession;
   read: ReturnType<typeof vi.fn>;
   foregroundComponent: ReturnType<typeof vi.fn>;
-  pid: ReturnType<typeof vi.fn>;
+  appProcesses: ReturnType<typeof vi.fn>;
   readLayout: ReturnType<typeof vi.fn>;
   guard: SnapshotReobservationGuard;
 } {
@@ -88,17 +88,19 @@ function harness(): {
     packageName: "com.example.app",
     activity: "com.example.app.MainActivity"
   }));
-  const pid = vi.fn(() => Promise.resolve(42));
+  const appProcesses = vi.fn(() => Promise.resolve([
+    { pid: 42, name: "com.example.app" }
+  ]));
   const readLayout = vi.fn(() => Promise.resolve(layout));
   return {
     current,
     read,
     foregroundComponent,
-    pid,
+    appProcesses,
     readLayout,
     guard: new SnapshotReobservationGuard({
       store: { read },
-      adb: { foregroundComponent, pid },
+      adb: { foregroundComponent, appProcesses },
       androidCli: { layout: readLayout },
       now: () => new Date("2026-07-22T12:10:00.000Z")
     })
@@ -159,7 +161,9 @@ describe("SnapshotReobservationGuard", () => {
       });
     }],
     ["PID", (test: ReturnType<typeof harness>): void => {
-      test.pid.mockResolvedValueOnce(99);
+      test.appProcesses.mockResolvedValueOnce([
+        { pid: 99, name: "com.example.app" }
+      ]);
     }],
     ["Layout", (test: ReturnType<typeof harness>): void => {
       test.readLayout.mockResolvedValueOnce([{

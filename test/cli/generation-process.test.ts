@@ -27,8 +27,6 @@ beforeAll(async () => {
   projectRoot = await mkdtemp(join(tmpdir(), "taphound-generation-process-"));
   await writeFile(join(projectRoot, "taphound.config.json"), JSON.stringify({
     version: 1,
-    build: { task: ":app:assembleDebug" },
-    artifact: { target: "app", variant: "debug" },
     run: {
       packageName: "com.example.app",
       activity: ".MainActivity"

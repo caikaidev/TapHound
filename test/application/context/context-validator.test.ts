@@ -23,8 +23,6 @@ const temporaryRoots: string[] = [];
 
 const config: TapHoundConfig = {
   version: 1,
-  build: { task: "assembleDebug" },
-  artifact: { target: "app", variant: "debug" },
   run: {
     packageName: "com.example.app",
     activity: ".MainActivity"

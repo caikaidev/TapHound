@@ -24,8 +24,6 @@ function commandResult(exitCode = 0): CommandResult {
 
 function androidCli(exitCode = 0): AndroidCliPort {
   return {
-    describeProject: vi.fn(),
-    runApp: vi.fn(),
     layout: vi.fn(),
     layoutDiff: vi.fn(),
     captureScreen: vi.fn(() => Promise.resolve(commandResult(exitCode))),

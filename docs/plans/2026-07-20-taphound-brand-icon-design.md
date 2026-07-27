@@ -1,69 +1,69 @@
-# TapHound 品牌 Icon 设计
+# TapHound Brand Icon Design
 
-**日期：** 2026-07-20  
-**状态：** 已批准  
-**视觉方向：** HoundMark  
-**交付范围：** 核心发布套件
+**Date:** 2026-07-20
+**Status:** Approved
+**Visual direction:** HoundMark
+**Delivery scope:** Core release suite
 
-## 1. 目标
+## 1. Goal
 
-为 TapHound 建立一个跨平台、开发者友好、可在小尺寸清晰识别的品牌 Icon。它首先服务于 GitHub 仓库、README 和 npm 发布相关品牌展示，但不能绑定 Android，因为 TapHound 长期可能支持 iOS、Web 或其他客户端。
+Establish a cross-platform, developer-friendly brand Icon for TapHound that remains clearly recognizable at small sizes. It primarily serves GitHub repository, README, and npm-release brand display, but it must not be tied to Android because TapHound may eventually support iOS, Web, or other clients.
 
-Icon 需要同时表达两层含义：
+The Icon needs to express two meanings simultaneously:
 
-- `Hound`：持续追踪、可靠寻找目标。
-- `Tap`：用户交互、路径录制和确定性验证。
+- `Hound`: persistent tracking, reliably finding the target.
+- `Tap`: user interaction, path recording, and deterministic verification.
 
-本期只设计独立品牌标记，不扩展为文字 Logo、README Banner、社交分享图或完整视觉设计系统。
+This phase only designs the standalone brand mark; it does not extend to a wordmark, README banner, social share image, or a complete visual design system.
 
-## 2. 方向选择
+## 2. Direction Selection
 
-评估过三个方向：
+Three directions were evaluated:
 
-1. **HoundMark（采用）**：抽象猎犬侧脸，鼻尖对准点击靶心。品牌名与产品行为能在一个紧凑图形中同时成立。
-2. **TrackHound**：用路径线组成猎犬轮廓，叙事完整，但在 16–32 px 时细节过多。
-3. **TargetEar**：猎犬正脸与点击波纹结合，更像吉祥物，也更容易被误认成宠物产品。
+1. **HoundMark (adopted)**: an abstract hound side profile with its nose tip aimed at a tap target. The brand name and product behavior can both hold in a single compact graphic.
+2. **TrackHound**: a hound outline formed from path lines; the narrative is complete, but there is too much detail at 16–32 px.
+3. **TargetEar**: a hound front face combined with a tap ripple; it reads more like a mascot and is more easily mistaken for a pet product.
 
-HoundMark 在识别性、专业感、小尺寸表现和未来跨平台适用性之间最平衡。
+HoundMark is the most balanced across legibility, professionalism, small-size performance, and future cross-platform applicability.
 
-## 3. 核心造型
+## 3. Core Form
 
-主图形是一只朝右追踪的抽象猎犬侧脸：
+The main graphic is an abstract rightward-tracking hound side profile:
 
-- 耳朵、额头、口鼻由少量粗几何面形成连续向前的动势。
-- 鼻尖指向一个独立的点击靶心，形成“发现目标”的瞬间。
-- 靶心由实心圆点与一圈断开的波纹组成，表达 Tap、录制与验证完成。
-- 猎犬与靶心之间保留明确负空间，避免在小尺寸融合成普通箭头。
-- 造型使用填充几何面，不依赖细描边、字体或滤镜。
+- Ear, forehead, and muzzle are formed from a few bold geometric planes creating a continuous forward momentum.
+- The nose tip points at an independent tap target, forming the moment of "target found."
+- The target is composed of a solid dot and one broken ripple, expressing Tap, recording, and verification complete.
+- Clear negative space is retained between the hound and the target, to avoid merging into a generic arrow at small sizes.
+- The form uses filled geometric planes and does not rely on thin strokes, fonts, or filters.
 
-不使用写实毛发、爪印、Android 机器人、设备外框、代码括号或 `TH` 字母缩写。Icon 必须作为独立轮廓成立，而不是靠文字解释。
+No realistic fur, paw prints, Android robots, device frames, code brackets, or `TH` letter initials are used. The Icon must stand as an independent silhouette, not rely on text explanation.
 
-## 4. 构图与比例
+## 4. Composition and Proportion
 
-- 基础画布：`1024 × 1024`，正方形。
-- 安全区：四周至少 `128 px`；所有关键轮廓必须落在中央 `768 × 768` 区域。
-- 圆形裁切安全区：主要图形必须完整落在以画布中心为圆心、直径 `768 px` 的区域内，适配 GitHub 头像裁切。
-- 视觉重心：猎犬约占图形宽度的 68%，点击靶心约占 18%，两者间负空间约占 6–8%。
-- 朝向：固定向右，代表沿 Journey 前进；不得提供随意镜像版本。
-- 圆角：外轮廓使用有限圆角，避免尖锐攻击性，同时保持工具感而非卡通感。
+- Base canvas: `1024 × 1024`, square.
+- Safe area: at least `128 px` on all sides; all key outlines must fall within the central `768 × 768` region.
+- Circular-crop safe area: the main graphic must fall entirely within a circle centered on the canvas center with a diameter of `768 px`, to fit GitHub avatar cropping.
+- Visual center of gravity: the hound occupies about 68% of the graphic width, the tap target about 18%, and the negative space between them about 6–8%.
+- Orientation: fixed rightward, representing forward progress along a Journey; no arbitrary mirrored versions.
+- Corner radius: the outer outline uses a limited corner radius, avoiding aggressive sharpness while keeping a tool feel rather than a cartoon feel.
 
-在 `16 px` 时允许波纹简化，但猎犬朝向、口鼻和靶心圆点仍须可辨认。
+At `16 px`, the ripple may be simplified, but the hound's orientation, muzzle, and the target dot must remain recognizable.
 
-## 5. 色彩系统
+## 5. Color System
 
-主色：
+Primary colors:
 
-- Hound Charcoal：`#1B1D21`
-- Tap Orange：`#FF5A1F`
-- Trail White：`#FFF8F2`
+- Hound Charcoal: `#1B1D21`
+- Tap Orange: `#FF5A1F`
+- Trail White: `#FFF8F2`
 
-标准浅色 Icon 使用暖白背景、深炭黑猎犬和橙色靶心。深色版本使用深炭黑背景、暖白猎犬和橙色靶心。
+The standard light Icon uses a warm-white background, a deep-charcoal hound, and an orange target. The dark version uses a deep-charcoal background, a warm-white hound, and an orange target.
 
-同时提供纯黑与纯白单色版本。单色版不能只通过颜色区分猎犬和靶心，必须依靠负空间保持结构。禁止渐变、阴影、发光、半透明叠加和 Android 绿色平台暗示。
+Pure-black and pure-white monochrome versions are also provided. A monochrome version cannot distinguish the hound and target by color alone; it must preserve structure through negative space. Gradients, shadows, glows, semi-transparent overlays, and Android-green platform hints are prohibited.
 
-## 6. 交付文件
+## 6. Deliverable Files
 
-源文件和发布资产统一存放在 `assets/brand/`：
+Source files and release assets are stored uniformly under `assets/brand/`:
 
 ```text
 assets/brand/
@@ -82,62 +82,62 @@ assets/brand/
     └── taphound-icon-32.png
 ```
 
-文件职责：
+File responsibilities:
 
-- `taphound-icon.svg`：暖白方形背景的默认发布 Icon，作为单一主版本。
-- `taphound-icon-dark.svg`：深色背景版本。
-- `taphound-mark.svg`：透明背景双色标记，用于 README 或未来布局组合。
-- `taphound-mark-mono-*`：纯黑/纯白透明背景标记。
-- PNG：由默认发布 Icon 导出，使用正方形画布，禁止二次锐化产生白边。
-- `assets/brand/README.md`：记录色值、留白、最小尺寸、允许用途和禁止变形。
+- `taphound-icon.svg`: the default release Icon on a warm-white square background, serving as the single master version.
+- `taphound-icon-dark.svg`: the dark-background version.
+- `taphound-mark.svg`: a two-color mark on a transparent background, for README or future layout compositions.
+- `taphound-mark-mono-*`: pure-black/pure-white transparent-background marks.
+- PNG: exported from the default release Icon using a square canvas; no secondary sharpening that produces white edges.
+- `assets/brand/README.md`: records color values, whitespace, minimum size, permitted uses, and prohibited deformations.
 
-SVG 必须具有明确 `viewBox="0 0 1024 1024"`，不包含字体、外部链接、脚本、嵌入位图、编辑器私有元数据或无意义的小数精度。
+The SVG must have an explicit `viewBox="0 0 1024 1024"` and must not contain fonts, external links, scripts, embedded bitmaps, editor-private metadata, or meaningless decimal precision.
 
-## 7. 产品集成
+## 7. Product Integration
 
-- README 顶部使用 `taphound-mark.svg`，旁边保留文本标题 `TapHound`，避免把品牌名烘焙进图片。
-- GitHub 仓库头像使用 `taphound-icon-512.png`。
-- `taphound-icon-512.png` 可作为 npm 组织或账号展示资产；npm 包本身不新增非标准 `icon` 字段。
-- npm tarball 只包含 `assets/brand/taphound-mark.svg`，保证打包后的 README 仍有可用品牌图；其余源变体和 PNG 不进入包体。
-- 首版 Android Demo 不替换为 TapHound 品牌 App Icon，避免把测试 fixture 与工具品牌混为一体。
+- The README top uses `taphound-mark.svg` with the text title `TapHound` kept alongside, to avoid baking the brand name into the image.
+- The GitHub repository avatar uses `taphound-icon-512.png`.
+- `taphound-icon-512.png` may serve as an npm organization or account display asset; the npm package itself does not add a non-standard `icon` field.
+- The npm tarball includes only `assets/brand/taphound-mark.svg`, ensuring the packaged README still has a usable brand image; other source variants and PNGs do not enter the package body.
+- The first-version Android Demo does not replace its app icon with the TapHound brand Icon, to avoid mixing the test fixture with the tool brand.
 
-## 8. 验收与评审
+## 8. Acceptance and Review
 
-设计评审使用四组视图：
+The design review uses four view groups:
 
-1. `1024 px`：检查几何关系、负空间和视觉重心。
-2. `128 px`：检查常见仓库头像大小。
-3. `32 px`：检查工具栏和小头像识别。
-4. 圆形裁切与深浅背景：检查头像平台适配。
+1. `1024 px`: check geometric relationships, negative space, and visual center of gravity.
+2. `128 px`: check the common repository avatar size.
+3. `32 px`: check toolbar and small-avatar legibility.
+4. Circular crop and light/dark backgrounds: check avatar-platform adaptation.
 
-自动检查：
+Automated checks:
 
-- 所有 SVG 可解析，画布和 viewBox 一致。
-- SVG 不包含字体、脚本、外部资源、滤镜或位图。
-- PNG 文件尺寸、色彩模式和透明度符合文件约定。
-- README 引用的资产路径存在。
-- 主版本只使用批准的三个色值。
+- All SVGs are parseable, and canvas and viewBox are consistent.
+- SVGs contain no fonts, scripts, external resources, filters, or bitmaps.
+- PNG file dimensions, color mode, and transparency conform to the file contract.
+- README-referenced asset paths exist.
+- The master version uses only the three approved color values.
 
-人工检查：
+Manual checks:
 
-- 16–32 px 仍可分辨“向右的猎犬 + 点击目标”。
-- 圆形裁切不切掉耳朵、口鼻或点击波纹。
-- 灰度与单色环境下结构仍成立。
-- 不像宠物商店、浏览器、Android 专属工具或通用播放按钮。
-- 与 `Follow every tap. Catch every regression.` 的品牌语义一致。
+- At 16–32 px, "rightward hound + tap target" is still distinguishable.
+- Circular cropping does not cut off the ear, muzzle, or tap ripple.
+- Structure still holds under grayscale and monochrome conditions.
+- It does not resemble a pet store, browser, Android-only tool, or generic play button.
+- It is consistent with the brand semantics of `Follow every tap. Catch every regression.`
 
-## 9. 失败处理
+## 9. Failure Handling
 
-- 如果 32 px 下猎犬与靶心融合，优先扩大负空间和靶心圆点，不增加轮廓细节。
-- 如果图形被误认成狐狸、狼或普通箭头，调整耳朵角度、额头到口鼻的比例和鼻尖停顿，不添加眼睛或写实特征。
-- 如果圆形裁切损失关键结构，缩小整体图形并重新居中，不为不同平台维护多个不一致的主造型。
-- 如果自动导出的 PNG 出现模糊或白边，从主 SVG 重新导出；禁止手工逐尺寸修图造成版本漂移。
+- If the hound and target merge at 32 px, prioritize enlarging the negative space and the target dot; do not add outline detail.
+- If the graphic is mistaken for a fox, wolf, or generic arrow, adjust the ear angle, the forehead-to-muzzle ratio, and the nose-tip pause; do not add eyes or realistic features.
+- If circular cropping loses key structure, shrink the overall graphic and re-center; do not maintain multiple inconsistent master forms for different platforms.
+- If auto-exported PNGs appear blurry or have white edges, re-export from the master SVG; do not hand-edit individual sizes, which causes version drift.
 
-## 10. 完成标准
+## 10. Completion Criteria
 
-- HoundMark 主造型和橙黑配色形成唯一批准方向。
-- 核心 SVG、深色版、单色版和 32–1024 px PNG 全部交付。
-- GitHub 圆形裁切、README 和小尺寸视图通过人工评审。
-- 资产通过结构、尺寸、色值和引用路径自动检查。
-- README 使用品牌标记，但产品代码、Journey/Report schema 和 Android fixture 行为不受影响。
-- 设计资产纳入 TapHound 本地迁移审计，在 GitHub 首次推送和 npm 发布闸门之前完成。
+- The HoundMark master form and the orange-black palette form the single approved direction.
+- The core SVG, dark version, monochrome versions, and 32–1024 px PNGs are all delivered.
+- GitHub circular crop, README, and small-size views pass manual review.
+- Assets pass automated checks for structure, dimensions, color values, and referenced paths.
+- The README uses the brand mark, but product code, Journey/Report schema, and Android fixture behavior are unaffected.
+- Design assets are included in the TapHound local migration audit and completed before the GitHub first-push and npm publish gates.

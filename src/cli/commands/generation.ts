@@ -13,9 +13,6 @@ import {
 import type {
   RuntimeObservation
 } from "../../application/generation/runtime-observer.js";
-import {
-  ProjectConfigurationError
-} from "../../application/project/project-describer.js";
 import { TapHoundConfigSchema } from "../../domain/config.js";
 import type { TapHoundConfig } from "../../domain/config.js";
 import { GenerationSessionIdSchema } from "../../domain/generation.js";
@@ -175,10 +172,6 @@ function mappedFailure(
     );
     return;
   }
-  if (error instanceof ProjectConfigurationError) {
-    writeFailure(dependencies, options, 2, "CONFIG_INVALID", error);
-    return;
-  }
   if (error instanceof GenerationFinalizationError) {
     writeFailure(dependencies, options, 1, error.code, error);
     return;
@@ -322,11 +315,15 @@ function createStartCommand(dependencies: CliDependencies): Command {
       }
 
       try {
-        const doctor = await dependencies.doctor.run(
-          options.project,
-          dependencies.signal,
-          options.device
-        );
+        const doctor = await dependencies.doctor.run({
+          packageName: config.run.packageName,
+          ...(options.device === undefined
+            ? {}
+            : { requestedDevice: options.device }),
+          ...(dependencies.signal === undefined
+            ? {}
+            : { signal: dependencies.signal })
+        });
         if (doctor.status === "failed") {
           writeFailure(
             dependencies,
@@ -382,16 +379,6 @@ function createStartCommand(dependencies: CliDependencies): Command {
             options,
             exitCode,
             error.code,
-            error
-          );
-          return;
-        }
-        if (error instanceof ProjectConfigurationError) {
-          writeFailure(
-            dependencies,
-            options,
-            2,
-            "CONFIG_INVALID",
             error
           );
           return;
@@ -670,11 +657,15 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
       const name = options.name === undefined
         ? undefined
         : z.string().trim().min(1).parse(options.name);
-      const doctor = await dependencies.doctor.run(
-        options.project,
-        dependencies.signal,
-        options.device
-      );
+      const doctor = await dependencies.doctor.run({
+        packageName: config.run.packageName,
+        ...(options.device === undefined
+          ? {}
+          : { requestedDevice: options.device }),
+        ...(dependencies.signal === undefined
+          ? {}
+          : { signal: dependencies.signal })
+      });
       if (doctor.status === "failed") {
         writeFailure(
           dependencies,

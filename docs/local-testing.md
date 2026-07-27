@@ -1,16 +1,16 @@
-# TapHound 本地测试指南
+# TapHound Local Testing Guide
 
-本指南用于在当前机器或新的开发机器上验证源码、npm tarball 和 Android 设备流程。所有命令都从仓库根目录执行；测试阶段不要运行 `npm publish`。
+This guide is for verifying source code, the npm tarball, and the Android device flow on the current machine or a new development machine. Run all commands from the repository root; do not run `npm publish` during the testing phase.
 
-## 1. 准备环境
+## 1. Prepare the Environment
 
-要求：
+Requirements:
 
-- Node.js 22 或更高版本
+- Node.js 22 or newer
 - npm
-- 进行设备测试时，额外安装 Android SDK、ADB、Android CLI，并启动一个 Emulator 或连接 USB Device
+- For device testing, additionally install the Android SDK, ADB, and Android CLI, and start an Emulator or connect a USB Device
 
-克隆并安装锁定依赖：
+Clone and install locked dependencies:
 
 ```bash
 git clone git@github.com:caikaidev/TapHound.git
@@ -18,15 +18,15 @@ cd TapHound
 npm ci
 ```
 
-## 2. 运行源码测试
+## 2. Run Source Tests
 
-只运行一个测试文件：
+Run only a single test file:
 
 ```bash
 npm test -- test/domain/journey.test.ts
 ```
 
-运行完整源码质量门：
+Run the full source quality gate:
 
 ```bash
 npm test
@@ -37,19 +37,19 @@ npm run brand:render
 git diff --exit-code -- assets/brand/png
 ```
 
-全部命令都应退出 0，品牌 PNG 重渲染不应产生 Git diff。最新的精确测试数量记录在 [`verification/taphound-v0.2-dev.1-audit.md`](verification/taphound-v0.2-dev.1-audit.md)。
+All commands should exit 0, and re-rendering the brand PNGs should produce no Git diff. The latest exact test count is recorded in [`verification/taphound-v0.2-dev.1-audit.md`](verification/taphound-v0.2-dev.1-audit.md).
 
-构建后可以直接检查 CLI：
+After building, you can inspect the CLI directly:
 
 ```bash
 node dist/cli/main.js --help
 ```
 
-首行应为 `Usage: taphound`，并列出 `doctor`、`record`、`verify`、`project`、`context`、`generation` 和 `init`。
+The first line should be `Usage: taphound`, and it should list `doctor`, `record`, `verify`, `project`, `context`, `generation`, and `init`.
 
-## 3. 测试 npm tarball
+## 3. Test the npm Tarball
 
-先执行上方完整源码质量门，再生成本机将要验证的 tarball：
+First run the full source quality gate above, then generate the tarball that will be verified on this machine:
 
 ```bash
 mkdir -p /private/tmp/taphound-pack-smoke
@@ -59,9 +59,9 @@ npm pack --json \
 shasum -a 256 /private/tmp/taphound-pack-smoke/taphound-0.2.0-dev.1.tgz
 ```
 
-将摘要和 `npm pack --json` 的 size、shasum、integrity、entryCount 与[发布就绪审计](verification/taphound-v0.2-dev.1-audit.md)比较。任何差异都意味着必须重新完成本节的安装 smoke，不能沿用旧机器的验证结论。
+Compare the digest and the size, shasum, integrity, and entryCount from `npm pack --json` against the [release-ready audit](verification/taphound-v0.2-dev.1-audit.md). Any difference means you must redo the install smoke in this section; you cannot reuse the validation conclusion from a previous machine.
 
-把精确 tarball 安装到临时目录：
+Install the exact tarball into a temporary directory:
 
 ```bash
 mkdir -p /private/tmp/taphound-install-smoke
@@ -73,17 +73,17 @@ npm install \
 test ! -e "/private/tmp/taphound-install-smoke/node_modules/.bin/$(printf 'a\160r')"
 ```
 
-帮助命令和最后一个否定检查都应退出 0。npm 11 对 `npm publish <tgz>` 不执行 `prepublishOnly`，因此完整源码质量门和精确 tarball smoke 都是发布前的独立必需步骤。
+Both the help command and the last negative check should exit 0. npm 11 does not run `prepublishOnly` for `npm publish <tgz>`, so the full source quality gate and the exact-tarball smoke are both independent required steps before publishing.
 
-## 4. 检查 Android 环境
+## 4. Check the Android Environment
 
-查看在线设备：
+List online devices:
 
 ```bash
 adb devices -l
 ```
 
-运行环境诊断：
+Run the environment diagnostics:
 
 ```bash
 node dist/cli/main.js doctor \
@@ -91,25 +91,34 @@ node dist/cli/main.js doctor \
   --json
 ```
 
-无在线设备时允许返回退出码 3 和 `DEVICE_UNAVAILABLE`；这不等于真实设备验收通过。存在多个在线设备时，后续命令必须使用 `--device <serial>` 明确选择。
+When there are no online devices, exit code 3 and `DEVICE_UNAVAILABLE` are acceptable; this does not count as passing real-device acceptance. When multiple devices are online, subsequent commands must explicitly select one using `--device <serial>`.
 
-## 5. 运行 Android Demo Journey
+## 5. Run the Android Demo Journey
 
-恰好有一个在线设备时运行仓库验收入口：
+TapHound does not compile or install the APK. Before running real-device acceptance, install the demo app onto the device first:
+
+```bash
+cd examples/taphound-android-demo
+./gradlew :app:assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+cd ../..
+```
+
+When exactly one device is online, run the repository acceptance entry:
 
 ```bash
 TAPHOUND_ACCEPTANCE_DEVICE=1 npm run acceptance:device
 ```
 
-该命令验证已有 Journey 的完整 Replay。生成协议另有独立的真机验收入口，它会创建 Project Context，执行 `generation start → observe → step → finalize`，并要求最终状态为 `verified`：
+This command verifies a full Replay of an existing Journey. The generation protocol has a separate real-device acceptance entry, which creates a Project Context, executes `generation start → observe → step → finalize`, and requires the final state to be `verified`:
 
 ```bash
 TAPHOUND_ACCEPTANCE_DEVICE=1 npm run acceptance:generation
 ```
 
-两个入口均为显式 opt-in，普通测试通过不能作为真机 Replay 或 Generation 验收通过的证据。运行前必须先完成 `npm run build`。
+Both entries are explicit opt-in; passing the normal test suite is not evidence that real-device Replay or Generation acceptance passed. You must run `npm run build` first.
 
-存在多个设备时直接指定 serial：
+When multiple devices are present, specify the serial directly:
 
 ```bash
 node dist/cli/main.js verify \
@@ -120,17 +129,17 @@ node dist/cli/main.js verify \
   --json
 ```
 
-将 `emulator-5554` 替换为 `adb devices -l` 返回的目标 serial。报告写入 `examples/taphound-android-demo/.taphound/runs/`，固定包含 `report.json` 和 `summary.txt`；截图、完整 Logcat 和步骤日志按运行阶段与采集结果提供，采集失败会记录为 secondary error。
+Replace `emulator-5554` with the target serial returned by `adb devices -l`. The report is written to `examples/taphound-android-demo/.taphound/runs/` and always contains `report.json` and `summary.txt`; screenshots, full Logcat, and step logs are provided depending on the run phase and collection results, and collection failures are recorded as secondary errors.
 
-TapHound 使用仓库内自研的 JSON Journey；不要将其替换为 Android CLI 的 XML Journey。
+TapHound uses its own in-repo JSON Journey; do not replace it with Android CLI's XML Journey.
 
-## 6. 测试失败时记录什么
+## 6. What to Record When Tests Fail
 
-跨机器验证至少保留：
+Cross-machine validation should retain at minimum:
 
-- Git commit SHA、Node/npm/Android CLI 版本和设备 serial
-- 失败命令及退出码
-- 对应 run 目录中的 `report.json`、`summary.txt` 和必要日志
-- 是否能在相同 commit 上稳定复现
+- Git commit SHA, Node/npm/Android CLI versions, and the device serial
+- The failing command and its exit code
+- The `report.json`, `summary.txt`, and any necessary logs from the corresponding run directory
+- Whether the failure can be reliably reproduced on the same commit
 
-不要提交 token、OTP、设备隐私数据或其他凭据。
+Do not commit tokens, OTPs, device privacy data, or other credentials.

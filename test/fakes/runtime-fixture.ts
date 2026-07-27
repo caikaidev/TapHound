@@ -8,9 +8,11 @@ import type { TapHoundReport } from "../../src/domain/report.js";
 import type { VerifyRuntimeDependencies } from "../../src/application/runtime/verify-runtime.js";
 import type { TapHoundConfig } from "../../src/domain/config.js";
 import type { Journey } from "../../src/domain/journey.js";
-import type { AdbPort, LogcatOptions } from "../../src/ports/adb.js";
+import type {
+  AdbPort,
+  LogcatOptions
+} from "../../src/ports/adb.js";
 import type { AndroidCliPort } from "../../src/ports/android-cli.js";
-import type { GradlePort } from "../../src/ports/gradle.js";
 import type { ArtifactSession } from "../../src/ports/artifact-store.js";
 import { MemoryArtifactStore } from "./artifact-store.js";
 import { FakeClock } from "./fake-clock.js";
@@ -18,8 +20,6 @@ import { commandResult } from "./process-runner.js";
 
 export const runtimeConfig: TapHoundConfig = {
   version: 1,
-  build: { task: ":app:assembleDebug" },
-  artifact: { target: "app", variant: "debug" },
   run: {
     packageName: "com.example.app",
     activity: ".MainActivity"
@@ -48,7 +48,6 @@ export const runtimeJourney: Journey = {
 export interface RuntimeFixture {
   order: string[];
   dependencies: VerifyRuntimeDependencies;
-  gradle: GradlePort;
   androidCli: AndroidCliPort;
   adb: AdbPort;
   artifacts: MemoryArtifactStore;
@@ -57,12 +56,6 @@ export interface RuntimeFixture {
 export function runtimeFixture(): RuntimeFixture {
   const order: string[] = [];
   const artifacts = new MemoryArtifactStore();
-  const gradle: GradlePort = {
-    build: vi.fn(() => {
-      order.push("build");
-      return Promise.resolve(commandResult());
-    })
-  };
   const activities = [
     "com.example.app.MainActivity",
     "com.example.app.MainActivity",
@@ -70,17 +63,6 @@ export function runtimeFixture(): RuntimeFixture {
   ];
   let layoutCalls = 0;
   const androidCli: AndroidCliPort = {
-    describeProject: vi.fn(() => {
-      order.push("describe");
-      return Promise.resolve({
-        apkPath: "/project/app-debug.apk",
-        metadataPaths: ["/project/output-metadata.json"]
-      });
-    }),
-    runApp: vi.fn(() => {
-      order.push("run");
-      return Promise.resolve(commandResult());
-    }),
     layout: vi.fn(() => {
       layoutCalls += 1;
       order.push(layoutCalls === 1 ? "baseline" : "step-layout");
@@ -113,10 +95,24 @@ export function runtimeFixture(): RuntimeFixture {
       order.push(value.endsWith("MainActivity") ? "activity-main" : "activity-search");
       return Promise.resolve(value);
     }),
-    forceStop: vi.fn(() => Promise.resolve(commandResult())),
-    pid: vi.fn(() => {
+    isInstalled: vi.fn(() => {
+      order.push("install");
+      return Promise.resolve(true);
+    }),
+    launchActivity: vi.fn(() => {
+      order.push("launch");
+      return Promise.resolve(commandResult());
+    }),
+    forceStop: vi.fn(() => {
+      order.push("force-stop");
+      return Promise.resolve(commandResult());
+    }),
+    appProcesses: vi.fn(() => {
       order.push("pid");
-      return Promise.resolve(42);
+      return Promise.resolve([
+        { pid: 42, name: "com.example.app" },
+        { pid: 77, name: "com.example.app:remote" }
+      ]);
     }),
     tap: vi.fn(() => {
       order.push("action");
@@ -143,12 +139,10 @@ export function runtimeFixture(): RuntimeFixture {
   const writer = new ReportWriter();
   return {
     order,
-    gradle,
     androidCli,
     adb,
     artifacts,
     dependencies: {
-      gradle,
       androidCli,
       adb,
       clock: new FakeClock(),

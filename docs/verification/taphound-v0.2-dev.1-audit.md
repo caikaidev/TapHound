@@ -1,92 +1,92 @@
-# TapHound 0.2.0-dev.1 本地发布就绪审计
+# TapHound 0.2.0-dev.1 Local Release Readiness Audit
 
-- 审计日期：2026-07-20
-- 集成分支：`main`
-- 被审阅源码提交：`57b0cf9482d36af80823aefd71512e376059f146`
-- 环境：Node.js `24.3.0`、npm `11.4.2`
-- 结论：本地质量门禁、精确 tarball 安装 smoke、迁移审计与 GitHub 首次 push 已完成；npm publish 未执行，仍需独立明确确认。
+- Audit date: 2026-07-20
+- Integration branch: `main`
+- Reviewed source commit: `57b0cf9482d36af80823aefd71512e376059f146`
+- Environment: Node.js `24.3.0`, npm `11.4.2`
+- Conclusion: The local quality gate, exact tarball installation smoke, migration audit, and first GitHub push are complete; npm publish was not executed and still requires separate explicit confirmation.
 
-## 源码质量门禁
+## Source Quality Gate
 
-在隔离工作树中基于上述源码提交重新执行，并在快进集成后的主 checkout 再次复核：
+Re-executed in an isolated worktree based on the source commit above, and re-checked on the main checkout after fast-forward integration:
 
-| 检查 | 结果 |
+| Check | Result |
 |---|---|
-| `npm test` | 通过；37 个测试文件、230 个测试 |
-| `npm run typecheck` | 通过 |
-| `npm run lint` | 通过 |
-| `npm run build` | 通过 |
-| `npm run brand:render` | 通过 |
-| `git diff --exit-code -- assets/brand/png` | 通过；确定性重渲染无差异 |
+| `npm test` | Passed; 37 test files, 230 tests |
+| `npm run typecheck` | Passed |
+| `npm run lint` | Passed |
+| `npm run build` | Passed |
+| `npm run brand:render` | Passed |
+| `git diff --exit-code -- assets/brand/png` | Passed; deterministic re-render with no diff |
 
-独立完整分支审阅没有 Critical 发现。唯一 Important 发现是旧完成审计中的 Demo 路径不可复现；已用失败回归测试证明、改为 `examples/taphound-android-demo`、重新执行 doctor，并提交修复。审阅提出的 npm `files` 精确 allowlist 建议也已落实为测试。
+The independent full-branch review raised no Critical findings. The only Important finding was that the demo path in the old completion audit was not reproducible; this was proven with a failing regression test, changed to `examples/taphound-android-demo`, doctor was re-run, and the fix was committed. The review's suggestion for a precise npm `files` allowlist was also implemented as a test.
 
-本地集成首次在主 checkout 运行完整门禁时发现 Vitest 会递归扫描 `.worktrees/`，造成测试重复和进程用例超时。已通过失败配置契约测试复现，并使用 `vitest.config.ts` 在保留 Vitest 默认排除项的同时排除嵌套 Git worktree；隔离工作树重新运行完整门禁得到上表结果。
+When the local integration first ran the full gate on the main checkout, Vitest was found to recursively scan `.worktrees/`, causing duplicate tests and process-case timeouts. This was reproduced with a failing configuration contract test and fixed using `vitest.config.ts` to exclude nested Git worktrees while preserving Vitest's default exclusions; re-running the full gate in the isolated worktree produced the results in the table above.
 
-## 构建后 CLI 与环境探测
+## Built CLI and Environment Probe
 
-`node dist/cli/main.js --help` 退出码为 0，首行是 `Usage: taphound [options] [command]`，仅列出 `doctor`、`record`、`verify` 和 Commander 的 `help`。
+`node dist/cli/main.js --help` exits with code 0; the first line is `Usage: taphound [options] [command]`, listing only `doctor`, `record`, `verify`, and Commander's `help`.
 
-执行：
+Executed:
 
 ```text
 node dist/cli/main.js doctor --project examples/taphound-android-demo --json
 ```
 
-真实结果为退出码 3：
+The actual result is exit code 3:
 
 ```json
 {"status":"failed","checks":[{"name":"node","status":"passed","version":"24.3.0"},{"name":"adb","status":"passed","version":"Android Debug Bridge version 1.0.41"},{"name":"android","status":"passed","version":"1.0.15857036"},{"name":"gradle","status":"passed"},{"name":"permissions","status":"notRun","message":"Permission probe requires an online selected device"},{"name":"device","status":"failed","message":"Expected exactly one online device, found 0"}],"failureCode":"DEVICE_UNAVAILABLE"}
 ```
 
-Node、ADB、Android CLI 与示例 Gradle Wrapper 均通过。本机没有在线 Emulator 或 USB Device，权限探测因此按契约为 `notRun`；本审计不声称真实设备端到端验收已通过。
+Node, ADB, Android CLI, and the example Gradle Wrapper all passed. There is no online Emulator or USB Device on this machine, so the permission probe is `notRun` per contract; this audit does not claim that real-device end-to-end acceptance passed.
 
-## 精确 tarball 与安装 smoke
+## Exact Tarball and Installation Smoke
 
-唯一完成本地验证、后续允许用于发布闸门的文件是：
+The only file that completed local verification and is subsequently allowed for the publish gate is:
 
 ```text
 /private/tmp/taphound-pack-smoke/taphound-0.2.0-dev.1.tgz
 ```
 
-| 属性 | 值 |
+| Property | Value |
 |---|---|
-| 文件大小 | 43,630 bytes |
-| 解包大小 | 206,321 bytes |
-| 条目数 | 92 |
+| File size | 43,630 bytes |
+| Unpacked size | 206,321 bytes |
+| Entry count | 92 |
 | SHA-256 | `0545c4f2324080b2c3cee99d27351887c868fe9f8bdf4ff37cc0275413d8e47f` |
 | npm shasum (SHA-1) | `7b229925e7facc73466ea42565538dd645ab7727` |
 | npm integrity | `sha512-kmt/5FHn/VDQTzCa2gsSjBbyIHY/nYauMBn/JyPfAuhIaDbCd13JGyVP0n7qBcAVcOodU3SvJt/GfhH0oOj2Uw==` |
 
-`npm pack --json` 的文件清单仅包含 `dist`、`README.md`、`LICENSE`、`package.json` 与 `assets/brand/taphound-mark.svg`。清单中没有 source map、测试、归档、PNG、概念图或其他品牌 SVG。
+The `npm pack --json` file list contains only `dist`, `README.md`, `LICENSE`, `package.json`, and `assets/brand/taphound-mark.svg`. The list contains no source maps, tests, archives, PNGs, concept images, or other brand SVGs.
 
-该精确 tarball 已安装到 `/private/tmp/taphound-handoff-install-smoke`。安装后的 `node_modules/.bin/taphound --help` 退出码为 0 并显示正确 CLI；旧二进制入口的否定检查退出码为 0。
+This exact tarball was installed into `/private/tmp/taphound-handoff-install-smoke`. The installed `node_modules/.bin/taphound --help` exits with code 0 and shows the correct CLI; the negative check for the old binary entry exits with code 0.
 
-## 品牌与迁移合约
+## Brand and Migration Contract
 
-- 最终 SVG 是唯一品牌源文件；六个 PNG 尺寸由脚本确定性生成。
-- 自动化品牌测试验证 SVG 结构、批准色值、尺寸、安全区及打包范围。
-- 已在 512 px、32 px、深色、单色、透明背景和圆形裁切情形下人工检查：右向猎犬、鼻尖与橙色点击目标均可辨认，32 px 负空间保持开放，关键几何不被圆形裁切。
-- Journey、Report 与配置 schema version 均保持 1；机器契约语义未更改。
-- 活跃树陈旧名称扫描仅命中旧完成审计中一处明确标注为“未发布阶段内部代号”的迁移说明，没有活动兼容接口。
-- secret 扫描无命中。
-- 主 checkout 的原始设计文件与归档副本（`docs/archive/a&#112;r-v0.2/A&#80;R-Design-v0.2.md`）在集成前逐字节一致，SHA-256 均为 `61872af876f52fba677faea2938b27bffbaa50ec91d5ca088207317a9b5abbb9`。归档提交并集成后，旧根路径已移除；内容可从 Git 跟踪的归档恢复。
+- The final SVG is the only brand source file; the six PNG sizes are deterministically generated by a script.
+- Automated brand tests verify SVG structure, approved color values, dimensions, safe area, and packaging scope.
+- Manual inspection was performed at 512 px, 32 px, dark, monochrome, transparent background, and circular crop: the right-facing hound, nose tip, and orange tap target are all recognizable, the negative space remains open at 32 px, and key geometry is not cut off by the circular crop.
+- Journey, Report, and config schema versions all remain 1; the machine-contract semantics were not changed.
+- The active-tree stale-name scan only hit a single migration note in the old completion audit explicitly labeled "internal codename during the unreleased phase"; there are no active compatibility interfaces.
+- The secret scan returned no matches.
+- The original design file in the main checkout and the archived copy (`docs/archive/a&#112;r-v0.2/A&#80;R-Design-v0.2.md`) are byte-for-byte identical before integration, both with SHA-256 `61872af876f52fba677faea2938b27bffbaa50ec91d5ca088207317a9b5abbb9`. After the archive commit and integration, the old root path was removed; the content can be recovered from the Git-tracked archive.
 
-## GitHub 首次 push 证据
+## First GitHub Push Evidence
 
-- 用户于 2026-07-21 明确授权 GitHub 首次 push；该授权不包含 npm publish。
-- 远端 URL：`git@github.com:caikaidev/TapHound.git`
-- 首次推送的本地与远端 `main` SHA：`473f27cf6993ce0cd2ed80d3180715e734dba4c7`
-- refspec：`main:main`
-- 验证时间：2026-07-21 11:18:06 CST
-- `git ls-remote --heads origin main` 返回上述精确 SHA；`git remote show origin` 显示默认分支为 `main`，本地 `main` 正常跟踪 `origin/main`。
-- 首次 push 前远端无 refs，因此没有覆盖或合并远端历史；push 未使用 `--force` 或 `--force-with-lease`。
-- 未登录访问仓库页面返回 HTTP 200，观察到仓库当前公开可见；本次没有修改可见性。GitHub CLI 的本地 token 已失效，因此未使用其 API 输出作为证据。
+- The user explicitly authorized the first GitHub push on 2026-07-21; this authorization did not include npm publish.
+- Remote URL: `git@github.com:caikaidev/TapHound.git`
+- Local and remote `main` SHA at first push: `473f27cf6993ce0cd2ed80d3180715e734dba4c7`
+- refspec: `main:main`
+- Verification time: 2026-07-21 11:18:06 CST
+- `git ls-remote --heads origin main` returns the exact SHA above; `git remote show origin` shows the default branch is `main`, and local `main` correctly tracks `origin/main`.
+- The remote had no refs before the first push, so no remote history was overwritten or merged; the push did not use `--force` or `--force-with-lease`.
+- Viewing the repository page without authentication returns HTTP 200; the repository is currently publicly visible, and this audit did not change visibility. The local GitHub CLI token had expired, so its API output was not used as evidence.
 
-## 外部变更闸门
+## External Change Gates
 
-- GitHub 首次 push：**已完成并验证**；证据见上节，未 force-push。
-- npm publish：**待另一项独立明确确认**；未执行。允许的目标仅为公开的 `taphound@0.2.0-dev.1`、dist-tag `dev`，不得创建或移动 `latest`。
-- npm `11.4.2` 对 `npm publish <tgz>` 不执行 `prepublishOnly`。发布安全性依赖本审计记录的新鲜完整门禁和上方精确 tarball；`prepublishOnly` 仅保护从目录直接发布的路径。若 tarball 内容或摘要变化，必须重新执行完整 pack/install smoke，旧确认也不得沿用。
+- First GitHub push: **completed and verified**; evidence in the section above; no force-push.
+- npm publish: **pending another separate explicit confirmation**; not executed. The only allowed target is the public `taphound@0.2.0-dev.1` with dist-tag `dev`; `latest` must not be created or moved.
+- npm `11.4.2` does not run `prepublishOnly` for `npm publish <tgz>`. Publish safety relies on the fresh full gate recorded in this audit and the exact tarball above; `prepublishOnly` only protects the path of publishing directly from a directory. If the tarball content or digest changes, the full pack/install smoke must be re-run, and the old confirmation must not be reused.
 
-本文不包含 registry token、GitHub token、OTP 或其他凭据。
+This document contains no registry token, GitHub token, OTP, or other credentials.

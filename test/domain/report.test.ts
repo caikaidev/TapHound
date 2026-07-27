@@ -8,7 +8,7 @@ import {
 import { validReport } from "../fixtures/report.js";
 
 describe("TapHoundReportSchema", () => {
-  it("accepts the layered v1 report contract", () => {
+  it("accepts the layered v2 report contract", () => {
     expect(TapHoundReportSchema.parse(validReport())).toEqual(validReport());
   });
 
@@ -23,7 +23,6 @@ describe("TapHoundReportSchema", () => {
     const report = validReport({
       status: "failed",
       layers: {
-        build: "passed",
         run: "passed",
         structural: "failed",
         activityCheckpoint: "notRun",

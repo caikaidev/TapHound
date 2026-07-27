@@ -7,8 +7,6 @@ import { commandResult } from "../../fakes/process-runner.js";
 
 function androidCli(): AndroidCliPort {
   return {
-    describeProject: vi.fn(),
-    runApp: vi.fn(() => Promise.resolve(commandResult())),
     layout: vi.fn(),
     layoutDiff: vi.fn(),
     captureScreen: vi.fn(() => Promise.resolve(commandResult())),

@@ -15,13 +15,6 @@ const ActivityNameSchema = z.string().refine(
 
 export const TapHoundConfigSchema = z.strictObject({
   version: z.literal(1),
-  build: z.strictObject({
-    task: z.string().trim().min(1)
-  }),
-  artifact: z.strictObject({
-    target: z.string().trim().min(1),
-    variant: z.string().trim().min(1)
-  }),
   run: z.strictObject({
     packageName: PackageNameSchema,
     activity: ActivityNameSchema

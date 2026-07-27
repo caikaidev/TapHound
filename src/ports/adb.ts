@@ -1,5 +1,6 @@
 import type { Point } from "./android-cli.js";
 import type { ForegroundComponent } from "../domain/activity.js";
+import type { AppProcess } from "../domain/app-process.js";
 import type {
   CommandResult,
   RunningCommand
@@ -17,9 +18,16 @@ export interface AppIdentity {
   timeoutMs?: number | undefined;
 }
 
+export interface LaunchActivityOptions {
+  packageName: string;
+  activity: string;
+  deviceSerial: string;
+  signal?: AbortSignal | undefined;
+  timeoutMs?: number | undefined;
+}
+
 export interface LogcatOptions {
   deviceSerial: string;
-  pid?: number | undefined;
   onStdoutLine: (line: string) => void;
   onStderrLine?: ((line: string) => void) | undefined;
   signal?: AbortSignal | undefined;
@@ -31,8 +39,10 @@ export interface AdbPort {
     identity: AppIdentity
   ) => Promise<ForegroundComponent>;
   currentActivity: (identity: AppIdentity) => Promise<string>;
+  isInstalled: (identity: AppIdentity) => Promise<boolean>;
+  launchActivity: (options: LaunchActivityOptions) => Promise<CommandResult>;
   forceStop: (identity: AppIdentity) => Promise<CommandResult>;
-  pid: (identity: AppIdentity) => Promise<number | null>;
+  appProcesses: (identity: AppIdentity) => Promise<readonly AppProcess[]>;
   tap: (
     point: Point,
     deviceSerial: string,

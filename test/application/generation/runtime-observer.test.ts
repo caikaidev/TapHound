@@ -19,6 +19,7 @@ import {
 } from "../../../src/domain/runtime-snapshot.js";
 import type { GenerationSession } from "../../../src/domain/generation.js";
 import type { ForegroundComponent } from "../../../src/domain/activity.js";
+import type { AppProcess } from "../../../src/domain/app-process.js";
 import type {
   CaptureScreenOptions
 } from "../../../src/ports/android-cli.js";
@@ -136,7 +137,7 @@ interface ObserverHarness {
   identities: unknown[];
   adb: {
     foregroundComponent: Mock<() => Promise<ForegroundComponent>>;
-    pid: Mock<(identity: unknown) => Promise<number | null>>;
+    appProcesses: Mock<(identity: unknown) => Promise<readonly AppProcess[]>>;
   };
   androidCli: {
     layout: Mock<() => Promise<{
@@ -161,9 +162,9 @@ function harness(): ObserverHarness {
       packageName: "com.android.permissioncontroller",
       activity: "com.android.permissioncontroller.PermissionActivity"
     })),
-    pid: vi.fn((identity: unknown) => {
+    appProcesses: vi.fn((identity: unknown) => {
       identities.push(identity);
-      return Promise.resolve(null);
+      return Promise.resolve([]);
     })
   };
   const androidCli = {
@@ -258,7 +259,7 @@ describe("RuntimeObserver", () => {
       );
     }],
     ["PID ADB", (test: ReturnType<typeof harness>): void => {
-      test.adb.pid.mockRejectedValueOnce(new Error("pid failed"));
+      test.adb.appProcesses.mockRejectedValueOnce(new Error("pid failed"));
     }],
     ["layout", (test: ReturnType<typeof harness>): void => {
       test.androidCli.layout.mockRejectedValueOnce(new Error("layout failed"));

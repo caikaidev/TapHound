@@ -1,3 +1,7 @@
+import {
+  appProcessPids,
+  primaryAppPid
+} from "../../domain/app-process.js";
 import type { AdbPort } from "../../ports/adb.js";
 import type { Clock } from "../../ports/clock.js";
 
@@ -10,7 +14,12 @@ export interface ProcessWaitOptions {
 }
 
 export type ProcessWaitResult =
-  | { status: "ready"; pid: number; durationMs: number }
+  | {
+      status: "ready";
+      pid: number;
+      pids: readonly number[];
+      durationMs: number;
+    }
   | { status: "timeout"; durationMs: number }
   | { status: "cancelled"; durationMs: number };
 
@@ -44,13 +53,16 @@ export class ProcessWaiter {
       }
 
       let pid: number | null;
+      let pids: readonly number[];
       try {
-        pid = await this.adb.pid({
+        const processes = await this.adb.appProcesses({
           packageName: options.packageName,
           deviceSerial: options.deviceSerial,
           timeoutMs: remainingMs,
           ...(options.signal === undefined ? {} : { signal: options.signal })
         });
+        pid = primaryAppPid(processes, options.packageName);
+        pids = appProcessPids(processes);
       } catch (error) {
         if (isAborted(options.signal)) {
           return {
@@ -64,6 +76,7 @@ export class ProcessWaiter {
         return {
           status: "ready",
           pid,
+          pids,
           durationMs: this.clock.now() - startedAt
         };
       }

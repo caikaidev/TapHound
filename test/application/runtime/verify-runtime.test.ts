@@ -6,6 +6,7 @@ import {
   type VerifyInput
 } from "../../../src/application/runtime/verify-runtime.js";
 import type { StepRunner } from "../../../src/application/runtime/step-runner.js";
+import type { AppProcess } from "../../../src/domain/app-process.js";
 import type { CommandResult } from "../../../src/ports/process-runner.js";
 import {
   runtimeConfig,
@@ -26,6 +27,11 @@ function input(signal?: AbortSignal): VerifyInput {
   };
 }
 
+const alive: readonly AppProcess[] = [
+  { pid: 42, name: "com.example.app" },
+  { pid: 77, name: "com.example.app:remote" }
+];
+
 describe("VerifyRuntime", () => {
   it("orchestrates the full deterministic verification order", async () => {
     const test = runtimeFixture();
@@ -38,7 +44,6 @@ describe("VerifyRuntime", () => {
       report: {
         status: "passed",
         layers: {
-          build: "passed",
           run: "passed",
           structural: "passed",
           activityCheckpoint: "passed",
@@ -52,11 +57,12 @@ describe("VerifyRuntime", () => {
         }
       }
     });
+    expect(result.report.schemaVersion).toBe(2);
     expect(test.order).toEqual([
-      "build",
-      "describe",
+      "install",
       "logcat-start",
-      "run",
+      "force-stop",
+      "launch",
       "pid",
       "pid",
       "activity-main",
@@ -91,12 +97,12 @@ describe("VerifyRuntime", () => {
 
   it("waits for a delayed App process within one launch-readiness budget", async () => {
     const test = runtimeFixture();
-    vi.mocked(test.adb.pid)
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(null)
-      .mockResolvedValue(42);
+    vi.mocked(test.adb.appProcesses)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValue(alive);
 
     const result = await new VerifyRuntime(test.dependencies).verify(input());
 
@@ -105,12 +111,12 @@ describe("VerifyRuntime", () => {
       currentTime: 400,
       sleeps: [100, 100, 100, 100]
     });
-    expect(test.adb.pid).toHaveBeenNthCalledWith(5, {
+    expect(test.adb.appProcesses).toHaveBeenNthCalledWith(5, {
       packageName: runtimeConfig.run.packageName,
       deviceSerial: "emulator-5554",
       timeoutMs: 100
     });
-    expect(test.adb.pid).toHaveBeenNthCalledWith(6, {
+    expect(test.adb.appProcesses).toHaveBeenNthCalledWith(6, {
       packageName: runtimeConfig.run.packageName,
       deviceSerial: "emulator-5554",
       timeoutMs: 100
@@ -146,10 +152,10 @@ describe("VerifyRuntime", () => {
 
   it("fails launch readiness when the App process exits during redirect", async () => {
     const test = runtimeFixture();
-    vi.mocked(test.adb.pid)
-      .mockResolvedValueOnce(42)
-      .mockResolvedValueOnce(42)
-      .mockResolvedValueOnce(null);
+    vi.mocked(test.adb.appProcesses)
+      .mockResolvedValueOnce(alive)
+      .mockResolvedValueOnce(alive)
+      .mockResolvedValueOnce([]);
     vi.mocked(test.adb.currentActivity)
       .mockResolvedValue("com.example.app.SplashActivity");
 
@@ -171,61 +177,30 @@ describe("VerifyRuntime", () => {
     expect(test.order).not.toContain("action");
   });
 
-  it("fails fast at build but still finalizes best-effort evidence", async () => {
+  it("fails fast when the app is not installed but still finalizes best-effort evidence", async () => {
     const test = runtimeFixture();
-    test.dependencies.gradle = {
-      build: (): Promise<CommandResult> => {
-        test.order.push("build");
-        return Promise.resolve(commandResult({
-          exitCode: 1,
-          stderr: "Gradle failed"
-        }));
-      }
-    };
-
-    const result = await new VerifyRuntime(test.dependencies).verify(input());
-
-    expect(result).toMatchObject({
-      status: "failed",
-      exitCode: 1,
-      report: {
-        primaryFailure: { code: "BUILD_FAILED", message: "Gradle failed" },
-        layers: { build: "failed", run: "notRun" }
-      }
+    vi.mocked(test.adb.isInstalled).mockImplementation(() => {
+      test.order.push("install");
+      return Promise.resolve(false);
     });
-    expect(test.order).toEqual(["build", "screenshot", "report"]);
-  });
-
-  it("rejects a configured Package that conflicts with Android project metadata", async () => {
-    const test = runtimeFixture();
-    const conflictingDescription = {
-      apkPath: "/project/app-debug.apk",
-      metadataPaths: ["/project/AndroidProject.json"],
-      packageName: "com.other.app"
-    };
-    vi.mocked(test.androidCli.describeProject)
-      .mockResolvedValue(conflictingDescription);
 
     const result = await new VerifyRuntime(test.dependencies).verify(input());
 
     expect(result).toMatchObject({
       status: "error",
-      exitCode: 2,
+      exitCode: 3,
       report: {
-        primaryFailure: {
-          code: "CONFIG_INVALID",
-          phase: "describe"
-        }
+        primaryFailure: { code: "APP_NOT_INSTALLED", phase: "install" },
+        layers: { run: "failed" }
       }
     });
-    expect(result.report.primaryFailure?.message).toContain("com.other.app");
-    expect(test.order).not.toContain("run");
+    expect(test.order).toEqual(["install", "screenshot", "report"]);
   });
 
   it("finalizes Logcat when App launch fails", async () => {
     const test = runtimeFixture();
-    vi.mocked(test.androidCli.runApp).mockImplementation(() => {
-      test.order.push("run");
+    vi.mocked(test.adb.launchActivity).mockImplementation(() => {
+      test.order.push("launch");
       return Promise.resolve(commandResult({ exitCode: 1, stderr: "launch failed" }));
     });
 
@@ -233,10 +208,10 @@ describe("VerifyRuntime", () => {
 
     expect(result.report.primaryFailure?.code).toBe("APP_LAUNCH_FAILED");
     expect(test.order).toEqual([
-      "build",
-      "describe",
+      "install",
       "logcat-start",
-      "run",
+      "force-stop",
+      "launch",
       "screenshot",
       "logcat-stop",
       "report"
@@ -298,7 +273,8 @@ describe("VerifyRuntime", () => {
         steps: []
       }
     });
-    expect(test.order).not.toContain("run");
+    expect(test.order).not.toContain("force-stop");
+    expect(test.order).not.toContain("launch");
     expect(test.order).not.toContain("action");
   });
 
@@ -332,7 +308,7 @@ describe("VerifyRuntime", () => {
 
   it("maps readiness command errors to APP_LAUNCH_FAILED", async () => {
     const test = runtimeFixture();
-    vi.mocked(test.adb.pid).mockRejectedValue(new Error("ADB disconnected"));
+    vi.mocked(test.adb.appProcesses).mockRejectedValue(new Error("ADB disconnected"));
 
     const result = await new VerifyRuntime(test.dependencies).verify(input());
 
@@ -351,7 +327,7 @@ describe("VerifyRuntime", () => {
     const test = runtimeFixture();
     const clock = new FakeClock();
     const controller = new AbortController();
-    vi.mocked(test.adb.pid).mockResolvedValue(null);
+    vi.mocked(test.adb.appProcesses).mockResolvedValue([]);
     clock.onSleep = (): void => {
       controller.abort();
     };

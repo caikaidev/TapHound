@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { basename, dirname, join } from "node:path";
+import { basename, dirname } from "node:path";
 import { mkdirSync, writeFileSync } from "node:fs";
 
 const executable = basename(process.argv[1] ?? "");
@@ -16,23 +16,9 @@ if (root === undefined) {
   fail("TAPHOUND_FAKE_ROOT is required");
 }
 
-if (executable === "gradlew") {
-  if (process.env.TAPHOUND_FAKE_GRADLE_EXIT === "1") {
-    fail("fixture Gradle build failed", 1);
-  }
-  process.exit(0);
-}
-
 if (executable === "android") {
   if (args[0] === "--version") {
     process.stdout.write("1.0.fixture\n");
-    process.exit(0);
-  }
-  if (args[0] === "describe") {
-    process.stdout.write(`${join(root, "metadata.json")}\n`);
-    process.exit(0);
-  }
-  if (args[0] === "run") {
     process.exit(0);
   }
   if (args[0] === "layout") {
@@ -77,8 +63,35 @@ if (executable === "adb") {
       "07-19 10:00:00.000  42  42 I TapHound: process fixture ready\n"
     );
     setInterval(() => {}, 1000);
-  } else if (command[0] === "shell" && command[1] === "pidof") {
-    process.stdout.write("42\n");
+  } else if (command[0] === "shell" && command[1] === "ps") {
+    process.stdout.write(
+      "  PID NAME\n"
+        + "   42 com.example.app\n"
+        + "   77 com.example.app:remote\n"
+        + "  100 system_server\n"
+    );
+  } else if (
+    command[0] === "shell"
+    && command[1] === "pm"
+    && command[2] === "path"
+  ) {
+    if (process.env.TAPHOUND_FAKE_APP === "absent") {
+      process.exit(1);
+    }
+    process.stdout.write("package:/data/app/fixture/base.apk\n");
+  } else if (
+    command[0] === "shell"
+    && command[1] === "am"
+    && (command[2] === "start" || command[2] === "force-stop")
+  ) {
+    if (command[2] === "start" && process.env.TAPHOUND_FAKE_LAUNCH === "error") {
+      process.stdout.write("Error: Activity not started\n");
+    }
+  } else if (
+    command[0] === "shell"
+    && command[1] === "input"
+  ) {
+    process.stdout.write("");
   } else if (
     command[0] === "shell"
     && command[1] === "dumpsys"

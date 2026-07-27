@@ -134,7 +134,7 @@ function harness(
   adb: Record<
     | "foregroundComponent"
     | "currentActivity"
-    | "pid"
+    | "appProcesses"
     | "tap"
     | "longClick"
     | "swipe"
@@ -182,7 +182,9 @@ function harness(
       });
     }),
     currentActivity: vi.fn(() => Promise.resolve(afterActivity)),
-    pid: vi.fn(() => Promise.resolve(42)),
+    appProcesses: vi.fn(() => Promise.resolve([
+      { pid: 42, name: "com.example.app" }
+    ])),
     tap: vi.fn(() => {
       calls.push("action");
       return Promise.resolve(ok);
@@ -689,7 +691,7 @@ describe("GenerationStepExecutor", () => {
       });
     }, "PACKAGE_ESCAPE"],
     ["crash", (test: ReturnType<typeof harness>): void => {
-      test.adb.pid.mockResolvedValueOnce(null);
+      test.adb.appProcesses.mockResolvedValueOnce([]);
     }, "APP_CRASHED"],
     ["action failure", (test: ReturnType<typeof harness>): void => {
       test.adb.tap.mockResolvedValueOnce({ ...ok, exitCode: 1, stderr: "tap failed" });
@@ -1103,10 +1105,12 @@ describe("GenerationStepExecutor", () => {
       });
     }, "SNAPSHOT_STALE"],
     ["missing PID", (test: ReturnType<typeof harness>): void => {
-      test.adb.pid.mockResolvedValueOnce(null);
+      test.adb.appProcesses.mockResolvedValueOnce([]);
     }, "APP_CRASHED"],
     ["replaced PID", (test: ReturnType<typeof harness>): void => {
-      test.adb.pid.mockResolvedValueOnce(99);
+      test.adb.appProcesses.mockResolvedValueOnce([
+        { pid: 99, name: "com.example.app" }
+      ]);
     }, "APP_CRASHED"],
     ["Layout drift", (test: ReturnType<typeof harness>): void => {
       test.androidCli.layout.mockResolvedValueOnce([{
@@ -1150,8 +1154,10 @@ describe("GenerationStepExecutor", () => {
         ? "com.example.app.OtherActivity"
         : activity
     })) as never);
-    test.adb.pid.mockImplementation((() => Promise.resolve(
-      identity === "PID" && layoutReturned ? 99 : 42
+    test.adb.appProcesses.mockImplementation((() => Promise.resolve(
+      identity === "PID" && layoutReturned
+        ? [{ pid: 99, name: "com.example.app" }]
+        : [{ pid: 42, name: "com.example.app" }]
     )) as never);
     test.androidCli.layout.mockImplementationOnce((async () => {
       await Promise.resolve();
@@ -1174,11 +1180,11 @@ describe("GenerationStepExecutor", () => {
   it("detects PID replacement after the action", async () => {
     const runtime = snapshot();
     const test = harness(session(runtime));
-    test.adb.pid
-      .mockResolvedValueOnce(42)
-      .mockResolvedValueOnce(42)
-      .mockResolvedValueOnce(42)
-      .mockResolvedValueOnce(99);
+    test.adb.appProcesses
+      .mockResolvedValueOnce([{ pid: 42, name: "com.example.app" }])
+      .mockResolvedValueOnce([{ pid: 42, name: "com.example.app" }])
+      .mockResolvedValueOnce([{ pid: 42, name: "com.example.app" }])
+      .mockResolvedValueOnce([{ pid: 99, name: "com.example.app" }]);
 
     const result = await test.execute({
       generationId: "generation-1",
@@ -1362,8 +1368,10 @@ describe("GenerationStepExecutor", () => {
       actionCompleted = true;
       return Promise.resolve(ok);
     }) as never);
-    test.adb.pid.mockImplementation((() => Promise.resolve(
-      actionCompleted && ++postActionPidObservations >= 3 ? 99 : 42
+    test.adb.appProcesses.mockImplementation((() => Promise.resolve(
+      actionCompleted && ++postActionPidObservations >= 3
+        ? [{ pid: 99, name: "com.example.app" }]
+        : [{ pid: 42, name: "com.example.app" }]
     )) as never);
 
     const result = await test.execute({
@@ -1455,8 +1463,10 @@ describe("GenerationStepExecutor", () => {
       actionCompleted = true;
       return Promise.resolve(ok);
     }) as never);
-    test.adb.pid.mockImplementation((() => Promise.resolve(
-      actionCompleted && ++postActionPidObservations >= 4 ? 99 : 42
+    test.adb.appProcesses.mockImplementation((() => Promise.resolve(
+      actionCompleted && ++postActionPidObservations >= 4
+        ? [{ pid: 99, name: "com.example.app" }]
+        : [{ pid: 42, name: "com.example.app" }]
     )) as never);
 
     const result = await test.execute({
@@ -1869,8 +1879,10 @@ describe("GenerationStepExecutor", () => {
         : "com.example.app",
       activity
     })) as never);
-    test.adb.pid.mockImplementation((() => Promise.resolve(
-      identity === "PID" && escaped ? 99 : 42
+    test.adb.appProcesses.mockImplementation((() => Promise.resolve(
+      identity === "PID" && escaped
+        ? [{ pid: 99, name: "com.example.app" }]
+        : [{ pid: 42, name: "com.example.app" }]
     )) as never);
     const scroll: ProposedStep = {
       action: "scrollTo",

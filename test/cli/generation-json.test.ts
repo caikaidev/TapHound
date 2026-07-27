@@ -159,12 +159,7 @@ function harness(signal?: AbortSignal): Harness {
       describe: vi.fn(() => Promise.resolve({
         projectRoot: "/project",
         packageName: "com.example.app",
-        buildTask: ":app:assembleDebug",
-        artifactTarget: "app",
-        variant: "debug",
-        launchActivity: "com.example.app.MainActivity",
-        apkPath: "/project/app-debug.apk",
-        metadataPaths: []
+        launchActivity: "com.example.app.MainActivity"
       }))
     },
     contextValidator: { validate: vi.fn() },

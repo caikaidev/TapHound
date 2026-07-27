@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { primaryAppPid } from "../../domain/app-process.js";
 import {
   GenerationSessionIdSchema,
   GenerationSessionSchema,
@@ -41,7 +42,7 @@ export interface RuntimeObserverDependencies {
     GenerationSessionStore,
     "read" | "writeEvidence" | "produceEvidence" | "commitSnapshot"
   >;
-  adb: Pick<AdbPort, "foregroundComponent" | "pid">;
+  adb: Pick<AdbPort, "foregroundComponent" | "appProcesses">;
   androidCli: Pick<AndroidCliPort, "layout" | "captureScreen">;
   now: () => Date;
   createAttemptId: () => string;
@@ -49,7 +50,7 @@ export interface RuntimeObserverDependencies {
 
 export interface SnapshotReobservationGuardDependencies {
   store: Pick<GenerationSessionStore, "read">;
-  adb: Pick<AdbPort, "foregroundComponent" | "pid">;
+  adb: Pick<AdbPort, "foregroundComponent" | "appProcesses">;
   androidCli: Pick<AndroidCliPort, "layout">;
   now: () => Date;
 }
@@ -85,7 +86,7 @@ function assertObservable(session: GenerationSession): void {
 
 async function collectRuntime(
   dependencies: {
-    adb: Pick<AdbPort, "foregroundComponent" | "pid">;
+    adb: Pick<AdbPort, "foregroundComponent" | "appProcesses">;
     androidCli: Pick<AndroidCliPort, "layout">;
   },
   session: GenerationSession,
@@ -102,7 +103,10 @@ async function collectRuntime(
     ...(signal === undefined ? {} : { signal })
   };
   const foreground = await dependencies.adb.foregroundComponent(identity);
-  const pid = await dependencies.adb.pid(identity);
+  const pid = primaryAppPid(
+    await dependencies.adb.appProcesses(identity),
+    session.target.packageName
+  );
   const layout = z.array(LayoutElementSchema).parse(
     await dependencies.androidCli.layout({
       deviceSerial: session.target.deviceSerial,

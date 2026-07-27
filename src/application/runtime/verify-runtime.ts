@@ -13,10 +13,10 @@ import type { AdbPort } from "../../ports/adb.js";
 import type { AndroidCliPort } from "../../ports/android-cli.js";
 import type { ArtifactStore } from "../../ports/artifact-store.js";
 import type { Clock } from "../../ports/clock.js";
-import type { GradlePort } from "../../ports/gradle.js";
 import { LogcatCollector } from "../collector/logcat-collector.js";
 import type { ReportWriter } from "../report/report-writer.js";
 import { ActivityWaiter } from "./activity-waiter.js";
+import { launchFailure } from "./launch-failure.js";
 import { ProcessWaiter } from "./process-waiter.js";
 import {
   StepRunner,
@@ -44,7 +44,6 @@ export interface StepRunnerLike {
 }
 
 export interface VerifyRuntimeDependencies {
-  gradle: GradlePort;
   androidCli: AndroidCliPort;
   adb: AdbPort;
   clock: Clock;
@@ -106,11 +105,9 @@ function errorMessage(error: unknown): string {
 }
 
 function layerForFailure(code: FailureCode): keyof TapHoundReport["layers"] {
-  if (code === "BUILD_FAILED") {
-    return "build";
-  }
   if (
-    code === "APP_LAUNCH_FAILED"
+    code === "APP_NOT_INSTALLED"
+    || code === "APP_LAUNCH_FAILED"
     || code === "APP_CRASHED"
   ) {
     return "run";
@@ -154,7 +151,6 @@ export class VerifyRuntime {
     const collectionErrors: ReportFailure[] = [];
     const steps: TapHoundReport["steps"] = [];
     const layers: TapHoundReport["layers"] = {
-      build: "notRun",
       run: "notRun",
       structural: "notRun",
       activityCheckpoint: "notRun",
@@ -190,49 +186,25 @@ export class VerifyRuntime {
     };
 
     try {
-      const build = await this.dependencies.gradle.build({
-        projectDir: input.projectRoot,
-        task: input.config.build.task,
-        ...(input.signal === undefined ? {} : { signal: input.signal })
-      });
-      if (commandFailed(build)) {
-        layers.build = "failed";
-        setPrimary(
-          "BUILD_FAILED",
-          commandMessage(build, "Gradle build failed"),
-          "build"
-        );
-      } else {
-        layers.build = "passed";
-      }
-
-      let apkPath: string | undefined;
-      if (primaryFailure === undefined) {
-        try {
-          const description = await this.dependencies.androidCli.describeProject({
-            projectDir: input.projectRoot,
-            target: input.config.artifact.target,
-            variant: input.config.artifact.variant,
-            ...(input.signal === undefined ? {} : { signal: input.signal })
-          });
-          if (
-            description.packageName !== undefined
-            && description.packageName !== input.config.run.packageName
-          ) {
-            setPrimary(
-              "CONFIG_INVALID",
-              `Configured Package ${input.config.run.packageName} conflicts with Android metadata ${description.packageName}`,
-              "describe"
-            );
-          } else {
-            apkPath = description.apkPath;
-          }
-        } catch (error) {
-          setPrimary("BUILD_FAILED", errorMessage(error), "describe");
+      try {
+        const installed = await this.dependencies.adb.isInstalled({
+          packageName: input.config.run.packageName,
+          deviceSerial: input.deviceSerial,
+          ...(input.signal === undefined ? {} : { signal: input.signal }),
+          timeoutMs: input.config.idle.timeoutMs
+        });
+        if (!installed) {
+          setPrimary(
+            "APP_NOT_INSTALLED",
+            `Package ${input.config.run.packageName} is not installed on ${input.deviceSerial}`,
+            "install"
+          );
         }
+      } catch (error) {
+        setPrimary("APP_NOT_INSTALLED", errorMessage(error), "install");
       }
 
-      if (primaryFailure === undefined && apkPath !== undefined) {
+      if (primaryFailure === undefined) {
         try {
           await logcat.start({
             deviceSerial: input.deviceSerial,
@@ -249,19 +221,28 @@ export class VerifyRuntime {
         }
 
         if (logcatStarted) {
-          const run = await this.dependencies.androidCli.runApp({
-            apkPath,
-            activity: launchActivity,
+          const identity = {
+            packageName: input.config.run.packageName,
             deviceSerial: input.deviceSerial,
-            ...(input.signal === undefined ? {} : { signal: input.signal })
-          });
-          if (commandFailed(run)) {
+            ...(input.signal === undefined ? {} : { signal: input.signal }),
+            timeoutMs: input.config.idle.timeoutMs
+          };
+          const stopped = await this.dependencies.adb.forceStop(identity);
+          const launched = commandFailed(stopped)
+            ? undefined
+            : await this.dependencies.adb.launchActivity({
+                packageName: input.config.run.packageName,
+                activity: launchActivity,
+                deviceSerial: input.deviceSerial,
+                ...(input.signal === undefined ? {} : { signal: input.signal }),
+                timeoutMs: input.config.idle.timeoutMs
+              });
+          const launchError = launched === undefined
+            ? commandMessage(stopped, "App reset failed")
+            : launchFailure(launched);
+          if (launchError !== undefined) {
             layers.run = "failed";
-            setPrimary(
-              "APP_LAUNCH_FAILED",
-              commandMessage(run, "App launch failed"),
-              "run"
-            );
+            setPrimary("APP_LAUNCH_FAILED", launchError, "run");
           } else {
             try {
               const launchReadinessStartedAt = this.dependencies.clock.now();
@@ -288,7 +269,7 @@ export class VerifyRuntime {
                   "readiness"
                 );
               } else {
-                logcat.scopeToPid(processReadiness.pid);
+                logcat.scopeToPids(processReadiness.pids);
                 const firstStep = input.journey.steps[0];
                 if (firstStep === undefined) {
                   throw new Error("Journey requires at least one step");
@@ -458,12 +439,13 @@ export class VerifyRuntime {
           "CONFIG_INVALID",
           "ENVIRONMENT_MISSING_TOOL",
           "DEVICE_UNAVAILABLE",
+          "APP_NOT_INSTALLED",
           "INTERNAL_ERROR"
         ].includes(failure.code)
         ? "error"
         : "failed";
     const report: TapHoundReport = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       runId,
       status,
       startedAt: startedAt.toISOString(),

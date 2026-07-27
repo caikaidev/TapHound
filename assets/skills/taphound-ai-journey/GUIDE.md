@@ -42,6 +42,7 @@ when the project source changes significantly (see Section 5).
 | Node.js | 22+ (avoid 23) |
 | Android SDK | ADB + `uiautomator` (Android CLI) |
 | Device | One online Android device (emulator or USB) |
+| App | Target APK already installed on the device |
 | TapHound | Cloned repo with `npm ci` installed |
 
 ### 1.2 Build TapHound
@@ -471,7 +472,7 @@ taphound generation finalize \
 
 Finalize performs:
 1. `forceStop` the app
-2. Rebuild, launch, and replay all candidate steps in one pass
+2. Launch and replay all candidate steps in one pass
 3. Verify no fallback, no crash, all assertions pass
 4. Atomically publish the authoritative bundle to
    `.taphound/generations/<id>/`

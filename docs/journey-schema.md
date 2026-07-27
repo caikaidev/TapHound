@@ -1,8 +1,8 @@
 # TapHound Journey Schema v1
 
-TapHound Journey 是独立、自研、严格校验的 JSON 协议。默认配置文件为 `taphound.config.json`。它不复用、不调用且不兼容 Android CLI 官方 Journey。未知字段、空步骤列表、非 v1 文档以及自然语言步骤都会被拒绝。
+TapHound Journey is an independent, self-developed, strictly validated JSON protocol. The default config file is `taphound.config.json`. It does not reuse, invoke, or stay compatible with the official Android CLI Journey. Unknown fields, empty step lists, non-v1 documents, and natural-language steps are all rejected.
 
-## 顶层结构
+## Top-Level Structure
 
 ```json
 {
@@ -12,13 +12,13 @@ TapHound Journey 是独立、自研、严格校验的 JSON 协议。默认配置
 }
 ```
 
-- `version`：当前固定为 `1`。
-- `name`：非空 Journey 名称。
-- `steps`：至少一个步骤，按数组顺序串行执行，首个失败后停止。
+- `version`: currently fixed at `1`.
+- `name`: a non-empty Journey name.
+- `steps`: at least one step, executed serially in array order, stopping after the first failure.
 
 ## Activity Checkpoint
 
-每个步骤必须包含：
+Each step must include:
 
 ```json
 "activity": {
@@ -27,11 +27,11 @@ TapHound Journey 是独立、自研、严格校验的 JSON 协议。默认配置
 }
 ```
 
-`activity.before` 在 Locator 解析之前检查；`activity.after` 在 Action 成功且 Layout 稳定之后检查。二者必须是完整限定类名。Recorder 从设备直接读取并自动写入，它们是结构性检查，不是业务 `expect`。
+`activity.before` is checked before Locator resolution; `activity.after` is checked after the Action succeeds and the Layout is stable. Both must be fully qualified class names. The Recorder reads them directly from the device and writes them automatically; they are structural checks, not business `expect`.
 
 ## Locator
 
-目标型 Action 使用一个或多个字段：
+Target-type Actions use one or more fields:
 
 ```json
 {
@@ -41,19 +41,19 @@ TapHound Journey 是独立、自研、严格校验的 JSON 协议。默认配置
 }
 ```
 
-优先级固定为 `resourceId`、`text`、`contentDescription`。Replay 从第一个有命中的字段开始，并用后续字段消除歧义；零命中返回 `LOCATOR_NOT_FOUND`，多命中返回 `LOCATOR_AMBIGUOUS`，不会猜测目标。
+The priority is fixed as `resourceId`, `text`, then `contentDescription`. Replay starts from the first field that has matches and uses subsequent fields to disambiguate; zero matches return `LOCATOR_NOT_FOUND`, multiple matches return `LOCATOR_AMBIGUOUS`, and the target is never guessed.
 
 ## Action
 
-- `click`：需要 `locator`，执行 ADB tap。
-- `longClick`：需要 `locator`，可设置正整数 `durationMs`，默认 800。
-- `inputText`：需要非空 `text`，输入到当前焦点。
-- `swipe`：需要 `locator`、`direction`；`distancePercent` 取 `(0, 1]`，默认 0.6；`durationMs` 默认 300。Recorder 只展示 Android CLI 标记为 scrollable 且提供 bounds 的元素；手写 Journey 若只定位到没有 bounds 的元素，会以 `ACTION_FAILED` 终止，不会猜测滑动区域。
-- `scrollTo`：需要目标 `locator`、滚动容器 `container` 和 `direction`；`maxSwipes` 为 1 到 30，默认 20；`distancePercent` 与 `durationMs` 默认分别为 0.6 和 300。Replay 在每次滑动前后确定性解析目标，目标唯一出现后停止，不点击目标；超过上限返回 `SCROLL_TARGET_NOT_FOUND`。容器必须唯一且提供 bounds，不支持标注回退。
-- `back`：执行 ADB BACK keyevent。
-- `wait`：只执行 Layout 稳定检测，不使用固定 sleep。
+- `click`: requires `locator`, performs an ADB tap.
+- `longClick`: requires `locator`, accepts a positive integer `durationMs`, default 800.
+- `inputText`: requires non-empty `text`, typed into the current focus.
+- `swipe`: requires `locator`, `direction`; `distancePercent` is in `(0, 1]`, default 0.6; `durationMs` default 300. The Recorder only shows elements that Android CLI marks as scrollable and that provide bounds; a hand-written Journey that only locates an element without bounds will terminate with `ACTION_FAILED` and will not guess a swipe region.
+- `scrollTo`: requires a target `locator`, a scroll container `container`, and `direction`; `maxSwipes` ranges from 1 to 30, default 20; `distancePercent` and `durationMs` default to 0.6 and 300 respectively. Replay deterministically resolves the target before and after each swipe, stopping once the target appears uniquely, without clicking the target; exceeding the limit returns `SCROLL_TARGET_NOT_FOUND`. The container must be unique and provide bounds; annotated fallback is not supported.
+- `back`: performs the ADB BACK keyevent.
+- `wait`: performs only Layout stability detection, with no fixed sleep.
 
-示例：
+Example:
 
 ```json
 {
@@ -69,7 +69,7 @@ TapHound Journey 是独立、自研、严格校验的 JSON 协议。默认配置
 }
 ```
 
-`scrollTo` 示例：
+`scrollTo` example:
 
 ```json
 {
@@ -85,11 +85,11 @@ TapHound Journey 是独立、自研、严格校验的 JSON 协议。默认配置
 }
 ```
 
-完整示例见 [`examples/scroll-to.journey.json`](../examples/scroll-to.journey.json)。
+For a full example see [`examples/scroll-to.journey.json`](../examples/scroll-to.journey.json).
 
-## 显式标注回退
+## Explicit Annotated Fallback
 
-只有 `click` 与 `longClick` 接受标注截图回退：
+Only `click` and `longClick` accept annotated-screenshot fallback:
 
 ```json
 "fallback": {
@@ -98,11 +98,11 @@ TapHound Journey 是独立、自研、严格校验的 JSON 协议。默认配置
 }
 ```
 
-常规 Locator 失败且存在 `annotatedLabel` 时，Replay 才会采集新的标注截图并让 Android CLI 解析该 `#编号`。TapHound 不通过 AI 或视觉推理选择标签。其他 Action 不允许回退。
+When the regular Locator fails and an `annotatedLabel` is present, Replay captures a new annotated screenshot and lets Android CLI parse that `#number`. TapHound never selects labels through AI or visual reasoning. Other Actions do not allow fallback.
 
-## 显式 Expect
+## Explicit Expect
 
-Recorder 不自动生成业务断言。步骤可以拥有一个 `expect`：
+The Recorder does not auto-generate business assertions. A step may carry one `expect`:
 
 ### `activity`
 
@@ -137,4 +137,4 @@ Recorder 不自动生成业务断言。步骤可以拥有一个 `expect`：
 }
 ```
 
-Logcat 只匹配本步骤 `[T0, T1]` 窗口。`match` 可为 `literal` 或 `regex`；正则必须有效。完整可执行示例见 [`examples/search.journey.json`](../examples/search.journey.json)。
+Logcat is matched only within this step's `[T0, T1]` window. `match` may be `literal` or `regex`; the regex must be valid. For a full executable example see [`examples/search.journey.json`](../examples/search.journey.json).

@@ -3,6 +3,10 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import {
+  appProcessPids,
+  primaryAppPid
+} from "../../domain/app-process.js";
+import {
   GenerationSessionSchema,
   GenerationInFlightSchema,
   expandProposedStepVariables,
@@ -93,6 +97,7 @@ interface LiveRuntime {
   foregroundPackageName: string;
   activity: string;
   pid: number;
+  pids: readonly number[];
   layout: readonly LayoutElement[];
 }
 
@@ -506,7 +511,6 @@ export class GenerationStepExecutor {
     try {
       await logcat.start({
         deviceSerial: session.target.deviceSerial,
-        pid: authoritativePid,
         ...(input.signal === undefined ? {} : { signal: input.signal })
       });
       logcatStarted = true;
@@ -518,6 +522,7 @@ export class GenerationStepExecutor {
         input.signal,
         fresh
       );
+      logcat.scopeToPids(preAction.pids);
       throwIfCancelled(input.signal);
       const provisional = executableStep(
         proposal,
@@ -633,6 +638,7 @@ export class GenerationStepExecutor {
           undefined,
           input.signal
         );
+        logcat.scopeToPids(after.pids);
         finalStep = executableStep(
           proposal,
           session.variables,
@@ -895,7 +901,8 @@ export class GenerationStepExecutor {
     if (foreground.packageName !== session.target.packageName) {
       fail("PACKAGE_ESCAPE", "Foreground package escaped generation target");
     }
-    const pid = await this.dependencies.adb.pid(identity());
+    const processes = await this.dependencies.adb.appProcesses(identity());
+    const pid = primaryAppPid(processes, session.target.packageName);
     throwIfCancelled(signal);
     if (pid === null || pid !== expectedPid) {
       fail("APP_CRASHED", "Generation process identity changed");
@@ -918,7 +925,10 @@ export class GenerationStepExecutor {
     if (confirmedForeground.packageName !== session.target.packageName) {
       fail("PACKAGE_ESCAPE", "Foreground package escaped generation target");
     }
-    const confirmedPid = await this.dependencies.adb.pid(identity());
+    const confirmedPid = primaryAppPid(
+      await this.dependencies.adb.appProcesses(identity()),
+      session.target.packageName
+    );
     throwIfCancelled(signal);
     if (confirmedPid === null || confirmedPid !== expectedPid) {
       fail("APP_CRASHED", "Generation process identity changed");
@@ -951,6 +961,7 @@ export class GenerationStepExecutor {
       foregroundPackageName: foreground.packageName,
       activity: foreground.activity,
       pid,
+      pids: appProcessPids(processes),
       layout
     };
   }
@@ -987,7 +998,10 @@ export class GenerationStepExecutor {
     ) {
       fail("SNAPSHOT_STALE", "Generation Activity changed before mutation");
     }
-    const pid = await this.dependencies.adb.pid(identity());
+    const pid = primaryAppPid(
+      await this.dependencies.adb.appProcesses(identity()),
+      session.target.packageName
+    );
     throwIfCancelled(signal);
     if (pid === null || pid !== expectedPid) {
       fail("APP_CRASHED", "Generation process identity changed");

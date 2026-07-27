@@ -10,8 +10,6 @@ import type { GenerationSession } from "../../../src/domain/generation.js";
 
 const config: TapHoundConfig = {
   version: 1,
-  build: { task: ":app:assembleDebug" },
-  artifact: { target: "app", variant: "debug" },
   run: {
     packageName: "com.example.app",
     activity: ".MainActivity"
@@ -42,13 +40,7 @@ const context: ProjectContext = {
 const project = {
   projectRoot: "/project",
   packageName: "com.example.app",
-  buildTask: ":app:assembleDebug",
-  artifactTarget: "app",
-  variant: "debug",
-  launchActivity: "com.example.app.MainActivity",
-  apkPath: "/project/app-debug.apk",
-  metadataPaths: ["/project/output-metadata.json"],
-  metadataPackageName: "com.example.app"
+  launchActivity: "com.example.app.MainActivity"
 };
 
 function starter(validationStatus: "valid" | "stale" | "invalid" = "valid"): {
@@ -144,8 +136,7 @@ describe("GenerationStarter", () => {
     const right = await second.service.start({
       deviceSerial: "emulator-5554",
       project: {
-        ...project,
-        metadataPaths: [...project.metadataPaths]
+        ...project
       },
       context: {
         ...context,

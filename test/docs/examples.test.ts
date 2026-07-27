@@ -40,6 +40,7 @@ describe("TapHound documentation examples", () => {
 
   it("documents every executable command and its primary workflow", async () => {
     const readme = await text("README.md");
+    const readmeZh = await text("README.zh-CN.md");
     const commandNames = createProgram().commands.map((command) => command.name());
 
     expect(commandNames).toEqual([
@@ -51,27 +52,33 @@ describe("TapHound documentation examples", () => {
       "generation",
       "init"
     ]);
-    expect(readme).toContain("# TapHound");
-    expect(readme).toContain("TapHound for Android");
-    expect(readme).toContain("Follow every tap. Catch every regression.");
-    expect(readme).toContain("TapHound Journey");
-    expect(readme).toContain("Android CLI 官方 Journey");
-    expect(readme).not.toMatch(/\bAPR\b|\bapr\b/);
-    for (const command of ["doctor", "record", "verify"]) {
-      expect(readme).toContain(`taphound ${command}`);
+    for (const doc of [readme, readmeZh]) {
+      expect(doc).toContain("# TapHound");
+      expect(doc).toContain("TapHound for Android");
+      expect(doc).toContain("Follow every tap. Catch every regression.");
+      expect(doc).toContain("TapHound Journey");
+      expect(doc).not.toMatch(/\bAPR\b|\bapr\b/);
+      for (const command of ["doctor", "record", "verify"]) {
+        expect(doc).toContain(`taphound ${command}`);
+      }
+      for (const workflow of [
+        "project describe",
+        "context validate",
+        "generation start",
+        "taphound init"
+      ]) {
+        expect(doc).toContain(workflow);
+      }
+      expect(doc).toContain("Node.js 22");
+      expect(doc).toContain("macOS");
+      expect(doc).toContain("scrollTo");
     }
-    for (const workflow of [
-      "project describe",
-      "context validate",
-      "generation start",
-      "taphound init"
-    ]) {
-      expect(readme).toContain(workflow);
-    }
-    expect(readme).toContain("Node.js 22");
-    expect(readme).toContain("macOS");
-    expect(readme).toContain("当前限制");
-    expect(readme).toContain("scrollTo");
+    // Chinese-specific content lives in the zh-CN README.
+    expect(readmeZh).toContain("Android CLI 官方 Journey");
+    expect(readmeZh).toContain("当前限制");
+    // Language switcher links.
+    expect(readme).toContain("README.zh-CN.md");
+    expect(readmeZh).toContain("README.md");
   });
 
   it("documents Journey checkpoints, Actions, Expects, and explicit fallback", async () => {
@@ -95,7 +102,7 @@ describe("TapHound documentation examples", () => {
     expect(journey).toContain("activity.after");
     expect(journey).toContain("annotatedLabel");
     expect(journey).toContain("#7");
-    expect(journey).toContain("不兼容");
+    expect(journey).toContain("does not reuse");
   });
 
   it("documents the complete report failure and exit-code contract", async () => {
@@ -127,7 +134,6 @@ describe("TapHound documentation examples", () => {
     expect(agent).toContain("Project Context");
     expect(agent).toContain("generation observe");
     expect(agent).toContain("taphound init");
-    expect(agent).not.toContain("不在 v0.2");
   });
 
   it("brands active schema documentation as TapHound", async () => {
@@ -151,11 +157,14 @@ describe("TapHound documentation examples", () => {
 
   it("keeps local testing and machine handoff instructions discoverable", async () => {
     const readme = await text("README.md");
+    const readmeZh = await text("README.zh-CN.md");
     const testing = await text("docs/local-testing.md");
     const todo = await text("TODO.md");
 
-    expect(readme).toContain("docs/local-testing.md");
-    expect(readme).toContain("TODO.md");
+    for (const doc of [readme, readmeZh]) {
+      expect(doc).toContain("docs/local-testing.md");
+      expect(doc).toContain("TODO.md");
+    }
     expect(testing).toContain("npm test");
     expect(testing).toContain("npm run acceptance:device");
     expect(testing).toContain("npm run acceptance:generation");
@@ -172,8 +181,8 @@ describe("TapHound documentation examples", () => {
     ]) {
       expect(testing).toContain(`\`${command}\``);
     }
-    expect(todo).toContain("换机后");
-    expect(todo).toContain("npm `dev` 预发布");
+    expect(todo).toContain("Post-Machine-Switch");
+    expect(todo).toContain("npm `dev` Pre-release");
   });
 
   it("ignores generated Node, TapHound, Android, and local environment files", async () => {

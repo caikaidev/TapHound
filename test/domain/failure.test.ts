@@ -8,7 +8,6 @@ import {
 
 describe("exitCodeForFailure", () => {
   it.each([
-    "BUILD_FAILED",
     "APP_LAUNCH_FAILED",
     "APP_CRASHED",
     "LOCATOR_NOT_FOUND",
@@ -31,7 +30,8 @@ describe("exitCodeForFailure", () => {
 
   it.each([
     "ENVIRONMENT_MISSING_TOOL",
-    "DEVICE_UNAVAILABLE"
+    "DEVICE_UNAVAILABLE",
+    "APP_NOT_INSTALLED"
   ] as const)("maps %s to environment exit code 3", (failure) => {
     expect(exitCodeForFailure(failure)).toBe(3);
   });

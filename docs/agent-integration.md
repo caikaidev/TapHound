@@ -1,15 +1,15 @@
-# 从 Agent CLI 调用 TapHound
+# Calling TapHound from an Agent CLI
 
-TapHound 提供两类 Agent 集成面：
+TapHound provides two integration surfaces for Agents:
 
-- 使用 `taphound verify --json` 确定性验收已有 Journey。
-- 使用 Project Context 与 `taphound generation ... --json` 生成新 Journey，再由 TapHound 从初始状态完整 Replay 并验证后发布。
+- Use `taphound verify --json` to deterministically verify an existing Journey.
+- Use a Project Context and `taphound generation ... --json` to generate a new Journey, which TapHound then fully Replays from the initial state and publishes after verification.
 
-外部 Agent 可以分析源码、判断目标是否完成并提出下一步操作，但 TapHound Core 不调用模型。Project Context 校验、设备状态绑定、提案验证、风险确认、ADB 执行、最终 Replay 与断言均由确定性代码负责。
+An external Agent may analyze source code, judge whether a goal is complete, and propose the next step, but TapHound Core never invokes a model. Project Context validation, device-state binding, proposal validation, risk confirmation, ADB execution, final Replay, and assertions are all handled by deterministic code.
 
-## 验证已有 Journey
+## Verifying an Existing Journey
 
-典型流程是：开发者使用 Claude Code 或其他 Agent CLI 实现需求，完成后让 Agent 调用 TapHound Journey 验证代码是否符合预期。
+A typical flow: a developer uses Claude Code or another Agent CLI to implement a requirement, then has the Agent call TapHound Journey to verify whether the code meets expectations.
 
 ```bash
 taphound verify \
@@ -20,18 +20,18 @@ taphound verify \
   --json
 ```
 
-## 机器契约
+## Machine Contract
 
-- `verify --json` 的 stdout 恰好输出一个 JSON 值和结尾换行，不包含进度文本。
-- stderr 接收预检、进度和诊断，可由 Agent 单独保存。
-- 进程退出码与 JSON `exitCode` 一致。
-- `0` 表示通过；`1` 是产品验证失败；`2` 是输入无效；`3` 是环境不可用；`4` 是 TapHound 内部错误。
-- 有报告时读取 `reportPath`、`report.primaryFailure`、`report.secondaryErrors` 和分层结果。
-- 没有报告时读取顶层 `failure.code` 与 `failure.message`。
+- The stdout of `verify --json` contains exactly one JSON value and a trailing newline, with no progress text.
+- stderr receives pre-checks, progress, and diagnostics, which the Agent may save separately.
+- The process exit code matches the JSON `exitCode`.
+- `0` means passed; `1` is a product verification failure; `2` is invalid input; `3` is an unavailable environment; `4` is a TapHound internal error.
+- When a report exists, read `reportPath`, `report.primaryFailure`, `report.secondaryErrors`, and the layered results.
+- When no report exists, read the top-level `failure.code` and `failure.message`.
 
-不要只搜索 stdout 文本中的 “passed”；应先判断进程状态和 `exitCode`，再读取结构化字段。
+Do not merely search stdout text for "passed"; first check the process status and `exitCode`, then read the structured fields.
 
-## Node.js 调用示例
+## Node.js Invocation Example
 
 ```js
 import { spawn } from "node:child_process";
@@ -51,22 +51,22 @@ child.stderr.setEncoding("utf8").on("data", chunk => { stderr += chunk; });
 child.on("close", code => {
   const result = JSON.parse(stdout);
   if (code !== result.exitCode) throw new Error("TapHound exit contract mismatch");
-  // 将 result.report.primaryFailure 反馈给开发 Agent。
+  // Feed result.report.primaryFailure back to the development Agent.
 });
 ```
 
-调用方也必须使用参数数组并保持 `shell: false`，避免把项目路径或用户输入拼成 Shell 命令。
+The caller must also use an argument array and keep `shell: false`, to avoid turning project paths or user input into a Shell command.
 
-## 生成新 Journey
+## Generating a New Journey
 
-生成流程使用仓库内的 [`taphound-ai-journey` Skill](../assets/skills/taphound-ai-journey/SKILL.md)：
+The generation flow uses the in-repo [`taphound-ai-journey` Skill](../assets/skills/taphound-ai-journey/SKILL.md):
 
-1. `project describe --json` 输出稳定的 Package、Activity、Variant 与 APK 信息。
-2. Agent 分析 Android 项目源码，生成带文件哈希证据的 Project Context。
-3. `context validate` / `context status` 检查 Context 的结构、身份和时效性。
-4. `generation start` 绑定项目、配置、Context 和设备。
-5. Agent 循环调用 `generation observe` 获取权威 snapshot，再通过 `generation step` 提交与 snapshot 严格绑定的提案；需要人工批准时使用 `generation confirm`，本地 TTY 覆盖使用 `generation manual`。
-6. `generation finalize` 从初始状态完整 Replay；只有精确验证通过后才发布 Journey 和不可变证据。
+1. `project describe --json` outputs stable Package and Activity information.
+2. The Agent analyzes the Android project source and produces a Project Context with file-hash evidence.
+3. `context validate` / `context status` check the Context's structure, identity, and timeliness.
+4. `generation start` binds the project, config, Context, and device.
+5. The Agent loops: call `generation observe` to obtain an authoritative snapshot, then submit a proposal strictly bound to that snapshot via `generation step`; use `generation confirm` when human approval is required, and `generation manual` for local TTY overrides.
+6. `generation finalize` fully Replays from the initial state; the Journey and immutable evidence are published only after exact verification passes.
 
 ```bash
 taphound project describe --project /workspace/android-app --json
@@ -81,27 +81,27 @@ taphound generation start \
   --json
 ```
 
-设备在 `generation start` 时绑定。`generation observe`、`step`、`confirm` 和 `manual` 通过 `--session` 使用该绑定，不接受 `--device`；`generation finalize` 可以显式提供 `--device`，但不得改变会话身份绑定。
+The device is bound at `generation start`. `generation observe`, `step`, `confirm`, and `manual` use that binding via `--session` and do not accept `--device`; `generation finalize` may explicitly provide `--device`, but must not change the session identity binding.
 
-Generation 的 `--json` 命令同样只向 stdout 写入一个机器可读 JSON 值，并用 `exitCode` 表示结果。Agent 必须保留 `generationId`、`baseRevision`、`snapshotHash` 和完整 snapshot，不能自行伪造或重用过期绑定。完整协议、重试规则与 Context 更新策略见 Skill 的 [`GUIDE.md`](../assets/skills/taphound-ai-journey/GUIDE.md)。
+Generation's `--json` commands likewise write only one machine-readable JSON value to stdout and indicate the result with `exitCode`. The Agent must retain `generationId`, `baseRevision`, `snapshotHash`, and the full snapshot, and must not fabricate or reuse expired bindings on its own. For the full protocol, retry rules, and Context update strategy, see the Skill's [`GUIDE.md`](../assets/skills/taphound-ai-journey/GUIDE.md).
 
-## 为 AI Agent 安装 Skill
+## Installing the Skill for AI Agents
 
-`taphound init` 将 TapHound AI Journey Skill 从 npm 包复制到各 Agent 的 Skill 目录。交互式多选至少选择一个 Agent，也可以用 `--agent` 非交互指定：
+`taphound init` copies the TapHound AI Journey Skill from the npm package into each Agent's Skill directory. The interactive multi-select requires choosing at least one Agent; you can also specify non-interactively with `--agent`:
 
 ```bash
 taphound init --agent claude,codex,cursor,droid --json
 ```
 
-全局安装（用户级目录）：
+Global install (user-level directory):
 
 ```bash
 taphound init --agent claude --global
 ```
 
-支持的 Agent 及路径：
+Supported Agents and paths:
 
-| Agent | 项目级路径 | 用户级路径 |
+| Agent | Project-level path | User-level path |
 |---|---|---|
 | Claude Code | `.claude/skills/` | `~/.claude/skills/` |
 | Codex | `.agents/skills/` | `~/.agents/skills/` |
@@ -109,18 +109,18 @@ taphound init --agent claude --global
 | Droid | `.factory/skills/` | `~/.factory/skills/` |
 | Other | `.agents/skills/` | `~/.agents/skills/` |
 
-Skill 随 npm 包发布（`assets/skills/`），`taphound init` 从包内复制到目标目录。重新运行 `init` 会覆盖已有 Skill 文件。
+The Skill ships with the npm package (`assets/skills/`), and `taphound init` copies it from the package into the target directory. Re-running `init` overwrites existing Skill files.
 
-## 给 Claude Code 的最小指令
+## Minimal Instructions for Claude Code
 
 ```text
-实现完成后运行：
+After implementation is complete, run:
 taphound verify --project . --journey journeys/search.json --json
-解析 JSON；exitCode=0 才算验收通过。
-若失败，优先报告 report.primaryFailure，并附上 reportPath。
-不要修改 Journey 来掩盖实现缺陷。
+Parse the JSON; acceptance passes only when exitCode=0.
+If it fails, report report.primaryFailure first, and include reportPath.
+Do not modify the Journey to mask implementation defects.
 ```
 
-## 安全与确定性
+## Safety and Determinism
 
-TapHound Replay 不调用 AI。Agent 可以选择已有 Journey，也可以在 generation 会话中提出新步骤，但 Locator、Activity、Layout Diff、风险策略与 Expect 的最终判定均由确定性代码完成。Agent 不应在失败后自动放宽断言、替换 Package、删除步骤或绕过确认。
+TapHound Replay never invokes AI. The Agent may select an existing Journey or propose new steps in a generation session, but the final judgment of Locator, Activity, Layout Diff, risk policy, and Expect is performed by deterministic code. The Agent must not automatically loosen assertions, swap the Package, delete steps, or bypass confirmation after a failure.

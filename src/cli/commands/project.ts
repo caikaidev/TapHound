@@ -2,7 +2,6 @@ import { resolve } from "node:path";
 
 import { Command } from "commander";
 
-import { ProjectConfigurationError } from "../../application/project/project-describer.js";
 import { TapHoundConfigSchema } from "../../domain/config.js";
 import type { CliDependencies } from "../dependencies.js";
 import {
@@ -74,17 +73,12 @@ export function createProjectCommand(
         } else {
           writeLine(
             dependencies.stdout,
-            `${description.packageName} (${description.variant})\nAPK: ${description.apkPath}`
+            `${description.packageName}\nActivity: ${description.launchActivity}`
           );
         }
         dependencies.setExitCode(0);
       } catch (error) {
-        writeFailure(
-          dependencies,
-          options,
-          error instanceof ProjectConfigurationError ? 2 : 4,
-          error
-        );
+        writeFailure(dependencies, options, 4, error);
       }
     });
 

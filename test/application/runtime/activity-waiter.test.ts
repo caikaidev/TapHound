@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { ActivityWaiter } from "../../../src/application/runtime/activity-waiter.js";
+import type { AppProcess } from "../../../src/domain/app-process.js";
 import { FakeClock } from "../../fakes/fake-clock.js";
 import { runtimeFixture } from "../../fakes/runtime-fixture.js";
 
@@ -12,11 +13,15 @@ const options = {
   timeoutMs: 300
 };
 
+const alive: readonly AppProcess[] = [
+  { pid: 42, name: "com.example.app" }
+];
+
 describe("ActivityWaiter", () => {
   it("waits through a transient Activity", async () => {
     const runtime = runtimeFixture();
     const clock = new FakeClock();
-    vi.mocked(runtime.adb.pid).mockResolvedValue(42);
+    vi.mocked(runtime.adb.appProcesses).mockResolvedValue(alive);
     vi.mocked(runtime.adb.currentActivity)
       .mockResolvedValueOnce("com.example.app.SplashActivity")
       .mockResolvedValueOnce("com.example.app.HomeActivity");
@@ -33,7 +38,7 @@ describe("ActivityWaiter", () => {
   it("returns the last Activity on timeout", async () => {
     const runtime = runtimeFixture();
     const clock = new FakeClock();
-    vi.mocked(runtime.adb.pid).mockResolvedValue(42);
+    vi.mocked(runtime.adb.appProcesses).mockResolvedValue(alive);
     vi.mocked(runtime.adb.currentActivity)
       .mockResolvedValue("com.example.app.SplashActivity");
 
@@ -50,9 +55,9 @@ describe("ActivityWaiter", () => {
   it("stops when the configured App process exits", async () => {
     const runtime = runtimeFixture();
     const clock = new FakeClock();
-    vi.mocked(runtime.adb.pid)
-      .mockResolvedValueOnce(42)
-      .mockResolvedValueOnce(null);
+    vi.mocked(runtime.adb.appProcesses)
+      .mockResolvedValueOnce(alive)
+      .mockResolvedValueOnce([]);
     vi.mocked(runtime.adb.currentActivity)
       .mockResolvedValue("com.example.app.SplashActivity");
 
@@ -75,6 +80,6 @@ describe("ActivityWaiter", () => {
       status: "cancelled",
       durationMs: 0
     });
-    expect(runtime.adb.pid).not.toHaveBeenCalled();
+    expect(runtime.adb.appProcesses).not.toHaveBeenCalled();
   });
 });

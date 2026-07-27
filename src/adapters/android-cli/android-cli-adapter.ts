@@ -1,30 +1,17 @@
-import { readFile } from "node:fs/promises";
-
 import type {
   AndroidCliPort,
-  ArtifactDescription,
   CaptureScreenOptions,
-  DescribeProjectOptions,
   DeviceCommandOptions,
-  Point,
-  RunAppOptions
+  Point
 } from "../../ports/android-cli.js";
 import type {
   CommandResult,
   ProcessRunner
 } from "../../ports/process-runner.js";
 import {
-  extractDescriptionPaths,
-  selectApplicationId,
-  selectApkArtifact,
-  selectDescribedApk
-} from "./describe-parser.js";
-import {
   parseLayout,
   parseLayoutDiff
 } from "./layout-parser.js";
-
-type ReadTextFile = (path: string) => Promise<string>;
 
 function commandSpec(
   args: readonly string[],
@@ -53,54 +40,7 @@ function assertSuccess(result: CommandResult, operation: string): void {
 }
 
 export class AndroidCliAdapter implements AndroidCliPort {
-  public constructor(
-    private readonly runner: ProcessRunner,
-    private readonly readTextFile: ReadTextFile = (path) => (
-      readFile(path, "utf8")
-    )
-  ) {}
-
-  public async describeProject(
-    options: DescribeProjectOptions
-  ): Promise<ArtifactDescription> {
-    const result = await this.runner.run(commandSpec([
-      "describe",
-      `--project_dir=${options.projectDir}`
-    ], options.signal));
-    assertSuccess(result, "describe");
-
-    const metadataPaths = extractDescriptionPaths(result.stdout);
-    if (metadataPaths.length === 0) {
-      const apkPath = selectDescribedApk(result.stdout, options);
-      if (apkPath === undefined) {
-        throw new Error(
-          "Android CLI describe returned no metadata paths or matching APK"
-        );
-      }
-      return { apkPath, metadataPaths };
-    }
-    const documents: unknown[] = await Promise.all(
-      metadataPaths.map(async (path): Promise<unknown> => {
-        const document: unknown = JSON.parse(await this.readTextFile(path));
-        return document;
-      })
-    );
-    const packageName = selectApplicationId(documents, options);
-    return {
-      apkPath: selectApkArtifact(documents, options),
-      metadataPaths,
-      ...(packageName === undefined ? {} : { packageName })
-    };
-  }
-
-  public runApp(options: RunAppOptions): Promise<CommandResult> {
-    return this.runner.run(commandSpec([
-      "run",
-      `--apks=${options.apkPath}`,
-      `--activity=${options.activity}`,
-      `--device=${options.deviceSerial}`
-    ], options.signal));
-  }
+  public constructor(private readonly runner: ProcessRunner) {}
 
   public async layout(
     options: DeviceCommandOptions

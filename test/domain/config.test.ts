@@ -4,8 +4,6 @@ import { TapHoundConfigSchema } from "../../src/domain/config.js";
 
 const validConfig = {
   version: 1,
-  build: { task: ":app:assembleDebug" },
-  artifact: { target: "app", variant: "debug" },
   run: {
     packageName: "com.example.app",
     activity: ".MainActivity"

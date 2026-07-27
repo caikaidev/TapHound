@@ -14,35 +14,35 @@ Target Platform:
 
 # 1. Background
 
-AI 已经能够完成大量 Android 代码编写工作。
+AI can already complete a large amount of Android code writing work.
 
-但代码修改完成后，仍然需要开发者手动完成大量重复操作：
+However, after code changes are complete, developers still need to manually perform many repetitive operations:
 
 - Build
 - Run
-- 打开指定页面
-- 输入测试数据
-- 查看结果
-- 查看日志
+- Open a specific page
+- Enter test data
+- View results
+- View logs
 
-这些步骤每天都会重复很多次。
+These steps are repeated many times every day.
 
-APR 的目标不是替代 Android CLI。
+The goal of APR is not to replace Android CLI.
 
-而是在 Android CLI 之上，为 Android 项目提供一个可重复执行的 Runtime。
+Instead, on top of Android CLI, it provides a repeatable Runtime for Android projects.
 
 ---
 
 # 2. Goal
 
-第一阶段只解决一个问题：
+The first phase solves only one problem:
 
-> AI 修改代码以后，可以自动完成一次真实的功能验证。
+> After AI modifies the code, it can automatically complete a single real functional verification.
 
-例如：
+For example:
 
 ```
-修改代码
+Modify code
 
 ↓
 
@@ -50,56 +50,56 @@ Run App
 
 ↓
 
-进入搜索页面
+Enter the search page
 
 ↓
 
-输入 hello world
+Input hello world
 
 ↓
 
-截图
+Screenshot
 
 ↓
 
-导出日志
+Export logs
 
 ↓
 
-结束
+End
 ```
 
-第一阶段不引入 AI 推理。
+The first phase does not introduce AI reasoning.
 
-只保证流程稳定执行。
+It only ensures the process executes stably.
 
-## 2.1 核心定位与价值主张
+## 2.1 Core Positioning and Value Proposition
 
-APR 是**完全自研、不依赖 AI 参与执行**的确定性验证工具。
+APR is a **fully self-developed, deterministic verification tool that does not rely on AI to participate in execution**.
 
-核心场景：开发者 / AI 完成一次需求代码修改后，需要对这次修改做一次**可重复、可信赖**的回归验证。
+Core scenario: after a developer / AI completes a code change for a requirement, it needs to perform a **repeatable and trustworthy** regression verification of that change.
 
-验证依据两类信号，二者结合使用：
+Verification relies on two types of signals, used in combination:
 
-1. **精确的操作触发结果** —— 点击是否命中目标、页面是否按预期跳转
-2. **业务日志是否符合预期** —— 关键路径的日志是否在预期时间窗口内按预期内容出现
+1. **Precise operation trigger results** — whether the click hit the target, whether the page navigated as expected
+2. **Whether business logs match expectations** — whether the logs on the key path appear with the expected content within the expected time window
 
-二者结合，是为了排除"流程跑完了，但其实没跑对"这类假阳性。
+Combining the two is to rule out false positives where "the process ran to completion, but actually ran incorrectly."
 
-### 2.1.1 与 Android CLI 官方 Journey 的关系
+### 2.1.1 Relationship with the Official Android CLI Journey
 
-Android CLI 自身已经提供了 Journey 能力（[Android CLI support for Journeys](https://developer.android.com/tools/agents/android-cli/journeys)），但两者设计哲学完全不同，必须在这里说清楚，避免"重复造轮子"的误解：
+Android CLI itself already provides Journey capability ([Android CLI support for Journeys](https://developer.android.com/tools/agents/android-cli/journeys)), but the two design philosophies are completely different, and this must be clarified here to avoid the misunderstanding of "reinventing the wheel":
 
-| | 官方 Journey | APR Journey |
+| | Official Journey | APR Journey |
 |---|---|---|
-| 定位方式 | AI 视觉 + 推理，实时判断 | resourceId / text / contentDescription，固定匹配 |
-| 每次执行 | 都需要 AI 参与推理 | 纯确定性回放，不调用模型 |
-| 成本 | 每次运行消耗模型 token | 录制一次，之后近乎零成本重放 |
-| 稳定性 | 依赖模型判断，存在漂移风险 | 固定路径，结果可复现、可对比 |
-| 断言方式 | 自然语言描述，由 AI 判断是否满足 | 预先录制的结构化断言（跳转目标 / 日志匹配），确定性判断 |
-| 适用场景 | 探索性验证、复杂语义判断 | 高频回归验证、CI、需要稳定基线的场景 |
+| Locating approach | AI vision + reasoning, real-time judgment | resourceId / text / contentDescription, fixed matching |
+| Each execution | Always requires AI reasoning | Pure deterministic replay, no model invocation |
+| Cost | Consumes model tokens on every run | Record once, then replay at near-zero cost |
+| Stability | Depends on model judgment, with drift risk | Fixed path, results are reproducible and comparable |
+| Assertion approach | Natural language description, judged by AI | Pre-recorded structured assertions (navigation target / log matching), deterministic judgment |
+| Applicable scenarios | Exploratory verification, complex semantic judgment | High-frequency regression verification, CI, scenarios requiring a stable baseline |
 
-**APR 的核心卖点是确定性、可重复、不消耗 AI token，适合作为"AI 每次改完代码后都要跑一遍"的高频自我回归验证手段**，而不是替代官方 Journey 的探索式验证能力。两者可以并存：官方 Journey 适合"探索这个功能对不对"，APR 适合"确认这次改动没有破坏已知路径"。
+**The core selling point of APR is determinism, repeatability, and zero AI token consumption, suitable as the high-frequency self-regression verification method that "AI runs every time after changing code"**, rather than replacing the exploratory verification capability of the official Journey. The two can coexist: the official Journey is suitable for "exploring whether this feature is correct," while APR is suitable for "confirming that this change did not break known paths."
 
 ---
 
@@ -107,28 +107,28 @@ Android CLI 自身已经提供了 Journey 能力（[Android CLI support for Jour
 
 ## Included
 
-- Android CLI 集成
+- Android CLI integration
 - Journey Replay
 - Journey Recorder
 - Screenshot
 - Logcat
 - Verification Report
-- 断言机制（跳转 / 日志）
-- 基于 Layout Diff 的等待策略
+- Assertion mechanism (navigation / log)
+- Wait strategy based on Layout Diff
 
 ## Excluded
 
-- AI 自动探索
+- AI automatic exploration
 - OCR
-- Vision（除官方 `screen resolve` 兜底定位外）
+- Vision (except the official `screen resolve` fallback locating)
 - DFS
 - Android Studio Plugin
 - Windows
 - Linux
 - CI
-- 多设备并发
-- 自动修复 Journey
-- 自动生成断言内容（断言仍需人工/AI 在录制阶段显式指定）
+- Multi-device concurrency
+- Auto-repair Journey
+- Auto-generate assertion content (assertions still need to be explicitly specified by a human / AI at the recording stage)
 
 ---
 
@@ -136,40 +136,40 @@ Android CLI 自身已经提供了 Journey 能力（[Android CLI support for Jour
 
 ## Platform
 
-仅支持：
+Only supported:
 
 - macOS
 
-其它平台后续支持。
+Other platforms will be supported later.
 
-macOS 首次运行涉及 USB 调试授权、屏幕录制权限等系统弹窗，这类权限问题会中断自动化流程，属于已知限制，需要在环境准备阶段提示开发者提前完成授权。
+The first run on macOS involves system dialogs such as USB debugging authorization and screen recording permission. These permission issues interrupt the automation flow and are known limitations that need to be prompted to the developer in advance during the environment preparation stage.
 
 ---
 
-## Android CLI 依赖边界
+## Android CLI Dependency Boundary
 
-APR 依赖官方 Android CLI（[developer.android.com/tools/agents/android-cli](https://developer.android.com/tools/agents/android-cli)），但需要明确：**Android CLI 并不提供完整的交互执行能力**，APR 对它的依赖分为两部分：
+APR depends on the official Android CLI ([developer.android.com/tools/agents/android-cli](https://developer.android.com/tools/agents/android-cli)), but it must be clarified: **Android CLI does not provide complete interactive execution capability**, and APR's dependency on it is split into two parts:
 
-### 4.1 由 Android CLI 提供
+### 4.1 Provided by Android CLI
 
-| 能力 | 对应命令 | 用途 |
+| Capability | Corresponding command | Purpose |
 |---|---|---|
-| 部署已构建的 APK | `android run --apks=<path>` | Run 阶段安装并启动 App。**注意：该命令不执行任何构建步骤**，APK 必须提前由 Gradle 构建好 |
-| 获取产物路径 | `android describe` | 定位 Build 输出的 APK 路径，供 `run` 使用 |
-| 获取 UI Layout | `android layout [--diff]` | Locator 匹配的数据来源；`--diff` 可用于判断界面是否稳定（见 10.1） |
-| 截图 | `android screen capture [--annotate]` | Collector 采集截图；`--annotate` 附带元素标注框 |
-| 坐标兜底定位 | `android screen resolve` | 将标注截图上的标签转换为屏幕坐标，作为 Locator 失败时的兜底方案（见 8.3） |
-| 设备管理 | `android emulator create/list/start/stop` | Emulator 生命周期管理 |
+| Deploy a built APK | `android run --apks=<path>` | Install and launch the App during the Run stage. **Note: this command does not perform any build step**, the APK must be built by Gradle in advance |
+| Get artifact path | `android describe` | Locate the APK path output by Build, for use by `run` |
+| Get UI Layout | `android layout [--diff]` | Data source for Locator matching; `--diff` can be used to determine whether the UI is stable (see 10.1) |
+| Screenshot | `android screen capture [--annotate]` | Collector captures screenshots; `--annotate` includes element annotation boxes |
+| Coordinate fallback locating | `android screen resolve` | Convert labels on the annotated screenshot to screen coordinates, as a fallback when Locator fails (see 8.3) |
+| Device management | `android emulator create/list/start/stop` | Emulator lifecycle management |
 
-### 4.2 不由 Android CLI 提供，需 APR 自行通过 ADB 实现
+### 4.2 Not Provided by Android CLI, Must Be Implemented by APR Directly via ADB
 
-Android CLI **没有**提供点击 / 输入 / 滑动 / 日志采集的原生命令，以下能力必须由 APR 直接调用 `adb`：
+Android CLI **does not** provide native commands for click / input / swipe / log collection. The following capabilities must be invoked by APR directly via `adb`:
 
 - Click / LongClick / Swipe / Back → `adb shell input tap|swipe|keyevent`
 - InputText → `adb shell input text`
-- Logcat 采集 → `adb logcat`
+- Logcat collection → `adb logcat`
 
-因此第 8 节的架构图需要修正为：
+Therefore the architecture diagram in section 8 needs to be corrected to:
 
 ```
 Journey
@@ -180,20 +180,20 @@ Interaction
 
 ↓ ↘
 
-Android CLI      ADB (直接)
+Android CLI      ADB (direct)
 
 (layout / screenshot / run / device)   (click / input / swipe / logcat)
 ```
 
-### 4.3 Build 阶段
+### 4.3 Build Stage
 
-`android run` 不做构建，Runtime Flow 中必须显式包含独立的 Build 阶段（Gradle），流程修正为见第 5 节。
+`android run` does not perform the build. The Runtime Flow must explicitly include an independent Build stage (Gradle). The corrected flow is shown in section 5.
 
 ---
 
 ## Android Project
 
-第一阶段仅支持：
+The first phase only supports:
 
 - Android Application
 - Gradle Project
@@ -202,12 +202,12 @@ Android CLI      ADB (直接)
 
 ## Device
 
-支持：
+Supported:
 
 - Emulator
 - USB Device
 
-默认一次仅连接一个设备。
+By default only one device is connected at a time.
 
 ---
 
@@ -218,11 +218,11 @@ Build (Gradle)
 
 ↓
 
-Run (android run，部署已构建 APK)
+Run (android run, deploy the built APK)
 
 ↓
 
-Replay Journey（含逐步断言校验）
+Replay Journey (with step-by-step assertion verification)
 
 ↓
 
@@ -230,56 +230,56 @@ Capture Screenshot
 
 ↓
 
-Collect Logcat（按步骤时间窗口切片）
+Collect Logcat (sliced by step time window)
 
 ↓
 
-Generate Report（分层判定结果）
+Generate Report (layered judgment results)
 ```
 
-整个流程保持简单，但 Build 作为独立阶段显式存在，不再隐含在 Run 中。
+The overall flow stays simple, but Build exists explicitly as an independent stage, no longer implied within Run.
 
 ---
 
 # 6. Journey
 
-Journey 表示：
+Journey represents:
 
-一次完整的用户操作，**以及每一步操作后预期发生的结果**。
+A complete user operation, **and the expected result after each step**.
 
-例如：
+For example:
 
 ```
-首页
+Home
 
 ↓
 
-点击搜索
+Click search
 
-↓ (预期：跳转到 SearchActivity)
+↓ (expected: navigate to SearchActivity)
 
-输入 hello world
+Input hello world
 
-↓ (预期：日志出现 query=hello world)
+↓ (expected: log appears query=hello world)
 
-等待页面刷新
+Wait for page refresh
 ```
 
-Journey 不关心：
+Journey does not care about:
 
-- Activity 内部实现细节
+- Activity internal implementation details
 - Fragment
-- 底层 ADB 命令
+- Underlying ADB commands
 
-只描述用户行为 + 该行为应达成的可验证结果。
+It only describes user behavior + the verifiable result that the behavior should achieve.
 
 ---
 
 # 7. Journey Format
 
-第一阶段使用 JSON。
+The first phase uses JSON.
 
-在原有 `action` / `locator` 基础上，新增可选的 `expect` 字段，用于承载精确验证所需的断言。
+On top of the existing `action` / `locator`, an optional `expect` field is added to carry the assertions needed for precise verification.
 
 ```json
 {
@@ -319,27 +319,27 @@ Journey 不关心：
 }
 ```
 
-## 7.1 `expect` 类型
+## 7.1 `expect` Types
 
-第一阶段支持三种断言类型：
+The first phase supports three assertion types:
 
-| type | 说明 | 判定依据 |
+| type | Description | Judgment basis |
 |---|---|---|
-| `activity` | 当前前台 Activity 是否符合预期 | `dumpsys activity` 或等效方式获取当前 Activity |
-| `element` | 新页面上是否出现指定元素（更细粒度的"跳转成功"判定） | `android layout` 匹配 resourceId/text |
-| `logcat` | 指定时间窗口内是否出现匹配日志 | 见 11.1 时间窗口切片规则 |
+| `activity` | Whether the current foreground Activity matches expectations | Obtain the current Activity via `dumpsys activity` or equivalent |
+| `element` | Whether a specified element appears on the new page (a finer-grained "navigation succeeded" judgment) | `android layout` matching resourceId/text |
+| `logcat` | Whether matching logs appear within the specified time window | See 11.1 time-window slicing rules |
 
-`expect` 为可选字段。不写 `expect` 的步骤只做"结构级"校验（Locator 找到 + Action 执行成功），不做"断言级"校验，两者在 Report 中分别体现（见 12 节）。
+`expect` is an optional field. A step without `expect` only performs "structural-level" validation (Locator found + Action executed successfully), not "assertion-level" validation. The two are reflected separately in the Report (see section 12).
 
-Recorder 自动生成 `action` 与 `locator`。`expect` 原则上需要开发者或 AI 在录制后显式补充——这是有意的设计取舍：APR 不分析业务语义、不推断"这一步应该跳到哪"，只负责确定性地校验人为声明的预期，这样才能保证断言本身的可信度不依赖 AI 判断。
+Recorder auto-generates `action` and `locator`. `expect` in principle needs to be explicitly supplemented by the developer or AI after recording — this is an intentional design tradeoff: APR does not analyze business semantics, does not infer "where this step should navigate to," and only deterministically validates human-declared expectations, so that the credibility of the assertions themselves does not depend on AI judgment.
 
 ---
 
 # 8. Interaction Layer
 
-Journey 不直接执行 ADB。
+Journey does not directly execute ADB.
 
-所有操作统一通过 Interaction Layer。
+All operations go through the Interaction Layer uniformly.
 
 ```
 Journey
@@ -353,57 +353,57 @@ Interaction
 Android CLI (layout/screenshot/run)     ADB (click/input/swipe/logcat)
 ```
 
-这样可以避免 Journey 与底层实现耦合，同时也把"哪些能力来自 Android CLI，哪些来自原生 ADB"这件事封装在 Interaction 层内部，对上层透明。
+This avoids coupling Journey with the underlying implementation, and also encapsulates "which capabilities come from Android CLI and which from native ADB" inside the Interaction layer, transparent to the upper layer.
 
 ---
 
 ## Supported Actions
 
-第一阶段仅支持：
+The first phase only supports:
 
-| Action | Support | 执行方式 |
+| Action | Support | Execution |
 |---------|---------|---|
 | Click | ✅ | ADB |
 | LongClick | ✅ | ADB |
 | InputText | ✅ | ADB |
 | Swipe | ✅ | ADB |
 | Back | ✅ | ADB |
-| Wait | ✅ | 内部调度，见 10.1 |
+| Wait | ✅ | Internal scheduling, see 10.1 |
 
-其它操作后续增加。
+Other actions will be added later.
 
 ---
 
 ## Locator
 
-统一使用：
+Unified use of:
 
-Android CLI Layout（`android layout`）。
+Android CLI Layout (`android layout`).
 
-Locator 优先级：
+Locator priority:
 
 1. resourceId
 2. text
 3. contentDescription
 
-第一阶段不支持：
+The first phase does not support:
 
 - XPath
-- 直接指定 Coordinate
+- Directly specifying a Coordinate
 
-### 8.3 兜底定位（新增）
+### 8.3 Fallback Locating (new)
 
-当以上三种 Locator 均无法定位到目标元素时，允许使用 Android CLI 提供的 `screen capture --annotate` + `screen resolve` 作为兜底：先截图并获取标注框，再通过 `screen resolve` 将标签转换为坐标执行点击。
+When all three Locators above fail to locate the target element, the `screen capture --annotate` + `screen resolve` provided by Android CLI is allowed as a fallback: first capture a screenshot and get the annotation box, then convert the label to coordinates via `screen resolve` to perform the click.
 
-该兜底路径仅作为定位失败时的降级方案使用，不作为首选策略，且触发兜底时需要在 Report 中明确标记，提示这一步的稳定性弱于常规 Locator 命中。
+This fallback path is only used as a degraded solution when locating fails, not as the preferred strategy, and when the fallback is triggered it must be clearly marked in the Report, indicating that the stability of this step is weaker than a regular Locator hit.
 
 ---
 
 # 9. Recorder
 
-Recorder 用于录制 Journey。
+Recorder is used to record a Journey.
 
-流程：
+Flow:
 
 ```
 Start
@@ -418,27 +418,27 @@ Stop
 
 ↓
 
-Generate Journey（action + locator）
+Generate Journey (action + locator)
 
 ↓
 
-（可选）人工/AI 补充 expect 断言
+(optional) human/AI supplements expect assertions
 ```
 
-第一阶段 Recorder 自动录制：
+The first phase Recorder auto-records:
 
 - Action
 - Locator
 
-**不自动生成 `expect`**。断言涉及业务语义判断（"这一步应该跳到哪个页面""应该打印什么日志"），APR 不做推断，需要显式补充，以保证断言本身是可信的、非猜测的。
+**It does not auto-generate `expect`**. Assertions involve business semantic judgment ("which page this step should navigate to" "what log should be printed"), which APR does not infer. They need to be explicitly supplemented to ensure the assertions themselves are trustworthy and non-speculative.
 
 ---
 
 # 10. Replay
 
-Replay 根据 Journey 执行操作，并在每一步之后校验对应的 `expect`（如有）。
+Replay executes operations according to the Journey, and verifies the corresponding `expect` (if any) after each step.
 
-每一步：
+Each step:
 
 ```
 Execute Action
@@ -449,87 +449,87 @@ Wait Until Idle
 
 ↓
 
-（如有 expect）校验断言，记录结果
+(if expect present) verify assertion, record result
 
 ↓
 
 Next Action
 ```
 
-禁止：
+Prohibited:
 
 ```
 sleep(1000)
 ```
 
-## 10.1 Wait Until Idle 的具体实现
+## 10.1 Concrete Implementation of Wait Until Idle
 
-基于 `android layout --diff`：
+Based on `android layout --diff`:
 
-1. 执行完 Action 后开始轮询 `android layout --diff`
-2. 若连续 N 次（建议 N=2~3）轮询返回空 diff，则判定界面已稳定，可以进入下一步
-3. 设置超时上限（建议默认 5s，可按 Journey 配置覆盖），超时后仍视为"未稳定"，记录为该步失败并附带最后一次的 diff 内容，便于排查
+1. After executing an Action, start polling `android layout --diff`
+2. If N consecutive polls (recommended N=2~3) return an empty diff, the UI is judged stable and the next step can proceed
+3. Set a timeout upper bound (recommended default 5s, overridable per Journey config). After timeout it is still considered "not stable," recorded as a failure for that step with the last diff content attached, for troubleshooting
 
-这一机制替代了原文档中悬而未决的"统一等待"描述，同时避免了硬编码 sleep。
+This mechanism replaces the unresolved "unified wait" description in the original document, and also avoids hardcoded sleep.
 
-## 10.2 失败处理策略（新增）
+## 10.2 Failure Handling Strategy (new)
 
-单步失败（Locator 未命中 / Action 执行异常 / Wait Until Idle 超时 / 断言不匹配）时：
+On single-step failure (Locator miss / Action execution exception / Wait Until Idle timeout / assertion mismatch):
 
-- 默认策略：终止当前 Journey，不继续执行后续步骤，避免在错误状态上叠加更多不可控操作
-- Report 中明确区分失败类型：
-  - **环境类失败**（设备未连接、App 未启动成功等）
-  - **结构类失败**（Locator 未命中、Action 执行异常）
-  - **断言类失败**（跳转不符预期、日志未按预期出现）
+- Default strategy: terminate the current Journey, do not continue executing subsequent steps, to avoid stacking more uncontrollable operations on an erroneous state
+- The Report clearly distinguishes failure types:
+  - **Environment failure** (device not connected, App failed to start, etc.)
+  - **Structural failure** (Locator miss, Action execution exception)
+  - **Assertion failure** (navigation does not match expectations, log does not appear as expected)
 
-第一阶段不做自动重试，重试策略留待后续阶段评估。
+The first phase does not perform automatic retries; retry strategy is left for later phases to evaluate.
 
 ---
 
 # 11. Collector
 
-执行完成后统一采集：
+After execution completes, uniformly collect:
 
 - Screenshot
 - Logcat
 
-## 11.1 Logcat 时间窗口切片（新增）
+## 11.1 Logcat Time-Window Slicing (new)
 
-为了让日志断言可信，Collector 需要按步骤对 logcat 做时间切片，而不是整段日志笼统匹配：
+To make log assertions trustworthy, Collector needs to slice logcat by step, rather than matching the entire log in a coarse way:
 
-- 每个 Action 开始前记录时间戳 `T0`
-- 该 Action 对应的 Wait Until Idle 结束（或断言校验完成）时记录时间戳 `T1`
-- 该步骤的 `expect.type = logcat` 仅在 `[T0, T1]` 窗口内的日志中匹配 `pattern`
+- Record timestamp `T0` before each Action starts
+- Record timestamp `T1` when the corresponding Wait Until Idle ends (or assertion verification completes) for that Action
+- The `expect.type = logcat` for that step only matches `pattern` within the `[T0, T1]` window
 
-这样可以避免其他组件产生的无关日志造成误判。
+This avoids false judgments caused by unrelated logs produced by other components.
 
-第一阶段不对日志内容做进一步语义分析，只做 tag + pattern 的确定性匹配。
+The first phase does not perform further semantic analysis on log content, only deterministic matching of tag + pattern.
 
 ---
 
 # 12. Report
 
-输出分层判定结果，而不是单一的 Success/Fail：
+Output layered judgment results, rather than a single Success/Fail:
 
 ```
-Run Success（App 是否正常启动，未崩溃）
+Run Success (whether the App started normally, did not crash)
 
-Journey Structural Success（每一步 Locator 是否命中、Action 是否执行成功）
+Journey Structural Success (whether the Locator hit and Action executed successfully on each step)
 
-Journey Assertion Success（每一步 expect 是否匹配：跳转 / 元素 / 日志）
+Journey Assertion Success (whether each step's expect matched: navigation / element / log)
 
 Screenshot
 
-Logcat（按步骤切片）
+Logcat (sliced by step)
 
 Duration
 
-Fallback 使用记录（是否触发了 8.3 的坐标兜底定位）
+Fallback usage record (whether the 8.3 coordinate fallback locating was triggered)
 ```
 
-三层判定分开展示的原因：出问题时，开发者或 AI 需要能立刻区分"是元素没找到""是跳转错了"还是"跳转对了但日志没打出来"，而不是只看到一个笼统的失败。
+The reason the three layers of judgment are displayed separately: when a problem occurs, the developer or AI needs to be able to immediately distinguish "the element was not found" "the navigation was wrong" or "the navigation was correct but the log was not printed," rather than seeing only a coarse failure.
 
-Report 不包含 AI 分析，所有判定均基于确定性规则。
+The Report does not contain AI analysis; all judgments are based on deterministic rules.
 
 ---
 
@@ -538,57 +538,57 @@ Report 不包含 AI 分析，所有判定均基于确定性规则。
 ```
 apr/
 
-├── cli/          # Android CLI 封装（layout / screenshot / run / device）
+├── cli/          # Android CLI wrapper (layout / screenshot / run / device)
 
-├── adb/          # 原生 ADB 封装（click / input / swipe / logcat）
+├── adb/          # Native ADB wrapper (click / input / swipe / logcat)
 
-├── runtime/      # 流程调度（Build → Run → Replay → Collect → Report）
+├── runtime/      # Flow scheduling (Build → Run → Replay → Collect → Report)
 
-├── interaction/  # 用户操作，统一编排 cli 与 adb
+├── interaction/  # User operations, uniformly orchestrates cli and adb
 
-├── journey/      # Journey 定义（含 expect 断言 schema）
+├── journey/      # Journey definition (including expect assertion schema)
 
-├── recorder/     # Journey 录制
+├── recorder/     # Journey recording
 
-├── collector/    # 日志与截图，含时间窗口切片
+├── collector/    # Logs and screenshots, including time-window slicing
 
-└── report/       # 结果输出，分层判定
+└── report/       # Result output, layered judgment
 ```
 
-职责：
+Responsibilities:
 
-**cli** —— Android CLI 封装，负责 layout / screenshot / run / 设备管理。
+**cli** — Android CLI wrapper, responsible for layout / screenshot / run / device management.
 
-**adb** —— 原生 ADB 封装，负责 Android CLI 未覆盖的 click / input / swipe / logcat。
+**adb** — Native ADB wrapper, responsible for click / input / swipe / logcat not covered by Android CLI.
 
-**runtime** —— 流程调度，包含显式的 Build 阶段。
+**runtime** — Flow scheduling, including the explicit Build stage.
 
-**interaction** —— 用户操作，对上层屏蔽 cli 与 adb 的差异。
+**interaction** — User operations, shielding the upper layer from the differences between cli and adb.
 
-**journey** —— Journey 定义，包含 action / locator / expect。
+**journey** — Journey definition, including action / locator / expect.
 
-**recorder** —— Journey 录制，仅生成 action + locator，expect 需另行补充。
+**recorder** — Journey recording, only generates action + locator; expect needs to be supplemented separately.
 
-**collector** —— 日志与截图，按步骤时间窗口切片 logcat。
+**collector** — Logs and screenshots, slicing logcat by step time window.
 
-**report** —— 结果输出，分 Run / Structural / Assertion 三层判定。
+**report** — Result output, with Run / Structural / Assertion three-layer judgment.
 
 ---
 
 # 14. Success Criteria
 
-第一阶段完成后，应满足：
+After the first phase is complete, it should satisfy:
 
-- 可以录制 Journey（action + locator）
-- 可以为 Journey 步骤补充断言（跳转 / 日志）
-- 可以重复、确定性地执行 Journey
-- 可以自动完成 Build + Run
-- 可以基于 Layout Diff 稳定判断页面空闲状态，无需硬编码等待
-- 可以输出 Screenshot
-- 可以输出按步骤切片的 Logcat
-- 可以输出分层（Run / Structural / Assertion）的验证结果
-- 可以稳定完成开发验证，且验证结果不依赖 AI 判断
+- Can record a Journey (action + locator)
+- Can supplement assertions for Journey steps (navigation / log)
+- Can repeatedly and deterministically execute a Journey
+- Can automatically complete Build + Run
+- Can stably determine page idle state based on Layout Diff, without hardcoded waits
+- Can output Screenshot
+- Can output Logcat sliced by step
+- Can output layered (Run / Structural / Assertion) verification results
+- Can stably complete development verification, and the verification result does not depend on AI judgment
 
-达到以上目标即可进入下一阶段。
+Reaching the above goals allows entering the next phase.
 
-不提前增加复杂能力。
+Do not add complex capabilities in advance.

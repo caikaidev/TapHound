@@ -6,7 +6,7 @@ export type DoctorCheckName =
   | "node"
   | "adb"
   | "android"
-  | "gradle"
+  | "app"
   | "permissions"
   | "device";
 
@@ -23,15 +23,20 @@ export interface DoctorReport {
   deviceSerial?: string | undefined;
   failureCode?: Extract<
     FailureCode,
-    "ENVIRONMENT_MISSING_TOOL" | "DEVICE_UNAVAILABLE"
+    "ENVIRONMENT_MISSING_TOOL" | "DEVICE_UNAVAILABLE" | "APP_NOT_INSTALLED"
   > | undefined;
+}
+
+export interface DoctorRunInput {
+  packageName?: string | undefined;
+  requestedDevice?: string | undefined;
+  signal?: AbortSignal | undefined;
 }
 
 export interface DoctorDependencies {
   runner: ProcessRunner;
   adb: AdbPort;
   nodeVersion: string;
-  checkGradleWrapper: (projectRoot: string) => Promise<boolean>;
   checkAndroidPermissions: (
     deviceSerial: string,
     signal?: AbortSignal
@@ -61,11 +66,8 @@ function nodeCheck(version: string): DoctorCheck {
 export class DoctorService {
   public constructor(private readonly dependencies: DoctorDependencies) {}
 
-  public async run(
-    projectRoot: string,
-    signal?: AbortSignal,
-    requestedDevice?: string
-  ): Promise<DoctorReport> {
+  public async run(input: DoctorRunInput = {}): Promise<DoctorReport> {
+    const { packageName, requestedDevice, signal } = input;
     const checks: DoctorCheck[] = [nodeCheck(this.dependencies.nodeVersion)];
     const tool = async (
       name: Extract<DoctorCheckName, "adb" | "android">,
@@ -110,22 +112,6 @@ export class DoctorService {
       await tool("adb", "adb", ["version"]),
       await tool("android", "android", ["--version"])
     );
-    try {
-      const available = await this.dependencies.checkGradleWrapper(projectRoot);
-      checks.push(available
-        ? { name: "gradle", status: "passed" }
-        : {
-            name: "gradle",
-            status: "failed",
-            message: "Executable Gradle wrapper was not found"
-          });
-    } catch (error) {
-      checks.push({
-        name: "gradle",
-        status: "failed",
-        message: error instanceof Error ? error.message : String(error)
-      });
-    }
     let deviceSerial: string | undefined;
     let deviceCheck: DoctorCheck;
     try {
@@ -159,6 +145,41 @@ export class DoctorService {
       };
     }
 
+    if (packageName === undefined) {
+      checks.push({
+        name: "app",
+        status: "notRun",
+        message: "Installed application probe requires a configured package"
+      });
+    } else if (deviceSerial === undefined) {
+      checks.push({
+        name: "app",
+        status: "notRun",
+        message: "Installed application probe requires an online selected device"
+      });
+    } else {
+      try {
+        const installed = await this.dependencies.adb.isInstalled({
+          packageName,
+          deviceSerial,
+          ...(signal === undefined ? {} : { signal })
+        });
+        checks.push(installed
+          ? { name: "app", status: "passed", message: packageName }
+          : {
+              name: "app",
+              status: "failed",
+              message: `Package ${packageName} is not installed on ${deviceSerial}`
+            });
+      } catch (error) {
+        checks.push({
+          name: "app",
+          status: "failed",
+          message: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+
     if (deviceSerial === undefined) {
       checks.push({
         name: "permissions",
@@ -188,20 +209,24 @@ export class DoctorService {
     }
     checks.push(deviceCheck);
 
-    const environmentFailed = checks.some(
-      (check) => check.name !== "device" && check.status === "failed"
+    const failedCheck = (name: DoctorCheckName): boolean => checks.some(
+      (check) => check.name === name && check.status === "failed"
     );
-    const deviceFailed = checks.some(
-      (check) => check.name === "device" && check.status === "failed"
-    );
-    if (environmentFailed || deviceFailed) {
+    const environmentFailed = (["node", "adb", "android", "permissions"] as const)
+      .some(failedCheck);
+    const failureCode = environmentFailed
+      ? "ENVIRONMENT_MISSING_TOOL"
+      : failedCheck("device")
+        ? "DEVICE_UNAVAILABLE"
+        : failedCheck("app")
+          ? "APP_NOT_INSTALLED"
+          : undefined;
+    if (failureCode !== undefined) {
       return {
         status: "failed",
         checks,
         ...(deviceSerial === undefined ? {} : { deviceSerial }),
-        failureCode: environmentFailed
-          ? "ENVIRONMENT_MISSING_TOOL"
-          : "DEVICE_UNAVAILABLE"
+        failureCode
       };
     }
     return {

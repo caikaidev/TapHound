@@ -32,8 +32,7 @@ git diff --exit-code -- assets/brand/png
 ```
 
 Real-device acceptance is separate and opt-in. It requires Android SDK, ADB,
-Android CLI, an executable project Gradle wrapper, an online device, and a
-completed build:
+Android CLI, an online device with the demo APK already installed:
 
 ```bash
 TAPHOUND_ACCEPTANCE_DEVICE=1 npm run acceptance:device
@@ -49,7 +48,7 @@ The code follows ports and adapters:
 - `src/domain/` owns strict Zod schemas and domain types for configuration,
   layouts, locators, journeys, failures, and reports. These schemas are the
   protocol contracts.
-- `src/ports/` defines interfaces for ADB, Android CLI, Gradle, processes,
+- `src/ports/` defines interfaces for ADB, Android CLI, processes,
   clocks, prompts, artifact storage, and journey writing.
 - `src/adapters/` implements those ports using child processes, the filesystem,
   the system clock, and Inquirer.
@@ -68,9 +67,11 @@ fakes.
 
 ### Verification Flow
 
-`VerifyRuntime` builds the Android project, reads APK metadata, starts Logcat,
-launches the app, checks initial process/activity/layout readiness, and then
-runs Journey steps sequentially through `StepRunner`.
+`VerifyRuntime` asserts the configured package is installed, starts Logcat,
+force-stops and cold-launches the app via ADB, checks initial
+process/activity/layout readiness, and then runs Journey steps sequentially
+through `StepRunner`. TapHound does not build or install the APK; that is the
+agent's or developer's responsibility.
 
 Each step checks the before Activity, resolves a deterministic locator, applies
 an explicitly configured annotated-label fallback if eligible, executes the ADB
@@ -82,7 +83,8 @@ recorded as secondary errors rather than replacing the primary failure.
 
 ### Recorder Flow
 
-`RecorderService` builds and launches the app, reads each layout, prompts for an
+`RecorderService` asserts the app is installed, force-stops and cold-launches
+it via ADB, reads each layout, prompts for an
 action and deterministic target, executes the action through the shared action
 and idle abstractions, and captures before/after Activities. Only successful
 steps enter the Journey. Cancelled or failed recording does not write a partial
@@ -98,6 +100,11 @@ Journey, and the recorder does not invent business `expect` assertions.
 - Journey, config, and report schemas use `z.strictObject`; unknown fields are
   intentionally rejected. Coordinate schema, inferred types, runtime behavior,
   docs/examples, and tests when changing a protocol.
+- Config schema omits `build` and `artifact`; TapHound does not compile.
+  Report `schemaVersion` is `2` and `layers` has no `build` key.
+  `BUILD_FAILED` is replaced by `APP_NOT_INSTALLED` (exit 3).
+  `AdbPort` uses `appProcesses` (not `pidof`) for process discovery;
+  `LogcatCollector` scopes to a PID set via `scopeToPids`, not a single PID.
 - Locator priority is fixed: `resourceId`, then `text`, then
   `contentDescription`. Missing or ambiguous matches fail instead of selecting
   heuristically.

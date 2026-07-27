@@ -2,10 +2,15 @@ import {
   parseObservedActivityComponent,
   type ForegroundComponent
 } from "../../domain/activity.js";
+import {
+  isAppProcessName,
+  type AppProcess
+} from "../../domain/app-process.js";
 import type {
   AdbPort,
   AppIdentity,
   DeviceInfo,
+  LaunchActivityOptions,
   LogcatOptions
 } from "../../ports/adb.js";
 import type { Point } from "../../ports/android-cli.js";
@@ -15,8 +20,25 @@ import type {
   RunningCommand
 } from "../../ports/process-runner.js";
 
+const PROCESS_ROW = /^(\d+)\s+(\S+)$/;
+
 function deviceArgs(deviceSerial?: string): string[] {
   return deviceSerial === undefined ? [] : ["-s", deviceSerial];
+}
+
+function assertCommandUsable(
+  result: CommandResult,
+  operation: string
+): void {
+  if (result.spawnError !== undefined) {
+    throw new Error(`ADB ${operation} failed: ${result.spawnError}`);
+  }
+  if (result.timedOut) {
+    throw new Error(`ADB ${operation} timed out`);
+  }
+  if (result.cancelled) {
+    throw new Error(`ADB ${operation} was cancelled`);
+  }
 }
 
 function quoteRemoteShellArgument(value: string): string {
@@ -97,6 +119,32 @@ export class AdbAdapter implements AdbPort {
     return (await this.foregroundComponent(identity)).activity;
   }
 
+  public async isInstalled(identity: AppIdentity): Promise<boolean> {
+    const result = await this.run([
+      ...deviceArgs(identity.deviceSerial),
+      "shell",
+      "pm",
+      "path",
+      identity.packageName
+    ], identity.signal, identity.timeoutMs);
+    assertCommandUsable(result, "pm path");
+    return /^package:/m.test(result.stdout);
+  }
+
+  public launchActivity(
+    options: LaunchActivityOptions
+  ): Promise<CommandResult> {
+    return this.run([
+      ...deviceArgs(options.deviceSerial),
+      "shell",
+      "am",
+      "start",
+      "-W",
+      "-n",
+      `${options.packageName}/${options.activity}`
+    ], options.signal, options.timeoutMs);
+  }
+
   public forceStop(identity: AppIdentity): Promise<CommandResult> {
     return this.run([
       ...deviceArgs(identity.deviceSerial),
@@ -107,22 +155,40 @@ export class AdbAdapter implements AdbPort {
     ], identity.signal, identity.timeoutMs);
   }
 
-  public async pid(identity: AppIdentity): Promise<number | null> {
+  public async appProcesses(
+    identity: AppIdentity
+  ): Promise<readonly AppProcess[]> {
     const result = await this.run([
       ...deviceArgs(identity.deviceSerial),
       "shell",
-      "pidof",
-      identity.packageName
+      "ps",
+      "-A",
+      "-o",
+      "PID,NAME"
     ], identity.signal, identity.timeoutMs);
-    const value = result.stdout.trim();
-    if (value.length === 0) {
-      return null;
+    assertCommandUsable(result, "ps");
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `ADB ps failed: ${result.stderr.trim() || `exit ${String(result.exitCode)}`}`
+      );
     }
-    const firstPid = value.split(/\s+/)[0];
-    if (firstPid === undefined || !/^\d+$/.test(firstPid)) {
-      throw new Error(`Invalid PID from adb: ${value}`);
-    }
-    return Number(firstPid);
+    return result.stdout
+      .split(/\r?\n/)
+      .flatMap((line) => {
+        const row = PROCESS_ROW.exec(line.trim());
+        if (row?.[1] === undefined || row[2] === undefined) {
+          return [];
+        }
+        if (!isAppProcessName(row[2], identity.packageName)) {
+          return [];
+        }
+        const pid = Number(row[1]);
+        if (!Number.isSafeInteger(pid) || pid <= 0) {
+          throw new Error(`Invalid PID from adb ps: ${row[1]}`);
+        }
+        return [{ pid, name: row[2] }];
+      })
+      .sort((left, right) => left.pid - right.pid);
   }
 
   public tap(
@@ -218,10 +284,7 @@ export class AdbAdapter implements AdbPort {
         ...deviceArgs(options.deviceSerial),
         "logcat",
         "-v",
-        "threadtime",
-        ...(options.pid === undefined
-          ? []
-          : [`--pid=${String(options.pid)}`])
+        "threadtime"
       ],
       ...(options.signal === undefined ? {} : { signal: options.signal })
     }, {

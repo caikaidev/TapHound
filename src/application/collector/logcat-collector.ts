@@ -22,12 +22,11 @@ export interface LogcatLine {
 
 export interface LogcatMetadata {
   deviceSerial: string;
-  pid?: number | undefined;
+  pids: readonly number[];
 }
 
 export interface StartLogcatOptions {
   deviceSerial: string;
-  pid?: number | undefined;
   signal?: AbortSignal | undefined;
 }
 
@@ -73,8 +72,9 @@ function startupFailure(result: CommandResult): string {
 export class LogcatCollector {
   private readonly collected: LogcatLine[] = [];
   private readonly stderr: string[] = [];
+  private readonly scopedPids = new Set<number>();
   private running?: RunningCommand | undefined;
-  private streamMetadata?: LogcatMetadata | undefined;
+  private streamMetadata?: { deviceSerial: string } | undefined;
   private stopPromise?: Promise<CommandResult> | undefined;
 
   public constructor(
@@ -95,44 +95,44 @@ export class LogcatCollector {
       onStderrLine: (line): void => {
         this.stderr.push(line);
       },
-      ...(options.pid === undefined ? {} : { pid: options.pid }),
       ...(options.signal === undefined ? {} : { signal: options.signal })
     };
     this.running = this.adb.startLogcat(logcatOptions);
-    this.streamMetadata = {
-      deviceSerial: options.deviceSerial,
-      ...(options.pid === undefined ? {} : { pid: options.pid })
-    };
+    this.streamMetadata = { deviceSerial: options.deviceSerial };
     const startupResult = await this.running.started;
     if (startupResult !== undefined) {
       throw new Error(startupFailure(startupResult));
     }
   }
 
-  public scopeToPid(pid: number): void {
+  public scopeToPids(pids: readonly number[]): void {
     if (this.streamMetadata === undefined) {
       throw new Error("Logcat collector has not started");
     }
-    if (!Number.isInteger(pid) || pid <= 0) {
-      throw new Error("Logcat PID must be a positive integer");
+    for (const pid of pids) {
+      if (!Number.isInteger(pid) || pid <= 0) {
+        throw new Error("Logcat PID must be a positive integer");
+      }
+      this.scopedPids.add(pid);
     }
-    this.streamMetadata = {
-      ...this.streamMetadata,
-      pid
-    };
   }
 
   public metadata(): LogcatMetadata {
     if (this.streamMetadata === undefined) {
       throw new Error("Logcat collector has not started");
     }
-    return { ...this.streamMetadata };
+    return {
+      deviceSerial: this.streamMetadata.deviceSerial,
+      pids: [...this.scopedPids].sort((left, right) => left - right)
+    };
   }
 
   public lines(): readonly LogcatLine[] {
-    const pid = this.streamMetadata?.pid;
+    if (this.scopedPids.size === 0) {
+      return [...this.collected];
+    }
     return this.collected.filter(
-      (line) => pid === undefined || line.pid === undefined || line.pid === pid
+      (line) => line.pid === undefined || this.scopedPids.has(line.pid)
     );
   }
 

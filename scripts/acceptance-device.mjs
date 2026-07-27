@@ -3,6 +3,8 @@ import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import process from "node:process";
 
+import { requireInstalledApp } from "./require-installed-app.mjs";
+
 if (process.env.TAPHOUND_ACCEPTANCE_DEVICE !== "1") {
   process.stderr.write(
     "Skipping device acceptance. Set TAPHOUND_ACCEPTANCE_DEVICE=1 to opt in.\n"
@@ -17,7 +19,6 @@ const projectRoot = resolve(
   "taphound-android-demo"
 );
 const cli = resolve(repositoryRoot, "dist", "cli", "main.js");
-const gradleWrapper = resolve(projectRoot, "gradlew");
 
 try {
   await access(cli);
@@ -25,14 +26,7 @@ try {
   throw new Error("Build TapHound first with `npm run build`");
 }
 
-try {
-  await access(gradleWrapper);
-} catch {
-  throw new Error(
-    "Device acceptance requires a Gradle Wrapper at "
-      + "examples/taphound-android-demo/gradlew"
-  );
-}
+requireInstalledApp("dev.taphound.demo");
 
 const result = spawnSync(process.execPath, [
   cli,

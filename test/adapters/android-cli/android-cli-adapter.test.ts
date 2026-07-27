@@ -4,56 +4,6 @@ import { AndroidCliAdapter } from "../../../src/adapters/android-cli/android-cli
 import { commandResult, processRunner } from "../../fakes/process-runner.js";
 
 describe("AndroidCliAdapter", () => {
-  it("reads an APK from current Android CLI describe output", async () => {
-    const runner = processRunner(commandResult({
-      stdout: [
-        "Task: :core-sdk",
-        "  Variants:",
-        "    Variant: debug",
-        "      Output Listing File: null",
-        "Task: :app",
-        "  Variants:",
-        "    Variant: debug",
-        "      Output Listing File: /project/redirect.txt",
-        "        APK: /project/app/build/outputs/apk/debug/app-debug.apk (Exists)",
-        "    Variant: release",
-        "      Output Listing File: null",
-        "gradlew completed successfully."
-      ].join("\n")
-    }));
-    const adapter = new AndroidCliAdapter(runner);
-
-    await expect(adapter.describeProject({
-      projectDir: "/project",
-      target: "app",
-      variant: "debug"
-    })).resolves.toEqual({
-      apkPath: "/project/app/build/outputs/apk/debug/app-debug.apk",
-      metadataPaths: []
-    });
-  });
-
-  it("deploys a built APK with Activity and device arguments", async () => {
-    const runner = processRunner();
-    const adapter = new AndroidCliAdapter(runner);
-
-    await adapter.runApp({
-      apkPath: "/project/app-debug.apk",
-      activity: "com.example.app.MainActivity",
-      deviceSerial: "emulator-5554"
-    });
-
-    expect(vi.mocked(runner.run)).toHaveBeenCalledWith({
-      executable: "android",
-      args: [
-        "run",
-        "--apks=/project/app-debug.apk",
-        "--activity=com.example.app.MainActivity",
-        "--device=emulator-5554"
-      ]
-    });
-  });
-
   it("reads full Layout and Layout Diff", async () => {
     const runner = processRunner(commandResult({
       stdout: JSON.stringify({

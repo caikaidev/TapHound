@@ -64,13 +64,10 @@ async function fixture(options: {
   await mkdir(bin);
   await symlink(fakeTool, join(bin, "adb"));
   await symlink(fakeTool, join(bin, "android"));
-  await symlink(fakeTool, join(root, "gradlew"));
   const configPath = join(root, "taphound.config.json");
   const journeyPath = join(root, "journey.json");
   await writeFile(configPath, `${JSON.stringify({
     version: 1,
-    build: { task: ":app:assembleDebug" },
-    artifact: { target: "app", variant: "debug" },
     run: { packageName: "com.example.app", activity: ".MainActivity" },
     idle: { pollIntervalMs: 10, stablePolls: 1, timeoutMs: 2000 },
     artifactsDir: options.blockedReports === true
@@ -88,17 +85,6 @@ async function fixture(options: {
       }
     }]
   })}\n`);
-  await writeFile(join(root, "metadata.json"), `${JSON.stringify({
-    modules: [{
-      name: "app",
-      variants: [{
-        name: "debug",
-        mainArtifact: { applicationId: "com.example.app" },
-        artifacts: [{ type: "APK", path: "app-debug.apk" }]
-      }]
-    }]
-  })}\n`);
-  await writeFile(join(root, "app-debug.apk"), "fixture");
   if (options.blockedReports === true) {
     await writeFile(join(root, "blocked"), "not a directory");
   }
@@ -181,9 +167,9 @@ describe("built taphound verify --json process contract", () => {
   });
 
   it.each([
-    [1, {}, { TAPHOUND_FAKE_GRADLE_EXIT: "1" }],
     [2, { invalidJourney: true }, {}],
     [3, {}, { TAPHOUND_FAKE_DEVICE: "none" }],
+    [3, {}, { TAPHOUND_FAKE_APP: "absent" }],
     [4, { blockedReports: true }, {}]
   ] as const)("returns one JSON value with process exit %s", async (
     exitCode,

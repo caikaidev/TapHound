@@ -89,7 +89,6 @@ export const StepReportSchema = z.strictObject({
 });
 
 const LayersSchema = z.strictObject({
-  build: ResultStatusSchema,
   run: ResultStatusSchema,
   structural: ResultStatusSchema,
   activityCheckpoint: ResultStatusSchema,
@@ -107,7 +106,7 @@ const ArtifactsSchema = z.strictObject({
 });
 
 export const TapHoundReportSchema = z.strictObject({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.literal(2),
   runId: z.string().min(1),
   status: RunStatusSchema,
   startedAt: z.string().min(1),

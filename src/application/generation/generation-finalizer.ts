@@ -57,13 +57,7 @@ const Sha256Schema = z.string().regex(/^[a-f\d]{64}$/);
 const ProjectDescriptionSchema: z.ZodType<ProjectDescription> = z.strictObject({
   projectRoot: z.string().min(1),
   packageName: z.string().min(1),
-  buildTask: z.string().min(1),
-  artifactTarget: z.string().min(1),
-  variant: z.string().min(1),
-  launchActivity: z.string().min(1),
-  apkPath: z.string().min(1),
-  metadataPaths: z.array(z.string()),
-  metadataPackageName: z.string().optional()
+  launchActivity: z.string().min(1)
 });
 
 const VerificationReceiptSchema = z.strictObject({

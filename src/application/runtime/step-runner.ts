@@ -1,10 +1,14 @@
 import type { FailureCode } from "../../domain/failure.js";
+import {
+  appProcessPids,
+  primaryAppPid
+} from "../../domain/app-process.js";
 import type { JourneyStep } from "../../domain/journey.js";
 import type {
   ReportFailure,
   StepReport
 } from "../../domain/report.js";
-import type { AdbPort } from "../../ports/adb.js";
+import type { AdbPort, AppIdentity } from "../../ports/adb.js";
 import type { AndroidCliPort } from "../../ports/android-cli.js";
 import type { ArtifactSession } from "../../ports/artifact-store.js";
 import type { Clock } from "../../ports/clock.js";
@@ -116,6 +120,14 @@ export class StepRunner {
     timeoutMs: this.options.idle.timeoutMs
   });
 
+  private readonly primaryPid = async (
+    identity: AppIdentity
+  ): Promise<number | null> => {
+    const processes = await this.options.adb.appProcesses(identity);
+    this.options.logcat.scopeToPids(appProcessPids(processes));
+    return primaryAppPid(processes, this.options.packageName);
+  };
+
   private async generatedForeground(
     expectedActivity: string,
     code: "ACTIVITY_BEFORE_MISMATCH" | "ACTIVITY_AFTER_MISMATCH",
@@ -183,7 +195,7 @@ export class StepRunner {
         }/${foreground.activity}`
       };
     }
-    const pid = await this.options.adb.pid(identity());
+    const pid = await this.primaryPid(identity());
     if (pid !== expectedPid) {
       return {
         status: "failed",
@@ -354,7 +366,7 @@ export class StepRunner {
       );
     }
     const generatedPid = this.options.generatedReplayPolicy === true
-      ? await this.options.adb.pid(identity)
+      ? await this.primaryPid(identity)
       : undefined;
     if (
       this.options.generatedReplayPolicy === true
@@ -515,7 +527,7 @@ export class StepRunner {
       }
     }
 
-    const pid = await this.options.adb.pid(identity);
+    const pid = await this.primaryPid(identity);
     if (pid === null) {
       return fail("APP_CRASHED", "App process is no longer running");
     }
@@ -618,7 +630,7 @@ export class StepRunner {
             "ACTIVITY_AFTER_MISMATCH",
             signal
           );
-          const guardedPid = await this.options.adb.pid(identity);
+          const guardedPid = await this.primaryPid(identity);
           if (guardedPid !== generatedPid) {
             return await fail(
               "ACTIVITY_AFTER_MISMATCH",

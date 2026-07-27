@@ -9,7 +9,6 @@ import type { Journey } from "../../../src/domain/journey.js";
 import type { RecorderPromptPort } from "../../../src/ports/recorder-prompt.js";
 import type { RecorderAction } from "../../../src/ports/recorder-prompt.js";
 import type { JourneyWriterPort } from "../../../src/ports/journey-writer.js";
-import type { GradlePort } from "../../../src/ports/gradle.js";
 import {
   runtimeConfig,
   runtimeFixture
@@ -80,7 +79,6 @@ async function recordScrollToJourney(): Promise<Journey> {
     .mockResolvedValueOnce({ kind: "select", id: "message_bubble" });
   const journeyWriter = writer();
   const service = new RecorderService({
-    gradle: runtime.gradle,
     androidCli: runtime.androidCli,
     adb: runtime.adb,
     clock: runtime.dependencies.clock,
@@ -120,7 +118,6 @@ describe("RecorderService", () => {
     });
     const journeyWriter = writer();
     const service = new RecorderService({
-      gradle: runtime.gradle,
       androidCli: runtime.androidCli,
       adb: runtime.adb,
       clock: runtime.dependencies.clock,
@@ -151,7 +148,6 @@ describe("RecorderService", () => {
     const recorderPrompt = prompt(["click", "finish"]);
     const journeyWriter = writer();
     const service = new RecorderService({
-      gradle: runtime.gradle,
       androidCli: runtime.androidCli,
       adb: runtime.adb,
       clock: runtime.dependencies.clock,
@@ -181,7 +177,7 @@ describe("RecorderService", () => {
       }]
     }]);
     expect(journeyWriter.journeys[0]?.steps[0]?.expect).toBeUndefined();
-    expect(runtime.order.slice(0, 3)).toEqual(["build", "describe", "run"]);
+    expect(runtime.order.slice(0, 3)).toEqual(["install", "force-stop", "launch"]);
   });
 
   it("records from the stable Activity reached after launch", async () => {
@@ -192,7 +188,6 @@ describe("RecorderService", () => {
     const recorderPrompt = prompt(["click", "finish"]);
     const journeyWriter = writer();
     const service = new RecorderService({
-      gradle: runtime.gradle,
       androidCli: runtime.androidCli,
       adb: runtime.adb,
       clock: runtime.dependencies.clock,
@@ -217,17 +212,16 @@ describe("RecorderService", () => {
 
   it("waits for a delayed App process before entering the prompt loop", async () => {
     const runtime = runtimeFixture();
-    vi.mocked(runtime.adb.pid)
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(42);
+    vi.mocked(runtime.adb.appProcesses)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ pid: 42, name: "com.example.app" }]);
     const recorderPrompt = prompt(["cancel"]);
     vi.mocked(recorderPrompt.selectAction).mockImplementation(() => {
-      expect(runtime.adb.pid).toHaveBeenCalledTimes(2);
+      expect(runtime.adb.appProcesses).toHaveBeenCalledTimes(2);
       return Promise.resolve("cancel");
     });
     const journeyWriter = writer();
     const service = new RecorderService({
-      gradle: runtime.gradle,
       androidCli: runtime.androidCli,
       adb: runtime.adb,
       clock: runtime.dependencies.clock,
@@ -249,11 +243,10 @@ describe("RecorderService", () => {
 
   it("does not prompt when the App process is missing after launch", async () => {
     const runtime = runtimeFixture();
-    vi.mocked(runtime.adb.pid).mockResolvedValue(null);
+    vi.mocked(runtime.adb.appProcesses).mockResolvedValue([]);
     const recorderPrompt = prompt(["finish"]);
     const journeyWriter = writer();
     const service = new RecorderService({
-      gradle: runtime.gradle,
       androidCli: runtime.androidCli,
       adb: runtime.adb,
       clock: runtime.dependencies.clock,
@@ -279,14 +272,13 @@ describe("RecorderService", () => {
     const runtime = runtimeFixture();
     const clock = new FakeClock();
     const controller = new AbortController();
-    vi.mocked(runtime.adb.pid).mockResolvedValue(null);
+    vi.mocked(runtime.adb.appProcesses).mockResolvedValue([]);
     clock.onSleep = (): void => {
       controller.abort();
     };
     const recorderPrompt = prompt(["finish"]);
     const journeyWriter = writer();
     const service = new RecorderService({
-      gradle: runtime.gradle,
       androidCli: runtime.androidCli,
       adb: runtime.adb,
       clock,
@@ -314,7 +306,6 @@ describe("RecorderService", () => {
     const recorderPrompt = prompt(["finish"]);
     const journeyWriter = writer();
     const service = new RecorderService({
-      gradle: runtime.gradle,
       androidCli: runtime.androidCli,
       adb: runtime.adb,
       clock: runtime.dependencies.clock,
@@ -347,7 +338,6 @@ describe("RecorderService", () => {
     const recorderPrompt = prompt(["click", "click", "finish"]);
     const journeyWriter = writer();
     const service = new RecorderService({
-      gradle: runtime.gradle,
       androidCli: runtime.androidCli,
       adb: runtime.adb,
       clock: runtime.dependencies.clock,
@@ -377,7 +367,6 @@ describe("RecorderService", () => {
     const recorderPrompt = prompt(["click", "finish"]);
     const journeyWriter = writer();
     const service = new RecorderService({
-      gradle: runtime.gradle,
       androidCli: runtime.androidCli,
       adb: runtime.adb,
       clock: runtime.dependencies.clock,
@@ -411,7 +400,6 @@ describe("RecorderService", () => {
     vi.mocked(recorderPrompt.selectFallbackLabel).mockResolvedValue("#7");
     const journeyWriter = writer();
     const service = new RecorderService({
-      gradle: runtime.gradle,
       androidCli: runtime.androidCli,
       adb: runtime.adb,
       clock: runtime.dependencies.clock,
@@ -444,7 +432,6 @@ describe("RecorderService", () => {
     const runtime = runtimeFixture();
     const journeyWriter = writer();
     const service = new RecorderService({
-      gradle: runtime.gradle,
       androidCli: runtime.androidCli,
       adb: runtime.adb,
       clock: runtime.dependencies.clock,
@@ -488,16 +475,13 @@ describe("RecorderService", () => {
 
   it("does not enter the prompt loop when launch preparation fails", async () => {
     const runtime = runtimeFixture();
-    const failingGradle: GradlePort = {
-      build: () => Promise.resolve(commandResult({
-        exitCode: 1,
-        stderr: "compile failed"
-      }))
-    };
+    vi.mocked(runtime.adb.forceStop).mockResolvedValue(commandResult({
+      exitCode: 1,
+      stderr: "compile failed"
+    }));
     const recorderPrompt = prompt(["finish"]);
     const journeyWriter = writer();
     const service = new RecorderService({
-      gradle: failingGradle,
       androidCli: runtime.androidCli,
       adb: runtime.adb,
       clock: runtime.dependencies.clock,
@@ -526,7 +510,6 @@ describe("RecorderService", () => {
     const runtime = runtimeFixture();
     const journeyWriter = writer();
     const service = new RecorderService({
-      gradle: runtime.gradle,
       androidCli: runtime.androidCli,
       adb: runtime.adb,
       clock: runtime.dependencies.clock,
@@ -568,7 +551,6 @@ describe("RecorderService", () => {
     vi.mocked(recorderPrompt.selectTarget).mockResolvedValue("subject");
     const journeyWriter = writer();
     const service = new RecorderService({
-      gradle: runtime.gradle,
       androidCli: runtime.androidCli,
       adb: runtime.adb,
       clock: runtime.dependencies.clock,
@@ -629,7 +611,6 @@ describe("RecorderService", () => {
     });
     const journeyWriter = writer();
     const service = new RecorderService({
-      gradle: runtime.gradle,
       androidCli: runtime.androidCli,
       adb: runtime.adb,
       clock: runtime.dependencies.clock,

@@ -74,11 +74,15 @@ export function createVerifyCommand(dependencies: CliDependencies): Command {
       }
 
       try {
-        const doctor = await dependencies.doctor.run(
-          options.project,
-          dependencies.signal,
-          options.device
-        );
+        const doctor = await dependencies.doctor.run({
+          packageName: config.run.packageName,
+          ...(options.device === undefined
+            ? {}
+            : { requestedDevice: options.device }),
+          ...(dependencies.signal === undefined
+            ? {}
+            : { signal: dependencies.signal })
+        });
         if (doctor.status === "failed") {
           const output = failureOutput(
             3,

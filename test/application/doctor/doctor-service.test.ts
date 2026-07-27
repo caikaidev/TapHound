@@ -8,7 +8,7 @@ import { commandResult, runningCommand } from "../../fakes/process-runner.js";
 function fixture(overrides: {
   nodeVersion?: string;
   devices?: Array<{ serial: string; status: string }>;
-  gradle?: boolean;
+  installed?: boolean;
   permissions?: boolean;
   failures?: Record<string, string>;
 } = {}): {
@@ -41,8 +41,12 @@ function fixture(overrides: {
     )),
     foregroundComponent: vi.fn(),
     currentActivity: vi.fn(),
+    isInstalled: vi.fn(() => Promise.resolve(overrides.installed ?? true)),
+    launchActivity: vi.fn(() => Promise.resolve(commandResult())),
     forceStop: vi.fn(),
-    pid: vi.fn(),
+    appProcesses: vi.fn(() => Promise.resolve([
+      { pid: 42, name: "com.example.app" }
+    ])),
     tap: vi.fn(),
     longClick: vi.fn(),
     swipe: vi.fn(),
@@ -61,16 +65,17 @@ function fixture(overrides: {
       runner,
       adb,
       nodeVersion: overrides.nodeVersion ?? "v24.3.0",
-      checkGradleWrapper: vi.fn(() => Promise.resolve(overrides.gradle ?? true)),
       checkAndroidPermissions: checkPermissions
     })
   };
 }
 
 describe("DoctorService", () => {
-  it("reports Node, ADB, Android CLI, Gradle, permissions, and one device", async () => {
+  it("reports Node, ADB, Android CLI, app, permissions, and one device", async () => {
     const test = fixture();
-    const report = await test.service.run("/project");
+    const report = await test.service.run({
+      packageName: "com.example.app"
+    });
 
     expect(report).toMatchObject({
       status: "passed",
@@ -79,7 +84,7 @@ describe("DoctorService", () => {
         { name: "node", status: "passed", version: "24.3.0" },
         { name: "adb", status: "passed" },
         { name: "android", status: "passed" },
-        { name: "gradle", status: "passed" },
+        { name: "app", status: "passed", message: "com.example.app" },
         { name: "permissions", status: "passed" },
         { name: "device", status: "passed" }
       ]
@@ -90,11 +95,22 @@ describe("DoctorService", () => {
     );
   });
 
+  it("skips the app probe when no package name is configured", async () => {
+    const test = fixture();
+    const report = await test.service.run();
+
+    expect(report).toMatchObject({ status: "passed" });
+    expect(report.checks).toContainEqual(expect.objectContaining({
+      name: "app",
+      status: "notRun"
+    }));
+  });
+
   it("rejects unsupported Node and missing tools as an environment failure", async () => {
     const report = await fixture({
       nodeVersion: "v20.0.0",
       failures: { "android --version": "command not found" }
-    }).service.run("/project");
+    }).service.run({ packageName: "com.example.app" });
 
     expect(report).toMatchObject({
       status: "failed",
@@ -107,29 +123,41 @@ describe("DoctorService", () => {
   });
 
   it("requires exactly one online device", async () => {
-    const none = await fixture({ devices: [] }).service.run("/project");
+    const none = await fixture({ devices: [] }).service.run({
+      packageName: "com.example.app"
+    });
     const many = await fixture({ devices: [
       { serial: "one", status: "device" },
       { serial: "two", status: "device" }
-    ] }).service.run("/project");
+    ] }).service.run({ packageName: "com.example.app" });
     const offline = await fixture({
       devices: [{ serial: "one", status: "offline" }]
-    }).service.run("/project");
+    }).service.run({ packageName: "com.example.app" });
 
     expect(none.failureCode).toBe("DEVICE_UNAVAILABLE");
     expect(many.failureCode).toBe("DEVICE_UNAVAILABLE");
     expect(offline.failureCode).toBe("DEVICE_UNAVAILABLE");
   });
 
-  it("reports Gradle wrapper and Android permission diagnostic failures", async () => {
+  it("reports an uninstalled app as APP_NOT_INSTALLED", async () => {
     const report = await fixture({
-      gradle: false,
+      installed: false
+    }).service.run({ packageName: "com.example.app" });
+
+    expect(report.failureCode).toBe("APP_NOT_INSTALLED");
+    expect(report.checks).toContainEqual(expect.objectContaining({
+      name: "app",
+      status: "failed"
+    }));
+  });
+
+  it("reports Android permission diagnostic failures", async () => {
+    const report = await fixture({
       permissions: false
-    }).service.run("/project");
+    }).service.run({ packageName: "com.example.app" });
 
     expect(report.failureCode).toBe("ENVIRONMENT_MISSING_TOOL");
     expect(report.checks).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: "gradle", status: "failed" }),
       expect.objectContaining({ name: "permissions", status: "failed" })
     ]));
   });

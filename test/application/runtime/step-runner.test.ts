@@ -8,6 +8,7 @@ import {
 import type { JourneyStep } from "../../../src/domain/journey.js";
 import type { AdbPort } from "../../../src/ports/adb.js";
 import type { AndroidCliPort } from "../../../src/ports/android-cli.js";
+import type { AppProcess } from "../../../src/domain/app-process.js";
 import { MemoryArtifactSession } from "../../fakes/artifact-store.js";
 import { FakeClock } from "../../fakes/fake-clock.js";
 import {
@@ -20,6 +21,10 @@ const checkpoint = {
   after: "com.example.app.SearchActivity"
 };
 
+const alive: readonly AppProcess[] = [
+  { pid: 42, name: "com.example.app" }
+];
+
 function adbPort(): AdbPort {
   return {
     devices: vi.fn(),
@@ -27,8 +32,10 @@ function adbPort(): AdbPort {
     currentActivity: vi.fn()
       .mockResolvedValueOnce(checkpoint.before)
       .mockResolvedValueOnce(checkpoint.after),
+    isInstalled: vi.fn(() => Promise.resolve(true)),
+    launchActivity: vi.fn(() => Promise.resolve(commandResult())),
     forceStop: vi.fn(),
-    pid: vi.fn(() => Promise.resolve(42)),
+    appProcesses: vi.fn(() => Promise.resolve(alive)),
     tap: vi.fn(() => Promise.resolve(commandResult())),
     longClick: vi.fn(() => Promise.resolve(commandResult())),
     swipe: vi.fn(() => Promise.resolve(commandResult())),
@@ -40,8 +47,6 @@ function adbPort(): AdbPort {
 
 function androidCli(): AndroidCliPort {
   return {
-    describeProject: vi.fn(),
-    runApp: vi.fn(),
     layout: vi.fn(() => Promise.resolve([{
       id: "search",
       resourceId: "search",
@@ -75,7 +80,7 @@ function fixture(overrides: {
   const artifacts = new MemoryArtifactSession();
   const logcat = new LogcatCollector(adb, clock);
   void logcat.start({ deviceSerial: "emulator-5554" });
-  logcat.scopeToPid(42);
+  logcat.scopeToPids([42]);
   return {
     runner: new StepRunner({
       adb,
@@ -154,8 +159,6 @@ function scrollCli(
   };
   let reads = 0;
   return {
-    describeProject: vi.fn(),
-    runApp: vi.fn(),
     layout: vi.fn(() => {
       reads += 1;
       if (target === "ambiguous") {
@@ -356,7 +359,7 @@ describe("StepRunner", () => {
 
   it("detects an App crash after the Action", async () => {
     const adb = adbPort();
-    vi.mocked(adb.pid).mockResolvedValue(null);
+    vi.mocked(adb.appProcesses).mockResolvedValue([]);
     const test = fixture({ adb });
 
     await expect(test.runner.run(clickStep(), 0)).resolves.toMatchObject({
@@ -743,8 +746,8 @@ describe("scrollTo replay", () => {
         activity: actionCompleted ? checkpoint.after : checkpoint.before
       })
     ));
-    vi.mocked(adb.pid).mockImplementation(() => Promise.resolve(
-      actionCompleted && ++postActionPidObservations >= 2 ? 99 : 42
+    vi.mocked(adb.appProcesses).mockImplementation(() => Promise.resolve(
+      [{ pid: actionCompleted && ++postActionPidObservations >= 2 ? 99 : 42, name: "com.example.app" }]
     ));
     const { runner } = fixture({ adb, generatedReplayPolicy: true });
 
@@ -858,11 +861,11 @@ describe("scrollTo replay", () => {
         packageName: "com.example.app",
         activity: checkpoint.after
       });
-    vi.mocked(adb.pid)
-      .mockResolvedValueOnce(42)
-      .mockResolvedValueOnce(42)
-      .mockResolvedValueOnce(42)
-      .mockResolvedValueOnce(99);
+    vi.mocked(adb.appProcesses)
+      .mockResolvedValueOnce([{pid: 42, name: "com.example.app"}])
+      .mockResolvedValueOnce([{pid: 42, name: "com.example.app"}])
+      .mockResolvedValueOnce([{pid: 42, name: "com.example.app"}])
+      .mockResolvedValueOnce([{pid: 99, name: "com.example.app"}]);
     const cli = androidCli();
     vi.mocked(cli.layout)
       .mockResolvedValueOnce([{

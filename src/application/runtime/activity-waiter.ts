@@ -1,3 +1,4 @@
+import { primaryAppPid } from "../../domain/app-process.js";
 import type { AdbPort } from "../../ports/adb.js";
 import type { Clock } from "../../ports/clock.js";
 
@@ -61,7 +62,8 @@ export class ActivityWaiter {
         ...(options.signal === undefined ? {} : { signal: options.signal })
       };
 
-      if (await this.adb.pid(identity) === null) {
+      const processes = await this.adb.appProcesses(identity);
+      if (primaryAppPid(processes, options.packageName) === null) {
         return {
           status: "processMissing",
           durationMs: this.clock.now() - startedAt,

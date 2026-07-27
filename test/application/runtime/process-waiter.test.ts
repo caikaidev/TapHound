@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { ProcessWaiter } from "../../../src/application/runtime/process-waiter.js";
+import type { AppProcess } from "../../../src/domain/app-process.js";
 import { FakeClock } from "../../fakes/fake-clock.js";
 import { runtimeFixture } from "../../fakes/runtime-fixture.js";
 
@@ -11,27 +12,33 @@ const options = {
   timeoutMs: 250
 };
 
+const ready: readonly AppProcess[] = [
+  { pid: 42, name: "com.example.app" },
+  { pid: 77, name: "com.example.app:remote" }
+];
+
 describe("ProcessWaiter", () => {
   it("waits for a delayed App process within the timeout budget", async () => {
     const runtime = runtimeFixture();
     const clock = new FakeClock();
-    vi.mocked(runtime.adb.pid)
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(42);
+    vi.mocked(runtime.adb.appProcesses)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(ready);
 
     await expect(new ProcessWaiter(runtime.adb, clock).wait(options))
       .resolves.toEqual({
         status: "ready",
         pid: 42,
+        pids: [42, 77],
         durationMs: 100
       });
     expect(clock.sleeps).toEqual([100]);
-    expect(runtime.adb.pid).toHaveBeenNthCalledWith(1, {
+    expect(runtime.adb.appProcesses).toHaveBeenNthCalledWith(1, {
       packageName: options.packageName,
       deviceSerial: options.deviceSerial,
       timeoutMs: 250
     });
-    expect(runtime.adb.pid).toHaveBeenNthCalledWith(2, {
+    expect(runtime.adb.appProcesses).toHaveBeenNthCalledWith(2, {
       packageName: options.packageName,
       deviceSerial: options.deviceSerial,
       timeoutMs: 150
@@ -41,7 +48,7 @@ describe("ProcessWaiter", () => {
   it("times out without polling beyond the deadline", async () => {
     const runtime = runtimeFixture();
     const clock = new FakeClock();
-    vi.mocked(runtime.adb.pid).mockResolvedValue(null);
+    vi.mocked(runtime.adb.appProcesses).mockResolvedValue([]);
 
     await expect(new ProcessWaiter(runtime.adb, clock).wait(options))
       .resolves.toEqual({
@@ -49,8 +56,8 @@ describe("ProcessWaiter", () => {
         durationMs: 250
       });
     expect(clock.sleeps).toEqual([100, 100, 50]);
-    expect(runtime.adb.pid).toHaveBeenCalledTimes(3);
-    expect(runtime.adb.pid).toHaveBeenLastCalledWith({
+    expect(runtime.adb.appProcesses).toHaveBeenCalledTimes(3);
+    expect(runtime.adb.appProcesses).toHaveBeenLastCalledWith({
       packageName: options.packageName,
       deviceSerial: options.deviceSerial,
       timeoutMs: 50
@@ -61,7 +68,7 @@ describe("ProcessWaiter", () => {
     const runtime = runtimeFixture();
     const clock = new FakeClock();
     const controller = new AbortController();
-    vi.mocked(runtime.adb.pid).mockResolvedValue(null);
+    vi.mocked(runtime.adb.appProcesses).mockResolvedValue([]);
     clock.onSleep = (): void => {
       controller.abort();
     };
@@ -73,6 +80,6 @@ describe("ProcessWaiter", () => {
       status: "cancelled",
       durationMs: 0
     });
-    expect(runtime.adb.pid).toHaveBeenCalledTimes(1);
+    expect(runtime.adb.appProcesses).toHaveBeenCalledTimes(1);
   });
 });

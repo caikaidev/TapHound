@@ -1,7 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { constants } from "node:fs";
 import {
-  access,
   mkdtemp,
   readFile,
   rm
@@ -18,14 +16,16 @@ import { FileSystemGenerationSessionStore } from "../adapters/filesystem/generat
 import { FileSystemJourneyWriter } from "../adapters/filesystem/journey-writer.js";
 import { NodeProjectFileInspector } from "../adapters/filesystem/project-file-inspector.js";
 import { FileSystemSkillInstaller } from "../adapters/filesystem/skill-installer.js";
-import { GradleAdapter } from "../adapters/gradle/gradle-adapter.js";
 import { NodeProcessRunner } from "../adapters/process/node-process-runner.js";
 import { InquirerRecorderPrompt } from "../adapters/prompt/inquirer-recorder-prompt.js";
 import { InquirerGenerationPrompt } from "../adapters/prompt/inquirer-generation-prompt.js";
 import { InquirerInitPrompt } from "../adapters/prompt/inquirer-init-prompt.js";
 import { ContextValidator } from "../application/context/context-validator.js";
 import { DoctorService } from "../application/doctor/doctor-service.js";
-import type { DoctorReport } from "../application/doctor/doctor-service.js";
+import type {
+  DoctorReport,
+  DoctorRunInput
+} from "../application/doctor/doctor-service.js";
 import {
   GenerationConfirmationService
 } from "../application/generation/generation-confirmation-service.js";
@@ -82,11 +82,7 @@ export interface GenerationCliRuntime {
 export interface CliDependencies {
   signal?: AbortSignal | undefined;
   doctor: {
-    run: (
-      projectRoot: string,
-      signal?: AbortSignal,
-      requestedDevice?: string
-    ) => Promise<DoctorReport>;
+    run: (input?: DoctorRunInput) => Promise<DoctorReport>;
   };
   recorder: {
     record: (input: RecordInput) => Promise<RecordResult>;
@@ -138,7 +134,6 @@ export function createProductionDependencies(
   const runner = new NodeProcessRunner();
   const adb = new AdbAdapter(runner);
   const androidCli = new AndroidCliAdapter(runner);
-  const gradle = new GradleAdapter(runner);
   const clock = new SystemClock();
   const generationStoreFactory = options.generationStoreFactory
     ?? ((projectRoot: string): GenerationSessionStore => (
@@ -151,14 +146,6 @@ export function createProductionDependencies(
       runner,
       adb,
       nodeVersion: process.version,
-      checkGradleWrapper: async (projectRoot): Promise<boolean> => {
-        try {
-          await access(join(projectRoot, "gradlew"), constants.X_OK);
-          return true;
-        } catch {
-          return false;
-        }
-      },
       checkAndroidPermissions: async (
         deviceSerial,
         signal
@@ -193,7 +180,6 @@ export function createProductionDependencies(
       }
     }),
     recorder: new RecorderService({
-      gradle,
       androidCli,
       adb,
       clock,
@@ -201,7 +187,6 @@ export function createProductionDependencies(
       journeyWriter: new FileSystemJourneyWriter()
     }),
     verifier: new VerifyRuntime({
-      gradle,
       androidCli,
       adb,
       clock,
@@ -210,7 +195,7 @@ export function createProductionDependencies(
       now: () => new Date(),
       createRunId: runId
     }),
-    projectDescriber: new ProjectDescriber(androidCli),
+    projectDescriber: new ProjectDescriber(),
     contextValidator,
     init: new InitService({
       installer: new FileSystemSkillInstaller(),
@@ -290,7 +275,6 @@ export function createProductionDependencies(
         contextValidator,
         adb,
         verifyRuntime: new VerifyRuntime({
-          gradle,
           androidCli,
           adb,
           clock,

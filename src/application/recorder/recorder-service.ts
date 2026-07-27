@@ -1,6 +1,7 @@
 import { parse } from "node:path";
 
 import { normalizeActivity } from "../../domain/activity.js";
+import { primaryAppPid } from "../../domain/app-process.js";
 import type { TapHoundConfig } from "../../domain/config.js";
 import {
   JourneySchema,
@@ -12,7 +13,6 @@ import type { LayoutElement, Locator } from "../../domain/layout.js";
 import type { AdbPort } from "../../ports/adb.js";
 import type { AndroidCliPort } from "../../ports/android-cli.js";
 import type { Clock } from "../../ports/clock.js";
-import type { GradlePort } from "../../ports/gradle.js";
 import type { JourneyWriterPort } from "../../ports/journey-writer.js";
 import type {
   RecorderAction,
@@ -20,6 +20,7 @@ import type {
 } from "../../ports/recorder-prompt.js";
 import { ActionExecutor, type ActionTarget } from "../interaction/action-executor.js";
 import { resolveLocator } from "../locator/locator-resolver.js";
+import { launchFailure } from "../runtime/launch-failure.js";
 import { ProcessWaiter } from "../runtime/process-waiter.js";
 import { IdleWaiter } from "../wait/idle-waiter.js";
 import {
@@ -29,7 +30,6 @@ import {
 } from "./locator-selector.js";
 
 export interface RecorderDependencies {
-  gradle: GradlePort;
   androidCli: AndroidCliPort;
   adb: AdbPort;
   clock: Clock;
@@ -126,44 +126,43 @@ export class RecorderService {
       input.config.run.packageName,
       input.config.run.activity
     );
-    const build = await this.dependencies.gradle.build({
-      projectDir: input.projectRoot,
-      task: input.config.build.task,
-      ...(input.signal === undefined ? {} : { signal: input.signal })
-    });
-    if (failedCommand(build)) {
-      return {
-        status: "failed",
-        stepsRecorded: 0,
-        message: commandMessage(build, "Gradle build failed")
-      };
-    }
-    const description = await this.dependencies.androidCli.describeProject({
-      projectDir: input.projectRoot,
-      target: input.config.artifact.target,
-      variant: input.config.artifact.variant,
-      ...(input.signal === undefined ? {} : { signal: input.signal })
-    });
-    const run = await this.dependencies.androidCli.runApp({
-      apkPath: description.apkPath,
-      activity: launchActivity,
-      deviceSerial: input.deviceSerial,
-      ...(input.signal === undefined ? {} : { signal: input.signal })
-    });
-    if (failedCommand(run)) {
-      return {
-        status: "failed",
-        stepsRecorded: 0,
-        message: commandMessage(run, "App launch failed")
-      };
-    }
-
     const identity = {
       packageName: input.config.run.packageName,
       deviceSerial: input.deviceSerial,
       ...(input.signal === undefined ? {} : { signal: input.signal }),
       timeoutMs: input.config.idle.timeoutMs
     };
+    if (!await this.dependencies.adb.isInstalled(identity)) {
+      return {
+        status: "failed",
+        stepsRecorded: 0,
+        message: `Package ${input.config.run.packageName} is not installed on ${input.deviceSerial}`
+      };
+    }
+    const stopped = await this.dependencies.adb.forceStop(identity);
+    if (failedCommand(stopped)) {
+      return {
+        status: "failed",
+        stepsRecorded: 0,
+        message: commandMessage(stopped, "App reset failed")
+      };
+    }
+    const launchError = launchFailure(
+      await this.dependencies.adb.launchActivity({
+        packageName: input.config.run.packageName,
+        activity: launchActivity,
+        deviceSerial: input.deviceSerial,
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+        timeoutMs: input.config.idle.timeoutMs
+      })
+    );
+    if (launchError !== undefined) {
+      return {
+        status: "failed",
+        stepsRecorded: 0,
+        message: launchError
+      };
+    }
     const processReadiness = await new ProcessWaiter(
       this.dependencies.adb,
       this.dependencies.clock
@@ -274,7 +273,8 @@ export class RecorderService {
           };
         }
       }
-      if (await this.dependencies.adb.pid(identity) === null) {
+      const processes = await this.dependencies.adb.appProcesses(identity);
+      if (primaryAppPid(processes, input.config.run.packageName) === null) {
         return {
           status: "failed",
           stepsRecorded: steps.length,

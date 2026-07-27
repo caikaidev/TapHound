@@ -87,8 +87,6 @@ function sha256(value: string): string {
 
 const config: TapHoundConfig = {
   version: 1,
-  build: { task: ":app:assembleDebug" },
-  artifact: { target: "app", variant: "debug" },
   run: { packageName: "com.example.app", activity: ".MainActivity" },
   idle: { pollIntervalMs: 100, stablePolls: 2, timeoutMs: 5_000 },
   artifactsDir: ".taphound/reports"
@@ -116,24 +114,12 @@ const context: ProjectContext = {
 function project(root: string): {
   projectRoot: string;
   packageName: string;
-  buildTask: string;
-  artifactTarget: string;
-  variant: string;
   launchActivity: string;
-  apkPath: string;
-  metadataPaths: string[];
-  metadataPackageName: string;
 } {
   return {
     projectRoot: root,
     packageName: "com.example.app",
-    buildTask: ":app:assembleDebug",
-    artifactTarget: "app",
-    variant: "debug",
-    launchActivity: "com.example.app.MainActivity",
-    apkPath: join(root, "app-debug.apk"),
-    metadataPaths: [join(root, "output-metadata.json")],
-    metadataPackageName: "com.example.app"
+    launchActivity: "com.example.app.MainActivity"
   };
 }
 
@@ -155,7 +141,7 @@ function report(root: string, fallbackUsed = false): TapHoundReport {
     }]
   };
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     runId: "verify-run",
     status: "passed",
     startedAt: "2026-07-23T00:00:00.000Z",
@@ -172,7 +158,6 @@ function report(root: string, fallbackUsed = false): TapHoundReport {
       tools: { adb: "1" }
     },
     layers: {
-      build: "passed",
       run: "passed",
       structural: "passed",
       activityCheckpoint: "passed",
@@ -778,7 +763,7 @@ describe("GenerationFinalizer", () => {
     const changed = input(test.root);
     changed.project = {
       ...changed.project,
-      variant: "release"
+      launchActivity: "com.example.app.OtherActivity"
     };
 
     await expect(test.finalize.finalize(changed)).rejects.toMatchObject({

@@ -114,13 +114,91 @@ describe("AdbAdapter", () => {
     })).resolves.toBe("com.android.settings.Settings");
   });
 
-  it("reads the Package PID", async () => {
-    const runner = processRunner(commandResult({ stdout: "1234\n" }));
+  it("lists App processes matching the Package, sorted by PID", async () => {
+    const runner = processRunner(commandResult({
+      stdout: [
+        "PID NAME",
+        "10 system_server",
+        "1234 com.example.app",
+        "1235 com.example.app:remote",
+        "1230 com.other.app",
+        "4321 com.example.app:other"
+      ].join("\n")
+    }));
 
-    await expect(new AdbAdapter(runner).pid({
+    await expect(new AdbAdapter(runner).appProcesses({
       packageName: "com.example.app",
       deviceSerial: "emulator-5554"
-    })).resolves.toBe(1234);
+    })).resolves.toEqual([
+      { pid: 1234, name: "com.example.app" },
+      { pid: 1235, name: "com.example.app:remote" },
+      { pid: 4321, name: "com.example.app:other" }
+    ]);
+
+    expect(vi.mocked(runner.run)).toHaveBeenCalledWith({
+      executable: "adb",
+      args: [
+        "-s",
+        "emulator-5554",
+        "shell",
+        "ps",
+        "-A",
+        "-o",
+        "PID,NAME"
+      ]
+    });
+  });
+
+  it("reports whether the Package is installed via pm path", async () => {
+    const installedRunner = processRunner(commandResult({
+      stdout: "package:/data/app/com.example.app/base.apk\n"
+    }));
+    await expect(new AdbAdapter(installedRunner).isInstalled({
+      packageName: "com.example.app",
+      deviceSerial: "emulator-5554"
+    })).resolves.toBe(true);
+    expect(vi.mocked(installedRunner.run)).toHaveBeenCalledWith({
+      executable: "adb",
+      args: [
+        "-s",
+        "emulator-5554",
+        "shell",
+        "pm",
+        "path",
+        "com.example.app"
+      ]
+    });
+
+    const missingRunner = processRunner(commandResult({ stdout: "" }));
+    await expect(new AdbAdapter(missingRunner).isInstalled({
+      packageName: "com.example.app",
+      deviceSerial: "emulator-5554"
+    })).resolves.toBe(false);
+  });
+
+  it("launches an Activity with am start -W -n", async () => {
+    const runner = processRunner(commandResult({ stdout: "" }));
+    const adapter = new AdbAdapter(runner);
+
+    await adapter.launchActivity({
+      packageName: "com.example.app",
+      activity: "com.example.app.MainActivity",
+      deviceSerial: "emulator-5554"
+    });
+
+    expect(vi.mocked(runner.run)).toHaveBeenCalledWith({
+      executable: "adb",
+      args: [
+        "-s",
+        "emulator-5554",
+        "shell",
+        "am",
+        "start",
+        "-W",
+        "-n",
+        "com.example.app/com.example.app.MainActivity"
+      ]
+    });
   });
 
   it("force-stops the exact Package on the selected device", async () => {
@@ -168,32 +246,7 @@ describe("AdbAdapter", () => {
     ]);
   });
 
-  it("starts PID-scoped Logcat as a streaming command", () => {
-    const runner = processRunner();
-    vi.mocked(runner.start).mockReturnValue(runningCommand());
-    const adapter = new AdbAdapter(runner);
-    const onStdoutLine = vi.fn();
-
-    adapter.startLogcat({
-      deviceSerial: "emulator-5554",
-      pid: 1234,
-      onStdoutLine
-    });
-
-    expect(vi.mocked(runner.start)).toHaveBeenCalledWith({
-      executable: "adb",
-      args: [
-        "-s",
-        "emulator-5554",
-        "logcat",
-        "-v",
-        "threadtime",
-        "--pid=1234"
-      ]
-    }, { onStdoutLine });
-  });
-
-  it("starts unscoped Logcat before the App PID is known", () => {
+  it("starts Logcat as a streaming command", () => {
     const runner = processRunner();
     vi.mocked(runner.start).mockReturnValue(runningCommand());
     const adapter = new AdbAdapter(runner);

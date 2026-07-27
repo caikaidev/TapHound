@@ -4,7 +4,7 @@ export function validReport(
   overrides: Partial<TapHoundReport> = {}
 ): TapHoundReport {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     runId: "run-123",
     status: "passed",
     startedAt: "2026-07-19T10:00:00.000Z",
@@ -28,7 +28,6 @@ export function validReport(
       }
     },
     layers: {
-      build: "passed",
       run: "passed",
       structural: "passed",
       activityCheckpoint: "passed",

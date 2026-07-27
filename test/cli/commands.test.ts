@@ -4,7 +4,6 @@ import {
   GenerationOperationError,
   GenerationStarter
 } from "../../src/application/generation/generation-starter.js";
-import { ProjectConfigurationError } from "../../src/application/project/project-describer.js";
 import { createProgram } from "../../src/cli/program.js";
 import type { CliDependencies, TextOutput } from "../../src/cli/dependencies.js";
 import {
@@ -84,13 +83,7 @@ function dependencies(): {
         describe: vi.fn(() => Promise.resolve({
           projectRoot: "/project",
           packageName: "com.example.app",
-          buildTask: ":app:assembleDebug",
-          artifactTarget: "app",
-          variant: "debug",
-          launchActivity: "com.example.app.MainActivity",
-          apkPath: "/project/app-debug.apk",
-          metadataPaths: ["/project/output-metadata.json"],
-          metadataPackageName: "com.example.app"
+          launchActivity: "com.example.app.MainActivity"
         }))
       },
       contextValidator: {
@@ -251,11 +244,11 @@ describe("TapHound CLI commands", () => {
       "--reports", "/tmp/taphound-reports"
     ]);
 
-    expect(test.value.doctor.run).toHaveBeenCalledWith(
-      "/project",
-      signal,
-      "pixel-1"
-    );
+    expect(test.value.doctor.run).toHaveBeenCalledWith({
+      packageName: "com.override.app",
+      requestedDevice: "pixel-1",
+      signal
+    });
     const verifyInput = vi.mocked(test.value.verifier.verify).mock.calls[0]?.[0];
     expect(verifyInput).toMatchObject({
       projectRoot: "/project",
@@ -288,13 +281,7 @@ describe("TapHound CLI commands", () => {
       exitCode: 0,
       projectRoot: "/project",
       packageName: "com.example.app",
-      buildTask: ":app:assembleDebug",
-      artifactTarget: "app",
-      variant: "debug",
-      launchActivity: "com.example.app.MainActivity",
-      apkPath: "/project/app-debug.apk",
-      metadataPaths: ["/project/output-metadata.json"],
-      metadataPackageName: "com.example.app"
+      launchActivity: "com.example.app.MainActivity"
     });
     expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
     expect(test.stderr.value).toBe("");
@@ -462,8 +449,8 @@ describe("TapHound CLI commands", () => {
     vi.mocked(test.value.readJson).mockImplementation((path) => Promise.resolve(
       path.includes("context") ? generationContext : runtimeConfig
     ));
-    vi.mocked(test.value.projectDescriber.describe).mockRejectedValueOnce(
-      new ProjectConfigurationError("metadata package conflict")
+    vi.mocked(test.value.generationStarter.start).mockRejectedValueOnce(
+      new GenerationOperationError("CONFIG_INVALID", "metadata package conflict")
     );
 
     await createProgram(test.value).parseAsync([
@@ -509,13 +496,7 @@ describe("TapHound CLI commands", () => {
     ));
     vi.mocked(test.value.projectDescriber.describe).mockResolvedValueOnce({
       ...projectIdentity,
-      buildTask: ":app:assembleDebug",
-      artifactTarget: "app",
-      variant: "debug",
-      launchActivity: "com.example.app.MainActivity",
-      apkPath: "/project/app-debug.apk",
-      metadataPaths: ["/project/output-metadata.json"],
-      metadataPackageName: projectIdentity.packageName
+      launchActivity: "com.example.app.MainActivity"
     });
     test.value.generationStarter = new GenerationStarter({
       contextValidator: test.value.contextValidator,
@@ -592,7 +573,7 @@ describe("TapHound CLI commands", () => {
 
     const conflict = dependencies();
     vi.mocked(conflict.value.projectDescriber.describe).mockRejectedValue(
-      new ProjectConfigurationError("metadata package conflict")
+      new Error("metadata package conflict")
     );
 
     await createProgram(conflict.value).parseAsync([
@@ -601,15 +582,15 @@ describe("TapHound CLI commands", () => {
 
     expect(JSON.parse(conflict.stdout.value)).toMatchObject({
       status: "error",
-      exitCode: 2,
+      exitCode: 4,
       failure: {
-        code: "CONFIG_INVALID",
+        code: "INTERNAL_ERROR",
         message: "metadata package conflict"
       }
     });
     expect(conflict.stdout.value.trim().split("\n")).toHaveLength(1);
     expect(conflict.stderr.value).toBe("");
-    expect(conflict.exitCodes).toEqual([2]);
+    expect(conflict.exitCodes).toEqual([4]);
   });
 
   it.each([

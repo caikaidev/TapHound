@@ -18,6 +18,23 @@ cd TapHound
 npm ci
 ```
 
+Prepare, validate, and register the local CLI in one command:
+
+```bash
+npm run dev:setup
+```
+
+This runs the tests, type-checker, linter, build, built-CLI smoke test,
+`npm link`, and a final check through the registered `taphound` command. After
+it passes, commands such as the following use the current checkout:
+
+```bash
+taphound doctor --project /path/to/android-project
+```
+
+Run `npm ci` separately after cloning or whenever locked dependencies change;
+`dev:setup` intentionally does not reinstall dependencies on every run.
+
 ## 2. Run Source Tests
 
 Run only a single test file:

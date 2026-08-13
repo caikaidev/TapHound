@@ -40,9 +40,15 @@ taphound doctor --project /path/to/android-project
 
 ```bash
 npm ci
-npm run build
-npm link
-taphound --help
+npm run dev:setup
+```
+
+`dev:setup` 会依次运行测试、类型检查、Lint、构建、构建产物冒烟检查、
+`npm link` 和最终的 `taphound --help` 检查。执行成功后即可直接调用
+TapHound，例如：
+
+```bash
+taphound doctor --project /path/to/android-project
 ```
 
 完整本地质量门：

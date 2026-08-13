@@ -40,9 +40,15 @@ Install from source:
 
 ```bash
 npm ci
-npm run build
-npm link
-taphound --help
+npm run dev:setup
+```
+
+`dev:setup` runs the tests, type-checker, linter, build, built-CLI smoke test,
+`npm link`, and a final `taphound --help` check. After it passes, invoke
+TapHound directly, for example:
+
+```bash
+taphound doctor --project /path/to/android-project
 ```
 
 Full local quality gate:

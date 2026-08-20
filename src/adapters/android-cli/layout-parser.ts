@@ -152,9 +152,15 @@ function parseElement(value: unknown, path: string): LayoutElement | undefined {
     const parsed = parseElement(child, `${path}/${String(index)}`);
     return parsed === undefined ? [] : [parsed];
   });
+  const serializerKey = record.key;
+  const windowId = typeof serializerKey === "string"
+    || typeof serializerKey === "number"
+    ? String(serializerKey)
+    : undefined;
 
   return {
     id: elementId(record, path),
+    ...(windowId === undefined ? {} : { windowId }),
     ...(resourceId === undefined ? {} : { resourceId }),
     ...(text === undefined ? {} : { text }),
     ...(contentDescription === undefined ? {} : { contentDescription }),

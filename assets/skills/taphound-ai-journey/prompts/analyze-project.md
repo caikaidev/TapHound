@@ -1,15 +1,31 @@
 # Analyze Android Project for TapHound Context
 
-You are generating or updating a TapHound Project Context JSON file for
-an Android project. Read the project source code and produce a Context
-that matches `schemas/project-context.json`.
+You are generating or updating a TapHound Project Context Bundle v2 for an
+Android project. Produce a compact root index matching
+`schemas/project-context.json` and one shard per Gradle module matching
+`schemas/project-context-module.json`.
+
+The output directory is:
+
+```text
+.taphound/context/
+├── project-context.json
+└── modules/
+    ├── app.json
+    ├── feature-chat.json
+    └── ...
+```
+
+Analyze modules one at a time as bounded tasks. A large project is not a
+reason to omit modules. Every discovered module must appear in the root index
+with status `complete`, `partial`, `unsupported`, or `notAnalyzed`.
 
 There are two modes:
-- **Full generation** (no existing Context, or `context status` returns
-  `"invalid"`): Follow all steps below from scratch.
-- **Incremental update** (existing Context, `context status` returns
-  `"stale"`, structural counts match): Skip to the Incremental Update
-  section at the bottom. Only re-analyze changed files.
+- **Full generation**: discover the complete module catalog, then generate
+  each shard independently before writing the root index.
+- **Incremental update**: regenerate only stale shards and update their
+  hashes in the root index. If the Gradle module catalog changed, update the
+  index and generate every new shard.
 
 ## Step 1: Discover Project Modules
 
@@ -207,10 +223,11 @@ chain to find the actual string value:
 > `app/build/intermediates/merged_manifests/` (do not hash build
 > artifacts — only use them for discovery).
 
-## Step 4: Scan Source Files Across All Modules
+## Step 4: Scan Each Module Independently
 
-For each module discovered in Step 1, scan `src/main/` (and
-`src/<flavor>/main/` if flavors exist):
+For each module discovered in Step 1, complete Steps 4–6 and write that
+module's shard before moving to the next module. Scan `src/main/` (and
+variant source sets when applicable):
 
 ### 4a. Kotlin/Java source (`src/main/java/` or `src/main/kotlin/`)
 
@@ -370,17 +387,13 @@ find . \( -name "*.kt" -o -name "*.java" \) -not -path "*/build/*" \
 find . -path "*/res/layout/*.xml" -not -path "*/build/*" | wc -l
 ```
 
-If the project has hundreds of Activities/layouts, focus on:
-- All Activities in the `app` module (these are the entry points).
-- Activities in feature modules that a normal user flow can reach
-  (navigated to from app module Activities via `startActivity`).
-- Exclude internal/debug Activities (database repair, process utilities,
-  install helpers) unless the Goal specifically targets them.
+If the project has hundreds of Activities/layouts, keep each module as a
+separate bounded analysis. If one Gradle module alone is too large, split its
+analysis into internal parts, then merge the results into the module shard.
+Do not omit later modules and do not mark a shard `complete` until its selected
+inventory categories were fully enumerated.
 
-But DO NOT skip entire modules — if a feature module has Activities
-reachable from the app's user flow, include them.
-
-## Step 6: Compute SHA-256 Hashes
+## Step 6: Compute Evidence and Inventory Hashes
 
 For every file you include in the Context manifest, compute its SHA-256
 using this shell command (NEVER guess a hash):
@@ -389,30 +402,57 @@ using this shell command (NEVER guess a hash):
 node -e "const c=require('node:crypto');const f=require('node:fs');process.stdout.write(c.createHash('sha256').update(f.readFileSync('<relative-path>')).digest('hex'))"
 ```
 
+Also compute `semanticSha256` for each evidence file. It is a conservative
+SHA-256 over the file after removing comments and formatting whitespace while
+preserving string contents and all other tokens. TapHound uses this value to
+ignore formatting-only edits but still reject semantic source changes. If the
+file cannot be token-normalized safely, omit `semanticSha256`; the legacy
+full-file hash behavior remains strict for that file.
+
 The path must be relative to the Android project root (not the TapHound
 repo root), use forward slashes, and must not start with `/` or contain
 `..`.
 
-## Step 6: Generate the Context JSON
+For every module shard, enumerate all paths in its selected inventory
+categories:
 
-Produce a JSON object with:
+- `manifests`: `AndroidManifest.xml`
+- `sources`: `.kt` and `.java`
+- `layouts`: `res/layout*/*.xml`
+- `navigation`: `res/navigation*/*.xml`
 
-- `version`: `1`
+Exclude `.git`, `.gradle`, `.idea`, `.taphound`, and every `build` directory.
+Sort project-relative paths lexicographically, join them with a single `\n`
+and no trailing newline, then SHA-256 that exact UTF-8 string into
+`inventory.pathSetSha256`. This detects files added or removed later.
+
+## Step 7: Generate Module Shards and Root Index
+
+For every module, first produce a module shard with:
+
+- `version: 2`
+- exact Gradle `moduleId` and project-relative `projectDir`
+- explicit completeness `status`
+- inventory categories and path-set hash
+- source evidence manifest
+- semantic `summary` containing feature terms, Activities, screens,
+  actionable elements, cross-Activity transitions, and source-confirmed
+  Logcat candidates
+
+Write the shard, then compute the SHA-256 of the complete shard file bytes.
+
+Finally produce the root index with:
+
+- `version`: `2`
 - `packageName`: the `applicationId` from the app module's build file
   (`build.gradle.kts` or `build.gradle`, per Step 2), or `package` from
   manifest as fallback.
 - `launchActivity`: fully qualified launch Activity class, per Step 3.
-- `manifest.files`: list every source file you read that is relevant to
-  the UI structure. Include:
-  - All `AndroidManifest.xml` files (from app and library modules).
-  - All Kotlin/Java source files that define Activities, handle UI
-    interactions, or emit logcat tags used for expectations.
-  - All layout XML files that are referenced by Activities (directly via
-    `setContentView` or transitively via `<include>`).
-  - The app module's build file (`build.gradle.kts` or `build.gradle`,
-    whichever exists) for `applicationId`.
-  - `settings.gradle.kts` or `settings.gradle` (whichever exists) if
-    multi-module.
+- `manifest.files`: project-level identity and module-catalog evidence such
+  as settings files, app build files, and dynamic applicationId resolution
+  files. Module UI evidence belongs in shards.
+- `modules`: every discovered module with routing features, Activity names,
+  dependency IDs, shard path, shard file hash, kind, and explicit status.
   - Do NOT include build artifacts (`build/` directory), generated files,
     Gradle wrapper scripts, resource values (strings.xml, colors.xml),
     or themes unless they contain UI logic.
@@ -470,10 +510,8 @@ Produce a JSON object with:
 
 ## Incremental Update Mode
 
-When an existing Context is `stale` (file hashes changed) but the
-structural counts match (same number of Activities and layouts on disk
-as in the Context), you can do a targeted update instead of full
-regeneration.
+When an existing Context is `stale`, use the reported shard or evidence
+failure to perform a targeted module update instead of full regeneration.
 
 ### Procedure
 
@@ -504,9 +542,9 @@ regeneration.
    - New `<include>` / `<merge>` / `<ViewStub>` references
    Resolve any new `<include>` references transitively.
 
-5. **Update the Context JSON**: Replace the stale hashes with new ones.
-   Update `interactionPolicy` if needed. Do NOT change `packageName` or
-   `launchActivity` unless they actually changed.
+5. **Update the module shard**: Replace stale hashes, inventory, and semantic
+   summaries. Write it, recompute the shard file hash, and update that hash in
+   the root index. Update the global interaction policy only when needed.
 
 6. **Validate**:
    ```bash
@@ -518,9 +556,10 @@ regeneration.
 
 ### When NOT to use incremental update
 
-Switch to full regeneration (Steps 1-7 above) if:
-- The structural count check reveals new files on disk not in the Context.
-- An Activity or layout was deleted (file in Context but not on disk).
-- A new module was added (check `settings.gradle` or run `./gradlew
-  projects`).
+Update the root index and affected shards if:
+- Module inventory changed because a source, Activity, layout, manifest, or
+  navigation file was added or removed.
+- A new module was added (check `settings.gradle` or run `./gradlew projects`).
 - The `packageName` or `launchActivity` changed.
+
+Do not regenerate unrelated complete shards.

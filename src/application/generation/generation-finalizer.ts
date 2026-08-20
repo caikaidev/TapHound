@@ -17,9 +17,9 @@ import {
 } from "../../domain/generation.js";
 import { JourneySchema, type Journey } from "../../domain/journey.js";
 import {
-  ProjectContextSchema,
   ProjectRelativePathSchema,
-  type ProjectContext
+  ResolvedProjectContextSchema,
+  type ResolvedProjectContext
 } from "../../domain/project-context.js";
 import {
   hashJourney,
@@ -30,7 +30,6 @@ import {
   TapHoundConfigSchema,
   type TapHoundConfig
 } from "../../domain/config.js";
-import type { AdbPort } from "../../ports/adb.js";
 import {
   GenerationSessionStoreError,
   type GenerationSessionStore
@@ -137,11 +136,12 @@ export interface GenerationFinalizeInput {
   generationId: string;
   projectRoot: string;
   config: TapHoundConfig;
-  context: ProjectContext;
+  context: ResolvedProjectContext;
   project: ProjectDescription;
   outputPath: string;
   name?: string | undefined;
   deviceSerial: string;
+  allowEvidenceDrift?: boolean | undefined;
   toolVersions: Record<string, string>;
   signal?: AbortSignal | undefined;
 }
@@ -158,10 +158,11 @@ export interface GenerationFinalizerDependencies {
     | "readEvidence"
   >;
   contextValidator: Pick<ContextValidator, "validate">;
-  adb: Pick<AdbPort, "forceStop">;
   verifyRuntime: Pick<VerifyRuntime, "verify">;
   publisher: GenerationPublisher;
   generateAttemptId: () => string;
+  owner?: { pid: number; now: () => Date } | undefined;
+  progress?: ((stage: GenerationFinalizationStage) => void) | undefined;
 }
 
 export interface GenerationFinalizeResult {
@@ -180,18 +181,6 @@ function serializeJson(value: unknown): string {
 
 function sha256(value: string | Buffer): string {
   return createHash("sha256").update(value).digest("hex");
-}
-
-function commandFailed(result: {
-  exitCode: number | null;
-  timedOut: boolean;
-  cancelled: boolean;
-  spawnError?: string | undefined;
-}): boolean {
-  return result.exitCode !== 0
-    || result.timedOut
-    || result.cancelled
-    || result.spawnError !== undefined;
 }
 
 function derivedJourneyName(outputPath: string): string {
@@ -258,7 +247,7 @@ export class GenerationFinalizer {
     input: GenerationFinalizeInput
   ): Promise<GenerationFinalizeResult> => {
     const config = TapHoundConfigSchema.parse(input.config);
-    const context = ProjectContextSchema.parse(input.context);
+    const context = ResolvedProjectContextSchema.parse(input.context);
     const project = ProjectDescriptionSchema.parse(input.project);
     const canonicalProjectRoot = await realpath(input.projectRoot);
     const outputPath = GenerationOutputPathSchema.parse(input.outputPath);
@@ -279,6 +268,7 @@ export class GenerationFinalizer {
     let verificationReport: TapHoundReport | undefined;
 
     if (session.verification.status === "notRun") {
+      this.dependencies.progress?.("verification");
       const begun = await this.beginVerification(session);
       session = begun.session;
       if (
@@ -351,21 +341,6 @@ export class GenerationFinalizer {
             "VERIFICATION_FAILED",
             "verification",
             "Generation finalization was cancelled"
-          );
-        }
-        const stopped = await this.dependencies.adb.forceStop({
-          packageName: session.target.packageName,
-          deviceSerial: session.target.deviceSerial,
-          ...(input.signal === undefined ? {} : { signal: input.signal }),
-          timeoutMs: config.idle.timeoutMs
-        });
-        if (commandFailed(stopped)) {
-          throw failure(
-            "VERIFICATION_FAILED",
-            "verification",
-            stopped.stderr.trim()
-              || stopped.spawnError
-              || "Unable to reset the generated Journey process"
           );
         }
         const result = await this.dependencies.verifyRuntime.verify({
@@ -504,6 +479,7 @@ export class GenerationFinalizer {
     });
 
     if (session.publication.status === "notRun") {
+      this.dependencies.progress?.("publication");
       try {
         await this.dependencies.publisher.stage({
           generationId: session.id,
@@ -573,6 +549,7 @@ export class GenerationFinalizer {
     }
 
     try {
+      this.dependencies.progress?.("export");
       const exported = await this.dependencies.publisher.export({
         generationId: session.id,
         projectRoot: input.projectRoot,
@@ -604,7 +581,7 @@ export class GenerationFinalizer {
     session: GenerationSession,
     input: GenerationFinalizeInput,
     config: TapHoundConfig,
-    context: ProjectContext,
+    context: ResolvedProjectContext,
     project: ProjectDescription
   ): void {
     if (
@@ -622,6 +599,7 @@ export class GenerationFinalizer {
       || session.bindings.projectHash !== hashGenerationBinding(project)
       || session.bindings.configHash !== hashGenerationBinding(config)
       || session.bindings.contextHash !== hashGenerationBinding(context)
+      || !sameJson(session.contextSelection, context.selection)
       || JSON.stringify(session.target.interactionPolicy)
         !== JSON.stringify(context.interactionPolicy)
     ) {
@@ -636,7 +614,7 @@ export class GenerationFinalizer {
   private async revalidate(
     input: GenerationFinalizeInput,
     config: TapHoundConfig,
-    context: ProjectContext,
+    context: ResolvedProjectContext,
     project: ProjectDescription,
     session: GenerationSession
   ): Promise<void> {
@@ -646,7 +624,10 @@ export class GenerationFinalizer {
       projectRoot: input.projectRoot,
       config
     });
-    if (result.status !== "valid") {
+    if (
+      result.status !== "valid"
+      && !(result.status === "stale" && input.allowEvidenceDrift === true)
+    ) {
       throw failure(
         result.status === "stale" ? "CONTEXT_STALE" : "CONTEXT_INVALID",
         "precondition",
@@ -659,17 +640,30 @@ export class GenerationFinalizer {
     session: GenerationSession
   ): Promise<{ session: GenerationSession; owned: boolean }> {
     const attemptId = this.dependencies.generateAttemptId();
+    const owner = this.dependencies.owner === undefined
+      ? undefined
+      : {
+          pid: this.dependencies.owner.pid,
+          startedAt: this.dependencies.owner.now().toISOString()
+        };
     const expected = GenerationSessionSchema.parse({
       ...session,
       revision: session.revision + 1,
-      verification: { status: "running", attemptId }
+      verification: {
+        status: "running",
+        attemptId,
+        ...(owner === undefined
+          ? {}
+          : { ownerPid: owner.pid, startedAt: owner.startedAt })
+      }
     });
     try {
       return {
         session: await this.dependencies.store.beginVerification(
           session.id,
           session.revision,
-          attemptId
+          attemptId,
+          owner
         ),
         owned: true
       };

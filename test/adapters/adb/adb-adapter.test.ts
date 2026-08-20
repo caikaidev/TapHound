@@ -149,6 +149,42 @@ describe("AdbAdapter", () => {
     });
   });
 
+  it("reads target-app window topology through dumpsys window", async () => {
+    const runner = processRunner(commandResult({
+      stdout: [
+        "  Window #0 Window{abc123 u0 com.example.app/.MainActivity}:",
+        "    mOwnerUid=10123 package=com.example.app appop=NONE",
+        "    mAttrs={(0,0)(fillxfill) ty=BASE_APPLICATION",
+        "      fl=HARDWARE_ACCELERATED}",
+        "    mBaseLayer=21000 mSubLayer=0",
+        "    mHasSurface=true isReadyForDisplay()=true",
+        "    Frames: parent=[0,0][1080,2400] frame=[0,0][1080,2400]",
+        "    isOnScreen=true",
+        "    isVisible=true"
+      ].join("\n")
+    }));
+
+    await expect(new AdbAdapter(runner).windowTopology({
+      packageName: "com.example.app",
+      deviceSerial: "emulator-5554"
+    })).resolves.toMatchObject({
+      status: "observed",
+      windows: [{ id: "abc123", type: "BASE_APPLICATION" }]
+    });
+
+    expect(vi.mocked(runner.run)).toHaveBeenCalledWith({
+      executable: "adb",
+      args: [
+        "-s",
+        "emulator-5554",
+        "shell",
+        "dumpsys",
+        "window",
+        "windows"
+      ]
+    });
+  });
+
   it("reports whether the Package is installed via pm path", async () => {
     const installedRunner = processRunner(commandResult({
       stdout: "package:/data/app/com.example.app/base.apk\n"

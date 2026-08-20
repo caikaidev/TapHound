@@ -76,6 +76,32 @@ describe("hashRuntimeSnapshot", () => {
     }));
   });
 
+  it("binds window hierarchy completeness and diagnostics", () => {
+    const snapshot = validSnapshot() as Record<string, unknown>;
+    expect(hashRuntimeSnapshot(snapshot)).not.toBe(hashRuntimeSnapshot({
+      ...snapshot,
+      windowHierarchy: {
+        status: "incomplete",
+        appWindows: [{
+          id: "popup-window",
+          title: "PopupWindow",
+          packageName: "com.example.app",
+          touchable: true
+        }],
+        semanticWindowIds: [],
+        diagnostics: [{
+          code: "APP_WINDOW_WITHOUT_SEMANTIC_ROOT",
+          message: "PopupWindow lacks a semantic root"
+        }],
+        recovery: [
+          "REOBSERVE",
+          "LAYOUT_INSPECTOR",
+          "DEBUG_WINDOW_INSPECTOR"
+        ]
+      }
+    }));
+  });
+
   it("binds generation, revision, device, foreground identity, and PID", () => {
     const snapshot = validSnapshot() as Record<string, unknown>;
     for (const change of [

@@ -13,7 +13,12 @@ export type ScrollToExecutionResult =
     code: FailureCode;
     message: string;
     swipesUsed: number;
-    idle?: { polls: number; lastDiff: readonly unknown[] };
+    idle?: {
+      polls: number;
+      durationMs: number;
+      samplingDurationMs?: number | undefined;
+      lastDiff: readonly unknown[];
+    };
   }
   | { status: "cancelled"; swipesUsed: number };
 
@@ -243,7 +248,14 @@ export class ScrollToExecutor {
           code: idle.code,
           message: "Layout did not become stable before timeout",
           swipesUsed,
-          idle: { polls: idle.polls, lastDiff: idle.lastDiff }
+          idle: {
+            polls: idle.polls,
+            durationMs: idle.durationMs,
+            ...(idle.samplingDurationMs === undefined
+              ? {}
+              : { samplingDurationMs: idle.samplingDurationMs }),
+            lastDiff: idle.lastDiff
+          }
         };
       }
       swipesUsed += 1;

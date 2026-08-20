@@ -36,11 +36,13 @@ assets/skills/taphound-ai-journey/
 │   ├── generate-step.md                  # Phase 2: next-step generation guidance
 │   └── check-completion.md               # Phase 2: Goal completion check
 ├── schemas/
-│   ├── project-context.json              # ProjectContext JSON Schema
+│   ├── project-context.json              # v2 root index JSON Schema
+│   ├── project-context-module.json       # v2 module shard JSON Schema
 │   ├── proposed-step-envelope.json       # {version, proposal, snapshot} envelope
 │   └── observe-output.json               # generation observe --json output shape
 └── templates/
-    └── project-context.example.json      # Full Context example
+    ├── project-context.example.json      # Root index example
+    └── project-context-module.example.json # Module shard example
 ```
 
 When this document says "Read `prompts/analyze-project.md`", the full path is
@@ -119,59 +121,77 @@ templates, then call the TapHound CLI.
      --context .taphound/context/project-context.json \
      --json
    ```
-   - `"valid"`: Hashes match. Do a quick structural check (Step 5) to
-     detect new files not in the manifest.
-   - `"stale"`: Tracked files changed. Needs incremental update or full
-     regeneration (see GUIDE.md Section 5).
+   - `"valid"`: Index, shard, evidence, and module inventory hashes match.
+   - `"stale"`: Tracked files changed. Run `context refresh` first (see
+     below); only re-analyze the modules it reports as blocked.
    - `"invalid"`: Needs full regeneration.
    - If the file does not exist, proceed to Phase 1 (full generation).
 
-5. **Structural completeness check** (when status is `"valid"`):
-   `context status` only checks hashes of files already listed — it
-   cannot detect NEW files. Run a quick count comparison:
+   Hash-only maintenance never requires re-analysis:
    ```bash
-   # Count Activity source files on disk
-   find <project> \( -name "*.kt" -o -name "*.java" \) \
-     -not -path "*/build/*" \
-     -exec grep -l "extends.*Activity\|:.*Activity(" {} + | wc -l
+   taphound context refresh \
+     --project <project> \
+     --context .taphound/context/project-context.json \
+     --json
    ```
-   Compare with the number of Activity source files in the Context's
-   `manifest.files`. If the on-disk count is higher, new Activities were
-   added — proceed to Phase 1 for full regeneration.
+   `refresh` backfills each evidence file's `semanticSha256`, rehashes
+   formatting- or comment-only changes, and repairs drifted shard hashes in the
+   index. It exits 1 with `"blocked"` when evidence changed semantically, a
+   module inventory changed, or an evidence file is missing; those modules need
+   re-analysis in Phase 1. `--module <id...>` narrows the scope, and
+   `--accept-source-changes` also rehashes semantic changes when the recorded
+   module summary is verified to still be accurate.
 
-   If both status and structural check pass, skip Phase 1 and go directly
-   to Phase 2.
+5. When status is valid, list the compact module index and choose the modules
+   relevant to the Goal:
+   ```bash
+   taphound context list \
+     --project <project> \
+     --context .taphound/context/project-context.json \
+     --json
+   ```
+   Skip Phase 1 and continue to Phase 2.
 
 ## Phase 1: Project Context Generation
 
 > Read `prompts/analyze-project.md` before starting — it contains detailed
-> guidance on multi-module discovery, packageName resolution, and complex
-> layout structures. Read `schemas/project-context.json` to understand the
-> required JSON structure. Use `templates/project-context.example.json`
-> as a reference template.
+> guidance on module-by-module discovery and analysis. Read both Context
+> schemas and both templates before writing files.
 
 1. Analyze the Android project source per `prompts/analyze-project.md`:
    - Discover modules via `./gradlew projects` (fallback: parse
      `settings.gradle`).
    - Determine `applicationId` from the app module's build file.
    - Identify the launch Activity from the app module's manifest.
-   - Scan all modules for Activities, click handlers, Logcat tags, layout
-     XML (resolving `<include>`, `<merge>`, `<layout>`, `<ViewStub>`).
-2. Compute SHA-256 for each file you include in the manifest:
+2. Analyze every discovered Gradle module as an independent bounded task and
+   write one shard under `.taphound/context/modules/`. Never defer feature
+   modules because the complete project is large. Each catalog entry and
+   shard must say `complete`, `partial`, `unsupported`, or `notAnalyzed`.
+3. Put reusable Activity, screen, element, transition, and Logcat semantics
+   in each shard. Compute its inventory hash by sorting all project-relative
+   paths in the selected categories, joining them with `\n`, and hashing that
+   exact string.
+4. Compute SHA-256 for each evidence file:
    ```bash
    node -e "const c=require('node:crypto');const f=require('node:fs');process.stdout.write(c.createHash('sha256').update(f.readFileSync('<project>/<relative-path>')).digest('hex'))"
    ```
    NEVER guess a hash. Always compute it.
-3. Generate the Project Context JSON matching `schemas/project-context.json`.
-4. Write it to `<project>/.taphound/context/project-context.json`.
-5. Validate:
+   Also include `semanticSha256` when available. It is computed after
+   conservatively removing comments and formatting whitespace while preserving
+   string contents and all other tokens. Files without this field retain strict
+   full-file hash validation.
+5. Write each module shard, hash the complete shard file, and put that hash
+   and module routing metadata in the root index.
+6. Write the root index to
+   `<project>/.taphound/context/project-context.json`.
+7. Validate:
    ```bash
    taphound context validate \
      --project <project> \
      --context .taphound/context/project-context.json \
      --json
    ```
-6. If validation fails, read the error message, fix the JSON, and retry.
+8. If validation fails, fix the named index or shard and retry.
    Common failures:
    - Package name mismatch between `taphound.config.json` and Context.
    - Stale or incorrect SHA-256 hash.
@@ -185,25 +205,37 @@ templates, then call the TapHound CLI.
 > for element-matching and step-generation guidance. Read
 > `prompts/check-completion.md` for Goal-completion criteria.
 
-1. Start a generation session:
+1. Read the compact root index. Select Goal-relevant modules using their
+   features, Activities, and navigation entry points, then read only those
+   module shards. The application module is always selected and declared
+   dependencies are expanded by Core.
+
+2. Start a generation session:
    ```bash
    taphound generation start \
      --project <project> \
      --config <config> \
      --context .taphound/context/project-context.json \
+     --module :feature:chat :core:ui \
      --device <serial> \
      --json
    ```
-   Capture `generationId` from the result. The `config` path is relative to
+   Omit `--module` only when all modules are intentionally needed. Capture
+   `generationId` and `contextSelection` from the result. The config path is relative to
    the project root. The selected device is bound to this session; subsequent
    `observe`, `step`, `confirm`, and `manual` commands use the session binding
    and do not accept `--device`.
 
-2. Initialize a `completedSteps` list (empty at start).
+3. Initialize a `completedSteps` list (empty at start).
 
-3. **Loop** for up to `maxSteps` iterations:
+4. Observe once before the loop. After a successful step, prefer the returned
+   `nextBinding` and `nextSnapshot`; call `generation observe` only when either
+   field is absent.
 
-   a. **Observe** the current device state:
+5. **Loop** for up to `maxSteps` iterations:
+
+   a. **Obtain** the current device state. Reuse the previous successful
+      step's bound post-action state when available, otherwise run:
       ```bash
       taphound generation observe \
         --project <project> \
@@ -212,14 +244,25 @@ templates, then call the TapHound CLI.
       ```
       Parse the result. Capture:
       - `generationId`, `baseRevision`, `snapshotHash` (the binding).
-      - `snapshot` (the full RuntimeSnapshot object, including `layout`).
+      - `snapshot` (the full RuntimeSnapshot object, including `layout` and
+        window-hierarchy diagnostics when available).
+      - Confirm `snapshot.activity` is covered by one selected shard. If not,
+        stop and report a Context coverage gap. Modules cannot be added after
+        session start because the selected set is cryptographically bound.
+      - If `snapshot.windowHierarchy.status` is `incomplete`, stop before
+        proposing a step. Report its diagnostics and recovery guidance. Do
+        not use coordinates or infer controls from the screenshot. An
+        `APP_WINDOW_NOT_ACCESSIBILITY_READABLE` diagnostic means the app shows
+        a window that cannot take focus; the app has to make that window
+        focusable in debug builds before the journey can continue.
 
    b. **Check completion**: Read `prompts/check-completion.md`. Using the
       Goal and `completedSteps`, determine if the Goal is accomplished.
       If `{"complete": true}`, break out of the loop and go to Phase 3.
 
    c. **Generate proposed step**: Read `prompts/generate-step.md`. Using the
-      Goal, Project Context, `snapshot.layout`, and `snapshot.activity`,
+      Goal, selected module summaries, `snapshot.layout`, and
+      `snapshot.activity`,
       generate the next proposed step JSON (without `binding`).
 
    d. **Build the envelope**: Combine the proposed step with the binding and
@@ -248,7 +291,9 @@ templates, then call the TapHound CLI.
 
    f. **Handle the result**:
       - **`status: "succeeded"`**: Add the step to `completedSteps`. Clean
-        up the temp file. Continue to the next iteration.
+        up the temp file. Save `nextBinding` and `nextSnapshot` as the next
+        iteration's authoritative input when both are present. Otherwise
+        re-observe before proposing another step.
       - **`status: "confirmationRequired"`**: Present the challenge details
         (action summary, challenge ID) to the user. Wait for explicit
         human approval. If approved, run:
@@ -262,22 +307,29 @@ templates, then call the TapHound CLI.
         Do NOT auto-approve. If the user declines, stop and report.
       - **`status: "error"` (any failure code)**: Read the failure code and
         message. Decrement the retry budget for this step.
+        - For `WINDOW_HIERARCHY_INCOMPLETE`, do not substitute coordinates or
+          visual guessing. Re-observe once. If it persists, report the
+          structured diagnostics and use Layout Inspector for developer
+          diagnosis or an opt-in debug WindowInspector backend.
         - If retries remain: re-observe (go back to step a) and re-generate
           the step, this time accounting for the failure feedback (e.g., if
           the locator was not found, try a different locator; if the
           activity was wrong, adjust the prediction).
         - If retries are exhausted: stop and report the failure with the
           session ID, last error, and step index.
-      - **`status: "recoveryRequired"`**: The session is in a crash-
-        consistent recovery state. Stop and report. The user must decide
-        whether to recover or abandon. Do not attempt further steps.
+      - **`status: "recoveryRequired"`**: Run `generation status` and report
+        its immutable attempt outcome plus `actionMayHaveExecuted`. Stop for
+        the user's explicit retry decision. Only after approval run
+        `generation recover --decision retry`; never silently repeat the
+        potentially side-effecting action.
 
    g. Clean up the temp envelope file after each iteration (success or
       failure).
 
 ## Phase 3: Finalize
 
-1. Run finalize:
+1. Start finalize as a detached job so the replay survives agent or terminal
+   interruption:
    ```bash
    taphound generation finalize \
      --project <project> \
@@ -285,10 +337,22 @@ templates, then call the TapHound CLI.
      --context .taphound/context/project-context.json \
      --output <output> \
      --device <serial> \
+     --detach \
      --json
    ```
 
-2. Check the result `status`:
+2. Wait for durable completion, then read the detached job's `outputPath`
+   returned by the start command:
+   ```bash
+   taphound generation status \
+     --project <project> \
+     --session <generationId> \
+     --wait \
+     --timeout-ms 600000 \
+     --json
+   ```
+
+3. Check the detached result `status`:
    - **`"verified"`**: Success. Report to the user:
      - `bundlePath` (authoritative generation bundle)
      - `journeyPath` (exported Journey v1)
@@ -297,7 +361,7 @@ templates, then call the TapHound CLI.
    - **Any other status**: Failure. Report the failure detail and session
      ID. Do NOT claim success. The session may still be recoverable.
 
-3. Clean up any remaining temp files.
+4. Clean up any remaining temp files.
 
 ## Error Handling Summary
 
@@ -307,7 +371,7 @@ templates, then call the TapHound CLI.
 | Context validation fails | Fix JSON, retry validation                |
 | Step rejected          | Re-observe + re-generate (up to retryCount) |
 | Confirmation required  | Present to user, wait for approval          |
-| Recovery required      | Stop, report session ID                     |
+| Recovery required      | Inspect status; ask before explicit retry   |
 | Max steps exceeded     | Stop, report incomplete Goal                |
 | Finalize not verified  | Report failure detail, do not claim success |
 
@@ -332,7 +396,8 @@ templates, then call the TapHound CLI.
   `applicationId`. If `applicationId` is a variable reference (e.g.,
   `gradle.ext.buildApplicationId`), trace it through `gradle.properties`
   and any `.gradle` config files to find the actual string value. Include
-  all files in the resolution chain in `manifest.files`.
+  project-wide identity/catalog files in the root `manifest.files`; put
+  module-owned files in that module shard's `manifest.files`.
 - The `resourceId` in locators is the bare name without the `id/` prefix
   (e.g., `open_search`, not `id/open_search`).
 - The same `@+id/submit` can appear in multiple layout XML files — this is
@@ -349,29 +414,26 @@ templates, then call the TapHound CLI.
   the app requires human approval during generation. Leave empty unless
   ALL instances of that action are genuinely dangerous. The Core risk
   evaluator handles per-step risk assessment at runtime.
-- If `context status` returns `"stale"`, the Context must be regenerated
+- If `context status` returns `"stale"`, run `context refresh` first. When it
+  reports `"refreshed"` the Context is current again. When it reports
+  `"blocked"`, the named modules changed semantically and must be re-analyzed
   before starting a new generation session. A stale Context will cause
   `generation start` to fail with `CONTEXT_STALE`.
 - `finalize` performs a full replay from scratch (forceStop, relaunch).
   TapHound does not build or install the APK; ensure the app is installed
-  before calling `finalize`. It is not incremental. Do not call it until
-  all steps are complete.
-- **Context completeness is critical**: the Context must include ALL
-  Activity source files and their layouts across ALL modules. If the AI
-  only scans a few files, the Context is useless for staleness detection
-  and the AI will not know about screens it missed. Use shell commands
-  (`find . -name AndroidManifest.xml -not -path "*/build/*"`) to
-  systematically discover all modules and Activities.
+  before calling `finalize`. It is not incremental. Prefer `--detach` and
+  `generation status --wait`; do not call it until all steps are complete.
+- **Context completeness is explicit**: every discovered Gradle module must
+  have a catalog entry and shard status. A large project is handled as many
+  bounded module analyses, never by silently omitting later feature modules.
 - `settings.gradle` may use custom functions like `includeModule()` that
   dynamically include modules. Parsing `include` statements alone will
   miss these. Use `./gradlew projects` or `find . -name "build.gradle"
   -not -path "*/build/*"` as a filesystem fallback.
-- `context status` only detects content changes to files already listed
-  in the Context. It does NOT detect new files added to the project (new
-  Activities, new layouts, new modules). Always run a structural count
-  comparison before reusing a Context.
-- During generation, if `observe` returns unexpected elements or
-  Activities not known from the Context, the Context may be stale. Note
-  the discrepancy, adapt to the live state, and recommend a Context
-  update after the session. Do NOT abort unless the error is
-  unrecoverable.
+- Module inventory hashes detect new and deleted manifest, source, layout,
+  and navigation files. A new Gradle module also changes root project
+  evidence such as `settings.gradle(.kts)`.
+- During generation, if `observe` returns an Activity not covered by the
+  session's selected module shards, stop and report a Context coverage gap.
+  Do not add modules after start because `contextSelection` is bound to the
+  authoritative session.

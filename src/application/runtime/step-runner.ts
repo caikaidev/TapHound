@@ -76,7 +76,8 @@ export class StepRunner {
     this.idleWaiter = new IdleWaiter(
       options.androidCli,
       options.clock,
-      options.deviceSerial
+      options.deviceSerial,
+      options.packageName
     );
     this.expectationEvaluator = new ExpectationEvaluator(
       options.adb,
@@ -394,6 +395,10 @@ export class StepRunner {
           report.idle = {
             status: "timeout",
             polls: scroll.idle.polls,
+            durationMs: scroll.idle.durationMs,
+            ...(scroll.idle.samplingDurationMs === undefined
+              ? {}
+              : { samplingDurationMs: scroll.idle.samplingDurationMs }),
             lastDiff: [...scroll.idle.lastDiff]
           };
         }
@@ -509,11 +514,26 @@ export class StepRunner {
         ? {
             status: "timeout",
             polls: idle.polls,
+            durationMs: idle.durationMs,
+            ...(idle.samplingDurationMs === undefined
+              ? {}
+              : { samplingDurationMs: idle.samplingDurationMs }),
             lastDiff: [...idle.lastDiff]
           }
         : {
             status: idle.status,
-            polls: idle.polls
+            polls: idle.polls,
+            durationMs: idle.durationMs,
+            ...(idle.status !== "stable"
+              ? {}
+              : {
+                  ...(idle.samplingDurationMs === undefined
+                    ? {}
+                    : { samplingDurationMs: idle.samplingDurationMs }),
+                  ...(idle.backend === undefined
+                    ? {}
+                    : { backend: idle.backend })
+                })
           };
       if (idle.status === "cancelled") {
         return finish("cancelled");

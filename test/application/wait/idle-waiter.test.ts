@@ -38,7 +38,8 @@ describe("IdleWaiter", () => {
     expect(result).toEqual({
       status: "stable",
       polls: 3,
-      durationMs: 200
+      durationMs: 200,
+      samplingDurationMs: 0
     });
     expect(cli.layoutDiff).toHaveBeenCalledTimes(3);
     expect(vi.mocked(cli.layoutDiff).mock.calls.map(([options]) => (
@@ -83,8 +84,9 @@ describe("IdleWaiter", () => {
       status: "timeout",
       code: "IDLE_TIMEOUT",
       polls: 4,
-      durationMs: 300,
-      lastDiff: [{ id: "still-changing" }]
+      durationMs: 250,
+      lastDiff: [{ id: "still-changing" }],
+      samplingDurationMs: 0
     });
   });
 
@@ -108,7 +110,8 @@ describe("IdleWaiter", () => {
       code: "IDLE_TIMEOUT",
       polls: 1,
       durationMs: 250,
-      lastDiff: []
+      lastDiff: [],
+      samplingDurationMs: 0
     });
   });
 
@@ -152,6 +155,95 @@ describe("IdleWaiter", () => {
       status: "cancelled",
       polls: 1,
       durationMs: 0
+    });
+  });
+
+  it("confirms stability with layout diff for gfxFrameStats backend", async () => {
+    const cli = androidCli();
+    vi.mocked(cli.layoutDiff).mockResolvedValue({
+      changes: [],
+      backend: "gfxFrameStats"
+    });
+    const clock = new FakeClock();
+
+    const result = await new IdleWaiter(
+      cli,
+      clock,
+      "emulator-5554",
+      "com.example.app"
+    ).waitUntilIdle({
+      pollIntervalMs: 100,
+      stablePolls: 2,
+      timeoutMs: 5000
+    });
+
+    expect(result).toMatchObject({
+      status: "stable",
+      backend: "gfxFrameStats",
+      polls: 3,
+      durationMs: 100
+    });
+    expect(cli.layoutDiff).toHaveBeenCalledTimes(3);
+    const calls = vi.mocked(cli.layoutDiff).mock.calls;
+    expect(calls[2]?.[0].packageName).toBeUndefined();
+  });
+
+  it("continues polling when confirmation shows layout changes", async () => {
+    const cli = androidCli();
+    let confirmCount = 0;
+    vi.mocked(cli.layoutDiff).mockImplementation((options) => {
+      if (options.packageName !== undefined) {
+        return Promise.resolve({ changes: [], backend: "gfxFrameStats" });
+      }
+      confirmCount += 1;
+      return Promise.resolve(
+        confirmCount === 1 ? [{ id: "change" }] : []
+      );
+    });
+    const clock = new FakeClock();
+
+    const result = await new IdleWaiter(
+      cli,
+      clock,
+      "emulator-5554",
+      "com.example.app"
+    ).waitUntilIdle({
+      pollIntervalMs: 100,
+      stablePolls: 2,
+      timeoutMs: 5000
+    });
+
+    expect(result).toMatchObject({
+      status: "stable",
+      backend: "gfxFrameStats",
+      polls: 6,
+      durationMs: 300
+    });
+  });
+
+  it("declares stable without confirmation when budget is too low", async () => {
+    const cli = androidCli();
+    vi.mocked(cli.layoutDiff).mockResolvedValue({
+      changes: [],
+      backend: "gfxFrameStats"
+    });
+    const clock = new FakeClock();
+
+    const result = await new IdleWaiter(
+      cli,
+      clock,
+      "emulator-5554",
+      "com.example.app"
+    ).waitUntilIdle({
+      pollIntervalMs: 100,
+      stablePolls: 2,
+      timeoutMs: 200
+    });
+
+    expect(result).toMatchObject({
+      status: "stable",
+      backend: "gfxFrameStats",
+      polls: 2
     });
   });
 });

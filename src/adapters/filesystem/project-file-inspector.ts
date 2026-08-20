@@ -193,6 +193,7 @@ export class NodeProjectFileInspector implements ProjectFileInspector {
 
       const hash = createHash("sha256");
       const buffer = Buffer.allocUnsafe(64 * 1024);
+      const chunks: Buffer[] = [];
       let totalBytes = 0;
       let tooLarge = false;
       while (totalBytes <= input.maximumBytes) {
@@ -203,7 +204,9 @@ export class NodeProjectFileInspector implements ProjectFileInspector {
           break;
         }
         totalBytes += readResult.bytesRead;
-        hash.update(buffer.subarray(0, readResult.bytesRead));
+        const chunk = Buffer.from(buffer.subarray(0, readResult.bytesRead));
+        hash.update(chunk);
+        chunks.push(chunk);
         if (totalBytes > input.maximumBytes) {
           tooLarge = true;
           break;
@@ -239,7 +242,8 @@ export class NodeProjectFileInspector implements ProjectFileInspector {
         : {
             status: "inspected",
             resolvedRelativePath,
-            sha256: hash.digest("hex")
+            sha256: hash.digest("hex"),
+            bytes: Buffer.concat(chunks)
           };
     } catch {
       return { status: "unreadable" };

@@ -35,7 +35,11 @@
         },
         "capturedAt": { "type": "string" },
         "screenshotPath": { "type": "string" },
-        "layout": { "type": "array" }
+        "layout": { "type": "array" },
+        "windowHierarchy": {
+          "type": "object",
+          "description": "Conservative comparison between visible touchable target-app windows and semantic layout roots. An incomplete status must block proposal generation."
+        }
       }
     }
   }

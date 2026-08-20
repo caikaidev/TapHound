@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://taphound.dev/schemas/project-context-module.json",
+  "title": "TapHound Project Context Module v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "moduleId",
+    "projectDir",
+    "status",
+    "inventory",
+    "manifest",
+    "summary"
+  ],
+  "properties": {
+    "version": { "const": 2 },
+    "moduleId": { "type": "string", "minLength": 1 },
+    "projectDir": { "$ref": "#/$defs/projectPath" },
+    "status": { "$ref": "#/$defs/shardStatus" },
+    "inventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "pathSetSha256", "categories"],
+      "properties": {
+        "version": { "const": 2 },
+        "pathSetSha256": { "$ref": "#/$defs/sha256" },
+        "categories": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["manifests", "sources", "layouts", "navigation"]
+          }
+        }
+      }
+    },
+    "manifest": { "$ref": "#/$defs/manifest" },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "features",
+        "activities",
+        "elements",
+        "transitions",
+        "logcat"
+      ],
+      "properties": {
+        "features": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "activities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "entryPoints", "screens"],
+            "properties": {
+              "name": { "$ref": "#/$defs/qualifiedName" },
+              "entryPoints": {
+                "type": "array",
+                "items": { "$ref": "#/$defs/qualifiedName" }
+              },
+              "screens": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": { "type": "string", "minLength": 1 }
+              }
+            }
+          }
+        },
+        "elements": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["screen", "actions"],
+            "properties": {
+              "screen": { "type": "string", "minLength": 1 },
+              "resourceId": { "type": "string", "minLength": 1 },
+              "text": { "type": "string", "minLength": 1 },
+              "contentDescription": { "type": "string", "minLength": 1 },
+              "actions": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "$ref": "#/$defs/action" }
+              }
+            },
+            "anyOf": [
+              { "required": ["resourceId"] },
+              { "required": ["text"] },
+              { "required": ["contentDescription"] }
+            ]
+          }
+        },
+        "transitions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["fromActivity", "toActivity"],
+            "properties": {
+              "fromActivity": { "$ref": "#/$defs/qualifiedName" },
+              "actionResourceId": { "type": "string", "minLength": 1 },
+              "actionText": { "type": "string", "minLength": 1 },
+              "toActivity": { "$ref": "#/$defs/qualifiedName" }
+            },
+            "anyOf": [
+              { "required": ["actionResourceId"] },
+              { "required": ["actionText"] }
+            ]
+          }
+        },
+        "logcat": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["tag", "pattern", "match"],
+            "properties": {
+              "tag": { "type": "string", "minLength": 1 },
+              "pattern": { "type": "string", "minLength": 1 },
+              "match": { "enum": ["literal", "regex"] }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "qualifiedName": {
+      "type": "string",
+      "pattern": "^(?:[A-Za-z_$][\\w$]*\\.)+[A-Za-z_$][\\w$]*$"
+    },
+    "projectPath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\]+$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f\\d]{64}$"
+    },
+    "shardStatus": {
+      "enum": ["complete", "partial", "unsupported", "notAnalyzed"]
+    },
+    "action": {
+      "enum": [
+        "click",
+        "longClick",
+        "inputText",
+        "swipe",
+        "scrollTo",
+        "back",
+        "wait"
+      ]
+    },
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "files"],
+      "properties": {
+        "version": { "const": 1 },
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "sha256", "confidence"],
+            "properties": {
+              "path": { "$ref": "#/$defs/projectPath" },
+              "sha256": { "$ref": "#/$defs/sha256" },
+              "semanticSha256": { "$ref": "#/$defs/sha256" },
+              "confidence": {
+                "enum": [
+                  "sourceConfirmed",
+                  "runtimeConfirmed",
+                  "inferred",
+                  "unknown"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

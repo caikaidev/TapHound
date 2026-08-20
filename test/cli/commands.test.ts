@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  ContextLoadError
+} from "../../src/application/context/context-loader.js";
+import {
+  ContextRefreshError
+} from "../../src/application/context/context-refresher.js";
+import {
   GenerationOperationError,
   GenerationStarter
 } from "../../src/application/generation/generation-starter.js";
@@ -11,25 +17,14 @@ import {
 } from "../../src/ports/generation-session-store.js";
 import { runtimeConfig, runtimeJourney } from "../fakes/runtime-fixture.js";
 import { validReport } from "../fixtures/report.js";
+import {
+  contextSelection,
+  projectContextIndex,
+  projectContextModule,
+  resolvedProjectContext
+} from "../fixtures/project-context.js";
 
-const generationContext = {
-  version: 1 as const,
-  packageName: "com.example.app",
-  launchActivity: "com.example.app.MainActivity",
-  manifest: {
-    version: 1 as const,
-    files: [{
-      path: "AndroidManifest.xml",
-      sha256: "a".repeat(64),
-      confidence: "sourceConfirmed" as const
-    }]
-  },
-  interactionPolicy: {
-    allowedActions: ["click" as const],
-    confirmationRequiredActions: [],
-    forbiddenActions: ["back" as const]
-  }
-};
+const generationContext = resolvedProjectContext;
 
 class BufferOutput implements TextOutput {
   public value = "";
@@ -89,6 +84,37 @@ function dependencies(): {
       contextValidator: {
         validate: vi.fn(() => Promise.resolve({ status: "valid" as const }))
       },
+      contextLoader: {
+        load: vi.fn(() => Promise.resolve({
+          context: generationContext,
+          binding: generationContext,
+          bundle: projectContextIndex,
+          modules: [projectContextModule]
+        })),
+        readIndex: vi.fn(() => Promise.resolve({
+          bundle: projectContextIndex,
+          indexHash: contextSelection.indexHash
+        }))
+      },
+      contextRefresher: {
+        refresh: vi.fn(() => Promise.resolve({
+          status: "refreshed" as const,
+          indexHash: "a".repeat(64),
+          acceptedSourceChanges: false,
+          scopes: [{
+            scope: "module" as const,
+            id: ":app",
+            contextPath: ".taphound/context/modules/app.json",
+            written: true,
+            semanticBackfilled: 2,
+            formattingRehashed: 1,
+            semanticChanged: [],
+            unresolved: [],
+            inventoryChanged: false
+          }],
+          blocked: []
+        }))
+      },
       init: {
         install: vi.fn(() => Promise.resolve({
           status: "installed" as const,
@@ -122,6 +148,7 @@ function dependencies(): {
               forbiddenActions: ["back" as const]
             }
           },
+          contextSelection,
           variables: {
             runId: "journey-run-1",
             timestamp: "2026-07-22T12:00:00.000Z",
@@ -306,6 +333,7 @@ describe("TapHound CLI commands", () => {
       "--project", "/project",
       "--config", "taphound.config.json",
       "--context", "context.json",
+      "--module", ":feature:search",
       "--device", "emulator-5554",
       "--json"
     ]);
@@ -321,6 +349,7 @@ describe("TapHound CLI commands", () => {
         contextHash: "a".repeat(64),
         snapshotHash: null
       },
+      contextSelection,
       variables: {
         runId: "journey-run-1",
         timestamp: "2026-07-22T12:00:00.000Z",
@@ -352,6 +381,11 @@ describe("TapHound CLI commands", () => {
         packageName: "com.example.app"
       },
       deviceSerial: "emulator-5554"
+    });
+    expect(test.value.contextLoader.load).toHaveBeenCalledWith({
+      projectRoot: "/project",
+      contextPath: "/project/context.json",
+      moduleIds: [":feature:search"]
     });
     expect(test.exitCodes).toEqual([0]);
   });
@@ -391,16 +425,21 @@ describe("TapHound CLI commands", () => {
     expect(test.stderr.value).toBe("");
     expect(test.value.runtimeObserver.observe).toHaveBeenCalledWith({
       projectRoot: "/project",
-      generationId: "generation-1"
+      generationId: "generation-1",
+      idle: {
+        pollIntervalMs: 100,
+        stablePolls: 1,
+        timeoutMs: 500
+      }
     });
     expect(test.exitCodes).toEqual([0]);
   });
 
   it("maps invalid generation Context input to CONTEXT_INVALID", async () => {
     const test = dependencies();
-    vi.mocked(test.value.readJson).mockImplementation((path) => Promise.resolve(
-      path.includes("context") ? { version: 1, invalid: true } : runtimeConfig
-    ));
+    vi.mocked(test.value.contextLoader.load).mockRejectedValueOnce(
+      new ContextLoadError("CONTEXT_INVALID", "invalid Context")
+    );
 
     await createProgram(test.value).parseAsync([
       "node", "taphound", "generation", "start",
@@ -420,11 +459,9 @@ describe("TapHound CLI commands", () => {
 
   it("maps unreadable generation Context JSON to CONTEXT_INVALID", async () => {
     const test = dependencies();
-    vi.mocked(test.value.readJson).mockImplementation((path) => (
-      path.includes("context")
-        ? Promise.reject(new Error("invalid Context JSON"))
-        : Promise.resolve(runtimeConfig)
-    ));
+    vi.mocked(test.value.contextLoader.load).mockRejectedValueOnce(
+      new ContextLoadError("CONTEXT_INVALID", "invalid Context JSON")
+    );
 
     await createProgram(test.value).parseAsync([
       "node", "taphound", "generation", "start",
@@ -628,6 +665,8 @@ describe("TapHound CLI commands", () => {
 
       expect(JSON.parse(test.stdout.value)).toEqual({
         ...validation,
+        contextSelection,
+        modules: [{ id: ":app", status: "complete" }],
         exitCode
       });
       expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
@@ -641,20 +680,129 @@ describe("TapHound CLI commands", () => {
     }
   );
 
+  it("lists the compact v2 Context module index", async () => {
+    const test = dependencies();
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "context", "list",
+      "--project", "/project",
+      "--context", ".taphound/context/project-context.json",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "listed",
+      exitCode: 0,
+      version: 2,
+      indexHash: contextSelection.indexHash,
+      modules: projectContextIndex.modules
+    });
+    expect(test.value.contextLoader.readIndex).toHaveBeenCalledWith({
+      projectRoot: "/project",
+      contextPath: "/project/.taphound/context/project-context.json"
+    });
+    expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("refreshes Context evidence hashes with selected modules", async () => {
+    const test = dependencies();
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "context", "refresh",
+      "--project", "/project",
+      "--context", ".taphound/context/project-context.json",
+      "--module", ":app",
+      "--accept-source-changes",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "refreshed",
+      exitCode: 0,
+      indexHash: "a".repeat(64)
+    });
+    expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
+    expect(test.value.contextRefresher.refresh).toHaveBeenCalledWith({
+      projectRoot: "/project",
+      contextPath: "/project/.taphound/context/project-context.json",
+      moduleIds: [":app"],
+      acceptSourceChanges: true
+    });
+    expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("maps blocked Context refresh to exit 1", async () => {
+    const test = dependencies();
+    vi.mocked(test.value.contextRefresher.refresh).mockResolvedValueOnce({
+      status: "blocked",
+      indexHash: "b".repeat(64),
+      acceptedSourceChanges: false,
+      scopes: [],
+      blocked: [{
+        code: "EVIDENCE_SEMANTIC_CHANGED",
+        message: ":app: 1 evidence files changed semantically (a.kt)"
+      }]
+    });
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "context", "refresh",
+      "--project", "/project",
+      "--context", ".taphound/context/project-context.json",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "blocked",
+      exitCode: 1
+    });
+    expect(test.exitCodes).toEqual([1]);
+  });
+
+  it("maps Context refresh failures to exit 2", async () => {
+    const test = dependencies();
+    vi.mocked(test.value.contextRefresher.refresh).mockRejectedValueOnce(
+      new ContextRefreshError(
+        "CONTEXT_MODULE_NOT_FOUND",
+        "Project Context module does not exist: :missing"
+      )
+    );
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "context", "refresh",
+      "--project", "/project",
+      "--context", ".taphound/context/project-context.json",
+      "--module", ":missing",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "error",
+      exitCode: 2,
+      failure: { code: "CONTEXT_MODULE_NOT_FOUND" }
+    });
+    expect(test.exitCodes).toEqual([2]);
+  });
+
   it.each([
-    ["config read", "taphound.config.json", "CONFIG_INVALID"],
-    ["context read", "project.context.json", "CONTEXT_INVALID"]
+    ["config read", "CONFIG_INVALID"],
+    ["context read", "CONTEXT_INVALID"]
   ])("isolates context %s failures to one JSON stdout value", async (
-    _case,
-    failingPath,
+    failureCase,
     expectedCode
   ) => {
     const test = dependencies();
-    vi.mocked(test.value.readJson).mockImplementation((path: string) => (
-      path.endsWith(failingPath)
-        ? Promise.reject(new Error(`${failingPath} unreadable`))
-        : Promise.resolve(runtimeConfig)
-    ));
+    if (failureCase === "config read") {
+      vi.mocked(test.value.readJson).mockRejectedValueOnce(
+        new Error("taphound.config.json unreadable")
+      );
+    } else {
+      vi.mocked(test.value.contextLoader.load).mockRejectedValueOnce(
+        new ContextLoadError(
+          "CONTEXT_INVALID",
+          "project.context.json unreadable"
+        )
+      );
+    }
 
     await createProgram(test.value).parseAsync([
       "node", "taphound", "context", "validate",
@@ -664,11 +812,19 @@ describe("TapHound CLI commands", () => {
       "--json"
     ]);
 
-    expect(JSON.parse(test.stdout.value)).toMatchObject({
-      status: "error",
-      exitCode: 2,
-      failure: { code: expectedCode }
-    });
+    expect(JSON.parse(test.stdout.value)).toMatchObject(
+      failureCase === "context read"
+        ? {
+            status: "invalid",
+            exitCode: 2,
+            reason: { code: "CONTEXT_SCHEMA_INVALID" }
+          }
+        : {
+            status: "error",
+            exitCode: 2,
+            failure: { code: expectedCode }
+          }
+    );
     expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
     expect(test.stderr.value).toBe("");
     expect(test.value.contextValidator.validate).not.toHaveBeenCalled();

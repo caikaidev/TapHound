@@ -135,25 +135,31 @@ perform these steps:
    attribute in the manifest for legacy projects).
 3. Identify the launch Activity from the app module's `AndroidManifest.xml`
    (library module Activities are merged in via manifest merge).
-4. Scan Kotlin/Java source across all modules to identify Activities, click
-   handlers, Logcat tags, and Activity transitions.
-5. Scan layout XML across all modules to extract `android:id` values,
-   recursively resolving `<include>`, `<merge>`, `<layout>` (Data Binding),
-   and `<ViewStub>` composite structures.
-6. Compute SHA-256 for each file using shell commands (never guessed).
-7. Generate a JSON matching `schemas/project-context.json`.
+4. Analyze each module independently for Activities, click handlers, Logcat
+   tags, navigation, and layouts. Write one v2 shard under
+   `.taphound/context/modules/` before moving to the next module.
+5. Store reusable screen, element, transition, and Logcat semantics in each
+   shard. Compute evidence hashes and the module inventory path-set hash.
+6. Mark every discovered module `complete`, `partial`, `unsupported`, or
+   `notAnalyzed`; never silently omit a module because the project is large.
+7. Hash each completed shard and write the compact v2 root index matching
+   `schemas/project-context.json`.
 
 > **Multi-module note**: Activities may be distributed across library/feature
 > modules, and layout XML may be in any module's `res/layout/`. The AI agent
-> uses `./gradlew projects` to get the authoritative module list and scans
-> all modules.
+> uses `./gradlew projects` to get the authoritative module list. The root
+> index stays small; detailed semantics are loaded from selected shards.
 
 ### 2.3 Write and Validate Context
 
-The AI-generated Context is written to:
+The AI-generated Bundle is written to:
 
 ```
-<project>/.taphound/context/project-context.json
+<project>/.taphound/context/
+├── project-context.json
+└── modules/
+    ├── app.json
+    └── feature-search.json
 ```
 
 Then validate:
@@ -190,6 +196,15 @@ taphound context status \
 
 Returns `"valid"` (still valid), `"stale"` (files changed, needs update),
 or `"invalid"` (structural error).
+
+List the compact module catalog without loading all shards:
+
+```bash
+taphound context list \
+  --project /path/to/android-project \
+  --context .taphound/context/project-context.json \
+  --json
+```
 
 ### 2.5 Context Persistence
 
@@ -228,6 +243,7 @@ taphound generation start \
   --project /path/to/android-project \
   --config taphound.config.json \
   --context .taphound/context/project-context.json \
+  --module :feature:search \
   --device emulator-5554 \
   --json
 ```
@@ -241,14 +257,17 @@ taphound generation start \
   "generationId": "a1b2c3d4-...",
   "revision": 0,
   "bindings": { "projectHash": "...", "configHash": "...", "contextHash": "...", "snapshotHash": null },
+  "contextSelection": { "bundleVersion": 2, "indexHash": "...", "modules": [{"id": ":app", "sha256": "...", "projectDir": "app", "inventory": {"pathSetSha256": "...", "categories": ["manifests", "sources", "layouts", "navigation"]}}, {"id": ":feature:search", "sha256": "...", "projectDir": "features/search", "inventory": {"pathSetSha256": "...", "categories": ["manifests", "sources", "layouts", "navigation"]}}] },
   "variables": { "runId": "...", "timestamp": "...", "randomHex": "..." },
   "target": { "packageName": "...", "deviceSerial": "...", "resetStrategy": "processOnly", "interactionPolicy": {...} }
 }
 ```
 
-**Note the `generationId`** — all subsequent commands use it. The selected
-device is bound to the session. Session operations such as `observe`, `step`,
-`confirm`, and `manual` use that binding and do not accept `--device`.
+**Note the `generationId` and `contextSelection`**. The application module,
+requested modules, and their declared dependencies are bound to the session.
+Omitting `--module` selects all modules. Modules cannot be added after start.
+The selected device is also bound. Session operations such as `observe`,
+`step`, `confirm`, and `manual` do not accept `--device`.
 
 **Failure troubleshooting**:
 
@@ -296,7 +315,23 @@ taphound generation observe \
 
 **Note** three binding fields: `generationId`, `baseRevision`,
 `snapshotHash`, plus the full `snapshot` object (including the `layout`
-array describing all UI elements on the current screen).
+array describing all UI elements on the current screen). Current snapshots
+also include `windowHierarchy` when the external tools expose enough
+metadata. `complete` means visible touchable target-app windows are covered by
+semantic roots, `unknown` means one side was unavailable, and `incomplete`
+means TapHound observed more app windows than semantic roots
+(`APP_WINDOW_WITHOUT_SEMANTIC_ROOT`), or observed a visible app window that
+cannot take focus (`APP_WINDOW_NOT_ACCESSIBILITY_READABLE`). Android
+accessibility only serializes the active window, so a non-focusable popup or
+panel is never readable; that is an app-side defect, and the app must make the
+window focusable in debug builds before the journey can continue.
+
+When `windowHierarchy.status` is `incomplete`, Core rejects every proposed
+action with `WINDOW_HIERARCHY_INCOMPLETE` before mutation. Re-observe once.
+If the mismatch persists, inspect the screen with Android Studio Layout
+Inspector for diagnosis, or use an opt-in debug WindowInspector backend when
+available. Layout Inspector is not a TapHound runtime dependency. Never work
+around the failure with absolute coordinates or screenshot guessing.
 
 > Ensure the app is launched and on the expected initial screen. If the
 > foreground is not the target app, `observe` records that state, and the
@@ -307,7 +342,7 @@ array describing all UI elements on the current screen).
 The AI agent reads `prompts/generate-step.md` and is given:
 
 - **Goal**: the user's test scenario description
-- **Project Context**: the JSON from Section 2
+- **Project Context Index** and the selected module shard summaries
 - **Snapshot**: the observe output from Step 2 (including layout)
 - **Completed steps**: the list of steps already succeeded in this session
 
@@ -378,9 +413,19 @@ taphound generation step \
   "revision": 3,
   "stepIndex": 0,
   "step": { "action": "click", "locator": {...}, "activity": {...} },
-  "source": "planner"
+  "source": "planner",
+  "nextBinding": {
+    "generationId": "a1b2c3d4-...",
+    "baseRevision": 4,
+    "snapshotHash": "..."
+  },
+  "nextSnapshot": { "...bound post-action RuntimeSnapshot..." }
 }
 ```
+
+When both `nextBinding` and `nextSnapshot` are present, use them directly for
+the next envelope. They were captured from the post-action state and
+authoritatively committed. If either is absent, run `generation observe`.
 
 **Confirmation required** (if the action is in
 `confirmationRequiredActions`):
@@ -433,8 +478,9 @@ re-generate the step (Step 3) with a corrected locator, and retry. Up to
 
 ### 3.6 Step 5 — Repeat Until Goal is Complete
 
-After each successful step, return to Step 2 (observe) for the new device
-state, then Step 3 (AI generates next step) -> Step 4 (execute).
+After each successful step, use its `nextBinding` and `nextSnapshot` for the
+new device state. Return to Step 2 (`observe`) only when the post-action
+snapshot capture was unavailable, then continue to Step 3 -> Step 4.
 
 The AI agent checks whether the Goal is complete before each step (reads
 `prompts/check-completion.md`). If complete, it breaks out of the loop.
@@ -444,7 +490,7 @@ incomplete.
 
 ### 3.7 Step 6 — Finalize and Verify
 
-After all steps are complete, run finalize:
+After all steps are complete, start finalize detached:
 
 ```bash
 taphound generation finalize \
@@ -453,8 +499,24 @@ taphound generation finalize \
   --context .taphound/context/project-context.json \
   --output journeys/generated-search.json \
   --device emulator-5554 \
+  --detach \
   --json
 ```
+
+The start result contains `ownerPid`, `outputPath`, and `progressPath`. Wait
+without owning the replay process:
+
+```bash
+taphound generation status \
+  --project /path/to/android-project \
+  --session <generationId> \
+  --wait \
+  --timeout-ms 600000 \
+  --json
+```
+
+After verification and publication become terminal, parse the detached
+finalize JSON at `outputPath`.
 
 **Success**:
 
@@ -644,56 +706,52 @@ taphound context status \
 - `"invalid"`: Context structure is broken. Needs full regeneration
   (Section 5.3).
 
-**Step 2: Structural completeness check**
+**Step 2: Module completeness check**
 
-`context status` only checks files already listed in the Context. It
-cannot detect NEW files added to the project. Run a quick structural
-comparison:
-
-```bash
-# Count Activities in all manifests
-ACTIVITY_COUNT=$(find . -name "AndroidManifest.xml" -not -path "*/build/*" \
-  -exec grep -c '<activity' {} + 2>/dev/null | \
-  awk -F: '{s+=$NF} END {print s}')
-
-# Count Activity source files on disk
-SRC_ACTIVITY_COUNT=$(find . \( -name "*.kt" -o -name "*.java" \) \
-  -not -path "*/build/*" \
-  -exec grep -l "extends.*Activity\|:.*Activity(" {} + 2>/dev/null | wc -l)
-
-# Count layout files on disk
-LAYOUT_COUNT=$(find . -path "*/res/layout/*.xml" -not -path "*/build/*" | wc -l)
-
-echo "Activities in manifests: $ACTIVITY_COUNT"
-echo "Activity source files:   $SRC_ACTIVITY_COUNT"
-echo "Layout files:            $LAYOUT_COUNT"
-```
-
-Compare these counts with the number of Activity source files and layout
-files actually listed in the Context's `manifest.files`. If the on-disk
-counts are significantly higher than what's in the Context, new files
-were added and a full regeneration (Section 5.3) is needed.
-
-> **Tip**: The AI agent can automate this comparison. Tell it:
-> "Check if the Project Context for /path/to/android-project is still
-> complete. Compare the Activity and layout counts on disk with what's
-> in the Context."
+Module inventory path-set hashes include manifest, source, layout, and
+navigation paths. `context status` therefore detects files added or removed
+inside an existing module. Root project evidence detects changes to the
+Gradle module catalog. Also run `context list --json` and ensure every module
+is explicitly `complete`; `partial`, `unsupported`, and `notAnalyzed` are
+coverage gaps, not successful full generation.
 
 **Decision matrix:**
 
-| `context status` | Structural counts match? | Action |
-|------------------|--------------------------|--------|
-| `valid` | Yes | Proceed to test (Section 3) |
-| `valid` | No (new files on disk) | Full regeneration (5.3) |
-| `stale` | Yes (same files, content changed) | Incremental update (5.2) |
-| `stale` | No (files added/removed) | Full regeneration (5.3) |
-| `invalid` | — | Full regeneration (5.3) |
+| `context status` | Module catalog | Action |
+|------------------|----------------|--------|
+| `valid` | All selected modules complete | Proceed to test |
+| `valid` | Any module incomplete | Complete that module shard |
+| `stale` | Existing module changed | Run `context refresh`, then regenerate any shard it reports as blocked |
+| `stale` | Module catalog changed | Update index and generate new shards |
+| `invalid` | — | Repair or regenerate Bundle |
 
 ### 5.2 Incremental Update (Content-Only Changes)
 
-When `context status` returns `"stale"` but the structural counts match
-(same files, just content modified — e.g., a button's text changed, a
-layout was restructured, an Activity's click handler was updated):
+**Step 0: Hash-only refresh**
+
+Before any re-analysis, let TapHound recompute hashes:
+
+```bash
+taphound context refresh \
+  --project /path/to/android-project \
+  --context /path/to/android-project/.taphound/context/project-context.json \
+  --json
+```
+
+- `"refreshed"` / `"unchanged"`: nothing semantic changed. `semanticSha256`
+  values are backfilled, formatting- or comment-only edits are rehashed,
+  drifted shard hashes in the index are repaired, and the Context is current.
+- `"blocked"`: the response lists the modules and files that changed
+  semantically, whose inventory changed, or whose evidence is missing. Only
+  those modules need the steps below.
+
+`--module <id...>` narrows the scope. `--accept-source-changes` also rehashes
+semantic and inventory drift; use it only after confirming the recorded module
+summary (screens, elements, transitions, Logcat) is still accurate, because
+`refresh` never updates semantics.
+
+When `refresh` reports `"blocked"`, regenerate the affected module shards
+instead of reanalyzing unrelated features:
 
 1. Identify which files changed (the `context status` output lists them).
 2. Recompute SHA-256 for each changed file.
@@ -705,8 +763,9 @@ layout was restructured, an Activity's click handler was updated):
    - New `android:id` elements (new locator candidates)
    - Removed elements (locators that no longer exist)
    - Changed `android:text` or `android:contentDescription`
-5. Update the `manifest.files` hashes and `interactionPolicy` if needed.
-6. Validate:
+5. Update shard semantics, evidence, and inventory. Write the shard,
+   recompute its file hash, and update the root index reference.
+6. Update the global `interactionPolicy` only when needed, then validate:
    ```bash
    taphound context validate \
      --project /path/to/android-project \
@@ -719,15 +778,15 @@ project.
 
 ### 5.3 Full Regeneration (Structural Changes)
 
-When new files are added (new Activities, new layouts, new modules) or
-the Context is `invalid`, re-run the full Section 2 flow:
+When a new Gradle module is added or the Bundle is `invalid`, update the
+module catalog and generate only missing or invalid shards:
 
 1. Have the AI agent re-analyze the source (reads `prompts/analyze-project.md`)
 2. Re-discover all modules via `./gradlew projects` or filesystem fallback
-3. Re-enumerate all Activities and layouts across all modules
-4. Recompute all SHA-256 hashes
-5. Update `interactionPolicy` based on the full source analysis
-6. Overwrite `project-context.json`
+3. Add every discovered module to the root index with explicit status
+4. Generate each new/invalid module shard independently
+5. Recompute affected shard hashes and global interaction policy
+6. Rewrite the root index
 7. Validate with `context validate`
 
 ```bash
@@ -816,7 +875,7 @@ Each Goal is an independent generation session and does not affect others.
 | `APP_CRASHED` | App process crashed | Check Logcat, restart app |
 | `RISK_CONFIRMATION_REQUIRED` | Action requires user confirmation | Wait for user confirmation |
 | `ACTION_FORBIDDEN` | Action is forbidden by policy | Use a different action or adjust policy |
-| `RECOVERY_REQUIRED` | Session entered recovery state | Stop, report session ID |
+| `RECOVERY_REQUIRED` | Session entered recovery state | Inspect status and ask before explicit retry |
 
 ### 7.2 generation finalize Failures
 
@@ -830,20 +889,23 @@ Each Goal is an independent generation session and does not affect others.
 ### 7.3 View Session State
 
 ```bash
-# Active session directories (dot prefix means in-progress)
-ls /path/to/project/.taphound/generations/
-
-# Published authoritative bundle (no dot prefix)
-ls /path/to/project/.taphound/generations/<id>/
+taphound generation status \
+  --project /path/to/android-project \
+  --session <generationId> \
+  --json
 ```
 
-### 7.4 Clean Up and Rerun
+If status reports recovery is available, the previous action or verification
+replay may already have produced external side effects. Show
+`actionMayHaveExecuted` and the immutable `attemptOutcome` to the user. Only
+after the user explicitly chooses retry:
 
 ```bash
-# Remove previous session artifacts
-rm -rf /path/to/project/.taphound/generations/
-rm -f /path/to/project/journeys/generated-*.json
-rm -f /path/to/project/journeys/generated-*.meta.json
+taphound generation recover \
+  --project /path/to/android-project \
+  --session <generationId> \
+  --decision retry \
+  --json
 ```
 
 ---

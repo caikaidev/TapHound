@@ -100,22 +100,39 @@ assertions.
 
 ### Project Context and Generation Flow
 
-`ProjectDescriber` emits stable package and launch facts. `ContextValidator`
-validates a source-derived Project Context, including project identity and
-evidence freshness.
+`ProjectDescriber` emits stable package and launch facts. Project Context is a
+v2-only Bundle: a compact root index plus one semantic/evidence shard per
+Gradle module. `ContextLoader` safely loads selected modules and dependencies;
+`ContextValidator` validates the resolved project identity and evidence.
+Per-module inventory path-set hashes detect newly added and removed manifest,
+source, layout, and navigation files. `ContextRefresher` recomputes evidence
+hashes for an existing Bundle: it backfills the optional `semanticSha256`,
+rehashes formatting-only changes, and repairs drifted shard hashes, but it
+blocks on semantic, inventory, or unresolved-evidence drift instead of
+inventing module semantics.
 
 Generation is a revisioned, evidence-backed state machine:
 
-1. `GenerationStarter` validates and hashes the project, config, and context,
-   binds one device and interaction policy, and creates an authoritative session.
+1. `GenerationStarter` validates and hashes the project, config, resolved
+   Context selection, one device, and interaction policy, then creates an
+   authoritative session. Application modules are always selected; requested
+   feature modules expand declared dependencies.
 2. `RuntimeObserver` captures layout and screenshot evidence, hashes the
    snapshot, and atomically advances the session revision.
 3. `GenerationStepExecutor` accepts only proposals bound to the current session
    revision and snapshot. It re-observes freshness, applies risk confirmation,
-   executes deterministically, records evidence, and commits successful steps.
+   executes deterministically, records evidence, commits successful steps, and
+   returns a bound post-action snapshot when that capture succeeds.
 4. `GenerationFinalizer` revalidates all bindings, resets the app, replays the
    complete candidate Journey through `VerifyRuntime`, and publishes the Journey,
    metadata, report, receipt, and manifest only after exact verification passes.
+
+`generation status` exposes durable step and verification ownership.
+`generation recover --decision retry` is the only CLI transition out of an
+interrupted action or dead receipt-free verification attempt. The explicit
+decision is required because the interrupted action or replay may already have
+produced business side effects. Long finalization can run with `--detach`; job
+stdout and progress stay outside the authoritative generation bundle.
 
 `FileSystemGenerationSessionStore` is the authoritative persistence boundary for
 generation state and immutable evidence. Its revision checks, locking, atomic

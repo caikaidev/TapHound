@@ -31,6 +31,7 @@ export interface DoctorRunInput {
   packageName?: string | undefined;
   requestedDevice?: string | undefined;
   signal?: AbortSignal | undefined;
+  skipPermissionProbe?: boolean | undefined;
 }
 
 export interface DoctorDependencies {
@@ -180,7 +181,13 @@ export class DoctorService {
       }
     }
 
-    if (deviceSerial === undefined) {
+    if (input.skipPermissionProbe === true) {
+      checks.push({
+        name: "permissions",
+        status: "notRun",
+        message: "Permission probe deferred to verification"
+      });
+    } else if (deviceSerial === undefined) {
       checks.push({
         name: "permissions",
         status: "notRun",

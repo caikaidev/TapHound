@@ -125,4 +125,35 @@ describe("resolveLocator", () => {
       element: { id: "nested" }
     });
   });
+
+  it("promotes a text match to its nearest clickable ancestor", () => {
+    const root = element({
+      id: "menu-item",
+      clickable: true,
+      children: [element({ id: "label", text: "发起群聊" })]
+    });
+
+    expect(resolveLocator([root], { text: "发起群聊" }, {
+      requiredCapability: "clickable"
+    })).toMatchObject({
+      status: "found",
+      element: { id: "menu-item" },
+      point: { x: 60, y: 50 },
+      matchedBy: "text"
+    });
+  });
+
+  it("does not promote to a non-clickable ancestor", () => {
+    const root = element({
+      id: "container",
+      children: [element({ id: "label", text: "发起群聊" })]
+    });
+
+    expect(resolveLocator([root], { text: "发起群聊" }, {
+      requiredCapability: "clickable"
+    })).toMatchObject({
+      status: "failed",
+      code: "ACTION_FAILED"
+    });
+  });
 });

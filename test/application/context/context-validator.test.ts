@@ -15,9 +15,13 @@ import {
   ContextValidator,
   MAX_CONTEXT_EVIDENCE_BYTES
 } from "../../../src/application/context/context-validator.js";
+import { semanticSha256 } from "../../../src/application/context/evidence-hash.js";
 import { NodeProjectFileInspector } from "../../../src/adapters/filesystem/project-file-inspector.js";
 import type { TapHoundConfig } from "../../../src/domain/config.js";
 import type { ProjectFileInspector } from "../../../src/ports/project-file-inspector.js";
+import type {
+  ProjectInventoryInspector
+} from "../../../src/ports/project-inventory-inspector.js";
 
 const temporaryRoots: string[] = [];
 
@@ -49,11 +53,12 @@ function contextFor(
   files: Array<{
     path: string;
     sha256: string;
+    semanticSha256?: string;
     confidence?: unknown;
   }>
 ): unknown {
   return {
-    version: 1,
+    version: 2,
     packageName: config.run.packageName,
     launchActivity: "com.example.app.MainActivity",
     manifest: {
@@ -63,7 +68,20 @@ function contextFor(
         confidence: file.confidence ?? "sourceConfirmed"
       }))
     },
-    interactionPolicy: policy
+    interactionPolicy: policy,
+    selection: {
+      bundleVersion: 2,
+      indexHash: "f".repeat(64),
+      modules: [{
+        id: ":app",
+        sha256: "e".repeat(64),
+        projectDir: "app",
+        inventory: {
+          pathSetSha256: "c".repeat(64),
+          categories: ["manifests", "sources", "layouts", "navigation"]
+        }
+      }]
+    }
   };
 }
 
@@ -121,6 +139,50 @@ describe("ContextValidator", () => {
       reason: {
         code: "EVIDENCE_HASH_MISMATCH",
         message: "Evidence file changed: app/src/main/source.kt"
+      }
+    });
+  });
+
+  it("ignores formatting-only changes when semantic evidence matches", async () => {
+    const root = await temporaryRoot();
+    const path = "app/src/main/source.kt";
+    const semantic = "fun render() { Text(\"Chat\") }";
+    await writeEvidence(root, path, semantic);
+
+    const context = contextFor([{
+      path,
+      sha256: sha256("old formatting"),
+      semanticSha256: semanticSha256(semantic)
+    }]);
+    await writeEvidence(root, path, "fun render(){\n  Text(\"Chat\")\n}\n");
+
+    await expect(validator().validate({
+      context,
+      projectRoot: root,
+      config
+    })).resolves.toEqual({ status: "valid" });
+  });
+
+  it("reports stale when semantic evidence changes", async () => {
+    const root = await temporaryRoot();
+    const path = "app/src/main/source.kt";
+    await writeEvidence(root, path, "fun render() { Text(\"Changed\") }");
+
+    await expect(validator().validate({
+      context: contextFor([{
+        path,
+        sha256: sha256("old content"),
+        semanticSha256: semanticSha256(
+          "fun render() { Text(\"Original\") }"
+        )
+      }]),
+      projectRoot: root,
+      config
+    })).resolves.toEqual({
+      status: "stale",
+      reason: {
+        code: "EVIDENCE_HASH_MISMATCH",
+        message: "Semantic evidence changed: app/src/main/source.kt"
       }
     });
   });
@@ -204,7 +266,7 @@ describe("ContextValidator", () => {
       status: "invalid",
       reason: {
         code: "CONTEXT_SCHEMA_INVALID",
-        message: "Project Context does not match the version 1 schema"
+        message: "Resolved Project Context does not match the version 2 schema"
       }
     });
   });
@@ -309,6 +371,38 @@ describe("ContextValidator", () => {
     });
   });
 
+  it("detects a module inventory change during revalidation", async () => {
+    const files: ProjectFileInspector = {
+      inspectProjectFile: vi.fn(() => Promise.resolve({
+        status: "inspected" as const,
+        resolvedRelativePath: "source.kt",
+        sha256: "a".repeat(64)
+      }))
+    };
+    const inventory: ProjectInventoryInspector = {
+      inspectProjectInventory: vi.fn(() => Promise.resolve({
+        status: "inspected" as const,
+        paths: ["app/src/main/New.kt"],
+        pathSetSha256: "b".repeat(64)
+      }))
+    };
+
+    await expect(new ContextValidator(files, inventory).validate({
+      context: contextFor([{
+        path: "source.kt",
+        sha256: "a".repeat(64)
+      }]),
+      projectRoot: "/project",
+      config
+    })).resolves.toEqual({
+      status: "stale",
+      reason: {
+        code: "EVIDENCE_HASH_MISMATCH",
+        message: "Module file inventory changed: :app"
+      }
+    });
+  });
+
   it("rejects evidence larger than the explicit maximum", async () => {
     const root = await temporaryRoot();
     const path = "app/src/main/large.txt";
@@ -343,7 +437,7 @@ describe("ContextValidator", () => {
       status: "invalid",
       reason: {
         code: "CONTEXT_SCHEMA_INVALID",
-        message: "Project Context does not match the version 1 schema"
+        message: "Resolved Project Context does not match the version 2 schema"
       }
     });
   });

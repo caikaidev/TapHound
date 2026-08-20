@@ -187,7 +187,8 @@ export class RecorderService {
     const idleWaiter = new IdleWaiter(
       this.dependencies.androidCli,
       this.dependencies.clock,
-      input.deviceSerial
+      input.deviceSerial,
+      input.config.run.packageName
     );
     await this.dependencies.androidCli.layout({
       deviceSerial: input.deviceSerial,
@@ -404,7 +405,8 @@ export class RecorderService {
     const idleWaiter = new IdleWaiter(
       this.dependencies.androidCli,
       this.dependencies.clock,
-      input.deviceSerial
+      input.deviceSerial,
+      input.config.run.packageName
     );
     let currentLayout = layout;
     let swipesUsed = 0;

@@ -27,6 +27,7 @@ import {
 import {
   GenerationSessionStoreError
 } from "../../../src/ports/generation-session-store.js";
+import { contextSelection } from "../../fixtures/project-context.js";
 
 const activity = "com.example.app.MainActivity";
 
@@ -79,6 +80,7 @@ function session(runtime = snapshot()): GenerationSession {
         forbiddenActions: []
       }
     },
+    contextSelection,
     variables: {
       runId: "run-1",
       timestamp: "2026-07-22T12:00:00.000Z",

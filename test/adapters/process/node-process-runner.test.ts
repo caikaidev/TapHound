@@ -126,8 +126,27 @@ describe("NodeProcessRunner", () => {
     const secondStop = running.stop();
 
     expect(firstStop).toBe(secondStop);
-    await expect(firstStop).resolves.toMatchObject({ exitCode: null });
+    await expect(firstStop).resolves.toMatchObject({
+      exitCode: null,
+      terminationRequested: true
+    });
     expect(lines).toEqual(["first", "second"]);
+  });
+
+  it("does not mark termination requested after a stream already exited", async () => {
+    const runner = new NodeProcessRunner(15 * 60 * 1000, 500);
+    const running = runner.start({
+      executable: process.execPath,
+      args: ["-e", "process.kill(process.pid, 'SIGTERM')"]
+    });
+    const completed = await running.completion;
+
+    expect(completed).toMatchObject({
+      exitCode: null,
+      signal: "SIGTERM"
+    });
+    expect(completed).not.toHaveProperty("terminationRequested");
+    await expect(running.stop()).resolves.toBe(completed);
   });
 
   it("reports a streaming command that exits during startup", async () => {

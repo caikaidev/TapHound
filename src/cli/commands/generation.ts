@@ -10,13 +10,15 @@ import {
 import {
   GenerationOperationError
 } from "../../application/generation/generation-starter.js";
+import {
+  ContextLoadError
+} from "../../application/context/context-loader.js";
 import type {
   RuntimeObservation
 } from "../../application/generation/runtime-observer.js";
 import { TapHoundConfigSchema } from "../../domain/config.js";
 import type { TapHoundConfig } from "../../domain/config.js";
 import { GenerationSessionIdSchema } from "../../domain/generation.js";
-import { ProjectContextSchema } from "../../domain/project-context.js";
 import { ProposedStepSchema } from "../../domain/proposed-step.js";
 import { RuntimeSnapshotSchema } from "../../domain/runtime-snapshot.js";
 import {
@@ -36,7 +38,9 @@ interface GenerationStartOptions {
   project: string;
   config: string;
   context: string;
+  module?: string[] | undefined;
   device?: string | undefined;
+  allowEvidenceDrift?: boolean | undefined;
   json?: boolean | undefined;
 }
 
@@ -45,6 +49,11 @@ interface GenerationObserveOptions {
   config: string;
   session: string;
   json?: boolean | undefined;
+}
+
+interface GenerationStatusOptions extends GenerationObserveOptions {
+  wait?: boolean | undefined;
+  timeoutMs?: string | undefined;
 }
 
 interface GenerationStepOptions extends GenerationObserveOptions {
@@ -64,6 +73,12 @@ interface GenerationFinalizeOptions extends GenerationObserveOptions {
   output: string;
   name?: string | undefined;
   device?: string | undefined;
+  allowEvidenceDrift?: boolean | undefined;
+  detach?: boolean | undefined;
+}
+
+interface GenerationRecoverOptions extends GenerationObserveOptions {
+  decision: string;
 }
 
 type GenerationOptions =
@@ -72,6 +87,7 @@ type GenerationOptions =
   | GenerationStepOptions
   | GenerationConfirmOptions
   | GenerationManualOptions
+  | GenerationRecoverOptions
   | GenerationFinalizeOptions;
 
 const PlannerEnvelopeSchema = z.strictObject({
@@ -102,7 +118,11 @@ function writeFailure(
     exitCode,
     failure: {
       code,
-      message: errorMessage(error)
+      message: errorMessage(error),
+      ...(error instanceof GenerationOperationError
+        && error.details !== undefined
+        ? { details: error.details }
+        : {})
     }
   };
   if (options.json === true) {
@@ -160,6 +180,16 @@ function mappedFailure(
 ): void {
   if (error instanceof z.ZodError || error instanceof SyntaxError) {
     writeFailure(dependencies, options, 2, "CONTEXT_INVALID", error);
+    return;
+  }
+  if (error instanceof ContextLoadError) {
+    writeFailure(
+      dependencies,
+      options,
+      error.code === "CONTEXT_STALE" ? 1 : 2,
+      error.code,
+      error
+    );
     return;
   }
   if (dependencies.signal?.aborted === true) {
@@ -258,7 +288,16 @@ async function executeApproved(
     revision: session.revision,
     stepIndex: session.candidateSteps.length - 1,
     step: result.step,
-    source: input.source
+    source: input.source,
+    ...(result.nextObservation === undefined
+      ? {}
+      : {
+          nextBinding: result.nextObservation.binding,
+          nextSnapshot: result.nextObservation.snapshot
+        }),
+    ...(result.nextObservationFailure === undefined
+      ? {}
+      : { nextObservationFailure: result.nextObservationFailure })
   }, `Generation step ${String(session.candidateSteps.length - 1)} succeeded`);
 }
 
@@ -286,35 +325,22 @@ function createStartCommand(dependencies: CliDependencies): Command {
     .option("--project <path>", "Android project root", dependencies.cwd())
     .option("--config <path>", "TapHound config path", "taphound.config.json")
     .requiredOption("--context <path>", "Project Context path")
+    .option("--module <id...>", "Select Context modules for this session")
     .option("--device <serial>", "Select an online Android device")
+    .option(
+      "--allow-evidence-drift",
+      "Allow changed source evidence; replay remains mandatory"
+    )
     .option("--json", "Emit one machine-readable JSON value")
     .action(async (options: GenerationStartOptions): Promise<void> => {
-      let config;
       try {
-        config = TapHoundConfigSchema.parse(await dependencies.readJson(
-          resolve(options.project, options.config)
-        ));
-      } catch (error) {
-        writeFailure(dependencies, options, 2, "CONFIG_INVALID", error);
-        return;
-      }
-      let context;
-      try {
-        context = ProjectContextSchema.parse(await dependencies.readJson(
-          resolve(options.project, options.context)
-        ));
-      } catch (error) {
-        writeFailure(
-          dependencies,
-          options,
-          2,
-          "CONTEXT_INVALID",
-          error
-        );
-        return;
-      }
-
-      try {
+        const config = await loadConfig(dependencies, options);
+        const loaded = await dependencies.contextLoader.load({
+          projectRoot: options.project,
+          contextPath: resolve(options.project, options.context),
+          ...(options.module === undefined ? {} : { moduleIds: options.module })
+        });
+        const context = loaded.context;
         const doctor = await dependencies.doctor.run({
           packageName: config.run.packageName,
           ...(options.device === undefined
@@ -351,7 +377,10 @@ function createStartCommand(dependencies: CliDependencies): Command {
           config,
           context,
           project,
-          deviceSerial
+          deviceSerial,
+          ...(options.allowEvidenceDrift === true
+            ? { allowEvidenceDrift: true }
+            : {})
         });
         const output = {
           status: "started" as const,
@@ -359,6 +388,10 @@ function createStartCommand(dependencies: CliDependencies): Command {
           generationId: session.id,
           revision: session.revision,
           bindings: session.bindings,
+          contextSelection: session.contextSelection,
+          ...(options.allowEvidenceDrift === true
+            ? { evidenceDriftAllowed: true }
+            : {}),
           variables: session.variables,
           target: session.target
         };
@@ -372,17 +405,6 @@ function createStartCommand(dependencies: CliDependencies): Command {
         }
         dependencies.setExitCode(0);
       } catch (error) {
-        if (error instanceof GenerationOperationError) {
-          const exitCode = error.code === "CONTEXT_STALE" ? 1 : 2;
-          writeFailure(
-            dependencies,
-            options,
-            exitCode,
-            error.code,
-            error
-          );
-          return;
-        }
         mappedFailure(dependencies, options, error);
       }
     });
@@ -403,6 +425,7 @@ function createObserveCommand(dependencies: CliDependencies): Command {
           ? await dependencies.runtimeObserver.observe({
               projectRoot: options.project,
               generationId,
+              idle: config.idle,
               ...(dependencies.signal === undefined
                 ? {}
                 : { signal: dependencies.signal })
@@ -416,6 +439,7 @@ function createObserveCommand(dependencies: CliDependencies): Command {
               await assertRuntimeConfig(runtime, generationId);
               return runtime.observer.observe({
                 generationId,
+                idle: config.idle,
                 ...(dependencies.signal === undefined
                   ? {}
                   : { signal: dependencies.signal })
@@ -636,29 +660,90 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
       .requiredOption("--context <path>", "Project Context path")
       .requiredOption("--output <path>", "Project-relative Journey output")
       .option("--name <name>", "Generated Journey name")
-      .option("--device <serial>", "Select an online Android device"),
+      .option("--device <serial>", "Select an online Android device")
+      .option(
+        "--allow-evidence-drift",
+        "Allow changed source evidence; replay remains mandatory"
+      )
+      .option(
+        "--detach",
+        "Run verification in a detached process and return immediately"
+      ),
     dependencies
   ).action(async (options: GenerationFinalizeOptions): Promise<void> => {
     try {
       const generationId = GenerationSessionIdSchema.parse(options.session);
       const config = await loadConfig(dependencies, options);
-      let context: z.infer<typeof ProjectContextSchema>;
-      try {
-        context = ProjectContextSchema.parse(await dependencies.readJson(
-          resolve(options.project, options.context)
-        ));
-      } catch (error) {
-        throw new GenerationOperationError(
-          "CONTEXT_INVALID",
-          errorMessage(error)
-        );
-      }
       const outputPath = GenerationOutputPathSchema.parse(options.output);
       const name = options.name === undefined
         ? undefined
         : z.string().trim().min(1).parse(options.name);
+      const runtime = requireRuntime(dependencies, options.project, config);
+      await assertRuntimeConfig(runtime, generationId);
+      const session = await runtime.readSession(generationId);
+      if (options.detach === true) {
+        if (
+          dependencies.detachedProcess === undefined
+          || dependencies.cliEntryPath === undefined
+          || dependencies.createDetachedJobId === undefined
+        ) {
+          throw new Error("Detached finalization is unavailable");
+        }
+        const jobId = dependencies.createDetachedJobId();
+        const outputJobPath =
+          `.taphound/jobs/${generationId}/${jobId}-output.json`;
+        const progressJobPath =
+          `.taphound/jobs/${generationId}/${jobId}-progress.log`;
+        const args = [
+          dependencies.cliEntryPath,
+          "generation",
+          "finalize",
+          "--project",
+          options.project,
+          "--config",
+          options.config,
+          "--session",
+          generationId,
+          "--context",
+          options.context,
+          "--output",
+          options.output,
+          ...(options.name === undefined ? [] : ["--name", options.name]),
+          ...(options.device === undefined
+            ? []
+            : ["--device", options.device]),
+          ...(options.allowEvidenceDrift === true
+            ? ["--allow-evidence-drift"]
+            : []),
+          "--json"
+        ];
+        const launched = await dependencies.detachedProcess.launch({
+          executable: process.execPath,
+          args,
+          cwd: options.project,
+          stdoutPath: resolve(options.project, outputJobPath),
+          stderrPath: resolve(options.project, progressJobPath)
+        });
+        writeSuccess(dependencies, options, {
+          status: "finalizationStarted",
+          exitCode: 0,
+          generationId,
+          jobId,
+          ownerPid: launched.pid,
+          outputPath: outputJobPath,
+          progressPath: progressJobPath
+        }, `Generation finalization started: ${generationId}`);
+        return;
+      }
+      const loaded = await dependencies.contextLoader.load({
+        projectRoot: options.project,
+        contextPath: resolve(options.project, options.context),
+        moduleIds: session.contextSelection.modules.map((module) => module.id)
+      });
+      const context = loaded.context;
       const doctor = await dependencies.doctor.run({
         packageName: config.run.packageName,
+        skipPermissionProbe: true,
         ...(options.device === undefined
           ? {}
           : { requestedDevice: options.device }),
@@ -695,7 +780,6 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
           ? {}
           : { signal: dependencies.signal })
       });
-      const runtime = requireRuntime(dependencies, options.project, config);
       const result = await runtime.finalizer.finalize({
         generationId,
         projectRoot: options.project,
@@ -705,6 +789,9 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
         outputPath,
         ...(name === undefined ? {} : { name }),
         deviceSerial,
+        ...(options.allowEvidenceDrift === true
+          ? { allowEvidenceDrift: true }
+          : {}),
         toolVersions: tools(doctor.checks),
         ...(dependencies.signal === undefined
           ? {}
@@ -717,8 +804,115 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
         bundlePath: result.bundlePath,
         journeyPath: result.journeyPath,
         metaPath: result.metaPath,
-        replayed: result.replayed
+        replayed: result.replayed,
+        ...(options.allowEvidenceDrift === true
+          ? { evidenceDriftAllowed: true }
+          : {})
       }, `Generation verified: ${result.journeyPath}`);
+    } catch (error) {
+      mappedFailure(dependencies, options, error);
+    }
+  });
+}
+
+function createStatusCommand(dependencies: CliDependencies): Command {
+  return addCommonOptions(
+    new Command("status")
+      .description("Inspect durable generation session state")
+      .option("--wait", "Wait until generation reaches a terminal state")
+      .option(
+        "--timeout-ms <milliseconds>",
+        "Maximum status wait time",
+        "900000"
+      ),
+    dependencies
+  ).action(async (options: GenerationStatusOptions): Promise<void> => {
+    try {
+      const generationId = GenerationSessionIdSchema.parse(options.session);
+      const config = await loadConfig(dependencies, options);
+      const runtime = requireRuntime(dependencies, options.project, config);
+      await assertRuntimeConfig(runtime, generationId);
+      const timeoutMs = z.coerce.number().int().positive().parse(
+        options.timeoutMs ?? "900000"
+      );
+      const deadline = Date.now() + timeoutMs;
+      let status = await runtime.recovery.status(generationId);
+      while (
+        options.wait === true
+        && status.publication.status !== "published"
+        && status.verification.status !== "failed"
+        && status.state !== "recoveryRequired"
+        && !(
+          status.verification.status === "running"
+          && status.recovery.available
+        )
+      ) {
+        if (dependencies.signal?.aborted === true) {
+          throw new GenerationOperationError(
+            "RECOVERY_REQUIRED",
+            "Generation status wait was cancelled"
+          );
+        }
+        if (Date.now() >= deadline) {
+          throw new GenerationOperationError(
+            "FINALIZATION_IN_PROGRESS",
+            "Generation did not reach a terminal state before status timeout"
+          );
+        }
+        await new Promise<void>((resolveWait) => {
+          setTimeout(resolveWait, Math.min(500, deadline - Date.now()));
+        });
+        status = await runtime.recovery.status(generationId);
+      }
+      writeSuccess(
+        dependencies,
+        options,
+        { status: "inspected", exitCode: 0, ...status },
+        `Generation ${generationId}: ${status.state}`
+      );
+    } catch (error) {
+      mappedFailure(dependencies, options, error);
+    }
+  });
+}
+
+function createRecoverCommand(dependencies: CliDependencies): Command {
+  return addCommonOptions(
+    new Command("recover")
+      .description("Explicitly reactivate an interrupted in-flight step")
+      .requiredOption(
+        "--decision <decision>",
+        "Recovery decision; retry acknowledges the action may have executed"
+      ),
+    dependencies
+  ).action(async (options: GenerationRecoverOptions): Promise<void> => {
+    try {
+      if (options.decision !== "retry") {
+        throw new GenerationOperationError(
+          "CONFIG_INVALID",
+          "generation recover currently requires --decision retry"
+        );
+      }
+      const generationId = GenerationSessionIdSchema.parse(options.session);
+      const config = await loadConfig(dependencies, options);
+      const runtime = requireRuntime(dependencies, options.project, config);
+      await assertRuntimeConfig(runtime, generationId);
+      const before = await runtime.recovery.status(generationId);
+      if (!before.recovery.available) {
+        throw new GenerationOperationError(
+          "RECOVERY_REQUIRED",
+          "Generation session has no recoverable in-flight step"
+        );
+      }
+      const session = await runtime.recovery.retry(generationId);
+      writeSuccess(dependencies, options, {
+        status: "recovered",
+        exitCode: 0,
+        generationId,
+        revision: session.revision,
+        actionMayHaveExecuted: before.recovery.actionMayHaveExecuted,
+        previousAttemptOutcome: before.recovery.attemptOutcome
+      }, `Generation ${generationId} recovered for explicit retry`);
     } catch (error) {
       mappedFailure(dependencies, options, error);
     }
@@ -735,5 +929,7 @@ export function createGenerationCommand(
     .addCommand(createStepCommand(dependencies))
     .addCommand(createConfirmCommand(dependencies))
     .addCommand(createManualCommand(dependencies))
+    .addCommand(createStatusCommand(dependencies))
+    .addCommand(createRecoverCommand(dependencies))
     .addCommand(createFinalizeCommand(dependencies));
 }

@@ -62,11 +62,18 @@ The caller must also use an argument array and keep `shell: false`, to avoid tur
 The generation flow uses the in-repo [`taphound-ai-journey` Skill](../assets/skills/taphound-ai-journey/SKILL.md):
 
 1. `project describe --json` outputs stable Package and Activity information.
-2. The Agent analyzes the Android project source and produces a Project Context with file-hash evidence.
-3. `context validate` / `context status` check the Context's structure, identity, and timeliness.
-4. `generation start` binds the project, config, Context, and device.
-5. The Agent loops: call `generation observe` to obtain an authoritative snapshot, then submit a proposal strictly bound to that snapshot via `generation step`; use `generation confirm` when human approval is required, and `generation manual` for local TTY overrides.
-6. `generation finalize` fully Replays from the initial state; the Journey and immutable evidence are published only after exact verification passes.
+2. The Agent analyzes each Gradle module independently and produces a Project Context v2 root index plus module shards.
+3. `context list` exposes the compact module catalog. `context validate` / `context status` check the index, shard hashes, source evidence, and per-module file inventory. `context refresh` recomputes evidence hashes for an existing Context without re-analyzing source.
+4. `generation start --module ...` binds the project, config, selected module dependency closure, and device.
+5. The Agent observes once, submits a proposal strictly bound to that snapshot,
+   then reuses successful steps' `nextBinding` and `nextSnapshot` when present.
+   It uses `generation confirm` when human approval is required, and
+   `generation manual` for local TTY overrides.
+6. `generation status` exposes durable state. Interrupted work is retried only
+   after explicit `generation recover --decision retry` acknowledgement.
+7. `generation finalize --detach` survives caller interruption and fully
+   Replays from the initial state. The Journey and immutable evidence are
+   published only after exact verification passes.
 
 ```bash
 taphound project describe --project /workspace/android-app --json
@@ -77,13 +84,29 @@ taphound context validate \
 taphound generation start \
   --project /workspace/android-app \
   --context .taphound/context/project-context.json \
+  --module :feature:search \
   --device emulator-5554 \
   --json
 ```
 
-The device is bound at `generation start`. `generation observe`, `step`, `confirm`, and `manual` use that binding via `--session` and do not accept `--device`; `generation finalize` may explicitly provide `--device`, but must not change the session identity binding.
+The application module is always selected; dependencies declared by selected modules are expanded automatically. Omitting `--module` selects all modules. The exact root-index hash and selected shard IDs/hashes are returned as `contextSelection` and bound to the session. Modules cannot be added later. The device is bound at `generation start`. `generation observe`, `step`, `confirm`, `manual`, `status`, and `recover` use that binding via `--session` and do not accept `--device`; `generation finalize` reloads exactly the bound module set and may explicitly provide `--device`, but must not change the session identity binding.
 
-Generation's `--json` commands likewise write only one machine-readable JSON value to stdout and indicate the result with `exitCode`. The Agent must retain `generationId`, `baseRevision`, `snapshotHash`, and the full snapshot, and must not fabricate or reuse expired bindings on its own. For the full protocol, retry rules, and Context update strategy, see the Skill's [`GUIDE.md`](../assets/skills/taphound-ai-journey/GUIDE.md).
+### Refreshing Context Evidence Hashes
+
+`context refresh` recomputes evidence hashes for an existing Context without re-analyzing source. It backfills the optional `semanticSha256` for every evidence file, rehashes files whose change was formatting or comments only, repairs index entries whose shard hash drifted, and rewrites only the shards and index that actually changed.
+
+```bash
+taphound context refresh \
+  --project /workspace/android-app \
+  --context .taphound/context/project-context.json \
+  --json
+```
+
+Refresh never invents semantic knowledge. It stops with `exitCode: 1` and `status: "blocked"` when evidence changed semantically, when a module's file inventory changed, or when an evidence file is missing or unreadable, because those cases need module re-analysis. `--module <id...>` limits refresh to selected modules. `--accept-source-changes` additionally rehashes semantically changed evidence and inventory drift; use it only when the recorded module summary is still accurate, since the summary itself is not updated. Missing or unreadable evidence always blocks.
+
+By default, changed source evidence stops generation with `CONTEXT_STALE`. For frequent implementation-only edits, an agent may explicitly pass `--allow-evidence-drift` to both `generation start` and `generation finalize`. This does not bypass Context shard integrity, project/config/session bindings, locator safety, or final replay verification. It only allows the validator's evidence-file drift result to proceed; the final replay remains authoritative. JSON output reports `evidenceDriftAllowed: true` when this opt-in is active.
+
+Generation's `--json` commands likewise write only one machine-readable JSON value to stdout and indicate the result with `exitCode`. The Agent must retain `generationId`, `baseRevision`, `snapshotHash`, and the full snapshot, and must not fabricate or reuse expired bindings on its own. Detached finalize progress and stdout live under `.taphound/jobs/<generationId>/`, outside the authoritative bundle. For the full protocol, retry rules, and Context update strategy, see the Skill's [`GUIDE.md`](../assets/skills/taphound-ai-journey/GUIDE.md).
 
 ## Installing the Skill for AI Agents
 

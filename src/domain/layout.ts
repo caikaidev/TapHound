@@ -39,6 +39,7 @@ export type Locator = z.infer<typeof LocatorSchema>;
 
 export interface LayoutElement {
   id: string;
+  windowId?: string | undefined;
   resourceId?: string | undefined;
   text?: string | undefined;
   contentDescription?: string | undefined;
@@ -56,6 +57,7 @@ export interface LayoutElement {
 export const LayoutElementSchema: z.ZodType<LayoutElement> = z.lazy(
   () => z.strictObject({
     id: z.string().min(1),
+    windowId: z.string().min(1).optional(),
     resourceId: z.string().min(1).optional(),
     text: z.string().optional(),
     contentDescription: z.string().optional(),

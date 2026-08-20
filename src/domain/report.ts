@@ -43,6 +43,13 @@ const LocatorReportSchema = z.strictObject({
 const IdleReportSchema = z.strictObject({
   status: z.enum(["stable", "timeout", "cancelled", "notRun"]),
   polls: z.number().int().nonnegative(),
+  durationMs: z.number().nonnegative().optional(),
+  samplingDurationMs: z.number().nonnegative().optional(),
+  backend: z.enum([
+    "uiautomator",
+    "androidCli",
+    "gfxFrameStats"
+  ]).optional(),
   lastDiff: z.array(z.unknown()).optional()
 });
 

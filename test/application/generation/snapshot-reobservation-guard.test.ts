@@ -9,9 +9,11 @@ import {
   hashRuntimeSnapshot,
   type RuntimeSnapshot
 } from "../../../src/domain/runtime-snapshot.js";
+import { contextSelection } from "../../fixtures/project-context.js";
 
 const layout = [{
   id: "root",
+  windowId: "window-1",
   enabled: true,
   bounds: { left: 0, top: 0, right: 100, bottom: 200 },
   children: []
@@ -32,6 +34,18 @@ function snapshot(
     capturedAt: "2026-07-22T12:00:00.000Z",
     screenshotPath: "evidence/original/screen.png",
     layout,
+    windowHierarchy: {
+      status: "complete",
+      appWindows: [{
+        id: "window-1",
+        title: "MainActivity",
+        packageName: "com.example.app",
+        touchable: true
+      }],
+      semanticWindowIds: ["window-1"],
+      diagnostics: [],
+      recovery: []
+    },
     ...overrides
   };
 }
@@ -59,6 +73,7 @@ function session(overrides: Partial<GenerationSession> = {}): GenerationSession 
         forbiddenActions: ["back"]
       }
     },
+    contextSelection,
     variables: {
       runId: "run-1",
       timestamp: "2026-07-22T12:00:00.000Z",
@@ -91,6 +106,16 @@ function harness(): {
   const appProcesses = vi.fn(() => Promise.resolve([
     { pid: 42, name: "com.example.app" }
   ]));
+  const windowTopology = vi.fn(() => Promise.resolve({
+    version: 1 as const,
+    status: "observed" as const,
+    windows: [{
+      id: "window-1",
+      title: "MainActivity",
+      packageName: "com.example.app",
+      touchable: true
+    }]
+  }));
   const readLayout = vi.fn(() => Promise.resolve(layout));
   return {
     current,
@@ -100,7 +125,7 @@ function harness(): {
     readLayout,
     guard: new SnapshotReobservationGuard({
       store: { read },
-      adb: { foregroundComponent, appProcesses },
+      adb: { foregroundComponent, appProcesses, windowTopology },
       androidCli: { layout: readLayout },
       now: () => new Date("2026-07-22T12:10:00.000Z")
     })

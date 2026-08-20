@@ -8,6 +8,7 @@ export interface Point {
 
 export interface DeviceCommandOptions {
   deviceSerial: string;
+  packageName?: string | undefined;
   signal?: AbortSignal | undefined;
   timeoutMs?: number | undefined;
 }
@@ -17,13 +18,24 @@ export interface CaptureScreenOptions extends DeviceCommandOptions {
   annotate?: boolean | undefined;
 }
 
+export interface LayoutDiffObservation {
+  changes: readonly unknown[];
+  layout?: readonly LayoutElement[] | undefined;
+  backend?: "uiautomator" | "androidCli" | "gfxFrameStats" | undefined;
+  durationMs?: number | undefined;
+}
+
+export type LayoutDiffResult =
+  | readonly unknown[]
+  | LayoutDiffObservation;
+
 export interface AndroidCliPort {
   layout: (
     options: DeviceCommandOptions
   ) => Promise<readonly LayoutElement[]>;
   layoutDiff: (
     options: DeviceCommandOptions
-  ) => Promise<readonly unknown[]>;
+  ) => Promise<LayoutDiffResult>;
   captureScreen: (
     options: CaptureScreenOptions
   ) => Promise<CommandResult>;

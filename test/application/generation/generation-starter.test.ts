@@ -5,8 +5,11 @@ import {
   GenerationStarter
 } from "../../../src/application/generation/generation-starter.js";
 import type { TapHoundConfig } from "../../../src/domain/config.js";
-import type { ProjectContext } from "../../../src/domain/project-context.js";
+import type {
+  ResolvedProjectContext
+} from "../../../src/domain/project-context.js";
 import type { GenerationSession } from "../../../src/domain/generation.js";
+import { contextSelection } from "../../fixtures/project-context.js";
 
 const config: TapHoundConfig = {
   version: 1,
@@ -18,8 +21,8 @@ const config: TapHoundConfig = {
   artifactsDir: ".taphound/reports"
 };
 
-const context: ProjectContext = {
-  version: 1,
+const context: ResolvedProjectContext = {
+  version: 2,
   packageName: "com.example.app",
   launchActivity: "com.example.app.MainActivity",
   manifest: {
@@ -34,7 +37,8 @@ const context: ProjectContext = {
     allowedActions: ["click", "wait"],
     confirmationRequiredActions: ["click"],
     forbiddenActions: ["back"]
-  }
+  },
+  selection: contextSelection
 };
 
 const project = {
@@ -168,6 +172,21 @@ describe("GenerationStarter", () => {
       Partial<GenerationOperationError>
     >({ code }));
     expect(test.created).toEqual([]);
+  });
+
+  it("allows stale evidence only with explicit drift opt-in", async () => {
+    const test = starter("stale");
+
+    await expect(test.service.start({
+      projectRoot: "/project",
+      config,
+      context,
+      project,
+      deviceSerial: "emulator-5554",
+      allowEvidenceDrift: true
+    })).resolves.toMatchObject({ state: "active" });
+    expect(test.created).toHaveLength(1);
+    expect(test.created[0]?.bindings.contextHash).toMatch(/^[a-f\d]{64}$/);
   });
 
   it.each([

@@ -19,6 +19,7 @@ describe("parseLayout", () => {
     expect(elements).toEqual([
       {
         id: "123456:0",
+        windowId: "123456",
         resourceId: "open_search",
         text: "Open search",
         contentDescription: "Open search screen",
@@ -30,6 +31,7 @@ describe("parseLayout", () => {
       },
       {
         id: "123456:1",
+        windowId: "123456",
         resourceId: "results",
         clickable: true,
         scrollable: true,
@@ -96,6 +98,7 @@ describe("parseLayout", () => {
     ]));
 
     expect(elements[0]).toMatchObject({
+      windowId: "3506402",
       resourceId: "searchIv",
       clickable: true,
       focusable: true,

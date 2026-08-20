@@ -100,6 +100,12 @@ if (executable === "adb") {
     process.stdout.write(
       "mResumedActivity: ActivityRecord{42 u0 com.example.app/.MainActivity t9}\n"
     );
+  } else if (
+    command[0] === "shell"
+    && command[1] === "dumpsys"
+    && command[2] === "gfxinfo"
+  ) {
+    process.stdout.write("Total frames rendered: 42\n");
   } else {
     fail(`unsupported fake adb command: ${command.join(" ")}`);
   }

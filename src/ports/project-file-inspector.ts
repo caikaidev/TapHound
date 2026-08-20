@@ -12,6 +12,7 @@ export type ProjectFileInspection =
       status: "inspected";
       resolvedRelativePath: string;
       sha256: string;
+      bytes?: Buffer;
     };
 
 export interface ProjectFileInspector {

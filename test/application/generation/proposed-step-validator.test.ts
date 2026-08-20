@@ -10,6 +10,7 @@ import {
   hashRuntimeSnapshot,
   type RuntimeSnapshot
 } from "../../../src/domain/runtime-snapshot.js";
+import { contextSelection } from "../../fixtures/project-context.js";
 
 const activity = "com.example.app.MainActivity";
 type ProposalDraft = ProposedStep extends infer Step
@@ -72,6 +73,7 @@ function session(runtime: RuntimeSnapshot): GenerationSession {
         forbiddenActions: []
       }
     },
+    contextSelection,
     variables: {
       runId: "run-1",
       timestamp: "2026-07-22T12:00:00.000Z",
@@ -307,6 +309,53 @@ describe("ProposedStepValidator", () => {
     const runtime = snapshot([]);
     expect(validate(runtime, { action: "back" }).action).toBe("back");
     expect(validate(runtime, { action: "wait" }).action).toBe("wait");
+  });
+
+  it("rejects every proposal when visible app windows exceed semantic roots", () => {
+    const runtime = snapshot([element({
+      windowId: "serializer-window",
+      clickable: true
+    })], {
+      windowHierarchy: {
+        status: "incomplete",
+        appWindows: [
+          {
+            id: "activity-window",
+            title: "MainActivity",
+            packageName: "com.example.app",
+            touchable: true
+          },
+          {
+            id: "popup-window",
+            title: "PopupWindow",
+            packageName: "com.example.app",
+            touchable: true
+          }
+        ],
+        semanticWindowIds: ["serializer-window"],
+        diagnostics: [{
+          code: "APP_WINDOW_WITHOUT_SEMANTIC_ROOT",
+          message: "PopupWindow lacks a semantic root"
+        }],
+        recovery: [
+          "REOBSERVE",
+          "LAYOUT_INSPECTOR",
+          "DEBUG_WINDOW_INSPECTOR"
+        ]
+      }
+    });
+
+    expect(() => validate(runtime, {
+      action: "click",
+      locator: { resourceId: "target" }
+    })).toThrow(/semantic root/i);
+    try {
+      validate(runtime, { action: "wait" });
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: "WINDOW_HIERARCHY_INCOMPLETE"
+      });
+    }
   });
 
   it.each([

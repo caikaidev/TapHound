@@ -27,6 +27,13 @@ function dependencies(exitCodes: number[]): CliDependencies {
     contextValidator: {
       validate: () => Promise.reject(new Error("unused"))
     },
+    contextLoader: {
+      load: () => Promise.reject(new Error("unused")),
+      readIndex: () => Promise.reject(new Error("unused"))
+    },
+    contextRefresher: {
+      refresh: () => Promise.reject(new Error("unused"))
+    },
     init: {
       install: () => Promise.reject(new Error("unused"))
     },

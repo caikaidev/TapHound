@@ -68,6 +68,13 @@ function harness(
     contextValidator: {
       validate: vi.fn(() => Promise.reject(new Error("unused")))
     },
+    contextLoader: {
+      load: vi.fn(() => Promise.reject(new Error("unused"))),
+      readIndex: vi.fn(() => Promise.reject(new Error("unused")))
+    },
+    contextRefresher: {
+      refresh: vi.fn(() => Promise.reject(new Error("unused")))
+    },
     init: { install: installMock },
     initPrompt: { selectAgents: selectAgentsMock },
     generationStarter: {

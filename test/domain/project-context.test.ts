@@ -3,8 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   ContextManifestSchema,
   InteractionPolicySchema,
+  ProjectContextModuleSchema,
   ProjectContextSchema
 } from "../../src/domain/project-context.js";
+import {
+  projectContextIndex,
+  projectContextModule
+} from "../fixtures/project-context.js";
 
 const validManifest = {
   version: 1,
@@ -53,15 +58,20 @@ describe("generation project context contracts", () => {
   });
 
   it("parses a strict project context", () => {
-    const context = {
-      version: 1,
-      packageName: "com.example.app",
-      launchActivity: "com.example.app.MainActivity",
-      manifest: validManifest,
-      interactionPolicy: validPolicy
-    };
+    expect(ProjectContextSchema.parse(projectContextIndex))
+      .toEqual(projectContextIndex);
+    expect(ProjectContextModuleSchema.parse(projectContextModule))
+      .toEqual(projectContextModule);
+  });
 
-    expect(ProjectContextSchema.parse(context)).toEqual(context);
+  it("requires an application module in the v2 index", () => {
+    expect(() => ProjectContextSchema.parse({
+      ...projectContextIndex,
+      modules: projectContextIndex.modules.map((module) => ({
+        ...module,
+        kind: "feature"
+      }))
+    })).toThrow(/application module/i);
   });
 
   it("rejects unknown fields at every contract boundary", () => {
@@ -74,11 +84,7 @@ describe("generation project context contracts", () => {
       confidenceThreshold: 0.8
     })).toThrow();
     expect(() => ProjectContextSchema.parse({
-      version: 1,
-      packageName: "com.example.app",
-      launchActivity: "com.example.app.MainActivity",
-      manifest: validManifest,
-      interactionPolicy: validPolicy,
+      ...projectContextIndex,
       projectRoot: "/tmp/app"
     })).toThrow();
   });

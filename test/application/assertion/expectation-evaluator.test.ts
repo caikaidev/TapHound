@@ -20,6 +20,7 @@ function adbPort(): AdbPort {
     appProcesses: vi.fn(() => Promise.resolve([
       { pid: 42, name: "com.example.app" }
     ])),
+    windowTopology: vi.fn(),
     tap: vi.fn(),
     longClick: vi.fn(),
     swipe: vi.fn(),

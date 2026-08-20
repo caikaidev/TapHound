@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import { LayoutElementSchema } from "./layout.js";
+import { WindowHierarchySchema } from "./window-hierarchy.js";
 
 const QualifiedNameSchema = z.string().regex(
   /^(?:[A-Za-z_$][\w$]*\.)+[A-Za-z_$][\w$]*$/,
@@ -20,7 +21,8 @@ export const RuntimeSnapshotSchema = z.strictObject({
   pid: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).nullable(),
   capturedAt: z.iso.datetime(),
   screenshotPath: z.string().trim().min(1).optional(),
-  layout: z.array(LayoutElementSchema)
+  layout: z.array(LayoutElementSchema),
+  windowHierarchy: WindowHierarchySchema.optional()
 });
 
 export type RuntimeSnapshot = z.infer<typeof RuntimeSnapshotSchema>;
@@ -51,7 +53,8 @@ export function hashRuntimeSnapshot(snapshot: unknown): string {
     foregroundPackageName: parsed.foregroundPackageName,
     activity: parsed.activity,
     pid: parsed.pid,
-    layout: parsed.layout
+    layout: parsed.layout,
+    windowHierarchy: parsed.windowHierarchy
   };
 
   return createHash("sha256")

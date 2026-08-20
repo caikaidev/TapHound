@@ -11,16 +11,23 @@ import { AdbAdapter } from "../adapters/adb/adb-adapter.js";
 import { AndroidCliAdapter } from "../adapters/android-cli/android-cli-adapter.js";
 import { SystemClock } from "../adapters/clock/system-clock.js";
 import { FileSystemArtifactStore } from "../adapters/filesystem/artifact-store.js";
+import { FileSystemContextDocumentWriter } from "../adapters/filesystem/context-document-writer.js";
 import { FileSystemGenerationMetaWriter } from "../adapters/filesystem/generation-meta-writer.js";
 import { FileSystemGenerationSessionStore } from "../adapters/filesystem/generation-session-store.js";
 import { FileSystemJourneyWriter } from "../adapters/filesystem/journey-writer.js";
 import { NodeProjectFileInspector } from "../adapters/filesystem/project-file-inspector.js";
+import { NodeProjectInventoryInspector } from "../adapters/filesystem/project-inventory-inspector.js";
 import { FileSystemSkillInstaller } from "../adapters/filesystem/skill-installer.js";
 import { NodeProcessRunner } from "../adapters/process/node-process-runner.js";
+import {
+  NodeDetachedProcessLauncher
+} from "../adapters/process/node-detached-process-launcher.js";
 import { InquirerRecorderPrompt } from "../adapters/prompt/inquirer-recorder-prompt.js";
 import { InquirerGenerationPrompt } from "../adapters/prompt/inquirer-generation-prompt.js";
 import { InquirerInitPrompt } from "../adapters/prompt/inquirer-init-prompt.js";
 import { ContextValidator } from "../application/context/context-validator.js";
+import { ContextLoader } from "../application/context/context-loader.js";
+import { ContextRefresher } from "../application/context/context-refresher.js";
 import { DoctorService } from "../application/doctor/doctor-service.js";
 import type {
   DoctorReport,
@@ -35,6 +42,9 @@ import {
 import {
   GenerationPublisher
 } from "../application/generation/generation-publisher.js";
+import {
+  GenerationRecoveryService
+} from "../application/generation/generation-recovery-service.js";
 import {
   GenerationStarter,
   GenerationOperationError,
@@ -55,6 +65,7 @@ import { ProjectDescriber } from "../application/project/project-describer.js";
 import { RecorderService, type RecordInput, type RecordResult } from "../application/recorder/recorder-service.js";
 import { ReportWriter } from "../application/report/report-writer.js";
 import { VerifyRuntime, type VerifyInput, type VerifyResult } from "../application/runtime/verify-runtime.js";
+import { IdleWaiter } from "../application/wait/idle-waiter.js";
 import type { TapHoundConfig } from "../domain/config.js";
 import type { InitResult } from "../domain/init.js";
 import type { GenerationSession } from "../domain/generation.js";
@@ -62,6 +73,9 @@ import type { InitPromptPort } from "../ports/init-prompt.js";
 import type {
   GenerationSessionStore
 } from "../ports/generation-session-store.js";
+import type {
+  DetachedProcessLauncher
+} from "../ports/detached-process-launcher.js";
 
 export interface TextOutput {
   write: (content: string) => void;
@@ -75,6 +89,7 @@ export interface GenerationCliRuntime {
   executor: Pick<GenerationStepExecutor, "execute">;
   observer: Pick<RuntimeObserver, "observe">;
   finalizer: Pick<GenerationFinalizer, "finalize">;
+  recovery: Pick<GenerationRecoveryService, "status" | "retry">;
   readSession: (id: string) => Promise<GenerationSession>;
   assertConfigIdentity: (id: string) => Promise<void>;
 }
@@ -92,6 +107,8 @@ export interface CliDependencies {
   };
   projectDescriber: Pick<ProjectDescriber, "describe">;
   contextValidator: Pick<ContextValidator, "validate">;
+  contextLoader: Pick<ContextLoader, "load" | "readIndex">;
+  contextRefresher: Pick<ContextRefresher, "refresh">;
   generationStarter: {
     start: (input: GenerationStartInput) => Promise<
       Awaited<ReturnType<GenerationStarter["start"]>>
@@ -106,6 +123,9 @@ export interface CliDependencies {
     projectRoot: string;
     config: TapHoundConfig;
   }) => GenerationCliRuntime;
+  detachedProcess?: DetachedProcessLauncher | undefined;
+  cliEntryPath?: string | undefined;
+  createDetachedJobId?: (() => string) | undefined;
   init: {
     install: (input: InitInput) => Promise<InitResult>;
   };
@@ -135,11 +155,43 @@ export function createProductionDependencies(
   const adb = new AdbAdapter(runner);
   const androidCli = new AndroidCliAdapter(runner);
   const clock = new SystemClock();
+  const waitUntilIdle = (
+    deviceSerial: string,
+    config: Parameters<IdleWaiter["waitUntilIdle"]>[0],
+    signal?: AbortSignal,
+    packageName?: string
+  ): ReturnType<IdleWaiter["waitUntilIdle"]> => new IdleWaiter(
+    androidCli,
+    clock,
+    deviceSerial,
+    packageName
+  ).waitUntilIdle(
+    config,
+    signal
+  );
   const generationStoreFactory = options.generationStoreFactory
     ?? ((projectRoot: string): GenerationSessionStore => (
       new FileSystemGenerationSessionStore(projectRoot)
     ));
-  const contextValidator = new ContextValidator(new NodeProjectFileInspector());
+  const projectFiles = new NodeProjectFileInspector();
+  const projectInventory = new NodeProjectInventoryInspector();
+  const contextValidator = new ContextValidator(
+    projectFiles,
+    projectInventory
+  );
+  const contextLoader = new ContextLoader({
+    files: projectFiles,
+    inventory: projectInventory,
+    readJson: async (path): Promise<unknown> => JSON.parse(
+      await readFile(path, "utf8")
+    ) as unknown
+  });
+  const contextRefresher = new ContextRefresher({
+    files: projectFiles,
+    inventory: projectInventory,
+    loader: contextLoader,
+    writer: new FileSystemContextDocumentWriter()
+  });
   return {
     ...(signal === undefined ? {} : { signal }),
     doctor: new DoctorService({
@@ -197,6 +249,8 @@ export function createProductionDependencies(
     }),
     projectDescriber: new ProjectDescriber(),
     contextValidator,
+    contextLoader,
+    contextRefresher,
     init: new InitService({
       installer: new FileSystemSkillInstaller(),
       cwd: process.cwd(),
@@ -220,6 +274,7 @@ export function createProductionDependencies(
           store: generationStoreFactory(projectRoot),
           adb,
           androidCli,
+          waitUntilIdle,
           now: () => new Date(),
           createAttemptId: randomUUID
         }).observe(input)
@@ -232,6 +287,7 @@ export function createProductionDependencies(
         store,
         adb,
         androidCli,
+        waitUntilIdle,
         now: (): Date => new Date(),
         createAttemptId: randomUUID
       });
@@ -263,6 +319,11 @@ export function createProductionDependencies(
         ): Promise<void> => confirmation.clearApproved({
           generationId,
           challenge
+        }),
+        observeNext: (input): Promise<RuntimeObservation> => observer.observeCollected({
+          generationId: input.generationId,
+          runtime: input.runtime,
+          ...(input.signal === undefined ? {} : { signal: input.signal })
         })
       });
       const publisher = new GenerationPublisher({
@@ -273,7 +334,6 @@ export function createProductionDependencies(
       const finalizer = new GenerationFinalizer({
         store,
         contextValidator,
-        adb,
         verifyRuntime: new VerifyRuntime({
           androidCli,
           adb,
@@ -284,13 +344,29 @@ export function createProductionDependencies(
           createRunId: runId
         }),
         publisher,
-        generateAttemptId: randomUUID
+        generateAttemptId: randomUUID,
+        owner: { pid: process.pid, now: (): Date => new Date() },
+        progress: (stage): void => {
+          process.stderr.write(`TapHound finalize: ${stage}\n`);
+        }
+      });
+      const recovery = new GenerationRecoveryService({
+        store,
+        ownerAlive: (pid): boolean => {
+          try {
+            process.kill(pid, 0);
+            return true;
+          } catch {
+            return false;
+          }
+        }
       });
       return {
         confirmation,
         executor,
         observer,
         finalizer,
+        recovery,
         readSession: (id): Promise<GenerationSession> => store.read(id),
         assertConfigIdentity: async (id): Promise<void> => {
           const session = await store.read(id);
@@ -303,6 +379,11 @@ export function createProductionDependencies(
         }
       };
     },
+    detachedProcess: new NodeDetachedProcessLauncher(),
+    createDetachedJobId: randomUUID,
+    ...(process.argv[1] === undefined
+      ? {}
+      : { cliEntryPath: process.argv[1] }),
     readJson: async (path): Promise<unknown> => JSON.parse(
       await readFile(path, "utf8")
     ) as unknown,

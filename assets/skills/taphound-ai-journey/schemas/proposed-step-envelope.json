@@ -220,6 +220,7 @@
       "required": ["id", "enabled", "children"],
       "properties": {
         "id": { "type": "string", "minLength": 1 },
+        "windowId": { "type": "string", "minLength": 1 },
         "resourceId": { "type": "string", "minLength": 1 },
         "text": { "type": "string" },
         "contentDescription": { "type": "string" },
@@ -260,6 +261,70 @@
         "layout": {
           "type": "array",
           "items": { "$ref": "#/$defs/LayoutElement" }
+        },
+        "windowHierarchy": {
+          "$ref": "#/$defs/WindowHierarchy"
+        }
+      }
+    },
+    "AppWindow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "packageName", "touchable"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "packageName": { "type": "string", "minLength": 1 },
+        "type": { "type": "string", "minLength": 1 },
+        "layer": { "type": "integer", "minimum": 0 },
+        "bounds": { "$ref": "#/$defs/Bounds" },
+        "touchable": { "type": "boolean" },
+        "focusable": { "type": "boolean" },
+        "focused": { "type": "boolean" }
+      }
+    },
+    "WindowHierarchy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "appWindows", "semanticWindowIds", "diagnostics", "recovery"],
+      "properties": {
+        "status": { "enum": ["complete", "incomplete", "unknown"] },
+        "appWindows": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/AppWindow" }
+        },
+        "semanticWindowIds": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["code", "message"],
+            "properties": {
+              "code": {
+                "enum": [
+                  "WINDOW_TOPOLOGY_UNAVAILABLE",
+                  "SEMANTIC_WINDOW_IDS_UNAVAILABLE",
+                  "APP_WINDOW_WITHOUT_SEMANTIC_ROOT",
+                  "APP_WINDOW_NOT_ACCESSIBILITY_READABLE"
+                ]
+              },
+              "message": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "recovery": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "REOBSERVE",
+              "LAYOUT_INSPECTOR",
+              "DEBUG_WINDOW_INSPECTOR"
+            ]
+          }
         }
       }
     }

@@ -3,6 +3,9 @@ import { describe, expect, it, vi, type Mock } from "vitest";
 import type {
   ConfirmationRequestResult
 } from "../../src/application/generation/generation-confirmation-service.js";
+import type {
+  GenerationRecoveryStatus
+} from "../../src/application/generation/generation-recovery-service.js";
 import {
   GenerationOperationError,
   hashGenerationBinding
@@ -23,6 +26,12 @@ import type {
 } from "../../src/ports/generation-session-store.js";
 import { hashRuntimeSnapshot } from "../../src/domain/runtime-snapshot.js";
 import { runtimeConfig } from "../fakes/runtime-fixture.js";
+import {
+  contextSelection,
+  projectContextIndex,
+  projectContextModule,
+  resolvedProjectContext
+} from "../fixtures/project-context.js";
 
 class BufferOutput implements TextOutput {
   public value = "";
@@ -54,24 +63,7 @@ const proposal = {
   activity: { before: "com.example.app.MainActivity" }
 };
 
-const generationContext = {
-  version: 1 as const,
-  packageName: "com.example.app",
-  launchActivity: "com.example.app.MainActivity",
-  manifest: {
-    version: 1 as const,
-    files: [{
-      path: "AndroidManifest.xml",
-      sha256: "a".repeat(64),
-      confidence: "sourceConfirmed" as const
-    }]
-  },
-  interactionPolicy: {
-    allowedActions: ["wait" as const],
-    confirmationRequiredActions: [],
-    forbiddenActions: []
-  }
-};
+const generationContext = resolvedProjectContext;
 
 interface Harness {
   dependencies: CliDependencies;
@@ -86,6 +78,8 @@ interface Harness {
   observe: Mock;
   finalize: Mock;
   assertConfigIdentity: Mock;
+  recoveryStatus: Mock;
+  retry: Mock;
 }
 
 function harness(signal?: AbortSignal): Harness {
@@ -136,9 +130,30 @@ function harness(signal?: AbortSignal): Harness {
     replayed: true
   }));
   const assertConfigIdentity = vi.fn(() => Promise.resolve());
+  const recoveryStatus = vi.fn(() => Promise.resolve({
+    generationId: "generation-1",
+    revision: 4,
+    state: "active" as const,
+    candidateStepCount: 1,
+    inFlight: null,
+    verification: { status: "notRun" as const },
+    publication: { status: "notRun" as const },
+    recovery: {
+      available: false,
+      kind: null,
+      actionMayHaveExecuted: false,
+      attemptOutcome: null,
+      requiredDecision: null,
+      ownerAlive: null
+    }
+  }));
+  const retry = vi.fn(() => Promise.resolve({
+    revision: 5
+  }));
   const readSession = vi.fn(() => Promise.resolve({
     revision: 4,
-    candidateSteps: [{}]
+    candidateSteps: [{}],
+    contextSelection
   }));
   const dependencies = {
     ...(signal === undefined ? {} : { signal }),
@@ -163,6 +178,18 @@ function harness(signal?: AbortSignal): Harness {
       }))
     },
     contextValidator: { validate: vi.fn() },
+    contextLoader: {
+      load: vi.fn(() => Promise.resolve({
+        context: generationContext,
+        binding: generationContext,
+        bundle: projectContextIndex,
+        modules: [projectContextModule]
+      })),
+      readIndex: vi.fn(() => Promise.resolve({
+        bundle: projectContextIndex,
+        indexHash: contextSelection.indexHash
+      }))
+    },
     init: {
       install: vi.fn(() => Promise.resolve({
         status: "installed" as const,
@@ -186,9 +213,15 @@ function harness(signal?: AbortSignal): Harness {
       executor: { execute },
       observer: { observe },
       finalizer: { finalize },
+      recovery: { status: recoveryStatus, retry },
       readSession,
       assertConfigIdentity
     })),
+    detachedProcess: {
+      launch: vi.fn(() => Promise.resolve({ pid: 4321 }))
+    },
+    cliEntryPath: "/cli/main.js",
+    createDetachedJobId: () => "job-1",
     readJson: vi.fn((path: string) => Promise.resolve(
       path.endsWith("input.json")
         ? { version: 1, proposal, snapshot }
@@ -213,7 +246,9 @@ function harness(signal?: AbortSignal): Harness {
     requestManual,
     observe,
     finalize,
-    assertConfigIdentity
+    assertConfigIdentity,
+    recoveryStatus,
+    retry
   };
 }
 
@@ -252,6 +287,7 @@ describe("generation JSON process protocol", () => {
     expect(runtime?.executor.execute).toBeTypeOf("function");
     expect(runtime?.observer.observe).toBeTypeOf("function");
     expect(runtime?.finalizer.finalize).toBeTypeOf("function");
+    expect(runtime?.recovery.status).toBeTypeOf("function");
     expect(runtime?.readSession).toBeTypeOf("function");
     expect(generationStoreFactory).toHaveBeenCalledTimes(1);
     expect(generationStoreFactory).toHaveBeenCalledWith("/project");
@@ -259,6 +295,7 @@ describe("generation JSON process protocol", () => {
     expect(internals(runtime?.executor).store).toBe(store);
     expect(internals(runtime?.observer).store).toBe(store);
     expect(internals(runtime?.finalizer).store).toBe(store);
+    expect(internals(runtime?.recovery).store).toBe(store);
     expect(internals(internals(runtime?.finalizer).publisher).store).toBe(
       store
     );
@@ -546,6 +583,10 @@ describe("generation JSON process protocol", () => {
 
   it.each([
     ["SNAPSHOT_STALE" as const, "stale snapshot"],
+    [
+      "WINDOW_HIERARCHY_INCOMPLETE" as const,
+      "visible app window lacks a semantic root"
+    ],
     ["ACTION_FORBIDDEN" as const, "forbidden action"],
     ["RECOVERY_REQUIRED" as const, "recovery required"]
   ])("maps deterministic %s rejection to exit 1 without action", async (
@@ -572,6 +613,53 @@ describe("generation JSON process protocol", () => {
     });
     expect(test.execute).not.toHaveBeenCalled();
     expect(test.exitCodes).toEqual([1]);
+  });
+
+  it("emits structured window-hierarchy recovery details", async () => {
+    const test = harness();
+    test.request.mockRejectedValueOnce(new GenerationOperationError(
+      "WINDOW_HIERARCHY_INCOMPLETE",
+      "visible app window lacks a semantic root",
+      {
+        diagnostics: [{
+          code: "APP_WINDOW_WITHOUT_SEMANTIC_ROOT",
+          message: "visible app window lacks a semantic root"
+        }],
+        recovery: [
+          "REOBSERVE",
+          "LAYOUT_INSPECTOR",
+          "DEBUG_WINDOW_INSPECTOR"
+        ]
+      }
+    ));
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "step",
+      "--project", "/project",
+      "--input", "input.json",
+      "--session", "generation-1",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toEqual({
+      status: "error",
+      exitCode: 1,
+      failure: {
+        code: "WINDOW_HIERARCHY_INCOMPLETE",
+        message: "visible app window lacks a semantic root",
+        details: {
+          diagnostics: [{
+            code: "APP_WINDOW_WITHOUT_SEMANTIC_ROOT",
+            message: "visible app window lacks a semantic root"
+          }],
+          recovery: [
+            "REOBSERVE",
+            "LAYOUT_INSPECTOR",
+            "DEBUG_WINDOW_INSPECTOR"
+          ]
+        }
+      }
+    });
   });
 
   it("maps step failure and cancellation to one exit-1 JSON result", async () => {
@@ -855,6 +943,60 @@ describe("generation JSON process protocol", () => {
     });
   });
 
+  it("returns the committed post-action binding and snapshot", async () => {
+    const test = harness();
+    vi.mocked(test.dependencies.readJson)
+      .mockResolvedValueOnce(runtimeConfig)
+      .mockResolvedValueOnce({
+        version: 1,
+        proposal,
+        snapshot
+      });
+    const nextSnapshot = {
+      ...snapshot,
+      baseRevision: 3,
+      capturedAt: "2026-07-23T00:00:01.000Z"
+    };
+    const nextSnapshotHash = hashRuntimeSnapshot(nextSnapshot);
+    test.execute.mockResolvedValueOnce({
+      status: "succeeded",
+      step: {
+        action: "wait",
+        activity: {
+          before: "com.example.app.MainActivity",
+          after: "com.example.app.MainActivity"
+        }
+      },
+      nextObservation: {
+        binding: {
+          generationId: "generation-1",
+          baseRevision: 3,
+          snapshotHash: nextSnapshotHash
+        },
+        snapshot: nextSnapshot,
+        snapshotHash: nextSnapshotHash
+      }
+    });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "step",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--input", "step.json",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "succeeded",
+      nextBinding: {
+        generationId: "generation-1",
+        baseRevision: 3,
+        snapshotHash: nextSnapshotHash
+      },
+      nextSnapshot
+    });
+  });
+
   it("preflights and finalizes with exact passed tool versions", async () => {
     const test = harness();
     vi.mocked(test.dependencies.readJson).mockImplementation((path) => (
@@ -893,6 +1035,175 @@ describe("generation JSON process protocol", () => {
       journeyPath: "/project/journeys/generated.json",
       metaPath: "/project/journeys/generated.meta.json",
       replayed: true
+    });
+    expect(test.dependencies.doctor.run).toHaveBeenCalledWith(
+      expect.objectContaining({ skipPermissionProbe: true })
+    );
+  });
+
+  it("returns durable generation status as one JSON value", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "status",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--json"
+    ]);
+
+    expect(test.recoveryStatus).toHaveBeenCalledWith("generation-1");
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "inspected",
+      exitCode: 0,
+      generationId: "generation-1",
+      recovery: { available: false }
+    });
+  });
+
+  it("waits until generation publication is terminal", async () => {
+    const test = harness();
+    const base: GenerationRecoveryStatus = {
+      generationId: "generation-1",
+      revision: 4,
+      state: "active",
+      candidateStepCount: 1,
+      inFlight: null,
+      verification: { status: "notRun" },
+      publication: { status: "notRun" },
+      recovery: {
+        available: false,
+        kind: null,
+        actionMayHaveExecuted: false,
+        attemptOutcome: null,
+        requiredDecision: null,
+        ownerAlive: null
+      }
+    };
+    test.recoveryStatus
+      .mockReset()
+      .mockResolvedValueOnce(base)
+      .mockResolvedValueOnce({
+        ...base,
+        verification: {
+          status: "passed",
+          attemptId: "verification-attempt"
+        },
+        publication: { status: "published" }
+      });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "status",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--wait",
+      "--timeout-ms", "1000",
+      "--json"
+    ]);
+
+    expect(test.recoveryStatus).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "inspected",
+      publication: { status: "published" }
+    });
+  });
+
+  it("times out while waiting without changing generation state", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "status",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--wait",
+      "--timeout-ms", "1",
+      "--json"
+    ]);
+
+    expect(test.retry).not.toHaveBeenCalled();
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "error",
+      exitCode: 1,
+      failure: { code: "FINALIZATION_IN_PROGRESS" }
+    });
+  });
+
+  it("requires explicit retry acknowledgement to recover", async () => {
+    const test = harness();
+    test.recoveryStatus.mockResolvedValueOnce({
+      ...(await test.recoveryStatus()),
+      state: "recoveryRequired",
+      recovery: {
+        available: true,
+        kind: "step",
+        actionMayHaveExecuted: true,
+        attemptOutcome: "unknown",
+        requiredDecision: "retry",
+        ownerAlive: null
+      }
+    });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "recover",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--decision", "retry",
+      "--json"
+    ]);
+
+    expect(test.retry).toHaveBeenCalledWith("generation-1");
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "recovered",
+      actionMayHaveExecuted: true
+    });
+  });
+
+  it("starts detached finalization without running preflight inline", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "finalize",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--context", "context.json",
+      "--output", "journeys/generated.json",
+      "--detach",
+      "--json"
+    ]);
+
+    expect(test.dependencies.detachedProcess?.launch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executable: process.execPath,
+        cwd: "/project",
+        stdoutPath: "/project/.taphound/jobs/generation-1/job-1-output.json"
+      })
+    );
+    expect(test.dependencies.doctor.run).not.toHaveBeenCalled();
+    expect(test.finalize).not.toHaveBeenCalled();
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "finalizationStarted",
+      exitCode: 0,
+      jobId: "job-1",
+      ownerPid: 4321
+    });
+  });
+
+  it("rejects an invalid detached request before spawning a child", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "finalize",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--context", "context.json",
+      "--output", "../escaping.json",
+      "--detach",
+      "--json"
+    ]);
+
+    expect(test.dependencies.detachedProcess?.launch).not.toHaveBeenCalled();
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "error",
+      exitCode: 2
     });
   });
 

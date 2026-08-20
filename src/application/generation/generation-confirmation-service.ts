@@ -189,8 +189,9 @@ export class GenerationConfirmationService {
       proposal: submittedEvidence.proposal
     });
     const risk = this.riskEvaluator.evaluate(
-      proposal.action,
-      session.target.interactionPolicy
+      proposal,
+      session.target.interactionPolicy,
+      submittedEvidence.snapshot
     );
     if (risk.effectiveRisk === "forbidden") {
       throw new GenerationOperationError(
@@ -546,8 +547,9 @@ export class GenerationConfirmationService {
       );
     }
     const risk = this.riskEvaluator.evaluate(
-      proposal.action,
-      session.target.interactionPolicy
+      proposal,
+      session.target.interactionPolicy,
+      snapshot
     );
     if (
       risk.effectiveRisk !== "confirmationRequired"

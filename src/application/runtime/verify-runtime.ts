@@ -14,6 +14,7 @@ import type { AndroidCliPort } from "../../ports/android-cli.js";
 import type { ArtifactStore } from "../../ports/artifact-store.js";
 import type { Clock } from "../../ports/clock.js";
 import { LogcatCollector } from "../collector/logcat-collector.js";
+import { logcatStopFailed } from "../collector/logcat-stop.js";
 import type { ReportWriter } from "../report/report-writer.js";
 import { ActivityWaiter } from "./activity-waiter.js";
 import { launchFailure } from "./launch-failure.js";
@@ -79,25 +80,6 @@ function commandMessage(
   fallback: string
 ): string {
   return result.stderr.trim() || result.spawnError || fallback;
-}
-
-function logcatStopFailed(result: {
-  exitCode: number | null;
-  signal: NodeJS.Signals | null;
-  timedOut: boolean;
-  cancelled: boolean;
-  spawnError?: string | undefined;
-}): boolean {
-  if (
-    result.timedOut
-    || result.cancelled
-    || result.spawnError !== undefined
-  ) {
-    return true;
-  }
-  return result.exitCode !== 0
-    && result.signal !== "SIGTERM"
-    && result.signal !== "SIGKILL";
 }
 
 function errorMessage(error: unknown): string {

@@ -49,6 +49,7 @@ describe("FileSystemSkillInstaller", () => {
         join(target, "my-skill", "schemas")
       );
       expect(schemasDir).toContain("project-context.json");
+      expect(schemasDir).toContain("project-context-module.json");
     } finally {
       await rm(target, { recursive: true, force: true });
     }

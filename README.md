@@ -70,8 +70,10 @@ See the [local testing guide](docs/local-testing.md) for source, npm tarball, an
 - `record`: interactively execute actions and record a Journey.
 - `verify`: deterministically replay a Journey and publish a report.
 - `project describe`: output stable Android project facts.
-- `context validate` / `context status`: validate or check a Project Context.
-- `generation start` / `observe` / `step` / `confirm` / `manual` / `finalize`: manage deterministic Journey generation sessions.
+- `context list` / `validate` / `status`: inspect or validate a v2 Project Context index and module shards.
+- `context refresh`: recompute Context evidence hashes, including semantic hashes, without re-analyzing source.
+- `generation start` / `observe` / `step` / `confirm` / `manual` / `status` /
+  `recover` / `finalize`: manage deterministic Journey generation sessions.
 - `init`: install the TapHound AI Journey Skill for AI agents.
 
 ## Configuration
@@ -114,15 +116,23 @@ Supported actions include `click`, `longClick`, `inputText`, `swipe`, `scrollTo`
 
 The repository ships a [`taphound-ai-journey` Skill](assets/skills/taphound-ai-journey/SKILL.md) that guides agents such as Droid, Claude Code, Copilot, and Cursor:
 
-1. Use `project describe` and the Android project source to generate a Project Context with evidence hashes.
-2. Use `context validate` / `context status` to check Context validity and freshness.
-3. Start a `generation` session, iteratively observe authoritative device state, propose strict steps, and let TapHound execute them.
-4. Use `generation finalize` to replay from the initial state and publish the Journey only after verification passes.
+1. Discover Gradle modules and generate a compact Project Context v2 index plus one semantic/evidence shard per module.
+2. Use `context list` to choose Goal-relevant modules and `context validate` / `context status` to check shard, evidence, and inventory freshness.
+3. Start a `generation` session with `--module`, observe once, then reuse each
+   successful step's `nextBinding` and `nextSnapshot` when present.
+4. Use `generation status` to inspect durable state. An interrupted in-flight
+   action can only be reactivated with the explicit
+   `generation recover --decision retry` acknowledgement because it may already
+   have executed.
+5. Use `generation finalize --detach` for long replay verification, then poll
+   `generation status` (or use `--wait`). TapHound publishes the Journey only
+   after exact verification passes.
 
 ```bash
 taphound generation start \
   --project /path/to/android-project \
   --context .taphound/context/project-context.json \
+  --module :feature:search \
   --device emulator-5554 \
   --json
 ```

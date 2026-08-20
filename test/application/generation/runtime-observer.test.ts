@@ -23,10 +23,12 @@ import type { AppProcess } from "../../../src/domain/app-process.js";
 import type {
   CaptureScreenOptions
 } from "../../../src/ports/android-cli.js";
+import type { IdleResult } from "../../../src/application/wait/idle-waiter.js";
 import type { CommandResult } from "../../../src/ports/process-runner.js";
 import {
   GenerationSessionStoreError
 } from "../../../src/ports/generation-session-store.js";
+import { contextSelection } from "../../fixtures/project-context.js";
 
 const temporaryRoots: string[] = [];
 
@@ -58,6 +60,7 @@ function session(revision = 0): GenerationSession {
         forbiddenActions: ["back"]
       }
     },
+    contextSelection,
     variables: {
       runId: "journey-run-1",
       timestamp: "2026-07-22T12:00:00.000Z",
@@ -138,6 +141,16 @@ interface ObserverHarness {
   adb: {
     foregroundComponent: Mock<() => Promise<ForegroundComponent>>;
     appProcesses: Mock<(identity: unknown) => Promise<readonly AppProcess[]>>;
+    windowTopology: Mock<() => Promise<{
+      version: 1;
+      status: "observed";
+      windows: {
+        id: string;
+        title: string;
+        packageName: string;
+        touchable: true;
+      }[];
+    }>>;
   };
   androidCli: {
     layout: Mock<() => Promise<{
@@ -150,6 +163,17 @@ interface ObserverHarness {
       (options: CaptureScreenOptions) => Promise<CommandResult>
     >;
   };
+  waitUntilIdle: Mock<
+    (
+      deviceSerial: string,
+      config: {
+        pollIntervalMs: number;
+        stablePolls: number;
+        timeoutMs: number;
+      },
+      signal?: AbortSignal
+    ) => Promise<IdleResult>
+  >;
   observer: RuntimeObserver;
 }
 
@@ -165,11 +189,22 @@ function harness(): ObserverHarness {
     appProcesses: vi.fn((identity: unknown) => {
       identities.push(identity);
       return Promise.resolve([]);
-    })
+    }),
+    windowTopology: vi.fn(() => Promise.resolve({
+      version: 1 as const,
+      status: "observed" as const,
+      windows: [{
+        id: "window-1",
+        title: "MainActivity",
+        packageName: "com.example.app",
+        touchable: true as const
+      }]
+    }))
   };
   const androidCli = {
     layout: vi.fn(() => Promise.resolve([{
       id: "root",
+      windowId: "window-1",
       enabled: true,
       bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
       children: []
@@ -179,15 +214,35 @@ function harness(): ObserverHarness {
       return commandResult();
     })
   };
+  const waitUntilIdle = vi.fn((
+    deviceSerial: string,
+    config: {
+      pollIntervalMs: number;
+      stablePolls: number;
+      timeoutMs: number;
+    },
+    signal?: AbortSignal
+  ): Promise<IdleResult> => {
+    void deviceSerial;
+    void config;
+    void signal;
+    return Promise.resolve({
+      status: "stable",
+      polls: 2,
+      durationMs: 150
+    });
+  });
   return {
     store,
     adb,
     androidCli,
+    waitUntilIdle,
     identities,
     observer: new RuntimeObserver({
       store,
       adb,
       androidCli,
+      waitUntilIdle,
       now: (): Date => new Date("2026-07-22T12:05:00.000Z"),
       createAttemptId: () => attemptIds.shift() ?? "unexpected-attempt"
     })
@@ -195,6 +250,27 @@ function harness(): ObserverHarness {
 }
 
 describe("RuntimeObserver", () => {
+  it("waits for a stable layout when observe receives idle config", async () => {
+    const test = harness();
+    const idle = {
+      pollIntervalMs: 150,
+      stablePolls: 2,
+      timeoutMs: 3000
+    };
+
+    await test.observer.observe({
+      generationId: "generation-1",
+      idle
+    });
+
+    expect(test.waitUntilIdle).toHaveBeenCalledWith(
+      "emulator-5554",
+      idle,
+      undefined,
+      "com.example.app"
+    );
+  });
+
   it("persists normalized evidence and commits its authoritative binding", async () => {
     const test = harness();
 
@@ -217,23 +293,146 @@ describe("RuntimeObserver", () => {
       activity: "com.android.permissioncontroller.PermissionActivity",
       pid: null,
       capturedAt: "2026-07-22T12:05:00.000Z",
-      layout: [{ id: "root", children: [] }]
+      layout: [{ id: "root", windowId: "window-1", children: [] }],
+      windowHierarchy: {
+        status: "complete",
+        semanticWindowIds: ["window-1"],
+        diagnostics: [],
+        recovery: []
+      }
     });
     expect(result.snapshotHash).toBe(hashRuntimeSnapshot(result.snapshot));
     expect(test.store.current).toMatchObject({
       revision: 1,
       bindings: { snapshotHash: result.snapshotHash }
     });
-    expect(test.identities).toEqual([{
-      packageName: "com.example.app",
-      deviceSerial: "emulator-5554"
-    }]);
+    expect(test.identities).toEqual([
+      {
+        packageName: "com.example.app",
+        deviceSerial: "emulator-5554"
+      },
+      {
+        packageName: "com.example.app",
+        deviceSerial: "emulator-5554"
+      }
+    ]);
     expect(test.store.binaryEvidence.get(
       "evidence/snapshots/revision-000001/attempt-1/screen.png"
     )).toEqual(Buffer.from("png-evidence"));
     expect(test.store.jsonEvidence.get(
       "evidence/snapshots/revision-000001/attempt-1/snapshot.json"
     )).toEqual(result.snapshot);
+  });
+
+  it("commits an already collected post-action runtime without recapturing layout", async () => {
+    const test = harness();
+    test.adb.foregroundComponent.mockResolvedValue({
+      packageName: "com.example.app",
+      activity: "com.example.app.MainActivity"
+    });
+    test.adb.appProcesses.mockResolvedValue([
+      { pid: 42, name: "com.example.app" }
+    ]);
+
+    const result = await test.observer.observeCollected({
+      generationId: "generation-1",
+      runtime: {
+        foregroundPackageName: "com.example.app",
+        activity: "com.example.app.MainActivity",
+        pid: 42,
+        layout: [{
+          id: "root",
+          windowId: "window-1",
+          enabled: true,
+          bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
+          children: []
+        }],
+        windowHierarchy: {
+          status: "complete",
+          appWindows: [{
+            id: "window-1",
+            title: "MainActivity",
+            packageName: "com.example.app",
+            touchable: true
+          }],
+          semanticWindowIds: ["window-1"],
+          diagnostics: [],
+          recovery: []
+        }
+      }
+    });
+
+    expect(result.snapshot).toMatchObject({
+      foregroundPackageName: "com.example.app",
+      activity: "com.example.app.MainActivity",
+      pid: 42
+    });
+    expect(test.androidCli.layout).not.toHaveBeenCalled();
+    expect(test.adb.foregroundComponent).toHaveBeenCalledTimes(1);
+    expect(test.adb.appProcesses).toHaveBeenCalledTimes(1);
+    expect(test.adb.windowTopology).not.toHaveBeenCalled();
+    expect(test.waitUntilIdle).not.toHaveBeenCalled();
+    expect(test.androidCli.captureScreen).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a torn snapshot when runtime identity changes during capture", async () => {
+    const test = harness();
+    test.adb.foregroundComponent
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: "com.example.app.MainActivity"
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: "com.example.app.SecondActivity"
+      });
+    test.adb.appProcesses.mockResolvedValue([
+      { pid: 42, name: "com.example.app" }
+    ]);
+
+    await expect(test.observer.observe({
+      generationId: "generation-1"
+    })).rejects.toMatchObject({ code: "SNAPSHOT_STALE" });
+
+    expect(test.store.commitSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("persists incomplete hierarchy diagnostics when app windows exceed roots", async () => {
+    const test = harness();
+    test.adb.windowTopology.mockResolvedValueOnce({
+      version: 1,
+      status: "observed",
+      windows: [
+        {
+          id: "window-1",
+          title: "MainActivity",
+          packageName: "com.example.app",
+          touchable: true
+        },
+        {
+          id: "popup-window",
+          title: "PopupWindow",
+          packageName: "com.example.app",
+          touchable: true
+        }
+      ]
+    });
+
+    const result = await test.observer.observe({
+      generationId: "generation-1"
+    });
+
+    expect(result.snapshot.windowHierarchy).toMatchObject({
+      status: "incomplete",
+      diagnostics: [{
+        code: "APP_WINDOW_WITHOUT_SEMANTIC_ROOT"
+      }],
+      recovery: [
+        "REOBSERVE",
+        "LAYOUT_INSPECTOR",
+        "DEBUG_WINDOW_INSPECTOR"
+      ]
+    });
   });
 
   it("creates a fresh committed revision for repeated observations", async () => {
@@ -263,6 +462,11 @@ describe("RuntimeObserver", () => {
     }],
     ["layout", (test: ReturnType<typeof harness>): void => {
       test.androidCli.layout.mockRejectedValueOnce(new Error("layout failed"));
+    }],
+    ["window topology", (test: ReturnType<typeof harness>): void => {
+      test.adb.windowTopology.mockRejectedValueOnce(
+        new Error("window topology cancelled")
+      );
     }],
     ["screenshot", (test: ReturnType<typeof harness>): void => {
       test.androidCli.captureScreen.mockResolvedValueOnce(commandResult(1));

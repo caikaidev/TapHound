@@ -1,10 +1,16 @@
 import { normalizeActivity } from "../../domain/activity.js";
+import { semanticSha256 } from "./evidence-hash.js";
 import type { TapHoundConfig } from "../../domain/config.js";
-import { ProjectContextSchema } from "../../domain/project-context.js";
+import {
+  ResolvedProjectContextSchema
+} from "../../domain/project-context.js";
 import {
   type ProjectFileInspection,
   type ProjectFileInspector
 } from "../../ports/project-file-inspector.js";
+import type {
+  ProjectInventoryInspector
+} from "../../ports/project-inventory-inspector.js";
 
 export const MAX_CONTEXT_EVIDENCE_BYTES = 1024 * 1024;
 
@@ -145,16 +151,19 @@ function invalidInspection(
 }
 
 export class ContextValidator {
-  public constructor(private readonly files: ProjectFileInspector) {}
+  public constructor(
+    private readonly files: ProjectFileInspector,
+    private readonly inventory?: ProjectInventoryInspector
+  ) {}
 
   public readonly validate = async (
     input: ContextValidationInput
   ): Promise<ContextValidationResult> => {
-    const parsed = ProjectContextSchema.safeParse(input.context);
+    const parsed = ResolvedProjectContextSchema.safeParse(input.context);
     if (!parsed.success) {
       return invalid(
         "CONTEXT_SCHEMA_INVALID",
-        "Project Context does not match the version 1 schema"
+        "Resolved Project Context does not match the version 2 schema"
       );
     }
 
@@ -182,6 +191,30 @@ export class ContextValidator {
     }
 
     let staleReason: ContextValidationReason | undefined;
+    if (this.inventory !== undefined) {
+      for (const module of parsed.data.selection.modules) {
+        const inspection = await this.inventory.inspectProjectInventory({
+          projectRoot: input.projectRoot,
+          projectDir: module.projectDir,
+          categories: module.inventory.categories
+        });
+        if (inspection.status !== "inspected") {
+          return invalid(
+            "CONTEXT_SCHEMA_INVALID",
+            `Unable to inspect module inventory: ${module.id}`
+          );
+        }
+        if (
+          inspection.pathSetSha256 !== module.inventory.pathSetSha256
+          && staleReason === undefined
+        ) {
+          staleReason = {
+            code: "EVIDENCE_HASH_MISMATCH",
+            message: `Module file inventory changed: ${module.id}`
+          };
+        }
+      }
+    }
     for (const evidence of parsed.data.manifest.files) {
       if (isSecretEvidencePath(evidence.path)) {
         return invalid(
@@ -208,7 +241,22 @@ export class ContextValidator {
       if (inspection.status !== "inspected") {
         return invalidInspection(evidence.path, inspection);
       }
-      if (inspection.sha256 !== evidence.sha256) {
+      const inspected = inspection;
+      if (
+        evidence.semanticSha256 !== undefined
+        && (
+          inspected.bytes === undefined
+          || semanticSha256(inspected.bytes) !== evidence.semanticSha256
+        )
+      ) {
+        staleReason ??= {
+          code: "EVIDENCE_HASH_MISMATCH",
+          message: `Semantic evidence changed: ${evidence.path}`
+        };
+      } else if (
+        evidence.semanticSha256 === undefined
+        && inspection.sha256 !== evidence.sha256
+      ) {
         staleReason ??= {
           code: "EVIDENCE_HASH_MISMATCH",
           message: `Evidence file changed: ${evidence.path}`

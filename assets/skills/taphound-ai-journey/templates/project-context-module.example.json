@@ -1,0 +1,58 @@
+{
+  "version": 2,
+  "moduleId": ":feature:search",
+  "projectDir": "features/search",
+  "status": "complete",
+  "inventory": {
+    "version": 2,
+    "pathSetSha256": "RUNTIME_COMPUTED",
+    "categories": ["manifests", "sources", "layouts", "navigation"]
+  },
+  "manifest": {
+    "version": 1,
+    "files": [
+      {
+        "path": "features/search/src/main/AndroidManifest.xml",
+        "sha256": "RUNTIME_COMPUTED",
+        "semanticSha256": "RUNTIME_COMPUTED",
+        "confidence": "sourceConfirmed"
+      },
+      {
+        "path": "features/search/src/main/java/dev/taphound/search/SearchActivity.kt",
+        "sha256": "RUNTIME_COMPUTED",
+        "semanticSha256": "RUNTIME_COMPUTED",
+        "confidence": "sourceConfirmed"
+      }
+    ]
+  },
+  "summary": {
+    "features": ["search"],
+    "activities": [
+      {
+        "name": "dev.taphound.search.SearchActivity",
+        "entryPoints": ["dev.taphound.demo.MainActivity"],
+        "screens": ["search"]
+      }
+    ],
+    "elements": [
+      {
+        "screen": "search",
+        "resourceId": "search_input",
+        "actions": ["click", "inputText"]
+      },
+      {
+        "screen": "search",
+        "resourceId": "submit_search",
+        "actions": ["click"]
+      }
+    ],
+    "transitions": [],
+    "logcat": [
+      {
+        "tag": "SearchViewModel",
+        "pattern": "submitted query=",
+        "match": "literal"
+      }
+    ]
+  }
+}

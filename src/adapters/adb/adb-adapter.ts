@@ -19,6 +19,11 @@ import type {
   ProcessRunner,
   RunningCommand
 } from "../../ports/process-runner.js";
+import {
+  WindowTopologySchema,
+  type WindowTopology
+} from "../../domain/window-hierarchy.js";
+import { parseWindowTopology } from "./window-topology-parser.js";
 
 const PROCESS_ROW = /^(\d+)\s+(\S+)$/;
 
@@ -189,6 +194,48 @@ export class AdbAdapter implements AdbPort {
         return [{ pid, name: row[2] }];
       })
       .sort((left, right) => left.pid - right.pid);
+  }
+
+  public async windowTopology(
+    identity: AppIdentity
+  ): Promise<WindowTopology> {
+    const result = await this.run([
+      ...deviceArgs(identity.deviceSerial),
+      "shell",
+      "dumpsys",
+      "window",
+      "windows"
+    ], identity.signal, identity.timeoutMs);
+    if (result.cancelled) {
+      throw new Error("ADB window topology was cancelled");
+    }
+    if (
+      result.exitCode !== 0
+      || result.timedOut
+      || result.spawnError !== undefined
+    ) {
+      return WindowTopologySchema.parse({
+        version: 1,
+        status: "unavailable",
+        windows: [],
+        diagnostic: result.stderr.trim()
+          || result.spawnError
+          || (result.timedOut
+            ? "ADB window topology timed out"
+            : `ADB window topology exited with code ${String(result.exitCode)}`)
+      });
+    }
+    const topology = parseWindowTopology(
+      result.stdout,
+      identity.packageName
+    );
+    if (topology.windows.length > 0) return topology;
+    return WindowTopologySchema.parse({
+      version: 1,
+      status: "unavailable",
+      windows: [],
+      diagnostic: "ADB window topology contained no visible touchable target-app windows"
+    });
   }
 
   public tap(

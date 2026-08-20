@@ -20,6 +20,8 @@ const cli = resolve(repositoryRoot, "dist", "cli", "main.js");
 const configPath = resolve(demoRoot, "taphound.config.json");
 const contextDir = resolve(demoRoot, ".taphound", "context");
 const contextPath = resolve(contextDir, "project-context.json");
+const moduleDir = resolve(contextDir, "modules");
+const modulePath = resolve(moduleDir, "app.json");
 
 try {
   await access(cli);
@@ -29,28 +31,85 @@ try {
 
 requireInstalledApp("dev.taphound.demo");
 
-const manifestFiles = [
+const moduleFiles = [
   "app/src/main/AndroidManifest.xml",
   "app/src/main/java/dev/taphound/demo/MainActivity.kt",
   "app/src/main/java/dev/taphound/demo/SearchActivity.kt",
   "app/src/main/res/layout/activity_main.xml",
   "app/src/main/res/layout/activity_search.xml"
 ];
+const projectFiles = ["settings.gradle.kts"];
 
 async function sha256(relativePath) {
   const bytes = await readFile(resolve(demoRoot, relativePath));
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-await mkdir(contextDir, { recursive: true });
+await mkdir(moduleDir, { recursive: true });
+const inventoryHash = createHash("sha256")
+  .update([...moduleFiles].sort().join("\n"))
+  .digest("hex");
+const moduleContext = {
+  version: 2,
+  moduleId: ":app",
+  projectDir: "app",
+  status: "complete",
+  inventory: {
+    version: 2,
+    pathSetSha256: inventoryHash,
+    categories: ["manifests", "sources", "layouts", "navigation"]
+  },
+  manifest: {
+    version: 1,
+    files: await Promise.all(
+      moduleFiles.map(async (path) => ({
+        path,
+        sha256: await sha256(path),
+        confidence: "sourceConfirmed"
+      }))
+    )
+  },
+  summary: {
+    features: ["launch", "search"],
+    activities: [
+      {
+        name: "dev.taphound.demo.MainActivity",
+        entryPoints: [],
+        screens: ["home"]
+      },
+      {
+        name: "dev.taphound.demo.SearchActivity",
+        entryPoints: ["dev.taphound.demo.MainActivity"],
+        screens: ["search"]
+      }
+    ],
+    elements: [
+      { screen: "home", resourceId: "open_search", actions: ["click"] },
+      { screen: "search", resourceId: "search_input", actions: ["click", "inputText"] },
+      { screen: "search", resourceId: "submit_search", actions: ["click"] }
+    ],
+    transitions: [{
+      fromActivity: "dev.taphound.demo.MainActivity",
+      actionResourceId: "open_search",
+      toActivity: "dev.taphound.demo.SearchActivity"
+    }],
+    logcat: [{
+      tag: "SearchViewModel",
+      pattern: "submitted query=hello world",
+      match: "literal"
+    }]
+  }
+};
+await writeFile(modulePath, `${JSON.stringify(moduleContext, null, 2)}\n`, "utf8");
+const moduleHash = await sha256(".taphound/context/modules/app.json");
 const projectContext = {
-  version: 1,
+  version: 2,
   packageName: "dev.taphound.demo",
   launchActivity: "dev.taphound.demo.MainActivity",
   manifest: {
     version: 1,
     files: await Promise.all(
-      manifestFiles.map(async (path) => ({
+      projectFiles.map(async (path) => ({
         path,
         sha256: await sha256(path),
         confidence: "sourceConfirmed"
@@ -61,7 +120,21 @@ const projectContext = {
     allowedActions: ["click", "longClick", "inputText", "swipe", "scrollTo", "back", "wait"],
     confirmationRequiredActions: [],
     forbiddenActions: []
-  }
+  },
+  modules: [{
+    id: ":app",
+    projectDir: "app",
+    kind: "application",
+    contextPath: ".taphound/context/modules/app.json",
+    sha256: moduleHash,
+    features: ["launch", "search"],
+    activities: [
+      "dev.taphound.demo.MainActivity",
+      "dev.taphound.demo.SearchActivity"
+    ],
+    dependsOn: [],
+    status: "complete"
+  }]
 };
 await writeFile(contextPath, `${JSON.stringify(projectContext, null, 2)}\n`, "utf8");
 
@@ -107,8 +180,7 @@ const stepTemplates = [
     action: "click",
     locator: { resourceId: "open_search" },
     activity: {
-      before: "dev.taphound.demo.MainActivity",
-      after: "dev.taphound.demo.SearchActivity"
+      before: "dev.taphound.demo.MainActivity"
     },
     expect: {
       type: "element",
@@ -120,24 +192,21 @@ const stepTemplates = [
     action: "click",
     locator: { resourceId: "search_input" },
     activity: {
-      before: "dev.taphound.demo.SearchActivity",
-      after: "dev.taphound.demo.SearchActivity"
+      before: "dev.taphound.demo.SearchActivity"
     }
   },
   {
     action: "inputText",
     text: "hello world",
     activity: {
-      before: "dev.taphound.demo.SearchActivity",
-      after: "dev.taphound.demo.SearchActivity"
+      before: "dev.taphound.demo.SearchActivity"
     }
   },
   {
     action: "click",
     locator: { resourceId: "submit_search" },
     activity: {
-      before: "dev.taphound.demo.SearchActivity",
-      after: "dev.taphound.demo.SearchActivity"
+      before: "dev.taphound.demo.SearchActivity"
     },
     expect: {
       type: "logcat",
@@ -150,28 +219,29 @@ const stepTemplates = [
   }
 ];
 
-for (const template of stepTemplates) {
-  const observeOutput = runCli([
-    "generation", "observe",
-    "--project", demoRoot,
-    "--session", generationId,
-    ...deviceArgs,
-    "--json"
-  ]);
+let observation = runCli([
+  "generation", "observe",
+  "--project", demoRoot,
+  "--session", generationId,
+  "--json"
+]);
+
+for (const [index, template] of stepTemplates.entries()) {
   const binding = {
-    generationId: observeOutput.generationId,
-    baseRevision: observeOutput.baseRevision,
-    snapshotHash: observeOutput.snapshotHash
+    generationId: observation.generationId,
+    baseRevision: observation.baseRevision,
+    snapshotHash: observation.snapshotHash
   };
   const envelope = {
     version: 1,
     proposal: { ...template, binding },
-    snapshot: observeOutput.snapshot
+    snapshot: observation.snapshot
   };
   const envelopePath = join(tmpdir(), `taphound-gen-step-${generationId}-${Date.now()}.json`);
   await writeFile(envelopePath, JSON.stringify(envelope), "utf8");
+  let stepOutput;
   try {
-    runCli([
+    stepOutput = runCli([
       "generation", "step",
       "--project", demoRoot,
       "--session", generationId,
@@ -180,6 +250,22 @@ for (const template of stepTemplates) {
     ]);
   } finally {
     await rm(envelopePath, { force: true });
+  }
+
+  if (index < stepTemplates.length - 1) {
+    if (stepOutput.nextBinding !== undefined && stepOutput.nextSnapshot !== undefined) {
+      observation = {
+        ...stepOutput.nextBinding,
+        snapshot: stepOutput.nextSnapshot
+      };
+    } else {
+      observation = runCli([
+    "generation", "observe",
+    "--project", demoRoot,
+    "--session", generationId,
+    "--json"
+      ]);
+    }
   }
 }
 

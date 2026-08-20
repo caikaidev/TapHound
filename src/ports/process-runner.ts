@@ -15,6 +15,7 @@ export interface CommandResult {
   durationMs: number;
   timedOut: boolean;
   cancelled: boolean;
+  terminationRequested?: boolean | undefined;
   spawnError?: string | undefined;
 }
 

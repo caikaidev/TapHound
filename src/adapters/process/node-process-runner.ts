@@ -54,6 +54,7 @@ export class NodeProcessRunner implements ProcessRunner {
     let cancelled = false;
     let spawnError: string | undefined;
     let settled = false;
+    let terminationRequested = false;
     let timeout: NodeJS.Timeout | undefined;
     let forceKillTimeout: NodeJS.Timeout | undefined;
     let startupTimeout: NodeJS.Timeout | undefined;
@@ -167,6 +168,7 @@ export class NodeProcessRunner implements ProcessRunner {
           durationMs: performance.now() - startedAt,
           timedOut,
           cancelled,
+          ...(terminationRequested ? { terminationRequested: true } : {}),
           ...(spawnError === undefined ? {} : { spawnError })
         };
         settleStarted(result);
@@ -175,6 +177,9 @@ export class NodeProcessRunner implements ProcessRunner {
     });
 
     const stop = (): Promise<CommandResult> => {
+      if (!settled) {
+        terminationRequested = true;
+      }
       terminate();
       return completion;
     };

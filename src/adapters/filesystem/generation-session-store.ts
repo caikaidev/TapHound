@@ -605,6 +605,33 @@ function assertVerificationCompletionTransition(
   }
 }
 
+function assertVerificationRecoveryTransition(
+  current: GenerationSession,
+  next: GenerationSession
+): void {
+  assertCoreIdentityPreserved(current, next);
+  assertLatestSnapshotPreserved(current, next);
+  if (
+    current.state !== "active"
+    || next.state !== "active"
+    || current.inFlight !== null
+    || next.inFlight !== null
+    || current.pendingConfirmation !== null
+    || next.pendingConfirmation !== null
+    || current.verification.status !== "running"
+    || next.verification.status !== "notRun"
+    || current.publication.status !== "notRun"
+    || next.publication.status !== "notRun"
+    || JSON.stringify(verificationStableState(current))
+      !== JSON.stringify(verificationStableState(next))
+  ) {
+    throw new GenerationSessionStoreError(
+      "INVALID_TRANSITION",
+      "Verification recovery may only reset an interrupted running attempt"
+    );
+  }
+}
+
 function assertBundlePublishableTransition(
   current: GenerationSession,
   next: GenerationSession
@@ -1647,7 +1674,8 @@ implements GenerationSessionStore {
   public readonly beginVerification = async (
     id: string,
     expectedRevision: number,
-    attemptId: string
+    attemptId: string,
+    owner?: { pid: number; startedAt: string }
   ): Promise<GenerationSession> => {
     assertId(id);
     validateExpectedRevision(expectedRevision);
@@ -1705,7 +1733,13 @@ implements GenerationSessionStore {
       const next = GenerationSessionSchema.parse({
         ...current,
         revision: current.revision + 1,
-        verification: { status: "running", attemptId }
+        verification: {
+          status: "running",
+          attemptId,
+          ...(owner === undefined
+            ? {}
+            : { ownerPid: owner.pid, startedAt: owner.startedAt })
+        }
       });
       await writeStateAtomically(
         activeDirectory,
@@ -1742,6 +1776,62 @@ implements GenerationSessionStore {
       input,
       "failed"
     );
+  };
+
+  public readonly recoverVerification = async (
+    id: string,
+    expectedRevision: number,
+    input: GenerationSession
+  ): Promise<void> => {
+    assertId(id);
+    const next = parseSession(input, true);
+    validateNextRevision(id, expectedRevision, next);
+    await this.ensureGenerationRoot();
+    await this.withLock(id, async () => {
+      const activeDirectory = this.activeDirectory(id);
+      if (!await pathExists(activeDirectory)) {
+        throw new GenerationSessionStoreError(
+          await pathExists(this.finalDirectory(id))
+            ? "SESSION_PUBLISHED"
+            : "SESSION_NOT_FOUND",
+          `Generation session cannot recover verification: ${id}`
+        );
+      }
+      const activeEvidence = await captureStoreDirectory(activeDirectory);
+      const current = await readBoundState(
+        activeDirectory,
+        id,
+        this.hooks.afterStateOpen,
+        activeEvidence
+      );
+      if (current.revision !== expectedRevision) {
+        throw new GenerationSessionStoreError(
+          "REVISION_CONFLICT",
+          `Expected generation revision ${String(expectedRevision)}, found ${
+            String(current.revision)
+          }`
+        );
+      }
+      if (
+        await pathExists(join(activeDirectory, "verification", "receipt.json"))
+        || await pathExists(
+          join(activeDirectory, "verification", "report.json")
+        )
+      ) {
+        throw new GenerationSessionStoreError(
+          "INVALID_TRANSITION",
+          "Verification recovery is forbidden after immutable evidence exists"
+        );
+      }
+      assertVerificationRecoveryTransition(current, next);
+      await writeStateAtomically(
+        activeDirectory,
+        next,
+        this.syncDirectory,
+        this.hooks.beforeStateRename,
+        activeEvidence
+      );
+    });
   };
 
   public readonly markBundlePublishable = async (

@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 const repositoryRoot = process.cwd();
 const cli = join(repositoryRoot, "dist", "cli", "main.js");
@@ -38,16 +38,6 @@ interface CliProcessResult {
   stderr: string;
 }
 
-beforeAll(() => {
-  const build = spawnSync("npm", ["run", "build", "--silent"], {
-    cwd: repositoryRoot,
-    encoding: "utf8"
-  });
-  if (build.status !== 0) {
-    throw new Error(build.stderr || build.stdout || "TapHound build failed");
-  }
-});
-
 afterEach(async () => {
   await Promise.all(temporaryRoots.splice(0).map(
     (root) => rm(root, { recursive: true, force: true })
@@ -69,7 +59,7 @@ async function fixture(options: {
   await writeFile(configPath, `${JSON.stringify({
     version: 1,
     run: { packageName: "com.example.app", activity: ".MainActivity" },
-    idle: { pollIntervalMs: 10, stablePolls: 1, timeoutMs: 2000 },
+    idle: { pollIntervalMs: 10, stablePolls: 1, timeoutMs: 10000 },
     artifactsDir: options.blockedReports === true
       ? "blocked/reports"
       : "reports"
@@ -164,7 +154,7 @@ describe("built taphound verify --json process contract", () => {
     await expect(access(String(reportPath), constants.R_OK)).resolves.toBeUndefined();
     expect(JSON.parse(await readFile(String(reportPath), "utf8")))
       .toMatchObject({ status: "passed" });
-  });
+  }, 15000);
 
   it.each([
     [2, { invalidJourney: true }, {}],

@@ -20,6 +20,7 @@ import {
   type RuntimeSnapshot
 } from "../../../src/domain/runtime-snapshot.js";
 import type { CommandResult, RunningCommand } from "../../../src/ports/process-runner.js";
+import { contextSelection } from "../../fixtures/project-context.js";
 
 const activity = "com.example.app.MainActivity";
 const afterActivity = "com.example.app.AfterActivity";
@@ -36,7 +37,7 @@ const ok: CommandResult = {
 const target = {
   id: "submit",
   resourceId: "submit",
-  text: "Submit run-42",
+  text: "Continue run-42",
   enabled: true,
   clickable: true,
   bounds: { left: 0, top: 0, right: 100, bottom: 100 },
@@ -61,7 +62,7 @@ function snapshot(): RuntimeSnapshot {
 function proposal(runtime = snapshot()): ProposedStep {
   return {
     action: "click",
-    locator: { text: "Submit ${runId}" },
+    locator: { text: "Continue ${runId}" },
     binding: {
       generationId: "generation-1",
       baseRevision: runtime.baseRevision,
@@ -109,6 +110,7 @@ function session(
         forbiddenActions: ["longClick"]
       }
     },
+    contextSelection,
     variables: {
       runId: "run-42",
       timestamp: "2026-07-22T12:00:00.000Z",
@@ -135,6 +137,7 @@ function harness(
     | "foregroundComponent"
     | "currentActivity"
     | "appProcesses"
+    | "windowTopology"
     | "tap"
     | "longClick"
     | "swipe"
@@ -185,6 +188,12 @@ function harness(
     appProcesses: vi.fn(() => Promise.resolve([
       { pid: 42, name: "com.example.app" }
     ])),
+    windowTopology: vi.fn(() => Promise.resolve({
+      version: 1,
+      status: "unavailable",
+      windows: [],
+      diagnostic: "legacy test snapshot"
+    })),
     tap: vi.fn(() => {
       calls.push("action");
       return Promise.resolve(ok);
@@ -345,7 +354,7 @@ describe("GenerationStepExecutor", () => {
       candidateSources: ["manualOverride"],
       candidateSteps: [{
         action: "click",
-        locator: { text: "Submit run-42" },
+        locator: { text: "Continue run-42" },
         activity: { before: activity, after: afterActivity }
       }]
     });
@@ -948,6 +957,56 @@ describe("GenerationStepExecutor", () => {
       "evidence/steps/0-attempt-1/logcat.txt",
       "evidence/steps/0-attempt-1/result.json"
     ]);
+  });
+
+  it.each(["SIGTERM", "SIGKILL"] as const)(
+    "accepts %s when TapHound intentionally stops Logcat",
+    async (signal) => {
+      const runtime = snapshot();
+      const test = harness(session(runtime));
+      test.stopLogcat.mockResolvedValueOnce({
+        ...ok,
+        exitCode: null,
+        signal,
+        terminationRequested: true
+      });
+
+      await expect(test.execute({
+        generationId: "generation-1",
+        proposal: proposal(runtime),
+        snapshot: runtime,
+        source: "planner"
+      })).resolves.toMatchObject({ status: "succeeded" });
+
+      expect(test.current()).toMatchObject({
+        state: "active",
+        inFlight: null,
+        candidateSteps: [{ action: "click" }]
+      });
+      expect(test.evidence.get(
+        "evidence/steps/0-attempt-1/result.json"
+      )).not.toHaveProperty("logcatStopFailure");
+    }
+  );
+
+  it("rejects a signalled Logcat process that died before stop was requested", async () => {
+    const runtime = snapshot();
+    const test = harness(session(runtime));
+    test.stopLogcat.mockResolvedValueOnce({
+      ...ok,
+      exitCode: null,
+      signal: "SIGTERM"
+    });
+
+    await expect(test.execute({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime,
+      source: "planner"
+    })).resolves.toMatchObject({
+      status: "failed",
+      failure: { code: "COLLECTION_FAILED" }
+    });
   });
 
   it("marks recoveryRequired if immutable result evidence cannot be persisted", async () => {

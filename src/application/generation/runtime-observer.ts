@@ -17,8 +17,10 @@ import {
   hashRuntimeSnapshot,
   type RuntimeSnapshot
 } from "../../domain/runtime-snapshot.js";
+import { assessWindowHierarchy } from "../../domain/window-hierarchy.js";
 import type { AdbPort } from "../../ports/adb.js";
 import type { AndroidCliPort } from "../../ports/android-cli.js";
+import type { IdleConfig, IdleResult } from "../wait/idle-waiter.js";
 import type {
   GenerationSessionStore
 } from "../../ports/generation-session-store.js";
@@ -34,6 +36,21 @@ export interface RuntimeObservation {
 
 export interface RuntimeObserveInput {
   generationId: string;
+  idle?: IdleConfig | undefined;
+  signal?: AbortSignal | undefined;
+}
+
+export interface CollectedRuntimeState {
+  foregroundPackageName: string;
+  activity: string;
+  pid: number | null;
+  layout: readonly z.infer<typeof LayoutElementSchema>[];
+  windowHierarchy: ReturnType<typeof assessWindowHierarchy>;
+}
+
+export interface CollectedRuntimeObserveInput {
+  generationId: string;
+  runtime: CollectedRuntimeState;
   signal?: AbortSignal | undefined;
 }
 
@@ -42,15 +59,27 @@ export interface RuntimeObserverDependencies {
     GenerationSessionStore,
     "read" | "writeEvidence" | "produceEvidence" | "commitSnapshot"
   >;
-  adb: Pick<AdbPort, "foregroundComponent" | "appProcesses">;
+  adb: Pick<
+    AdbPort,
+    "foregroundComponent" | "appProcesses" | "windowTopology"
+  >;
   androidCli: Pick<AndroidCliPort, "layout" | "captureScreen">;
+  waitUntilIdle?: (
+    deviceSerial: string,
+    config: IdleConfig,
+    signal?: AbortSignal,
+    packageName?: string
+  ) => Promise<IdleResult>;
   now: () => Date;
   createAttemptId: () => string;
 }
 
 export interface SnapshotReobservationGuardDependencies {
   store: Pick<GenerationSessionStore, "read">;
-  adb: Pick<AdbPort, "foregroundComponent" | "appProcesses">;
+  adb: Pick<
+    AdbPort,
+    "foregroundComponent" | "appProcesses" | "windowTopology"
+  >;
   androidCli: Pick<AndroidCliPort, "layout">;
   now: () => Date;
 }
@@ -86,38 +115,46 @@ function assertObservable(session: GenerationSession): void {
 
 async function collectRuntime(
   dependencies: {
-    adb: Pick<AdbPort, "foregroundComponent" | "appProcesses">;
+    adb: Pick<
+      AdbPort,
+      "foregroundComponent" | "appProcesses" | "windowTopology"
+    >;
     androidCli: Pick<AndroidCliPort, "layout">;
   },
   session: GenerationSession,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  stableLayout?: readonly z.infer<typeof LayoutElementSchema>[]
 ): Promise<{
   foregroundPackageName: string;
   activity: string;
   pid: number | null;
   layout: z.infer<typeof LayoutElementSchema>[];
+  windowHierarchy: ReturnType<typeof assessWindowHierarchy>;
 }> {
   const identity = {
     packageName: session.target.packageName,
     deviceSerial: session.target.deviceSerial,
     ...(signal === undefined ? {} : { signal })
   };
-  const foreground = await dependencies.adb.foregroundComponent(identity);
-  const pid = primaryAppPid(
-    await dependencies.adb.appProcesses(identity),
-    session.target.packageName
-  );
-  const layout = z.array(LayoutElementSchema).parse(
-    await dependencies.androidCli.layout({
-      deviceSerial: session.target.deviceSerial,
-      ...(signal === undefined ? {} : { signal })
-    })
-  );
+  const [foreground, processes, topology, observedLayout] = await Promise.all([
+    dependencies.adb.foregroundComponent(identity),
+    dependencies.adb.appProcesses(identity),
+    dependencies.adb.windowTopology(identity),
+    stableLayout === undefined
+      ? dependencies.androidCli.layout({
+          deviceSerial: session.target.deviceSerial,
+          ...(signal === undefined ? {} : { signal })
+        })
+      : Promise.resolve(stableLayout)
+  ]);
+  const pid = primaryAppPid(processes, session.target.packageName);
+  const layout = z.array(LayoutElementSchema).parse(observedLayout);
   return {
     foregroundPackageName: foreground.packageName,
     activity: foreground.activity,
     pid,
-    layout
+    layout,
+    windowHierarchy: assessWindowHierarchy(topology, layout)
   };
 }
 
@@ -133,12 +170,61 @@ export class RuntimeObserver {
       await this.dependencies.store.read(input.generationId)
     );
     assertObservable(current);
+    let stableLayout: readonly z.infer<typeof LayoutElementSchema>[] | undefined;
+    if (
+      input.idle !== undefined
+      && this.dependencies.waitUntilIdle !== undefined
+    ) {
+      const idle = await this.dependencies.waitUntilIdle(
+        current.target.deviceSerial,
+        input.idle,
+        input.signal,
+        current.target.packageName
+      );
+      if (idle.status !== "stable") {
+        throw new GenerationOperationError(
+          "RECOVERY_REQUIRED",
+          idle.status === "cancelled"
+            ? "Runtime observation was cancelled while waiting for layout stability"
+            : "Layout did not become stable before observation"
+        );
+      }
+      stableLayout = idle.layout;
+    }
     const runtime = await collectRuntime(
       this.dependencies,
       current,
-      input.signal
+      input.signal,
+      stableLayout
     );
 
+    return this.commit(current, runtime, input.signal);
+  };
+
+  public readonly observeCollected = async (
+    input: CollectedRuntimeObserveInput
+  ): Promise<RuntimeObservation> => {
+    const current = GenerationSessionSchema.parse(
+      await this.dependencies.store.read(input.generationId)
+    );
+    assertObservable(current);
+    if (
+      input.runtime.foregroundPackageName !== current.target.packageName
+      || input.runtime.pid === null
+    ) {
+      throw new GenerationOperationError(
+        "SNAPSHOT_STALE",
+        "Collected post-action runtime is not a valid target-app state"
+      );
+    }
+    return this.commit(current, input.runtime, input.signal);
+  };
+
+  private async commit(
+    current: GenerationSession,
+    runtime: CollectedRuntimeState,
+    signal?: AbortSignal
+  ): Promise<RuntimeObservation> {
     const baseRevision = current.revision + 1;
     const attemptId = GenerationSessionIdSchema.parse(
       this.dependencies.createAttemptId()
@@ -152,7 +238,7 @@ export class RuntimeObserver {
         const capture = await this.dependencies.androidCli.captureScreen({
           outputPath: temporaryPath,
           deviceSerial: current.target.deviceSerial,
-          ...(input.signal === undefined ? {} : { signal: input.signal })
+          ...(signal === undefined ? {} : { signal })
         });
         if (failedCapture(capture)) {
           throw new Error(
@@ -163,6 +249,29 @@ export class RuntimeObserver {
         }
       }
     );
+    const identity = {
+      packageName: current.target.packageName,
+      deviceSerial: current.target.deviceSerial,
+      ...(signal === undefined ? {} : { signal })
+    };
+    const [confirmedForeground, confirmedProcesses] = await Promise.all([
+      this.dependencies.adb.foregroundComponent(identity),
+      this.dependencies.adb.appProcesses(identity)
+    ]);
+    const confirmedPid = primaryAppPid(
+      confirmedProcesses,
+      current.target.packageName
+    );
+    if (
+      confirmedForeground.packageName !== runtime.foregroundPackageName
+      || confirmedForeground.activity !== runtime.activity
+      || confirmedPid !== runtime.pid
+    ) {
+      throw new GenerationOperationError(
+        "SNAPSHOT_STALE",
+        "Runtime identity changed while snapshot evidence was captured"
+      );
+    }
 
     const snapshot = RuntimeSnapshotSchema.parse({
       version: 1,
@@ -175,7 +284,8 @@ export class RuntimeObserver {
       pid: runtime.pid,
       capturedAt: this.dependencies.now().toISOString(),
       screenshotPath,
-      layout: runtime.layout
+      layout: runtime.layout,
+      windowHierarchy: runtime.windowHierarchy
     });
     const snapshotHash = hashRuntimeSnapshot(snapshot);
     await this.dependencies.store.writeEvidence(
@@ -206,7 +316,7 @@ export class RuntimeObserver {
       snapshot,
       snapshotHash
     };
-  };
+  }
 }
 
 export class SnapshotReobservationGuard {
@@ -266,7 +376,8 @@ export class SnapshotReobservationGuard {
         pid: runtime.pid,
         capturedAt: this.dependencies.now().toISOString(),
         screenshotPath: "non-authoritative://runtime-reobservation",
-        layout: runtime.layout
+        layout: runtime.layout,
+        windowHierarchy: runtime.windowHierarchy
       });
       if (hashRuntimeSnapshot(snapshot) !== binding.snapshotHash) {
         throw new GenerationOperationError(

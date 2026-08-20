@@ -12,8 +12,8 @@ import {
   type GenerationSession
 } from "../../domain/generation.js";
 import {
-  ProjectContextSchema,
-  type ProjectContext
+  ResolvedProjectContextSchema,
+  type ResolvedProjectContext
 } from "../../domain/project-context.js";
 import {
   TapHoundConfigSchema,
@@ -23,12 +23,21 @@ import type {
   GenerationSessionStore
 } from "../../ports/generation-session-store.js";
 
+export interface GenerationRecoveryDetails {
+  diagnostics: readonly {
+    code: string;
+    message: string;
+  }[];
+  recovery: readonly string[];
+}
+
 export class GenerationOperationError extends Error {
   public override readonly name = "GenerationOperationError";
 
   public constructor(
     public readonly code: GenerationErrorCode,
-    message: string
+    message: string,
+    public readonly details?: GenerationRecoveryDetails | undefined
   ) {
     super(message);
   }
@@ -37,9 +46,10 @@ export class GenerationOperationError extends Error {
 export interface GenerationStartInput {
   projectRoot: string;
   config: TapHoundConfig;
-  context: ProjectContext;
+  context: ResolvedProjectContext;
   project: ProjectDescription;
   deviceSerial: string;
+  allowEvidenceDrift?: boolean | undefined;
 }
 
 export interface GenerationStarterDependencies {
@@ -114,13 +124,16 @@ export class GenerationStarter {
       projectRoot: input.projectRoot,
       config
     });
-    if (validation.status !== "valid") {
+    if (
+      validation.status !== "valid"
+      && !(validation.status === "stale" && input.allowEvidenceDrift === true)
+    ) {
       throw new GenerationOperationError(
         validation.status === "stale" ? "CONTEXT_STALE" : "CONTEXT_INVALID",
         validation.reason.message
       );
     }
-    const context = ProjectContextSchema.parse(input.context);
+    const context = ResolvedProjectContextSchema.parse(input.context);
     if (
       context.packageName !== input.project.packageName
       || context.launchActivity !== input.project.launchActivity
@@ -150,6 +163,7 @@ export class GenerationStarter {
         resetStrategy: "processOnly",
         interactionPolicy: context.interactionPolicy
       },
+      contextSelection: context.selection,
       variables: {
         runId,
         timestamp: this.dependencies.now().toISOString(),

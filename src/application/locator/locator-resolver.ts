@@ -29,12 +29,21 @@ export type LocatorResolution = LocatedTarget | LocatorFailure;
 
 export interface LocatorResolutionOptions {
   requireEnabled?: boolean | undefined;
+  requiredCapability?: "clickable" | "longClickable" | undefined;
 }
 
-function flatten(elements: readonly LayoutElement[]): LayoutElement[] {
+interface LayoutEntry {
+  element: LayoutElement;
+  ancestors: readonly LayoutElement[];
+}
+
+function flatten(
+  elements: readonly LayoutElement[],
+  ancestors: readonly LayoutElement[] = []
+): LayoutEntry[] {
   return elements.flatMap((element) => [
-    element,
-    ...flatten(element.children)
+    { element, ancestors },
+    ...flatten(element.children, [...ancestors, element])
   ]);
 }
 
@@ -57,8 +66,8 @@ export function resolveLocator(
   locator: Locator,
   options: LocatorResolutionOptions = {}
 ): LocatorResolution {
-  const elements = flatten(roots);
-  let candidates: LayoutElement[] | undefined;
+  const entries = flatten(roots);
+  let candidates: LayoutEntry[] | undefined;
   let matchedBy: LocatorField | undefined;
 
   for (const field of LOCATOR_FIELDS) {
@@ -68,14 +77,18 @@ export function resolveLocator(
     }
 
     if (candidates === undefined) {
-      const matches = elements.filter((element) => element[field] === value);
+        const matches = entries.filter(
+          ({ element }) => element[field] === value
+        );
       if (matches.length === 0) {
         continue;
       }
       candidates = matches;
       matchedBy = field;
     } else if (candidates.length > 1) {
-      const narrowed = candidates.filter((element) => element[field] === value);
+      const narrowed = candidates.filter(
+        ({ element }) => element[field] === value
+      );
       if (narrowed.length === 0) {
         return {
           status: "failed",
@@ -107,13 +120,32 @@ export function resolveLocator(
     };
   }
 
-  const element = candidates[0];
-  if (element === undefined || matchedBy === undefined) {
+  const entry = candidates[0];
+  if (entry === undefined || matchedBy === undefined) {
     return {
       status: "failed",
       code: "LOCATOR_NOT_FOUND",
       message: "No Layout element matches the Locator"
     };
+  }
+  let element = entry.element;
+  if (
+    options.requiredCapability !== undefined
+    && element[options.requiredCapability] !== true
+  ) {
+    const ancestor = [...entry.ancestors].reverse().find(
+      (candidate) => candidate.enabled
+        && candidate[options.requiredCapability as "clickable" | "longClickable"]
+          === true
+    );
+    if (ancestor === undefined) {
+      return {
+        status: "failed",
+        code: "ACTION_FAILED",
+        message: `Layout target lacks required ${options.requiredCapability} capability`
+      };
+    }
+    element = ancestor;
   }
   if (options.requireEnabled !== false && !element.enabled) {
     return {

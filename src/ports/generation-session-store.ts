@@ -81,7 +81,8 @@ export interface GenerationSessionStore {
   beginVerification: (
     id: string,
     expectedRevision: number,
-    attemptId: string
+    attemptId: string,
+    owner?: { pid: number; startedAt: string }
   ) => Promise<GenerationSession>;
   completeVerification: (
     id: string,
@@ -89,6 +90,11 @@ export interface GenerationSessionStore {
     next: GenerationSession
   ) => Promise<void>;
   failVerification: (
+    id: string,
+    expectedRevision: number,
+    next: GenerationSession
+  ) => Promise<void>;
+  recoverVerification: (
     id: string,
     expectedRevision: number,
     next: GenerationSession

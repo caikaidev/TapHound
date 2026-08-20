@@ -135,4 +135,32 @@ describe("TapHound Android acceptance fixture", () => {
     expect(scripts?.["acceptance:device"])
       .toBe("node scripts/acceptance-device.mjs");
   });
+
+  it("keeps generation acceptance aligned with strict command contracts", async () => {
+    const runner = await readFile(
+      join(process.cwd(), "scripts", "acceptance-generation.mjs"),
+      "utf8"
+    );
+    const startCommand = runner.match(
+      /const startOutput = runCli\(\[([\s\S]*?)\]\);/
+    )?.[1];
+    const observeCommand = runner.match(
+      /let observation = runCli\(\[([\s\S]*?)\]\);/
+    )?.[1];
+    const finalizeCommand = runner.match(
+      /const finalizeOutput = runCli\(\[([\s\S]*?)\]\);/
+    )?.[1];
+
+    expect(runner).toContain("TAPHOUND_ACCEPTANCE_DEVICE");
+    expect(runner).toContain("version: 2");
+    expect(runner).toContain("moduleContext");
+    expect(runner).toContain("pathSetSha256");
+    expect(runner).not.toMatch(/\bafter\s*:/);
+    expect(startCommand).toContain('"generation", "start"');
+    expect(startCommand).toContain("...deviceArgs");
+    expect(observeCommand).toContain('"generation", "observe"');
+    expect(observeCommand).not.toContain("...deviceArgs");
+    expect(finalizeCommand).toContain('"generation", "finalize"');
+    expect(finalizeCommand).toContain("...deviceArgs");
+  });
 });

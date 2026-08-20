@@ -17,6 +17,7 @@ import {
 } from "../../domain/generation.js";
 import { JourneyStepSchema, type JourneyStep } from "../../domain/journey.js";
 import type { LayoutElement } from "../../domain/layout.js";
+import { assessWindowHierarchy } from "../../domain/window-hierarchy.js";
 import {
   ProposedStepSchema,
   hashProposedStep,
@@ -36,6 +37,7 @@ import {
   type ExpectationObservationInput
 } from "../assertion/expectation-evaluator.js";
 import { LogcatCollector } from "../collector/logcat-collector.js";
+import { logcatStopFailed } from "../collector/logcat-stop.js";
 import { ActionExecutor, type ActionTarget } from "../interaction/action-executor.js";
 import { ScrollToExecutor } from "../interaction/scroll-to-executor.js";
 import { resolveLocator } from "../locator/locator-resolver.js";
@@ -45,6 +47,10 @@ import {
 } from "./generation-confirmation-service.js";
 import { GenerationOperationError } from "./generation-starter.js";
 import type { SnapshotReobservationGuard } from "./runtime-observer.js";
+import type {
+  CollectedRuntimeState,
+  RuntimeObservation
+} from "./runtime-observer.js";
 import { RiskEvaluator } from "./risk-evaluator.js";
 import {
   hasExactlyOneEnabledFocusedElement
@@ -66,7 +72,12 @@ export interface GenerationStepFailure {
 }
 
 export type GenerationStepExecutionResult =
-  | { status: "succeeded"; step: JourneyStep }
+  | {
+      status: "succeeded";
+      step: JourneyStep;
+      nextObservation?: RuntimeObservation | undefined;
+      nextObservationFailure?: GenerationStepFailure | undefined;
+    }
   | { status: "failed"; failure: GenerationStepFailure }
   | { status: "cancelled"; failure: GenerationStepFailure };
 
@@ -91,6 +102,11 @@ export interface GenerationStepExecutorDependencies {
     generationId: string,
     challenge: PendingConfirmation
   ) => Promise<void>;
+  observeNext?: (input: {
+    generationId: string;
+    runtime: CollectedRuntimeState;
+    signal?: AbortSignal | undefined;
+  }) => Promise<RuntimeObservation>;
 }
 
 interface LiveRuntime {
@@ -99,6 +115,7 @@ interface LiveRuntime {
   pid: number;
   pids: readonly number[];
   layout: readonly LayoutElement[];
+  windowHierarchy: ReturnType<typeof assessWindowHierarchy>;
 }
 
 class StepCancelledError extends Error {
@@ -291,7 +308,12 @@ function requireTarget(
   ) {
     return undefined;
   }
-  const resolution = resolveLocator(layout, step.locator);
+  const resolution = resolveLocator(layout, step.locator, {
+    ...(step.action === "click" ? { requiredCapability: "clickable" } : {}),
+    ...(step.action === "longClick"
+      ? { requiredCapability: "longClickable" }
+      : {})
+  });
   if (resolution.status !== "found") {
     fail(resolution.code, resolution.message);
   }
@@ -339,8 +361,9 @@ export class GenerationStepExecutor {
     );
     assertBaseAuthorization(session, proposal, snapshot);
     const risk = this.riskEvaluator.evaluate(
-      proposal.action,
-      session.target.interactionPolicy
+      proposal,
+      session.target.interactionPolicy,
+      snapshot
     );
     if (risk.effectiveRisk === "forbidden") {
       throw new GenerationOperationError(
@@ -507,6 +530,8 @@ export class GenerationStepExecutor {
     let logcatStarted = false;
     let finalStep: JourneyStep | undefined;
     let outcome: GenerationStepExecutionResult | undefined;
+    let stableLayout: readonly LayoutElement[] | undefined;
+    let postActionRuntime: LiveRuntime | undefined;
     const stepStartedAt = this.dependencies.clock.now();
     try {
       await logcat.start({
@@ -536,7 +561,8 @@ export class GenerationStepExecutor {
       const idleWaiter = new IdleWaiter(
         this.dependencies.androidCli,
         this.dependencies.clock,
-        session.target.deviceSerial
+        session.target.deviceSerial,
+        session.target.packageName
       );
 
       if (provisional.action === "scrollTo") {
@@ -625,6 +651,8 @@ export class GenerationStepExecutor {
             };
           } else if (idle.status === "timeout") {
             fail(idle.code, "Layout did not become stable before timeout");
+          } else {
+            stableLayout = idle.layout;
           }
           throwIfCancelled(input.signal);
         }
@@ -636,8 +664,12 @@ export class GenerationStepExecutor {
           session,
           authoritativePid,
           undefined,
-          input.signal
+          input.signal,
+          undefined,
+          this.dependencies.idle.timeoutMs,
+          stableLayout
         );
+        postActionRuntime = after;
         logcat.scopeToPids(after.pids);
         finalStep = executableStep(
           proposal,
@@ -645,6 +677,7 @@ export class GenerationStepExecutor {
           after.activity
         );
         if (finalStep.expect !== undefined) {
+          let expectationRuntime: LiveRuntime | undefined;
           const expectation = await new ExpectationEvaluator(
             this.dependencies.adb,
             this.dependencies.androidCli,
@@ -695,6 +728,7 @@ export class GenerationStepExecutor {
                   undefined,
                   observation.timeoutMs
                 );
+                expectationRuntime = guarded;
                 return { status: "observed", layout: guarded.layout };
               } catch (error) {
                 if (error instanceof StepCancelledError) throw error;
@@ -719,14 +753,17 @@ export class GenerationStepExecutor {
             fail(expectation.code, expectation.message);
           } else {
             throwIfCancelled(input.signal);
-            await this.observeLive(
-              session,
-              authoritativePid,
-              finalStep.expect.type === "activity"
-                ? finalStep.expect.value
-                : after.activity,
-              input.signal
-            );
+            postActionRuntime = finalStep.expect.type === "element"
+              && expectationRuntime !== undefined
+              ? expectationRuntime
+              : await this.observeLive(
+                  session,
+                  authoritativePid,
+                  finalStep.expect.type === "activity"
+                    ? finalStep.expect.value
+                    : after.activity,
+                  input.signal
+                );
             throwIfCancelled(input.signal);
           }
         }
@@ -744,12 +781,7 @@ export class GenerationStepExecutor {
         if (isCancelled(input.signal)) {
           outcome = cancellation();
         }
-        if (
-          stopped.exitCode !== 0
-          || stopped.timedOut
-          || stopped.cancelled
-          || stopped.spawnError !== undefined
-        ) {
+        if (logcatStopFailed(stopped)) {
           stopFailure = {
             code: "COLLECTION_FAILED",
             message: stopped.stderr.trim()
@@ -867,7 +899,31 @@ export class GenerationStepExecutor {
           "Step completion state is ambiguous and requires recovery"
         );
       }
-      return outcome;
+      if (
+        this.dependencies.observeNext === undefined
+        || postActionRuntime === undefined
+      ) {
+        return outcome;
+      }
+      try {
+        const nextObservation = await this.dependencies.observeNext({
+          generationId: session.id,
+          runtime: {
+            foregroundPackageName: postActionRuntime.foregroundPackageName,
+            activity: postActionRuntime.activity,
+            pid: postActionRuntime.pid,
+            layout: postActionRuntime.layout,
+            windowHierarchy: postActionRuntime.windowHierarchy
+          },
+          ...(input.signal === undefined ? {} : { signal: input.signal })
+        });
+        return { ...outcome, nextObservation };
+      } catch (error) {
+        return {
+          ...outcome,
+          nextObservationFailure: asFailure(error)
+        };
+      }
     }
 
     await this.markRecovery(session.id, inFlight);
@@ -880,7 +936,8 @@ export class GenerationStepExecutor {
     expectedActivity: string | undefined,
     signal?: AbortSignal,
     authoritativeSnapshot?: RuntimeSnapshot,
-    timeoutMs = this.dependencies.idle.timeoutMs
+    timeoutMs = this.dependencies.idle.timeoutMs,
+    stableLayout?: readonly LayoutElement[]
   ): Promise<LiveRuntime> {
     const deadline = this.dependencies.clock.now() + timeoutMs;
     const identity = (): {
@@ -913,11 +970,17 @@ export class GenerationStepExecutor {
     ) {
       fail("SNAPSHOT_STALE", "Generation Activity changed unexpectedly");
     }
-    const layout = await this.dependencies.androidCli.layout({
-      deviceSerial: session.target.deviceSerial,
-      ...(signal === undefined ? {} : { signal }),
-      timeoutMs: Math.max(1, deadline - this.dependencies.clock.now())
-    });
+    const [layout, topology] = await Promise.all([
+      stableLayout === undefined
+        ? this.dependencies.androidCli.layout({
+            deviceSerial: session.target.deviceSerial,
+            ...(signal === undefined ? {} : { signal }),
+            timeoutMs: Math.max(1, deadline - this.dependencies.clock.now())
+          })
+        : Promise.resolve(stableLayout),
+      this.dependencies.adb.windowTopology(identity())
+    ]);
+    const windowHierarchy = assessWindowHierarchy(topology, layout);
     throwIfCancelled(signal);
     const confirmedForeground = await this.dependencies.adb
       .foregroundComponent(identity());
@@ -945,7 +1008,10 @@ export class GenerationStepExecutor {
         foregroundPackageName: foreground.packageName,
         activity: foreground.activity,
         pid,
-        layout
+        layout,
+        ...(authoritativeSnapshot.windowHierarchy === undefined
+          ? {}
+          : { windowHierarchy })
       });
       const authoritativeHash = hashRuntimeSnapshot(authoritativeSnapshot);
       if (liveHash !== authoritativeHash) {
@@ -962,7 +1028,8 @@ export class GenerationStepExecutor {
       activity: foreground.activity,
       pid,
       pids: appProcessPids(processes),
-      layout
+      layout,
+      windowHierarchy
     };
   }
 

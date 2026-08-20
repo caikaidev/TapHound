@@ -114,6 +114,12 @@ export function runtimeFixture(): RuntimeFixture {
         { pid: 77, name: "com.example.app:remote" }
       ]);
     }),
+    windowTopology: vi.fn(() => Promise.resolve({
+      version: 1 as const,
+      status: "unavailable" as const,
+      windows: [],
+      diagnostic: "not used by Replay"
+    })),
     tap: vi.fn(() => {
       order.push("action");
       return Promise.resolve(commandResult());

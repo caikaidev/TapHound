@@ -5,6 +5,7 @@ import { z } from "zod";
 import { JourneyStepSchema } from "./journey.js";
 import { ProjectRelativePathSchema } from "./project-context.js";
 import { InteractionPolicySchema } from "./project-context.js";
+import { ContextSelectionSchema } from "./project-context.js";
 import {
   ProposedStepSchema,
   type ProposedStep
@@ -18,6 +19,7 @@ export const GENERATION_ERROR_CODES = [
   "SNAPSHOT_STALE",
   "PACKAGE_ESCAPE",
   "APP_CRASHED",
+  "WINDOW_HIERARCHY_INCOMPLETE",
   "ACTION_UNSUPPORTED",
   "RISK_CONFIRMATION_REQUIRED",
   "ACTION_FORBIDDEN",
@@ -82,7 +84,9 @@ const VerificationSchema = z.discriminatedUnion("status", [
   z.strictObject({ status: z.literal("notRun") }),
   z.strictObject({
     status: z.literal("running"),
-    attemptId: GenerationSessionIdSchema
+    attemptId: GenerationSessionIdSchema,
+    ownerPid: z.number().int().positive().optional(),
+    startedAt: z.iso.datetime().optional()
   }),
   z.strictObject({
     status: z.literal("passed"),
@@ -128,6 +132,7 @@ export const GenerationSessionSchema = z.strictObject({
     resetStrategy: z.literal("processOnly"),
     interactionPolicy: InteractionPolicySchema
   }),
+  contextSelection: ContextSelectionSchema,
   variables: GenerationVariablesSchema,
   candidateSteps: z.array(JourneyStepSchema),
   candidateSources: z.array(z.enum(["planner", "manualOverride"])),
@@ -349,6 +354,7 @@ export interface GenerationCoreIdentity {
     "projectHash" | "configHash" | "contextHash"
   >;
   target: GenerationSession["target"];
+  contextSelection: GenerationSession["contextSelection"];
   variables: GenerationSession["variables"];
 }
 
@@ -363,6 +369,7 @@ export function generationCoreIdentity(
       contextHash: session.bindings.contextHash
     },
     target: session.target,
+    contextSelection: session.contextSelection,
     variables: session.variables
   };
 }

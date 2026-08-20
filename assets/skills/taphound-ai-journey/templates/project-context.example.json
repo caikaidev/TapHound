@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "packageName": "dev.taphound.demo",
   "launchActivity": "dev.taphound.demo.MainActivity",
   "manifest": {
@@ -8,35 +8,13 @@
       {
         "path": "settings.gradle.kts",
         "sha256": "RUNTIME_COMPUTED",
+        "semanticSha256": "RUNTIME_COMPUTED",
         "confidence": "sourceConfirmed"
       },
       {
         "path": "app/build.gradle.kts",
         "sha256": "RUNTIME_COMPUTED",
-        "confidence": "sourceConfirmed"
-      },      {
-        "path": "app/src/main/AndroidManifest.xml",
-        "sha256": "RUNTIME_COMPUTED",
-        "confidence": "sourceConfirmed"
-      },
-      {
-        "path": "app/src/main/java/dev/taphound/demo/MainActivity.kt",
-        "sha256": "RUNTIME_COMPUTED",
-        "confidence": "sourceConfirmed"
-      },
-      {
-        "path": "app/src/main/java/dev/taphound/demo/SearchActivity.kt",
-        "sha256": "RUNTIME_COMPUTED",
-        "confidence": "sourceConfirmed"
-      },
-      {
-        "path": "app/src/main/res/layout/activity_main.xml",
-        "sha256": "RUNTIME_COMPUTED",
-        "confidence": "sourceConfirmed"
-      },
-      {
-        "path": "app/src/main/res/layout/activity_search.xml",
-        "sha256": "RUNTIME_COMPUTED",
+        "semanticSha256": "RUNTIME_COMPUTED",
         "confidence": "sourceConfirmed"
       }
     ]
@@ -45,5 +23,29 @@
     "allowedActions": ["click", "inputText", "back", "wait"],
     "confirmationRequiredActions": [],
     "forbiddenActions": []
-  }
+  },
+  "modules": [
+    {
+      "id": ":app",
+      "projectDir": "app",
+      "kind": "application",
+      "contextPath": ".taphound/context/modules/app.json",
+      "sha256": "RUNTIME_COMPUTED",
+      "features": ["launch", "home"],
+      "activities": ["dev.taphound.demo.MainActivity"],
+      "dependsOn": [],
+      "status": "complete"
+    },
+    {
+      "id": ":feature:search",
+      "projectDir": "features/search",
+      "kind": "feature",
+      "contextPath": ".taphound/context/modules/feature-search.json",
+      "sha256": "RUNTIME_COMPUTED",
+      "features": ["search"],
+      "activities": ["dev.taphound.search.SearchActivity"],
+      "dependsOn": [],
+      "status": "complete"
+    }
+  ]
 }

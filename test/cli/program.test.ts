@@ -31,7 +31,7 @@ describe("createProgram", () => {
     expect(
       createProgram().commands.find((command) => command.name() === "context")
         ?.commands.map((command) => command.name())
-    ).toEqual(["validate", "status"]);
+    ).toEqual(["validate", "status", "list", "refresh"]);
     expect(
       createProgram().commands.find((command) => command.name() === "generation")
         ?.commands.map((command) => command.name())
@@ -41,6 +41,8 @@ describe("createProgram", () => {
       "step",
       "confirm",
       "manual",
+      "status",
+      "recover",
       "finalize"
     ]);
   });

@@ -22,6 +22,7 @@ import type { GenerationSession } from "../../../src/domain/generation.js";
 import {
   GenerationSessionStoreError
 } from "../../../src/ports/generation-session-store.js";
+import { contextSelection } from "../../fixtures/project-context.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -86,6 +87,7 @@ function validSession(
         forbiddenActions: ["back"]
       }
     },
+    contextSelection,
     variables: {
       runId: "journey-run-42",
       timestamp: "2026-07-22T12:00:00.000Z",
@@ -688,6 +690,64 @@ describe("FileSystemGenerationSessionStore", () => {
     const recovered = validSession(2);
     await store.recover("generation-1", 1, recovered);
     await expect(store.read("generation-1")).resolves.toEqual(recovered);
+  });
+
+  it("explicitly resets only an interrupted running verification", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(verificationCandidate());
+    const running = await store.beginVerification(
+      "generation-1",
+      0,
+      "verification-attempt",
+      {
+        pid: 1234,
+        startedAt: "2026-08-20T00:00:00.000Z"
+      }
+    );
+    const recovered = {
+      ...running,
+      revision: running.revision + 1,
+      verification: { status: "notRun" as const }
+    };
+
+    await store.recoverVerification(
+      "generation-1",
+      running.revision,
+      recovered
+    );
+
+    await expect(store.read("generation-1")).resolves.toEqual(recovered);
+  });
+
+  it("rejects verification recovery after immutable evidence exists", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(verificationCandidate());
+    const running = await store.beginVerification(
+      "generation-1",
+      0,
+      "verification-attempt",
+      { pid: 1234, startedAt: "2026-08-20T00:00:00.000Z" }
+    );
+    await store.writeEvidence(
+      "generation-1",
+      "verification/receipt.json",
+      { status: "passed" }
+    );
+
+    await expectStoreError(
+      store.recoverVerification(
+        "generation-1",
+        running.revision,
+        {
+          ...running,
+          revision: running.revision + 1,
+          verification: { status: "notRun" }
+        }
+      ),
+      "INVALID_TRANSITION"
+    );
   });
 
   it("rejects recovery unless only recovery state and inFlight are cleared", async () => {

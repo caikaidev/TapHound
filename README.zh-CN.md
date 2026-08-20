@@ -70,8 +70,10 @@ git diff --exit-code -- assets/brand/png
 - `record`：交互式执行操作并录制 Journey。
 - `verify`：确定性重放 Journey 并发布报告。
 - `project describe`：输出稳定的 Android 项目事实。
-- `context validate` / `context status`：校验或检查 Project Context。
-- `generation start` / `observe` / `step` / `confirm` / `manual` / `finalize`：管理确定性 Journey 生成会话。
+- `context list` / `validate` / `status`：查看或校验 v2 Project Context 索引及模块分片。
+- `context refresh`：在不重新分析源码的前提下，重算 Context 证据哈希（含语义哈希）。
+- `generation start` / `observe` / `step` / `confirm` / `manual` / `status` /
+  `recover` / `finalize`：管理确定性 Journey 生成会话。
 - `init`：为 AI Agent 安装 TapHound AI Journey Skill。
 
 ## 配置
@@ -114,20 +116,27 @@ Recorder 不自动生成业务 `expect`。Activity、Element 或 Logcat 断言�
 
 源码仓库提供 [`taphound-ai-journey` Skill](assets/skills/taphound-ai-journey/SKILL.md)，指导 Droid、Claude Code、Copilot、Cursor 等 Agent：
 
-1. 使用 `project describe` 和 Android 项目源码生成带证据哈希的 Project Context。
-2. 使用 `context validate` / `context status` 检查 Context 的有效性和时效性。
-3. 启动 `generation` 会话，循环观察权威设备状态、提出严格步骤并交由 TapHound 执行。
-4. 使用 `generation finalize` 从初始状态完整 Replay，并仅在验证通过后发布 Journey。
+1. 发现 Gradle 模块，生成精简的 Project Context v2 根索引以及每个模块独立的语义/证据分片。
+2. 使用 `context list` 选择 Goal 相关模块，并通过 `context validate` / `context status` 检查分片、证据与文件清单时效性。
+3. 使用 `--module` 启动 `generation` 会话。首次 `observe` 后，优先复用每个
+   成功步骤返回的 `nextBinding` 和 `nextSnapshot`。
+4. 使用 `generation status` 检查持久化状态。中断的 in-flight action 可能已执行，
+   只有显式运行 `generation recover --decision retry` 承认该风险后才会恢复。
+5. 长耗时 Replay 使用 `generation finalize --detach`，随后轮询
+   `generation status`（或使用 `--wait`）。只有精确验证通过后才发布 Journey。
 
 ```bash
 taphound generation start \
   --project /path/to/android-project \
   --context .taphound/context/project-context.json \
+  --module :feature:search \
   --device emulator-5554 \
   --json
 ```
 
-设备在 `generation start` 时绑定，后续 `observe`、`step`、`confirm` 和 `manual` 命令通过 session 使用该绑定。完整流程见 Skill 的 [`GUIDE.md`](assets/skills/taphound-ai-journey/GUIDE.md)。
+设备在 `generation start` 时绑定，后续 `observe`、`step`、`confirm`、`manual`、
+`status` 和 `recover` 命令通过 session 使用该绑定。完整流程见 Skill 的
+[`GUIDE.md`](assets/skills/taphound-ai-journey/GUIDE.md)。
 
 ### 为其他 AI Agent 安装 Skill
 

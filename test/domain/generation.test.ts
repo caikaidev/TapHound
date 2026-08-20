@@ -25,6 +25,20 @@ const variables = {
   randomHex: "c0ffee"
 };
 
+const contextSelection = {
+  bundleVersion: 2,
+  indexHash: "f".repeat(64),
+  modules: [{
+    id: ":app",
+    sha256: "e".repeat(64),
+    projectDir: "app",
+    inventory: {
+      pathSetSha256: "c".repeat(64),
+      categories: ["manifests", "sources", "layouts", "navigation"]
+    }
+  }]
+};
+
 const proposalBinding = {
   generationId: "generation-1",
   baseRevision: 1,
@@ -96,6 +110,7 @@ function validSession(): unknown {
         forbiddenActions: ["back"]
       }
     },
+    contextSelection,
     variables,
     candidateSteps: [{
       action: "wait",
@@ -121,6 +136,7 @@ describe("generation error contract", () => {
       "SNAPSHOT_STALE",
       "PACKAGE_ESCAPE",
       "APP_CRASHED",
+      "WINDOW_HIERARCHY_INCOMPLETE",
       "ACTION_UNSUPPORTED",
       "RISK_CONFIRMATION_REQUIRED",
       "ACTION_FORBIDDEN",
@@ -273,6 +289,7 @@ describe("GenerationSessionSchema", () => {
         contextHash: "a".repeat(64)
       },
       target: session.target,
+      contextSelection,
       variables: session.variables
     });
   });

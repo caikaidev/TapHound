@@ -49,7 +49,7 @@ import {
   GenerationSessionStoreError
 } from "../../../src/ports/generation-session-store.js";
 import type {
-  ProjectContext
+  ResolvedProjectContext
 } from "../../../src/domain/project-context.js";
 import {
   hashJourney,
@@ -72,6 +72,7 @@ import type {
   VerifyResult
 } from "../../../src/application/runtime/verify-runtime.js";
 import { commandResult } from "../../fakes/process-runner.js";
+import { contextSelection } from "../../fixtures/project-context.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -92,8 +93,8 @@ const config: TapHoundConfig = {
   artifactsDir: ".taphound/reports"
 };
 
-const context: ProjectContext = {
-  version: 1,
+const context: ResolvedProjectContext = {
+  version: 2,
   packageName: "com.example.app",
   launchActivity: "com.example.app.MainActivity",
   manifest: {
@@ -108,7 +109,8 @@ const context: ProjectContext = {
     allowedActions: ["inputText", "wait"],
     confirmationRequiredActions: [],
     forbiddenActions: ["back"]
-  }
+  },
+  selection: contextSelection
 };
 
 function project(root: string): {
@@ -222,6 +224,7 @@ function session(root: string): GenerationSession {
       resetStrategy: "processOnly",
       interactionPolicy: context.interactionPolicy
     },
+    contextSelection,
     variables: {
       runId: "candidate-run",
       timestamp: "2026-07-23T00:00:00.000Z",
@@ -310,7 +313,6 @@ async function fixture(
       contextValidator: {
         validate: validateContext
       },
-      adb: { forceStop },
       verifyRuntime: { verify },
       publisher,
       generateAttemptId: (): string => "verification-attempt"
@@ -323,7 +325,7 @@ function input(root: string): {
   generationId: string;
   projectRoot: string;
   config: TapHoundConfig;
-  context: ProjectContext;
+  context: ResolvedProjectContext;
   project: ReturnType<typeof project>;
   outputPath: string;
   deviceSerial: string;
@@ -396,7 +398,7 @@ describe("GenerationFinalizer", () => {
     expect(result.replayed).toBe(true);
     expect(result.journey.name).toBe("generated");
     expect(result.meta.manualOverrideStepIndexes).toEqual([0]);
-    expect(test.forceStop).toHaveBeenCalledOnce();
+    expect(test.forceStop).not.toHaveBeenCalled();
     expect(test.verify).toHaveBeenCalledOnce();
     expect(test.verify).toHaveBeenCalledWith(expect.objectContaining({
       requireFocusedInput: true
@@ -476,7 +478,6 @@ describe("GenerationFinalizer", () => {
           () => Promise.resolve({ status: "valid" as const })
         )
       },
-      adb: { forceStop: test.forceStop },
       verifyRuntime: { verify: test.verify },
       publisher: new GenerationPublisher({
         store: test.store,
@@ -490,7 +491,7 @@ describe("GenerationFinalizer", () => {
 
     expect(result.replayed).toBe(false);
     expect(test.verify).toHaveBeenCalledOnce();
-    expect(test.forceStop).toHaveBeenCalledOnce();
+    expect(test.forceStop).not.toHaveBeenCalled();
   });
 
   it("rejects fallback verification and durably prevents replay", async () => {
@@ -791,6 +792,26 @@ describe("GenerationFinalizer", () => {
     });
     await expect(test.store.read("generation-1")).resolves.toMatchObject({
       verification: { status: "failed" }
+    });
+  });
+  it("allows post-replay evidence drift only with explicit opt-in", async () => {
+    const test = await fixture();
+    test.validateContext
+      .mockResolvedValueOnce({ status: "valid" })
+      .mockResolvedValueOnce({
+        status: "stale",
+        reason: {
+          code: "EVIDENCE_HASH_MISMATCH",
+          message: "implementation-only source change"
+        }
+      });
+
+    await expect(test.finalize.finalize({
+      ...input(test.root),
+      allowEvidenceDrift: true
+    })).resolves.toMatchObject({
+      status: "verified",
+      replayed: true
     });
   });
 

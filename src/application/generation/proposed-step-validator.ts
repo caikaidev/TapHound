@@ -39,15 +39,25 @@ function requireUniqueTarget(
   capabilityName: string
 ): LayoutElement {
   const resolution = resolveLocator(snapshot.layout, locator);
-  if (resolution.status !== "found") {
-    rejectCapability(resolution.message);
+  const capabilityKey = capabilityName === "clickable"
+    ? "clickable"
+    : capabilityName === "longClickable"
+      ? "longClickable"
+      : undefined;
+  const resolved = capabilityKey === undefined
+    ? resolution
+    : resolveLocator(snapshot.layout, locator, {
+        requiredCapability: capabilityKey
+      });
+  if (resolved.status !== "found") {
+    rejectCapability(resolved.message);
   }
-  if (!capability(resolution.element)) {
+  if (!capability(resolved.element)) {
     rejectCapability(
       `Layout target lacks required ${capabilityName} capability`
     );
   }
-  return resolution.element;
+  return resolved.element;
 }
 
 function validateBinding(
@@ -154,12 +164,28 @@ function validateAction(
   }
 }
 
+function validateWindowHierarchy(snapshot: RuntimeSnapshot): void {
+  if (snapshot.windowHierarchy?.status === "incomplete") {
+    throw new GenerationOperationError(
+      "WINDOW_HIERARCHY_INCOMPLETE",
+      snapshot.windowHierarchy.diagnostics
+        .map((diagnostic) => diagnostic.message)
+        .join("; "),
+      {
+        diagnostics: snapshot.windowHierarchy.diagnostics,
+        recovery: snapshot.windowHierarchy.recovery
+      }
+    );
+  }
+}
+
 export class ProposedStepValidator {
   public validate(input: ProposedStepValidationInput): ProposedStep {
     const session = GenerationSessionSchema.parse(input.session);
     const snapshot = RuntimeSnapshotSchema.parse(input.snapshot);
     const proposal = ProposedStepSchema.parse(input.proposal);
     validateBinding(session, snapshot, proposal);
+    validateWindowHierarchy(snapshot);
     validateAction(snapshot, proposal);
     return proposal;
   }

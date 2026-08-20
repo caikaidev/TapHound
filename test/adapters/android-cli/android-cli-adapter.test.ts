@@ -5,30 +5,126 @@ import { commandResult, processRunner } from "../../fakes/process-runner.js";
 
 describe("AndroidCliAdapter", () => {
   it("reads full Layout and Layout Diff", async () => {
-    const runner = processRunner(commandResult({
-      stdout: JSON.stringify({
-        id: "root",
-        enabled: true,
-        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
-        children: []
-      })
-    }));
-    const adapter = new AndroidCliAdapter(runner);
+    const runner = processRunner();
+    vi.mocked(runner.run)
+      .mockResolvedValueOnce(commandResult({ exitCode: 1 }))
+      .mockResolvedValueOnce(commandResult())
+      .mockResolvedValueOnce(commandResult({
+        stdout: JSON.stringify({
+          id: "root",
+          enabled: true,
+          bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+          children: []
+        })
+      }));
+    const adapter = new AndroidCliAdapter(
+      runner,
+      () => "/sdcard/taphound-uiautomator.xml"
+    );
 
     await expect(adapter.layout({ deviceSerial: "emulator-5554" }))
       .resolves.toHaveLength(1);
     vi.mocked(runner.run).mockResolvedValueOnce(commandResult({ stdout: "[]" }));
     await expect(adapter.layoutDiff({ deviceSerial: "emulator-5554" }))
-      .resolves.toEqual([]);
+      .resolves.toMatchObject({
+        changes: [],
+        backend: "androidCli"
+      });
 
     expect(vi.mocked(runner.run)).toHaveBeenNthCalledWith(1, {
-      executable: "android",
-      args: ["layout", "--device=emulator-5554"]
+      executable: "adb",
+      args: [
+        "-s",
+        "emulator-5554",
+        "shell",
+        "uiautomator",
+        "dump",
+        "/sdcard/taphound-uiautomator.xml"
+      ]
     });
-    expect(vi.mocked(runner.run)).toHaveBeenNthCalledWith(2, {
+    expect(vi.mocked(runner.run)).toHaveBeenNthCalledWith(4, {
       executable: "android",
       args: ["layout", "--diff", "--device=emulator-5554"]
     });
+  });
+
+  it("uses the dedicated Android CLI diff backend for layout stability", async () => {
+    const runner = processRunner();
+    vi.mocked(runner.run)
+      .mockResolvedValueOnce(commandResult())
+      .mockResolvedValueOnce(commandResult({
+        stdout: "<hierarchy><node text='Home' bounds='[0,0][100,100]' " +
+          "enabled='true' /></hierarchy>"
+      }))
+      .mockResolvedValueOnce(commandResult())
+      .mockResolvedValueOnce(commandResult({ stdout: "[]" }))
+      .mockResolvedValueOnce(commandResult({
+        stdout: JSON.stringify({ modified: [{ id: "popup" }] })
+      }));
+    const adapter = new AndroidCliAdapter(runner);
+
+    await adapter.layout({ deviceSerial: "emulator-5554" });
+    await expect(adapter.layoutDiff({
+      deviceSerial: "emulator-5554"
+    })).resolves.toMatchObject({
+      changes: [],
+      backend: "androidCli"
+    });
+    await expect(adapter.layoutDiff({
+      deviceSerial: "emulator-5554"
+    })).resolves.toMatchObject({
+      changes: [{ id: "popup" }],
+      backend: "androidCli"
+    });
+    expect(vi.mocked(runner.run)).toHaveBeenCalledTimes(5);
+  });
+
+  it("uses fast frame counters when the target package is known", async () => {
+    const runner = processRunner(commandResult({
+      stdout: "Total frames rendered: 42\n"
+    }));
+    const adapter = new AndroidCliAdapter(runner);
+    const options = {
+      deviceSerial: "emulator-5554",
+      packageName: "com.example.app"
+    };
+
+    await expect(adapter.layoutDiff(options)).resolves.toMatchObject({
+      changes: [{ frameStats: "42" }],
+      backend: "gfxFrameStats"
+    });
+    await expect(adapter.layoutDiff(options)).resolves.toMatchObject({
+      changes: [],
+      backend: "gfxFrameStats"
+    });
+    expect(runner.run).toHaveBeenCalledWith({
+      executable: "adb",
+      args: [
+        "-s",
+        "emulator-5554",
+        "shell",
+        "dumpsys",
+        "gfxinfo",
+        "com.example.app"
+      ]
+    });
+  });
+
+  it("does not fall back after a UIAutomator timeout", async () => {
+    const runner = processRunner(commandResult({
+      exitCode: null,
+      timedOut: true
+    }));
+    const adapter = new AndroidCliAdapter(runner);
+
+    await expect(adapter.layout({
+      deviceSerial: "emulator-5554",
+      timeoutMs: 100
+    })).rejects.toThrow(/deadline/);
+    expect(runner.run).toHaveBeenCalledTimes(2);
+    expect(runner.run).not.toHaveBeenCalledWith(
+      expect.objectContaining({ executable: "android" })
+    );
   });
 
   it("captures normal and annotated screenshots", async () => {

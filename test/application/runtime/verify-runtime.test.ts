@@ -285,7 +285,8 @@ describe("VerifyRuntime", () => {
       options.onStdoutLine("07-19 10:00:00.000  42  42 I TapHound: ready");
       const completion = Promise.resolve(commandResult({
         exitCode: null,
-        signal: "SIGTERM"
+        signal: "SIGTERM",
+        terminationRequested: true
       }));
       return {
         started: Promise.resolve(undefined),

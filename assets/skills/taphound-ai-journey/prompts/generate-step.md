@@ -3,8 +3,10 @@
 You are generating the next proposed step in a TapHound journey. You have:
 
 - **Goal**: the user's natural-language description of the test scenario.
-- **Project Context**: the JSON you generated in Phase 1 (known UI elements,
-  locators, interaction policy).
+- **Project Context Index**: the compact v2 module catalog.
+- **Selected module summaries**: only the shards cryptographically bound at
+  `generation start`, containing known Activities, screens, elements,
+  transitions, and Logcat candidates.
 - **Snapshot**: the current device state from `generation observe --json`,
   including the `layout` array (all visible UI elements with their
   properties) and the current `activity`.
@@ -22,7 +24,21 @@ the observe result).
 1. **Identify what remains**: Compare the Goal against completed steps. What
    is the next logical action?
 
-2. **Find the target element**: Look through `snapshot.layout` for an element
+2. **Verify Context coverage**: Find `snapshot.activity` in the selected
+   module summaries. If no selected shard covers it, return
+   `{"error":"context coverage missing","activity":"..."}`. Do not read or
+   add an unbound shard after session start.
+
+3. **Verify hierarchy completeness**: Inspect `snapshot.windowHierarchy`
+   when present. If its status is `incomplete`, do not propose any action,
+   including Back or Wait. Return
+   `{"error":"window hierarchy incomplete","diagnostics":[...],"recovery":[...]}`
+   using the snapshot's exact diagnostics and recovery values. If the status
+   is `unknown`, continue only with elements already present in
+   `snapshot.layout`; never infer missing PopupWindow, dialog, or overlay
+   controls from the screenshot.
+
+4. **Find the target element**: Look through `snapshot.layout` for an element
    that matches the next intended action:
    - Match by `resourceId` first (highest priority).
    - If no `resourceId` match, match by `text`.
@@ -36,12 +52,12 @@ the observe result).
    - For `scrollTo`: specify both `locator` (target) and `container`
      (scrollable parent).
 
-3. **Determine activity.before**: This is `snapshot.activity` (the current
+5. **Determine activity.before**: This is `snapshot.activity` (the current
    Activity class). The proposed step only includes `activity.before` —
    never `activity.after`. The Core determines the after-Activity from
    live device observation after executing the action.
 
-4. **Add expect (optional)**: Only if there is a deterministic, verifiable
+6. **Add expect (optional)**: Only if there is a deterministic, verifiable
    outcome:
    - `element`: a specific element should appear after the action (e.g., a
      search input field appears after clicking "open search").
@@ -89,6 +105,7 @@ Example (inputText):
 ## Rules
 
 - Never use coordinates, visual guessing, or annotated-label fallback.
+- Never act when `snapshot.windowHierarchy.status` is `incomplete`.
 - The proposed step only includes `activity.before`, never `activity.after`.
   The Core determines `after` from live device observation.
 - Locator priority is fixed: `resourceId` > `text` > `contentDescription`.

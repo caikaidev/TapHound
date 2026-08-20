@@ -17,13 +17,6 @@ const cli = join(repositoryRoot, "dist", "cli", "main.js");
 let projectRoot = "";
 
 beforeAll(async () => {
-  const build = spawnSync("npm", ["run", "build", "--silent"], {
-    cwd: repositoryRoot,
-    encoding: "utf8"
-  });
-  if (build.status !== 0) {
-    throw new Error(build.stderr || build.stdout || "TapHound build failed");
-  }
   projectRoot = await mkdtemp(join(tmpdir(), "taphound-generation-process-"));
   await writeFile(join(projectRoot, "taphound.config.json"), JSON.stringify({
     version: 1,

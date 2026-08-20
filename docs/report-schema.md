@@ -64,4 +64,14 @@ The JSON `exitCode` of `taphound verify --json` matches the process exit code. S
 
 ## Step Failure Evidence
 
-Each step records monotonic time, duration, and the step Logcat path. The Locator report includes matched fields and fallback evidence; on Idle timeout the last Layout Diff is saved; Activity and Expect each record the expected value, actual result, and fixed failure code. A `scrollTo` step records a `scroll: { swipesUsed, maxSwipes }` summary and does not populate `locator`; `idle` is populated only when an Idle timeout occurs during scrolling (and the corresponding `steps/NNN-layout-diff.json` is written), while other scroll failures (such as `SCROLL_TARGET_NOT_FOUND`, `LOCATOR_AMBIGUOUS`, or a missing container) do not populate `idle`.
+Each step records monotonic time, duration, and the step Logcat path. Idle
+evidence records poll count and, when available, total wait duration,
+sampling-command duration, and the stability backend. The Locator report
+includes matched fields and fallback evidence; on Idle timeout the last Layout
+Diff is saved; Activity and Expect each record the expected value, actual
+result, and fixed failure code. A `scrollTo` step records a
+`scroll: { swipesUsed, maxSwipes }` summary and does not populate `locator`;
+`idle` is populated only when an Idle timeout occurs during scrolling (and the
+corresponding `steps/NNN-layout-diff.json` is written), while other scroll
+failures (such as `SCROLL_TARGET_NOT_FOUND`, `LOCATOR_AMBIGUOUS`, or a missing
+container) do not populate `idle`.

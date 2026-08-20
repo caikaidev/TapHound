@@ -1,6 +1,7 @@
 import type { Point } from "./android-cli.js";
 import type { ForegroundComponent } from "../domain/activity.js";
 import type { AppProcess } from "../domain/app-process.js";
+import type { WindowTopology } from "../domain/window-hierarchy.js";
 import type {
   CommandResult,
   RunningCommand
@@ -43,6 +44,7 @@ export interface AdbPort {
   launchActivity: (options: LaunchActivityOptions) => Promise<CommandResult>;
   forceStop: (identity: AppIdentity) => Promise<CommandResult>;
   appProcesses: (identity: AppIdentity) => Promise<readonly AppProcess[]>;
+  windowTopology: (identity: AppIdentity) => Promise<WindowTopology>;
   tap: (
     point: Point,
     deviceSerial: string,

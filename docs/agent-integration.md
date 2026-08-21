@@ -68,9 +68,12 @@ The generation flow uses the in-repo [`taphound-ai-journey` Skill](../assets/ski
    selects the deepest applicable valid Flow, never by filename alone.
 5. `generation start --module ... [--base-flow ...]` binds the project,
    config, selected module dependency closure, device, and optional cleanly
-   replayed Flow prefix.
-6. The Agent observes once, submits a proposal strictly bound to that snapshot,
-   then reuses successful steps' `nextBinding` and `nextSnapshot` when present.
+   replayed Flow prefix. Without a Base Flow, Core force-stops and launches the
+   configured Activity before creating the session.
+6. The Agent uses `generation observe --compact --json`, reads the project-
+   relative authoritative `snapshotRef`, and submits a proposal strictly bound
+   to that full snapshot. Compact successful steps return `nextBinding` and
+   `nextSnapshotRef`; the Agent reads the reference before the next proposal.
    It uses `generation confirm` when human approval is required, and
    `generation manual` for local TTY overrides.
 7. `generation status` exposes durable state. Interrupted work is retried only
@@ -114,7 +117,19 @@ Refresh never invents semantic knowledge. It stops with `exitCode: 1` and `statu
 
 By default, changed source evidence stops generation with `CONTEXT_STALE`. For frequent implementation-only edits, an agent may explicitly pass `--allow-evidence-drift` to both `generation start` and `generation finalize`. This does not bypass Context shard integrity, project/config/session bindings, locator safety, or final replay verification. It only allows the validator's evidence-file drift result to proceed; the final replay remains authoritative. JSON output reports `evidenceDriftAllowed: true` when this opt-in is active.
 
-Generation's `--json` commands likewise write only one machine-readable JSON value to stdout and indicate the result with `exitCode`. The Agent must retain `generationId`, `baseRevision`, `snapshotHash`, and the full snapshot, and must not fabricate or reuse expired bindings on its own. Detached finalize progress and stdout live under `.taphound/build/jobs/<generationId>/`, outside the authoritative bundle. For the full protocol, retry rules, and Context update strategy, see the Skill's [`GUIDE.md`](../assets/skills/taphound-ai-journey/GUIDE.md).
+Generation's `--json` commands likewise write only one machine-readable JSON
+value to stdout and indicate the result with `exitCode`. `observe` always
+returns `snapshotRef`; `--compact` omits the duplicate inline snapshot.
+`step`, `confirm`, and `manual` similarly replace `nextSnapshot` with
+`nextSnapshotRef` in compact mode. The referenced file is still the full
+RuntimeSnapshot required by the proposal envelope. The Agent must retain
+`generationId`, `baseRevision`, `snapshotHash`, and that exact snapshot, and
+must not fabricate or reuse expired bindings. Step results include phase timing
+for freshness, evidence setup, observation, action, idle wait, expectations,
+Logcat, and optional next observation. Detached finalize progress and stdout
+live under `.taphound/build/jobs/<generationId>/`, outside the authoritative
+bundle. For the full protocol, retry rules, and Context update strategy, see
+the Skill's [`GUIDE.md`](../assets/skills/taphound-ai-journey/GUIDE.md).
 
 ## Installing the Skill for AI Agents
 

@@ -58,6 +58,31 @@ describe("FileSystemWorkspaceLayout", () => {
     ]);
   });
 
+  it("reports timestamped Verify run directories at the workspace root", async () => {
+    const root = await temporaryRoot();
+    const layout = new FileSystemWorkspaceLayout();
+    const stray = "2026-08-06T12-34-56.789Z-123e4567-e89b-42d3-a456-426614174000";
+    await mkdir(join(root, ".taphound", stray), { recursive: true });
+    await mkdir(join(root, ".taphound", "journeys"));
+
+    await expect(layout.findLegacyDirectories(root)).resolves.toEqual([
+      `.taphound/${stray}`
+    ]);
+  });
+
+  it("initializes the safe build layout from a fresh project", async () => {
+    const root = await temporaryRoot();
+    const layout = new FileSystemWorkspaceLayout();
+
+    await layout.ensureBuildLayout(root);
+
+    await expect(readFile(
+      join(root, ".taphound", ".gitignore"),
+      "utf8"
+    )).resolves.toBe("build/\n");
+    await expect(layout.findLegacyDirectories(root)).resolves.toEqual([]);
+  });
+
   it("creates the build ignore file exactly once", async () => {
     const root = await temporaryRoot();
     const layout = new FileSystemWorkspaceLayout();

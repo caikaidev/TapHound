@@ -1017,6 +1017,7 @@ describe("generation JSON process protocol", () => {
       capturedAt: "2026-07-23T00:00:01.000Z"
     };
     const nextSnapshotHash = hashRuntimeSnapshot(nextSnapshot);
+    const nextSnapshotRef = ".taphound/build/generations/generation-1/evidence/snapshots/revision-000003/attempt-3/snapshot.json";
     test.execute.mockResolvedValueOnce({
       status: "succeeded",
       step: {
@@ -1033,7 +1034,8 @@ describe("generation JSON process protocol", () => {
           snapshotHash: nextSnapshotHash
         },
         snapshot: nextSnapshot,
-        snapshotHash: nextSnapshotHash
+        snapshotHash: nextSnapshotHash,
+        snapshotRef: nextSnapshotRef
       }
     });
 
@@ -1052,8 +1054,68 @@ describe("generation JSON process protocol", () => {
         baseRevision: 3,
         snapshotHash: nextSnapshotHash
       },
-      nextSnapshot
+      nextSnapshot,
+      nextSnapshotRef
     });
+  });
+
+  it("returns only the committed binding and snapshotRef in compact step mode", async () => {
+    const test = harness();
+    vi.mocked(test.dependencies.readJson)
+      .mockResolvedValueOnce(runtimeConfig)
+      .mockResolvedValueOnce({
+        version: 1,
+        proposal,
+        snapshot
+      });
+    const nextSnapshot = {
+      ...snapshot,
+      baseRevision: 3,
+      capturedAt: "2026-07-23T00:00:01.000Z"
+    };
+    const nextSnapshotHash = hashRuntimeSnapshot(nextSnapshot);
+    const nextSnapshotRef = ".taphound/build/generations/generation-1/evidence/snapshots/revision-000003/attempt-3/snapshot.json";
+    test.execute.mockResolvedValueOnce({
+      status: "succeeded",
+      step: {
+        action: "wait",
+        activity: {
+          before: "com.example.app.MainActivity",
+          after: "com.example.app.MainActivity"
+        }
+      },
+      nextObservation: {
+        binding: {
+          generationId: "generation-1",
+          baseRevision: 3,
+          snapshotHash: nextSnapshotHash
+        },
+        snapshot: nextSnapshot,
+        snapshotHash: nextSnapshotHash,
+        snapshotRef: nextSnapshotRef
+      }
+    });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "step",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--input", "step.json",
+      "--compact",
+      "--json"
+    ]);
+
+    const output = JSON.parse(test.stdout.value) as Record<string, unknown>;
+    expect(output).toMatchObject({
+      status: "succeeded",
+      nextBinding: {
+        generationId: "generation-1",
+        baseRevision: 3,
+        snapshotHash: nextSnapshotHash
+      },
+      nextSnapshotRef
+    });
+    expect(output).not.toHaveProperty("nextSnapshot");
   });
 
   it("preflights and finalizes with exact passed tool versions", async () => {
@@ -1117,6 +1179,51 @@ describe("generation JSON process protocol", () => {
       generationId: "generation-1",
       recovery: { available: false }
     });
+  });
+
+  it("renders durable ownership and recovery details for human status", async () => {
+    const test = harness();
+    test.recoveryStatus.mockResolvedValueOnce({
+      generationId: "generation-1",
+      revision: 7,
+      state: "active",
+      candidateStepCount: 3,
+      inFlight: null,
+      verification: {
+        status: "running",
+        attemptId: "verify-1",
+        ownerPid: 4321,
+        startedAt: "2026-07-23T00:00:00.000Z"
+      },
+      publication: { status: "notRun" },
+      recovery: {
+        available: false,
+        kind: null,
+        actionMayHaveExecuted: true,
+        attemptOutcome: null,
+        requiredDecision: null,
+        ownerAlive: true
+      }
+    });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "status",
+      "--project", "/project",
+      "--session", "generation-1"
+    ]);
+
+    expect(test.stdout.value).toContain("Generation: generation-1");
+    expect(test.stdout.value).toContain("Revision: 7");
+    expect(test.stdout.value).toContain("Candidate steps: 3");
+    expect(test.stdout.value).toContain(
+      "Verification: running (attempt verify-1)"
+    );
+    expect(test.stdout.value).toContain(
+      "Verification owner: 4321 (alive)"
+    );
+    expect(test.stdout.value).toContain("Recovery: unavailable");
+    expect(test.stdout.value).toContain("Action may have executed: yes");
+    expect(test.stderr.value).toBe("");
   });
 
   it("waits until generation publication is terminal", async () => {

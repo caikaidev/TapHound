@@ -174,6 +174,7 @@ function dependencies(): {
             snapshotHash: "b".repeat(64)
           },
           snapshotHash: "b".repeat(64),
+          snapshotRef: ".taphound/build/generations/generation-1/evidence/snapshots/revision-000001/attempt-1/snapshot.json",
           snapshot: {
             version: 1 as const,
             generationId: "generation-1",
@@ -655,6 +656,7 @@ describe("TapHound CLI commands", () => {
       generationId: "generation-1",
       baseRevision: 1,
       snapshotHash: "b".repeat(64),
+      snapshotRef: ".taphound/build/generations/generation-1/evidence/snapshots/revision-000001/attempt-1/snapshot.json",
       snapshot: {
         version: 1,
         generationId: "generation-1",
@@ -683,6 +685,29 @@ describe("TapHound CLI commands", () => {
       }
     });
     expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("emits only binding and authoritative snapshotRef in compact observe mode", async () => {
+    const test = dependencies();
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "generation", "observe",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--compact",
+      "--json"
+    ]);
+
+    const output = JSON.parse(test.stdout.value) as Record<string, unknown>;
+    expect(output).toEqual({
+      status: "observed",
+      exitCode: 0,
+      generationId: "generation-1",
+      baseRevision: 1,
+      snapshotHash: "b".repeat(64),
+      snapshotRef: ".taphound/build/generations/generation-1/evidence/snapshots/revision-000001/attempt-1/snapshot.json"
+    });
+    expect(output).not.toHaveProperty("snapshot");
   });
 
   it("maps invalid generation Context input to CONTEXT_INVALID", async () => {
@@ -787,6 +812,7 @@ describe("TapHound CLI commands", () => {
     });
     test.value.generationStarter = new GenerationStarter({
       contextValidator: test.value.contextValidator,
+      appPreparer: { prepare: vi.fn(() => Promise.resolve()) },
       store: { create: vi.fn((): Promise<void> => Promise.resolve()) },
       now: (): Date => new Date("2026-07-22T12:00:00.000Z"),
       generateId: (): string => "unused-id",

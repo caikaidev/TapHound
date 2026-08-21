@@ -3,6 +3,10 @@ import type {
   LayoutElement,
   Locator
 } from "../../domain/layout.js";
+import {
+  flattenLayout,
+  type LayoutEntry
+} from "../locator/layout-traversal.js";
 
 export interface RecorderTarget {
   element: LayoutElement;
@@ -12,18 +16,10 @@ export interface RecorderTarget {
 
 export type RecorderTargetAction = "click" | "longClick" | "swipe";
 
-function flatten(elements: readonly LayoutElement[]): LayoutElement[] {
-  return elements.flatMap((element) => [
-    element,
-    ...flatten(element.children)
-  ]);
-}
-
-export function selectUniqueLocator(
+function selectLocatorInScope(
   target: LayoutElement,
-  roots: readonly LayoutElement[]
+  elements: readonly LayoutElement[]
 ): Locator | undefined {
-  const elements = flatten(roots);
   for (const field of LOCATOR_FIELDS) {
     const value = target[field];
     if (
@@ -34,7 +30,59 @@ export function selectUniqueLocator(
       return { [field]: value };
     }
   }
-  return undefined;
+
+  let candidates = [...elements];
+  let locator: Locator = {};
+  for (const field of LOCATOR_FIELDS) {
+    const value = target[field];
+    if (value === undefined || value.length === 0) {
+      continue;
+    }
+    candidates = candidates.filter((element) => element[field] === value);
+    locator = { ...locator, [field]: value };
+    if (candidates.length === 1) {
+      return locator;
+    }
+  }
+
+  const index = candidates.findIndex((element) => element === target);
+  return index < 0 || LOCATOR_FIELDS.every((field) => locator[field] === undefined)
+    ? undefined
+    : { ...locator, index };
+}
+
+export function selectUniqueLocator(
+  target: LayoutElement,
+  roots: readonly LayoutElement[]
+): Locator | undefined {
+  return selectLocator(target, flattenLayout(roots));
+}
+
+function selectLocator(
+  target: LayoutElement,
+  entries: readonly LayoutEntry[]
+): Locator | undefined {
+  const elements = entries.map(({ element }) => element);
+  const global = selectLocatorInScope(target, elements);
+  if (global === undefined || global.index === undefined) {
+    return global;
+  }
+
+  const targetEntry = entries.find(({ element }) => element === target);
+  for (const ancestor of [...(targetEntry?.ancestors ?? [])].reverse()) {
+    const within = selectLocatorInScope(ancestor, elements);
+    if (within === undefined) {
+      continue;
+    }
+    const descendants = entries.filter(
+      ({ ancestors }) => ancestors.includes(ancestor)
+    ).map(({ element }) => element);
+    const scoped = selectLocatorInScope(target, descendants);
+    if (scoped !== undefined && scoped.index === undefined) {
+      return { ...scoped, within };
+    }
+  }
+  return global;
 }
 
 function targetLabel(element: LayoutElement, locator: Locator): string {
@@ -45,7 +93,13 @@ function targetLabel(element: LayoutElement, locator: Locator): string {
     return element.id;
   }
   const value = locator[identity] ?? element.id;
-  return `${element.id} — ${identity}: ${value}`;
+  const index = locator.index === undefined
+    ? ""
+    : ` [${String(locator.index)}]`;
+  const scope = locator.within === undefined
+    ? ""
+    : " within scoped container";
+  return `${element.id} — ${identity}: ${value}${index}${scope}`;
 }
 
 function supportsAction(
@@ -63,11 +117,16 @@ export function listRecorderTargets(
   roots: readonly LayoutElement[],
   action: RecorderTargetAction
 ): RecorderTarget[] {
-  const primary = flatten(roots).flatMap((element) => {
+  const entries = flattenLayout(roots);
+  const locators = new Map(entries.map(({ element }) => [
+    element,
+    selectLocator(element, entries)
+  ]));
+  const primary = entries.flatMap(({ element }) => {
     if (!element.enabled || !supportsAction(element, action)) {
       return [];
     }
-    const locator = selectUniqueLocator(element, roots);
+    const locator = locators.get(element);
     if (locator === undefined) {
       return [];
     }
@@ -85,17 +144,17 @@ export function listRecorderTargets(
     return primary;
   }
 
-  const hasOrphan = flatten(roots).some(
-    (element) => element.enabled
+  const hasOrphan = entries.some(
+    ({ element }) => element.enabled
       && supportsAction(element, action)
-      && selectUniqueLocator(element, roots) === undefined
+      && locators.get(element) === undefined
   );
   if (!hasOrphan) {
     return primary;
   }
 
   const primaryIds = new Set(primary.map((target) => target.element.id));
-  const relaxed = listLocatableTargets(roots).filter(
+  const relaxed = listLocatableTargetsFromEntries(entries, locators).filter(
     (target) => !supportsAction(target.element, action)
       && !primaryIds.has(target.element.id)
       && (target.locator.text !== undefined
@@ -108,11 +167,23 @@ export function listRecorderTargets(
 export function listLocatableTargets(
   roots: readonly LayoutElement[]
 ): RecorderTarget[] {
-  return flatten(roots).flatMap((element) => {
+  const entries = flattenLayout(roots);
+  const locators = new Map(entries.map(({ element }) => [
+    element,
+    selectLocator(element, entries)
+  ]));
+  return listLocatableTargetsFromEntries(entries, locators);
+}
+
+function listLocatableTargetsFromEntries(
+  entries: readonly LayoutEntry[],
+  locators: ReadonlyMap<LayoutElement, Locator | undefined>
+): RecorderTarget[] {
+  return entries.flatMap(({ element }) => {
     if (!element.enabled) {
       return [];
     }
-    const locator = selectUniqueLocator(element, roots);
+    const locator = locators.get(element);
     if (locator === undefined) {
       return [];
     }

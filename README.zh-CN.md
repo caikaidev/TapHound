@@ -131,11 +131,13 @@ TapHound 在 Android 项目中只留下一份可预测的目录结构：需要�
       runs/<runId>/       # verify 报告、截图、Logcat
 ```
 
-请把 `.taphound/build/` 加入 `.gitignore`，其余内容提交入库。首次创建 generation
-会话时，TapHound 会写入内容为 `build/` 的 `.taphound/.gitignore`，并且永远不会覆盖
-你自己维护的同名文件。旧结构使用 `.taphound/generations`、`.taphound/jobs` 与
+请把 `.taphound/build/` 加入 `.gitignore`，其余内容提交入库。在 record、verify
+或 generation 工作前，TapHound 会写入内容为 `build/` 的 `.taphound/.gitignore`，
+并且永远不会覆盖你自己维护的同名文件。`artifactsDir` 与 `verify --reports` 可以
+指向 `.taphound` 外部，但位于 `.taphound` 内部时必须保持在 `.taphound/build/`
+下面。旧结构使用 `.taphound/generations`、`.taphound/jobs` 与
 `.taphound/runs`；一旦检测到这些目录，TapHound 会以 `CONFIG_INVALID` 停止并打印
-需要执行的 `mv` 命令。
+需要执行的 `mv` 命令；根目录中散落的时间戳 Verify run 也会按相同方式检测。
 
 ## 交互式录制
 
@@ -159,8 +161,9 @@ Recorder 不自动生成业务 `expect`。Activity、Element 或 Logcat 断言�
 
 1. 发现 Gradle 模块，生成精简的 Project Context v2 根索引以及每个模块独立的语义/证据分片。
 2. 使用 `context list` 选择 Goal 相关模块，并通过 `context validate` / `context status` 检查分片、证据与文件清单时效性。
-3. 使用 `--module` 启动 `generation` 会话。首次 `observe` 后，优先复用每个
-   成功步骤返回的 `nextBinding` 和 `nextSnapshot`。
+3. 使用 `--module` 启动 `generation` 会话。不带 `--base-flow` 时，Core 会先
+   force-stop 并启动配置的 Activity。使用 `observe --compact` 并读取权威
+   `snapshotRef`；成功的 compact step 会返回 `nextBinding` 与 `nextSnapshotRef`。
 4. 使用 `generation status` 检查持久化状态。中断的 in-flight action 可能已执行，
    只有显式运行 `generation recover --decision retry` 承认该风险后才会恢复。
 5. 长耗时 Replay 使用 `generation finalize --detach`，随后轮询
@@ -178,6 +181,10 @@ taphound generation start \
 设备在 `generation start` 时绑定，后续 `observe`、`step`、`confirm`、`manual`、
 `status` 和 `recover` 命令通过 session 使用该绑定。完整流程见 Skill 的
 [`GUIDE.md`](assets/skills/taphound-ai-journey/GUIDE.md)。
+
+`generation manual` 会交互式构建、执行并记录一个确定性 Journey step。Generation
+step JSON 会分别报告 freshness、观察、action、idle 等待、expect、Logcat 收集及
+可选后续观察的耗时。
 
 ### 为其他 AI Agent 安装 Skill
 

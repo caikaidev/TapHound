@@ -83,7 +83,8 @@ async function fixture(options: {
 
 function runVerify(
   test: ProcessFixture,
-  environment: Record<string, string> = {}
+  environment: Record<string, string> = {},
+  extraArgs: readonly string[] = []
 ): CliProcessResult {
   const result = spawnSync(process.execPath, [
     cli,
@@ -94,6 +95,7 @@ function runVerify(
     test.configPath,
     "--journey",
     test.journeyPath,
+    ...extraArgs,
     "--json"
   ], {
     cwd: repositoryRoot,
@@ -154,7 +156,23 @@ describe("built taphound verify --json process contract", () => {
     await expect(access(String(reportPath), constants.R_OK)).resolves.toBeUndefined();
     expect(JSON.parse(await readFile(String(reportPath), "utf8")))
       .toMatchObject({ status: "passed" });
+    await expect(readFile(
+      join(test.root, ".taphound", ".gitignore"),
+      "utf8"
+    )).resolves.toBe("build/\n");
   }, 15000);
+
+  it("rejects --reports at the workspace root before device work", async () => {
+    const test = await fixture();
+    const result = runVerify(test, {}, ["--reports", ".taphound"]);
+
+    expect(result.status).toBe(2);
+    expect(jsonOutput(result)).toMatchObject({
+      exitCode: 2,
+      failure: { code: "CONFIG_INVALID" }
+    });
+    expect(result.stderr).toBe("");
+  });
 
   it.each([
     [2, { invalidJourney: true }, {}],

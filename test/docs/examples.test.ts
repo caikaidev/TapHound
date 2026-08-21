@@ -135,6 +135,8 @@ describe("TapHound documentation examples", () => {
     expect(journey).toContain("annotatedLabel");
     expect(journey).toContain("#7");
     expect(journey).toContain("does not reuse");
+    expect(journey).toContain("`within`");
+    expect(journey).toContain("`index`");
   });
 
   it("documents the complete report failure and exit-code contract", async () => {
@@ -200,7 +202,7 @@ describe("TapHound documentation examples", () => {
     expect(testing).toContain("npm test");
     expect(testing).toContain("npm run acceptance:device");
     expect(testing).toContain("npm run acceptance:generation");
-    expect(testing).toContain("taphound-0.2.0-dev.2.tgz");
+    expect(testing).toContain("taphound-0.2.0-dev.3.tgz");
     expect(testing).toContain("examples/taphound-android-demo");
     for (const command of [
       "doctor",

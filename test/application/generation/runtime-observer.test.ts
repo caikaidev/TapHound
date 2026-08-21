@@ -329,6 +329,9 @@ describe("RuntimeObserver", () => {
       baseRevision: 1,
       snapshotHash: result.snapshotHash
     });
+    expect(result.snapshotRef).toMatch(
+      /^\.taphound\/build\/generations\/generation-1\/evidence\/snapshots\/revision-000001\/[^/]+\/snapshot\.json$/
+    );
     expect(result.snapshot).toMatchObject({
       version: 1,
       generationId: "generation-1",

@@ -70,9 +70,11 @@ describe("Recorder locator selection", () => {
       .toEqual({ contentDescription: "Second item" });
   });
 
-  it("lists only enabled elements that have a deterministic Locator", () => {
+  it("lists enabled duplicate elements with deterministic ordinal Locators", () => {
     expect(listRecorderTargets(elements, "click").map((choice) => choice.element.id))
-      .toEqual(["search", "duplicate-b"]);
+      .toEqual(["search", "duplicate-a", "duplicate-b"]);
+    expect(listRecorderTargets(elements, "click")[1]?.locator)
+      .toEqual({ text: "Item", index: 0 });
     expect(listRecorderTargets(elements, "click")[0]?.label)
       .toContain("search_button");
   });
@@ -182,10 +184,10 @@ const noOrphanLayout: LayoutElement[] = [{
 }];
 
 describe("Recorder relaxed content targets", () => {
-  it("appends unique content targets after interactive ones when a click orphan exists", () => {
+  it("appends ordinal content targets after interactive ones when a click orphan exists", () => {
     expect(listRecorderTargets(orphanRowLayout, "click").map(
       (choice) => choice.element.id
-    )).toEqual(["chrome", "subject"]);
+    )).toEqual(["chrome", "subject", "sender-a", "sender-b"]);
   });
 
   it("does not append content targets for longClick even when an orphan exists", () => {
@@ -244,5 +246,44 @@ describe("listLocatableTargets", () => {
       children: []
     }]);
     expect(targets).toHaveLength(0);
+  });
+
+  it("prefers a stable ancestor scope over a global ordinal", () => {
+    const roots: LayoutElement[] = [
+      {
+        id: "first",
+        resourceId: "first_list",
+        enabled: true,
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+        children: [{
+          id: "first-item",
+          text: "Item",
+          enabled: true,
+          bounds: { left: 0, top: 0, right: 100, bottom: 40 },
+          children: []
+        }]
+      },
+      {
+        id: "second",
+        resourceId: "second_list",
+        enabled: true,
+        bounds: { left: 0, top: 100, right: 100, bottom: 200 },
+        children: [{
+          id: "second-item",
+          text: "Item",
+          enabled: true,
+          bounds: { left: 0, top: 100, right: 100, bottom: 140 },
+          children: []
+        }]
+      }
+    ];
+
+    const target = listLocatableTargets(roots).find(
+      ({ element }) => element.id === "second-item"
+    );
+    expect(target?.locator).toEqual({
+      text: "Item",
+      within: { resourceId: "second_list" }
+    });
   });
 });

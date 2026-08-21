@@ -66,6 +66,26 @@ describe("ProposedStepSchema", () => {
     expect(() => ProposedStepSchema.parse(step)).not.toThrow();
   });
 
+  it("accepts ordinal and scoped Locators across proposal surfaces", () => {
+    expect(() => ProposedStepSchema.parse({
+      binding,
+      action: "scrollTo",
+      locator: {
+        text: "Item",
+        index: 2,
+        within: { resourceId: "results" }
+      },
+      container: { resourceId: "results", index: 0 },
+      direction: "up",
+      activity: { before: "com.example.app.MainActivity" },
+      expect: {
+        type: "element",
+        locator: { text: "Ready", index: 1 },
+        timeoutMs: 3000
+      }
+    })).not.toThrow();
+  });
+
   it("requires an exact proposal snapshot binding", () => {
     expect(() => ProposedStepSchema.parse({
       action: "wait",

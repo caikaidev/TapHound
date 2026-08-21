@@ -292,6 +292,9 @@ requested modules, and their declared dependencies are bound to the session.
 Omitting `--module` selects all modules. Modules cannot be added after start.
 The selected device is also bound. Session operations such as `observe`,
 `step`, `confirm`, and `manual` do not accept `--device`.
+Without `--base-flow`, Core force-stops and launches the configured Activity
+before creating the session. With a Base Flow, the verified replay prepares
+the bound post-Flow state. Launcher navigation is never a Journey step.
 
 **Failure troubleshooting**:
 
@@ -309,6 +312,7 @@ The selected device is also bound. Session operations such as `observe`,
 taphound generation observe \
   --project /path/to/android-project \
   --session <generationId> \
+  --compact \
   --json
 ```
 
@@ -321,26 +325,15 @@ taphound generation observe \
   "generationId": "a1b2c3d4-...",
   "baseRevision": 1,
   "snapshotHash": "e5f6...",
-  "snapshot": {
-    "version": 1,
-    "generationId": "a1b2c3d4-...",
-    "baseRevision": 1,
-    "deviceSerial": "emulator-5554",
-    "expectedPackageName": "dev.taphound.demo",
-    "foregroundPackageName": "dev.taphound.demo",
-    "activity": "dev.taphound.demo.MainActivity",
-    "pid": 12345,
-    "capturedAt": "2026-07-24T...",
-    "layout": [
-      { "id": "...", "resourceId": "open_search", "text": "Open search", "clickable": true, "enabled": true, "children": [] }
-    ]
-  }
+  "snapshotRef": ".taphound/build/generations/a1b2c3d4-.../evidence/snapshots/revision-000001/attempt-.../snapshot.json"
 }
 ```
 
 **Note** three binding fields: `generationId`, `baseRevision`,
-`snapshotHash`, plus the full `snapshot` object (including the `layout`
-array describing all UI elements on the current screen). Current snapshots
+`snapshotHash`, plus `snapshotRef`. Read that project-relative authoritative
+JSON file as the full `snapshot` object required by the proposed-step
+envelope. Running without `--compact` also includes the same snapshot inline,
+but still returns `snapshotRef`. Current snapshots
 also include `windowHierarchy` when the external tools expose enough
 metadata. `complete` means visible touchable target-app windows are covered by
 semantic roots, `unknown` means one side was unavailable, and `incomplete`
@@ -358,9 +351,9 @@ Inspector for diagnosis, or use an opt-in debug WindowInspector backend when
 available. Layout Inspector is not a TapHound runtime dependency. Never work
 around the failure with absolute coordinates or screenshot guessing.
 
-> Ensure the app is launched and on the expected initial screen. If the
-> foreground is not the target app, `observe` records that state, and the
-> next proposed step is rejected with `PACKAGE_ESCAPE`.
+> Core prepares the initial app state during `generation start`. If the
+> foreground later escapes the target app, `observe` records that state and
+> the next proposed step is rejected with `PACKAGE_ESCAPE`.
 
 ### 3.5 Step 3 — AI Generates Next Proposed Step
 
@@ -425,6 +418,7 @@ taphound generation step \
   --project /path/to/android-project \
   --session <generationId> \
   --input /tmp/taphound-step.json \
+  --compact \
   --json
 ```
 
@@ -444,13 +438,24 @@ taphound generation step \
     "baseRevision": 4,
     "snapshotHash": "..."
   },
-  "nextSnapshot": { "...bound post-action RuntimeSnapshot..." }
+  "nextSnapshotRef": ".taphound/build/generations/a1b2c3d4-.../evidence/snapshots/revision-000004/attempt-.../snapshot.json",
+  "timing": {
+    "freshnessCheckMs": 25,
+    "actionExecutionMs": 80,
+    "idleWaitMs": 340,
+    "postActionObservationMs": 90,
+    "expectationMs": 0,
+    "totalMs": 620,
+    "nextObservationMs": 110
+  }
 }
 ```
 
-When both `nextBinding` and `nextSnapshot` are present, use them directly for
-the next envelope. They were captured from the post-action state and
-authoritatively committed. If either is absent, run `generation observe`.
+When both `nextBinding` and `nextSnapshotRef` are present, read the reference
+as the full snapshot and use both directly for the next envelope. They were
+captured from the post-action state and authoritatively committed. If either
+is absent, run `generation observe`. Phase timing distinguishes Core action
+and idle time from caller/agent latency.
 
 **Confirmation required** (if the action is in
 `confirmationRequiredActions`):
@@ -478,6 +483,7 @@ taphound generation confirm \
   --project /path/to/android-project \
   --session <generationId> \
   --challenge <challengeId> \
+  --compact \
   --json
 ```
 
@@ -535,9 +541,10 @@ do not silently omit or repeat the action.
 
 ### 3.7 Step 5 — Repeat Until Goal is Complete
 
-After each successful step, use its `nextBinding` and `nextSnapshot` for the
-new device state. Return to Step 2 (`observe`) only when the post-action
-snapshot capture was unavailable, then continue to Step 3 -> Step 4.
+After each successful step, use its `nextBinding` and read
+`nextSnapshotRef` for the new device state. Return to Step 2 (`observe`) only
+when the post-action snapshot capture was unavailable, then continue to
+Step 3 -> Step 4.
 
 The AI agent checks whether the Goal is complete before each step (reads
 `prompts/check-completion.md`). If complete, it breaks out of the loop.
@@ -944,7 +951,7 @@ Each Goal is an independent generation session and does not affect others.
 | failure.code | Meaning | AI agent response |
 |--------------|---------|-------------------|
 | `LOCATOR_NOT_FOUND` | Locator not found in current layout | Re-observe, try a different locator |
-| `LOCATOR_AMBIGUOUS` | Locator matches multiple elements | Use a more specific locator |
+| `LOCATOR_AMBIGUOUS` | Locator matches multiple elements | Narrow with identity fields or `within`, then use zero-based `index` only if duplicates remain |
 | `ACTION_UNSUPPORTED` | Element does not support the action | Check element clickable/scrollable properties |
 | `SNAPSHOT_STALE` | Device state has changed | Re-observe |
 | `PACKAGE_ESCAPE` | Foreground switched to another app | Ensure app is in foreground, re-observe |
@@ -953,6 +960,7 @@ Each Goal is an independent generation session and does not affect others.
 | `RISK_CONFIRMATION_REQUIRED` | Action requires user confirmation | Wait for user confirmation |
 | `ACTION_FORBIDDEN` | Action is forbidden by policy | Use a different action or adjust policy |
 | `RECOVERY_REQUIRED` | Session entered recovery state | Inspect status and ask before explicit retry |
+| `APP_LAUNCH_FAILED` | No-Base-Flow startup could not reach the configured app process and Activity | Check installation, launch Activity, and device state, then start a new session |
 
 ### 7.2 generation finalize Failures
 
@@ -987,7 +995,7 @@ taphound generation recover \
 
 `recover` only clears the recovery lock after explicit acknowledgement. It
 does not commit the previous action, capture a post-action snapshot, or return
-`nextBinding`/`nextSnapshot`. Run `generation observe` afterward. If the
+`nextBinding`/`nextSnapshotRef`. Run `generation observe` afterward. If the
 action already took effect, stop rather than continuing with a candidate that
 omits it or automatically repeating it.
 

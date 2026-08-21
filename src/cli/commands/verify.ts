@@ -4,6 +4,7 @@ import { Command } from "commander";
 
 import { TapHoundConfigSchema } from "../../domain/config.js";
 import { JourneySchema } from "../../domain/journey.js";
+import { assertArtifactDirectory } from "../../domain/workspace.js";
 import type { CliDependencies } from "../dependencies.js";
 import {
   errorMessage,
@@ -60,6 +61,7 @@ export function createVerifyCommand(dependencies: CliDependencies): Command {
           },
           artifactsDir: options.reports ?? parsed.artifactsDir
         });
+        assertArtifactDirectory(options.project, config.artifactsDir);
         await assertNoLegacyWorkspace(dependencies, options.project);
         journey = JourneySchema.parse(await dependencies.readJson(
           resolve(options.project, options.journey)

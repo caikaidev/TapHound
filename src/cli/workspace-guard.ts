@@ -11,4 +11,5 @@ export async function assertNoLegacyWorkspace(
   if (legacy.length > 0) {
     throw new Error(legacyWorkspaceMessage(legacy));
   }
+  await dependencies.workspaceLayout.ensureBuildLayout(projectRoot);
 }

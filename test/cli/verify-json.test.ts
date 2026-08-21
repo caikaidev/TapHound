@@ -188,4 +188,15 @@ describe("verify --json", () => {
     expect(dependencies.verifier.verify).not.toHaveBeenCalled();
     expect(exitCodes).toEqual([2]);
   });
+
+  it("initializes the safe build layout before verification", async () => {
+    const exitCodes: number[] = [];
+    const dependencies = baseDependencies(exitCodes);
+
+    await runVerify(dependencies);
+
+    expect(dependencies.workspaceLayout).toMatchObject({
+      initializedProjects: ["/project"]
+    });
+  });
 });

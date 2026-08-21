@@ -46,6 +46,9 @@ the observe result).
    - Match by `resourceId` first (highest priority).
    - If no `resourceId` match, match by `text`.
    - If no `text` match, match by `contentDescription`.
+   - If identity fields still match multiple live elements, first add `within`
+     with a deterministic ancestor Locator when available. Add zero-based
+     `index` only when identical candidates remain in that scope.
    - The element must be `enabled: true`.
    - For `click`: prefer `clickable: true` elements.
    - For `inputText`: the target should be `focusable: true` (an EditText).
@@ -113,7 +116,9 @@ Example (inputText):
   The Core determines `after` from live device observation.
 - Locator priority is fixed: `resourceId` > `text` > `contentDescription`.
   Do not use multiple fields simultaneously unless that is the only way to
-  disambiguate.
+  disambiguate. `within` limits matching to a deterministic ancestor's
+  descendants; `index` is zero-based and applies only after all identity
+  fields have narrowed the live Layout candidates.
 - The `snapshot.layout` from `observe` is the live device layout — it is
   the source of truth for element matching, not the static XML files from
   Context generation. The same `resourceId` may appear in different layout

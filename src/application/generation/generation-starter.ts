@@ -30,6 +30,9 @@ import {
   hashJourney,
   type TapHoundReport
 } from "../../domain/report.js";
+import type {
+  GenerationAppPreparer
+} from "./generation-app-preparer.js";
 
 export interface GenerationRecoveryDetails {
   diagnostics: readonly {
@@ -57,6 +60,7 @@ export interface GenerationStartInput {
   context: ResolvedProjectContext;
   project: ProjectDescription;
   deviceSerial: string;
+  signal?: AbortSignal | undefined;
   allowEvidenceDrift?: boolean | undefined;
   baseFlow?: {
     name: string;
@@ -68,6 +72,7 @@ export interface GenerationStartInput {
 
 export interface GenerationStarterDependencies {
   contextValidator: Pick<ContextValidator, "validate">;
+  appPreparer: Pick<GenerationAppPreparer, "prepare">;
   store: Pick<GenerationSessionStore, "create">;
   now: () => Date;
   generateId: () => string;
@@ -239,6 +244,21 @@ export class GenerationStarter {
             }
           };
         })();
+
+    if (baseFlow === undefined) {
+      try {
+        await this.dependencies.appPreparer.prepare({
+          config,
+          deviceSerial: input.deviceSerial,
+          ...(input.signal === undefined ? {} : { signal: input.signal })
+        });
+      } catch (error) {
+        throw new GenerationOperationError(
+          "APP_LAUNCH_FAILED",
+          error instanceof Error ? error.message : String(error)
+        );
+      }
+    }
 
     const generationId = this.dependencies.generateId();
     const runId = distinctId(generationId, this.dependencies.generateId);

@@ -41,7 +41,19 @@ Target-type Actions use one or more fields:
 }
 ```
 
-The priority is fixed as `resourceId`, `text`, then `contentDescription`. Replay starts from the first field that has matches and uses subsequent fields to disambiguate; zero matches return `LOCATOR_NOT_FOUND`, multiple matches return `LOCATOR_AMBIGUOUS`, and the target is never guessed.
+The priority is fixed as `resourceId`, `text`, then `contentDescription`. Replay starts from the first field that has matches and uses subsequent fields to disambiguate.
+
+When identity fields still match repeated elements, a Locator can add a stable ancestor scope and/or zero-based ordinal:
+
+```json
+{
+  "text": "Item",
+  "index": 1,
+  "within": { "resourceId": "results_list" }
+}
+```
+
+`within` resolves first and limits matching to that element's descendants. `index` is then applied to the remaining candidates in Layout traversal order, after every supplied identity field has narrowed the set. The Recorder and `generation manual` prefer a unique identity, then a stable ancestor scope, and use `index` when identical candidates remain. An unresolved scope, a missing identity match, or an out-of-range index returns `LOCATOR_NOT_FOUND`; multiple matches without an index return `LOCATOR_AMBIGUOUS`. TapHound never guesses a target.
 
 ## Action
 

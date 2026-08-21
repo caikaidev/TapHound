@@ -43,6 +43,9 @@ import {
   GenerationConfirmationService
 } from "../application/generation/generation-confirmation-service.js";
 import {
+  GenerationAppPreparer
+} from "../application/generation/generation-app-preparer.js";
+import {
   GenerationFinalizer
 } from "../application/generation/generation-finalizer.js";
 import {
@@ -287,6 +290,7 @@ export function createProductionDependencies(
         Awaited<ReturnType<GenerationStarter["start"]>>
       > => new GenerationStarter({
         contextValidator,
+        appPreparer: new GenerationAppPreparer(adb, clock),
         store: generationStoreFactory(input.projectRoot),
         now: (): Date => new Date(),
         generateId: randomUUID,

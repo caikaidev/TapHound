@@ -34,14 +34,23 @@
       "properties": {
         "resourceId": { "type": "string", "minLength": 1 },
         "text": { "type": "string", "minLength": 1 },
-        "contentDescription": { "type": "string", "minLength": 1 }
+        "contentDescription": { "type": "string", "minLength": 1 },
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Zero-based ordinal applied after all identity fields have narrowed the candidate set."
+        },
+        "within": {
+          "$ref": "#/$defs/Locator",
+          "description": "Optional deterministic ancestor scope. Only descendants of this Locator participate in target matching."
+        }
       },
       "anyOf": [
         { "required": ["resourceId"] },
         { "required": ["text"] },
         { "required": ["contentDescription"] }
       ],
-      "description": "At least one identity field is required. Priority: resourceId > text > contentDescription."
+      "description": "At least one identity field is required. Priority: resourceId > text > contentDescription. Use within for a stable ancestor scope, then index only when identical candidates remain."
     },
     "ProposalBinding": {
       "type": "object",

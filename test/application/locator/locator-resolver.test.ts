@@ -78,6 +78,84 @@ describe("resolveLocator", () => {
     });
   });
 
+  it("selects an ordinal after identity-field narrowing", () => {
+    const roots = [
+      element({ id: "one", resourceId: "row", text: "Same" }),
+      element({ id: "other", resourceId: "other", text: "Same" }),
+      element({ id: "two", resourceId: "row", text: "Same" }),
+      element({ id: "three", resourceId: "row", text: "Same" })
+    ];
+
+    expect(resolveLocator(roots, {
+      resourceId: "row",
+      text: "Same",
+      index: 1
+    })).toMatchObject({
+      status: "found",
+      element: { id: "two" },
+      matchedBy: "text"
+    });
+  });
+
+  it("reports an out-of-range ordinal as not found", () => {
+    expect(resolveLocator([
+      element({ id: "one", text: "Same" }),
+      element({ id: "two", text: "Same" })
+    ], { text: "Same", index: 2 })).toMatchObject({
+      status: "failed",
+      code: "LOCATOR_NOT_FOUND"
+    });
+  });
+
+  it("limits matching to descendants of a scoped container", () => {
+    const roots = [
+      element({
+        id: "first-list",
+        resourceId: "first",
+        children: [element({ id: "first-item", text: "Item" })]
+      }),
+      element({
+        id: "second-list",
+        resourceId: "second",
+        children: [
+          element({ id: "second-item-one", text: "Item" }),
+          element({ id: "second-item-two", text: "Item" })
+        ]
+      })
+    ];
+
+    expect(resolveLocator(roots, {
+      text: "Item",
+      index: 1,
+      within: { resourceId: "second" }
+    })).toMatchObject({
+      status: "found",
+      element: { id: "second-item-two" }
+    });
+  });
+
+  it("does not promote a scoped target above its container", () => {
+    const root = element({
+      id: "outer",
+      clickable: true,
+      children: [element({
+        id: "scope",
+        resourceId: "scope",
+        children: [element({ id: "label", text: "Item" })]
+      })]
+    });
+
+    expect(resolveLocator([root], {
+      text: "Item",
+      within: { resourceId: "scope" }
+    }, {
+      requiredCapability: "clickable"
+    })).toMatchObject({
+      status: "failed",
+      code: "ACTION_FAILED"
+    });
+  });
+
   it("rejects a disabled target as an Action failure", () => {
     expect(resolveLocator([
       element({ enabled: false, resourceId: "search" })

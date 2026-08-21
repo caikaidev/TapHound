@@ -22,20 +22,30 @@ export const LayoutPointSchema = z.strictObject({
 
 export type LayoutPoint = z.infer<typeof LayoutPointSchema>;
 
-export const LocatorSchema = z.strictObject({
-  resourceId: z.string().trim().min(1).optional(),
-  text: z.string().min(1).optional(),
-  contentDescription: z.string().min(1).optional()
-}).refine(
-  ({ contentDescription, resourceId, text }) => (
-    resourceId !== undefined
-    || text !== undefined
-    || contentDescription !== undefined
-  ),
-  { message: "Locator must contain a supported identity field" }
-);
+export interface Locator {
+  resourceId?: string | undefined;
+  text?: string | undefined;
+  contentDescription?: string | undefined;
+  index?: number | undefined;
+  within?: Locator | undefined;
+}
 
-export type Locator = z.infer<typeof LocatorSchema>;
+export const LocatorSchema: z.ZodType<Locator> = z.lazy(
+  () => z.strictObject({
+    resourceId: z.string().trim().min(1).optional(),
+    text: z.string().min(1).optional(),
+    contentDescription: z.string().min(1).optional(),
+    index: z.number().int().nonnegative().optional(),
+    within: LocatorSchema.optional()
+  }).refine(
+    ({ contentDescription, resourceId, text }) => (
+      resourceId !== undefined
+      || text !== undefined
+      || contentDescription !== undefined
+    ),
+    { message: "Locator must contain a supported identity field" }
+  )
+);
 
 export interface LayoutElement {
   id: string;

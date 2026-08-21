@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { Command } from "commander";
 
 import { TapHoundConfigSchema } from "../../domain/config.js";
+import { assertArtifactDirectory } from "../../domain/workspace.js";
 import type { CliDependencies } from "../dependencies.js";
 import {
   errorMessage,
@@ -36,6 +37,7 @@ export function createRecordCommand(dependencies: CliDependencies): Command {
         config = TapHoundConfigSchema.parse(await dependencies.readJson(
           resolve(options.project, options.config)
         ));
+        assertArtifactDirectory(options.project, config.artifactsDir);
         await assertNoLegacyWorkspace(dependencies, options.project);
       } catch (error) {
         const output = failureOutput(2, "CONFIG_INVALID", errorMessage(error));

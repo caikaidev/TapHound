@@ -88,6 +88,33 @@ describe("JourneySchema", () => {
     })).not.toThrow();
   });
 
+  it("accepts ordinal and scoped Locators for scroll targets, containers, and expectations", () => {
+    expect(() => JourneySchema.parse({
+      version: 1,
+      name: "Repeated elements",
+      steps: [{
+        action: "scrollTo",
+        locator: {
+          text: "Item",
+          index: 2,
+          within: { resourceId: "results" }
+        },
+        container: {
+          resourceId: "results",
+          index: 0,
+          within: { contentDescription: "Main panel" }
+        },
+        direction: "up",
+        activity,
+        expect: {
+          type: "element",
+          locator: { text: "Ready", index: 1 },
+          timeoutMs: 3000
+        }
+      }]
+    })).not.toThrow();
+  });
+
   it("requires Activity before and after checkpoints", () => {
     expect(() => JourneySchema.parse({
       version: 1,

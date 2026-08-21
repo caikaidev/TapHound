@@ -8,6 +8,10 @@ import type {
   Locator
 } from "../../domain/layout.js";
 import type { Point } from "../../ports/android-cli.js";
+import {
+  flattenLayout,
+  type LayoutEntry
+} from "./layout-traversal.js";
 
 export interface LocatedTarget {
   status: "found";
@@ -32,21 +36,6 @@ export interface LocatorResolutionOptions {
   requiredCapability?: "clickable" | "longClickable" | undefined;
 }
 
-interface LayoutEntry {
-  element: LayoutElement;
-  ancestors: readonly LayoutElement[];
-}
-
-function flatten(
-  elements: readonly LayoutElement[],
-  ancestors: readonly LayoutElement[] = []
-): LayoutEntry[] {
-  return elements.flatMap((element) => [
-    { element, ancestors },
-    ...flatten(element.children, [...ancestors, element])
-  ]);
-}
-
 function center(element: LayoutElement): Point {
   if (element.center !== undefined) {
     return element.center;
@@ -61,12 +50,35 @@ function center(element: LayoutElement): Point {
   };
 }
 
-export function resolveLocator(
-  roots: readonly LayoutElement[],
+type EntryResolution = {
+  status: "found";
+  entry: LayoutEntry;
+  matchedBy: LocatorField;
+} | LocatorFailure;
+
+function resolveEntry(
+  allEntries: readonly LayoutEntry[],
   locator: Locator,
-  options: LocatorResolutionOptions = {}
-): LocatorResolution {
-  const entries = flatten(roots);
+  entries: readonly LayoutEntry[] = allEntries
+): EntryResolution {
+  if (locator.within !== undefined) {
+    const scope = resolveEntry(allEntries, locator.within);
+    if (scope.status === "failed") {
+      return {
+        ...scope,
+        message: `Locator scope failed: ${scope.message}`
+      };
+    }
+    entries = allEntries.flatMap((entry) => {
+      const scopeIndex = entry.ancestors.indexOf(scope.entry.element);
+      return scopeIndex < 0
+        ? []
+        : [{
+            ...entry,
+            ancestors: entry.ancestors.slice(scopeIndex)
+          }];
+    });
+  }
   let candidates: LayoutEntry[] | undefined;
   let matchedBy: LocatorField | undefined;
 
@@ -77,9 +89,9 @@ export function resolveLocator(
     }
 
     if (candidates === undefined) {
-        const matches = entries.filter(
-          ({ element }) => element[field] === value
-        );
+      const matches = entries.filter(
+        ({ element }) => element[field] === value
+      );
       if (matches.length === 0) {
         continue;
       }
@@ -112,7 +124,17 @@ export function resolveLocator(
       message: "No Layout element matches the Locator"
     };
   }
-  if (candidates.length > 1) {
+  if (locator.index !== undefined) {
+    const indexed = candidates[locator.index];
+    if (indexed === undefined) {
+      return {
+        status: "failed",
+        code: "LOCATOR_NOT_FOUND",
+        message: `Locator index ${String(locator.index)} is out of range for ${String(candidates.length)} matches`
+      };
+    }
+    candidates = [indexed];
+  } else if (candidates.length > 1) {
     return {
       status: "failed",
       code: "LOCATOR_AMBIGUOUS",
@@ -128,6 +150,19 @@ export function resolveLocator(
       message: "No Layout element matches the Locator"
     };
   }
+  return { status: "found", entry, matchedBy };
+}
+
+export function resolveLocator(
+  roots: readonly LayoutElement[],
+  locator: Locator,
+  options: LocatorResolutionOptions = {}
+): LocatorResolution {
+  const resolution = resolveEntry(flattenLayout(roots), locator);
+  if (resolution.status === "failed") {
+    return resolution;
+  }
+  const { entry, matchedBy } = resolution;
   let element = entry.element;
   if (
     options.requiredCapability !== undefined

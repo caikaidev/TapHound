@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { TapHoundConfigSchema } from "../../src/domain/config.js";
-import { DEFAULT_ARTIFACTS_DIR } from "../../src/domain/workspace.js";
+import {
+  DEFAULT_ARTIFACTS_DIR,
+  assertArtifactDirectory
+} from "../../src/domain/workspace.js";
 
 const validConfig = {
   version: 1,
@@ -83,6 +86,49 @@ describe("TapHoundConfigSchema", () => {
       ...validConfig,
       artifactsDir: "/tmp/taphound-runs"
     }).artifactsDir).toBe("/tmp/taphound-runs");
+  });
+
+  it.each([
+    ".taphound",
+    ".taphound/runs",
+    ".taphound/journeys/runs",
+    "./other/../.taphound/reports",
+    ".taphound\\reports"
+  ])("rejects report artifacts in the authoritative workspace at %s", (
+    artifactsDir
+  ) => {
+    expect(() => TapHoundConfigSchema.parse({
+      ...validConfig,
+      artifactsDir
+    })).toThrow(/must stay under \.taphound\/build/);
+  });
+
+  it.each([
+    ".taphound/build",
+    ".taphound/build/runs",
+    "reports",
+    "../shared-taphound-reports",
+    "/tmp/taphound-runs"
+  ])("accepts artifact output outside authority paths at %s", (artifactsDir) => {
+    expect(TapHoundConfigSchema.parse({
+      ...validConfig,
+      artifactsDir
+    }).artifactsDir).toBe(artifactsDir);
+  });
+
+  it("rejects an absolute artifact override into project authority paths", () => {
+    expect(() => {
+      assertArtifactDirectory(
+        "/project",
+        "/project/.taphound/journeys/reports"
+      );
+    }).toThrow(/must stay under \.taphound\/build/);
+    expect(() => {
+      assertArtifactDirectory(
+        "/project",
+        "/project/.taphound/build/custom-runs"
+      );
+    }).not.toThrow();
   });
 
   it("rejects an empty artifactsDir instead of falling back", () => {

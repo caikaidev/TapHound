@@ -58,11 +58,14 @@ const project = {
 function starter(validationStatus: "valid" | "stale" | "invalid" = "valid"): {
   service: GenerationStarter;
   created: GenerationSession[];
+  prepare: ReturnType<typeof vi.fn>;
 } {
   const created: GenerationSession[] = [];
   const ids = ["generation-core-id", "journey-run-id"];
+  const prepare = vi.fn(() => Promise.resolve());
   return {
     created,
+    prepare,
     service: new GenerationStarter({
       contextValidator: {
         validate: vi.fn(() => Promise.resolve(
@@ -79,6 +82,7 @@ function starter(validationStatus: "valid" | "stale" | "invalid" = "valid"): {
               }
         ))
       },
+      appPreparer: { prepare },
       store: {
         create: vi.fn((session: GenerationSession) => {
           created.push(session);
@@ -132,6 +136,11 @@ describe("GenerationStarter", () => {
     expect(session.bindings.configHash).toMatch(/^[a-f\d]{64}$/);
     expect(session.bindings.contextHash).toMatch(/^[a-f\d]{64}$/);
     expect(session.bindings.snapshotHash).toBeNull();
+    expect(test.prepare).toHaveBeenCalledOnce();
+    expect(test.prepare).toHaveBeenCalledWith({
+      config,
+      deviceSerial: "emulator-5554"
+    });
   });
 
   it("computes deterministic canonical input hashes", async () => {
@@ -200,6 +209,7 @@ describe("GenerationStarter", () => {
     });
     expect(session.candidateSteps).toEqual(runtimeJourney.steps);
     expect(session.candidateSources).toEqual(["flow"]);
+    expect(test.prepare).not.toHaveBeenCalled();
   });
 
   it("rejects a failed or mismatched base Flow replay", async () => {
@@ -232,6 +242,24 @@ describe("GenerationStarter", () => {
       }
     })).rejects.toMatchObject({
       code: "FLOW_REPLAY_FAILED"
+    });
+    expect(test.created).toEqual([]);
+    expect(test.prepare).not.toHaveBeenCalled();
+  });
+
+  it("does not create a session when app preparation fails", async () => {
+    const test = starter();
+    test.prepare.mockRejectedValueOnce(new Error("launch failed"));
+
+    await expect(test.service.start({
+      projectRoot: "/project",
+      config,
+      context,
+      project,
+      deviceSerial: "emulator-5554"
+    })).rejects.toMatchObject({
+      code: "APP_LAUNCH_FAILED",
+      message: "launch failed"
     });
     expect(test.created).toEqual([]);
   });

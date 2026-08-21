@@ -95,11 +95,15 @@ layout; derive every path from it instead of writing `.taphound` literals:
       runs/<runId>/       # verify reports, screenshots, Logcat
 ```
 
-`artifactsDir` is optional and defaults to `.taphound/build/runs`.
+`artifactsDir` is optional and defaults to `.taphound/build/runs`. It may
+point outside `.taphound`, but any path inside `.taphound` must remain under
+`.taphound/build`; the same boundary applies to `verify --reports`.
 `record`, `verify`, and every `generation` subcommand refuse to run with
 `CONFIG_INVALID` (exit code 2) when the legacy `.taphound/generations`,
-`.taphound/jobs`, or `.taphound/runs` directories still exist. There is no
-silent fallback and no automatic migration.
+`.taphound/jobs`, or `.taphound/runs` directories, or root-level timestamped
+Verify run directories, still exist. They initialize the safe build layout
+and `.taphound/.gitignore` before device work. There is no silent fallback and
+no automatic migration.
 
 ### Verification Flow
 
@@ -144,11 +148,16 @@ Generation is a revisioned, evidence-backed state machine:
    authoritative session. Application modules are always selected; requested
    feature modules expand declared dependencies.
 2. `RuntimeObserver` captures layout and screenshot evidence, hashes the
-   snapshot, and atomically advances the session revision.
+   snapshot, writes an authoritative project-relative `snapshotRef`, and
+   atomically advances the session revision. Compact CLI output omits duplicate
+   inline snapshots but never replaces the full referenced snapshot required
+   by proposal envelopes.
 3. `GenerationStepExecutor` accepts only proposals bound to the current session
    revision and snapshot. It re-observes freshness, applies risk confirmation,
    executes deterministically, records evidence, commits successful steps, and
-   returns a bound post-action snapshot when that capture succeeds.
+   returns a bound post-action snapshot reference when that capture succeeds,
+   and records per-phase timing for freshness, evidence setup, observation,
+   action, idle, expectations, Logcat, and next observation.
 4. `GenerationFinalizer` revalidates all bindings, resets the app, replays the
    complete candidate Journey through `VerifyRuntime`, and publishes the Journey,
    metadata, report, receipt, and manifest only after exact verification passes.

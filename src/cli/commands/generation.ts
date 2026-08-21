@@ -16,6 +16,12 @@ import {
 import type {
   RuntimeObservation
 } from "../../application/generation/runtime-observer.js";
+import type {
+  GenerationStepTiming
+} from "../../application/generation/generation-step-executor.js";
+import type {
+  GenerationRecoveryStatus
+} from "../../application/generation/generation-recovery-service.js";
 import { TapHoundConfigSchema } from "../../domain/config.js";
 import type { TapHoundConfig } from "../../domain/config.js";
 import { GenerationSessionIdSchema } from "../../domain/generation.js";
@@ -35,6 +41,7 @@ import {
   writeLine
 } from "../output.js";
 import { assertNoLegacyWorkspace } from "../workspace-guard.js";
+import { assertArtifactDirectory } from "../../domain/workspace.js";
 
 interface GenerationStartOptions {
   project: string;
@@ -51,6 +58,7 @@ interface GenerationObserveOptions {
   project: string;
   config: string;
   session: string;
+  compact?: boolean | undefined;
   json?: boolean | undefined;
 }
 
@@ -119,6 +127,7 @@ function writeFailure(
     status?: "error" | "recoveryRequired";
     details?: unknown;
     generationId?: string;
+    timing?: GenerationStepTiming | undefined;
   } = {}
 ): void {
   const output = {
@@ -127,6 +136,9 @@ function writeFailure(
     ...(outputOptions.generationId === undefined
       ? {}
       : { generationId: outputOptions.generationId }),
+    ...(outputOptions.timing === undefined
+      ? {}
+      : { timing: outputOptions.timing }),
     failure: {
       code,
       message: errorMessage(error),
@@ -154,6 +166,7 @@ async function loadConfig(
     const config = TapHoundConfigSchema.parse(await dependencies.readJson(
       resolve(options.project, options.config)
     ));
+    assertArtifactDirectory(options.project, config.artifactsDir);
     await assertNoLegacyWorkspace(dependencies, options.project);
     return config;
   } catch (error) {
@@ -186,6 +199,50 @@ function writeSuccess(
     writeLine(dependencies.stdout, message);
   }
   dependencies.setExitCode(0);
+}
+
+function compactOutput(options: GenerationOptions): boolean {
+  return "compact" in options && options.compact === true;
+}
+
+function generationStatusText(status: GenerationRecoveryStatus): string {
+  const verificationAttempt = status.verification.status === "running"
+    || status.verification.status === "passed"
+    || status.verification.status === "failed"
+    ? ("attemptId" in status.verification
+        ? status.verification.attemptId
+        : "none")
+    : "none";
+  const owner = status.verification.status === "running"
+    && status.verification.ownerPid !== undefined
+    ? `${String(status.verification.ownerPid)} (${
+        status.recovery.ownerAlive === null
+          ? "unknown"
+          : status.recovery.ownerAlive ? "alive" : "not alive"
+      })`
+    : "none";
+  const inFlight = status.inFlight === null
+    ? "none"
+    : `step ${String(status.inFlight.stepIndex)}, attempt ${status.inFlight.attemptId}`;
+  const recovery = status.recovery.available
+    ? `${status.recovery.kind ?? "unknown"}; decision=${
+        status.recovery.requiredDecision ?? "none"
+      }; outcome=${status.recovery.attemptOutcome ?? "unknown"}`
+    : "unavailable";
+  return [
+    `Generation: ${status.generationId}`,
+    `State: ${status.state}`,
+    `Revision: ${String(status.revision)}`,
+    `Candidate steps: ${String(status.candidateStepCount)}`,
+    `In flight: ${inFlight}`,
+    `Verification: ${status.verification.status} (attempt ${verificationAttempt})`,
+    `Verification owner: ${owner}`,
+    `Publication: ${status.publication.status}`,
+    `Recovery: ${recovery}`,
+    `Action may have executed: ${
+      status.recovery.actionMayHaveExecuted ? "yes" : "no"
+    }`
+  ].join("\n");
 }
 
 function mappedFailure(
@@ -296,6 +353,7 @@ async function executeApproved(
       {
         status: "recoveryRequired",
         generationId: input.generationId,
+        ...(result.timing === undefined ? {} : { timing: result.timing }),
         ...(result.failure.details === undefined
           ? {}
           : { details: result.failure.details })
@@ -312,12 +370,19 @@ async function executeApproved(
     stepIndex: session.candidateSteps.length - 1,
     step: result.step,
     source: input.source,
+    ...(result.timing === undefined ? {} : { timing: result.timing }),
     ...(result.nextObservation === undefined
       ? {}
-      : {
-          nextBinding: result.nextObservation.binding,
-          nextSnapshot: result.nextObservation.snapshot
-        }),
+      : compactOutput(options)
+        ? {
+            nextBinding: result.nextObservation.binding,
+            nextSnapshotRef: result.nextObservation.snapshotRef
+          }
+        : {
+            nextBinding: result.nextObservation.binding,
+            nextSnapshot: result.nextObservation.snapshot,
+            nextSnapshotRef: result.nextObservation.snapshotRef
+          }),
     ...(result.nextObservationFailure === undefined
       ? {}
       : { nextObservationFailure: result.nextObservationFailure })
@@ -458,6 +523,9 @@ function createStartCommand(dependencies: CliDependencies): Command {
           context,
           project,
           deviceSerial,
+          ...(dependencies.signal === undefined
+            ? {}
+            : { signal: dependencies.signal }),
           ...(baseFlow === undefined ? {} : { baseFlow }),
           ...(options.allowEvidenceDrift === true
             ? { allowEvidenceDrift: true }
@@ -500,6 +568,10 @@ function createObserveCommand(dependencies: CliDependencies): Command {
     .option("--project <path>", "Android project root", dependencies.cwd())
     .option("--config <path>", "TapHound config path", "taphound.config.json")
     .requiredOption("--session <id>", "Generation session id")
+    .option(
+      "--compact",
+      "Emit binding plus authoritative snapshotRef instead of the full snapshot"
+    )
     .option("--json", "Emit one machine-readable JSON value")
     .action(async (options: GenerationObserveOptions): Promise<void> => {
       try {
@@ -533,7 +605,10 @@ function createObserveCommand(dependencies: CliDependencies): Command {
           status: "observed" as const,
           exitCode: 0 as const,
           ...observation.binding,
-          snapshot: observation.snapshot
+          snapshotRef: observation.snapshotRef,
+          ...(options.compact === true
+            ? {}
+            : { snapshot: observation.snapshot })
         };
         if (options.json === true) {
           writeJson(dependencies.stdout, output);
@@ -587,6 +662,10 @@ function createStepCommand(dependencies: CliDependencies): Command {
   return addCommonOptions(
     new Command("step")
       .description("Accept and execute one strict planner proposal")
+      .option(
+        "--compact",
+        "Return authoritative nextSnapshotRef instead of the full next snapshot"
+      )
       .requiredOption("--input <path>", "Strict proposal envelope path"),
     dependencies
   ).action(async (options: GenerationStepOptions): Promise<void> => {
@@ -639,6 +718,10 @@ function createConfirmCommand(dependencies: CliDependencies): Command {
   return addCommonOptions(
     new Command("confirm")
       .description("Approve and execute Core-owned challenge evidence")
+      .option(
+        "--compact",
+        "Return authoritative nextSnapshotRef instead of the full next snapshot"
+      )
       .requiredOption("--challenge <id>", "Core confirmation challenge id"),
     dependencies
   ).action(async (options: GenerationConfirmOptions): Promise<void> => {
@@ -670,8 +753,15 @@ function createConfirmCommand(dependencies: CliDependencies): Command {
 function createManualCommand(dependencies: CliDependencies): Command {
   return addCommonOptions(
     new Command("manual")
-      .description("Build one local TTY manual override proposal")
-      .requiredOption("--action <action>", "Exact ProposedStep action"),
+      .description("Interactively build, execute, and record one manual Journey step")
+      .option(
+        "--compact",
+        "Return authoritative nextSnapshotRef instead of the full next snapshot"
+      )
+      .requiredOption(
+        "--action <action>",
+        "Journey action to execute through deterministic Core controls"
+      ),
     dependencies
   ).action(async (options: GenerationManualOptions): Promise<void> => {
     try {
@@ -948,12 +1038,16 @@ function createStatusCommand(dependencies: CliDependencies): Command {
         });
         status = await runtime.recovery.status(generationId);
       }
-      writeSuccess(
-        dependencies,
-        options,
-        { status: "inspected", exitCode: 0, ...status },
-        `Generation ${generationId}: ${status.state}`
-      );
+      if (options.json === true) {
+        writeJson(dependencies.stdout, {
+          status: "inspected",
+          exitCode: 0,
+          ...status
+        });
+      } else {
+        writeLine(dependencies.stdout, generationStatusText(status));
+      }
+      dependencies.setExitCode(0);
     } catch (error) {
       mappedFailure(dependencies, options, error);
     }

@@ -25,6 +25,9 @@ import type {
   GenerationSessionStore
 } from "../../ports/generation-session-store.js";
 import { GenerationOperationError } from "./generation-starter.js";
+import {
+  GENERATIONS_DIR
+} from "../../domain/workspace.js";
 
 export type RuntimeObservationBinding = ProposalBinding;
 
@@ -32,6 +35,7 @@ export interface RuntimeObservation {
   binding: RuntimeObservationBinding;
   snapshot: RuntimeSnapshot;
   snapshotHash: string;
+  snapshotRef: string;
 }
 
 export interface RuntimeObserveInput {
@@ -247,6 +251,8 @@ export class RuntimeObserver {
     );
     const evidenceDirectory = `${revisionPath(baseRevision)}/${attemptId}`;
     const screenshotPath = `${evidenceDirectory}/screen.png`;
+    const snapshotPath = `${evidenceDirectory}/snapshot.json`;
+    const snapshotRef = `${GENERATIONS_DIR}/${current.id}/${snapshotPath}`;
     await this.dependencies.store.produceEvidence(
       current.id,
       screenshotPath,
@@ -306,7 +312,7 @@ export class RuntimeObserver {
     const snapshotHash = hashRuntimeSnapshot(snapshot);
     await this.dependencies.store.writeEvidence(
       current.id,
-      `${evidenceDirectory}/snapshot.json`,
+      snapshotPath,
       snapshot
     );
     const next = GenerationSessionSchema.parse({
@@ -330,7 +336,8 @@ export class RuntimeObserver {
         snapshotHash
       },
       snapshot,
-      snapshotHash
+      snapshotHash,
+      snapshotRef
     };
   }
 }

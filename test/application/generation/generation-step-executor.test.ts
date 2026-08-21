@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  GenerationStepExecutor
+  GenerationStepExecutor,
+  type GenerationStepTiming
 } from "../../../src/application/generation/generation-step-executor.js";
 import {
   GenerationSessionStoreError
@@ -379,6 +380,19 @@ describe("GenerationStepExecutor", () => {
         path: "evidence/steps/0-attempt-1/snapshot.json"
       }
     });
+    const resultEvidence = test.evidence.get(
+      "evidence/steps/0-attempt-1/result.json"
+    ) as { outcome?: { timing?: GenerationStepTiming } };
+    const recordedTiming = resultEvidence.outcome?.timing;
+    if (recordedTiming === undefined || result.timing === undefined) {
+      throw new Error("Expected generation step timing telemetry");
+    }
+    expect(Object.values(recordedTiming).every(
+      (duration) => typeof duration === "number" && duration >= 0
+    )).toBe(true);
+    const { totalMs: recordedTotalMs, ...recordedPhases } = recordedTiming;
+    expect(result.timing).toMatchObject(recordedPhases);
+    expect(result.timing.totalMs).toBeGreaterThanOrEqual(recordedTotalMs);
     expect(JSON.stringify(test.evidence.get(
       "evidence/steps/0-attempt-1/result.json"
     ))).toMatch(/"sha256":"[a-f0-9]{64}"/);

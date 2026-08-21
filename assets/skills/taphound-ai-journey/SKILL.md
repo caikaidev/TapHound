@@ -274,6 +274,9 @@ explicitly requests generation without reuse.
    the project root. The selected device is bound to this session; subsequent
    `observe`, `step`, `confirm`, and `manual` commands use the session binding
    and do not accept `--device`.
+   When no Base Flow is selected, Core force-stops and launches the configured
+   Activity before it creates the session. Never add launcher or cross-package
+   navigation as a Journey step.
    The normalized config is also immutable for the session. Choose
    `idle.strategy` before starting:
    - `hybrid` (default) uses fast frame counters and falls back to Core-owned
@@ -290,9 +293,10 @@ explicitly requests generation without reuse.
    precondition, but do not count it as completing Goal-specific business
    actions or assertions.
 
-4. Observe once before the loop. After a successful step, prefer the returned
-   `nextBinding` and `nextSnapshot`; call `generation observe` only when either
-   field is absent.
+4. Observe once before the loop in compact mode. Read the project-relative
+   authoritative `snapshotRef` as the full RuntimeSnapshot. After a successful
+   compact step, prefer `nextBinding` and the snapshot read from
+   `nextSnapshotRef`; call `generation observe` only when either is absent.
 
 5. **Loop** for up to `maxSteps` iterations:
 
@@ -302,12 +306,15 @@ explicitly requests generation without reuse.
       taphound generation observe \
         --project <project> \
         --session <generationId> \
+        --compact \
         --json
       ```
       Parse the result. Capture:
       - `generationId`, `baseRevision`, `snapshotHash` (the binding).
-      - `snapshot` (the full RuntimeSnapshot object, including `layout` and
-        window-hierarchy diagnostics when available).
+      - `snapshotRef`, then read that project-relative JSON file as `snapshot`
+        (the full RuntimeSnapshot, including `layout` and window-hierarchy
+        diagnostics when available). Never construct the snapshot from the
+        compact output.
       - Confirm `snapshot.activity` is covered by one selected shard. If not,
         stop and report a Context coverage gap. Modules cannot be added after
         session start because the selected set is cryptographically bound.
@@ -348,13 +355,16 @@ explicitly requests generation without reuse.
         --project <project> \
         --session <generationId> \
         --input <envelope-path> \
+        --compact \
         --json
       ```
 
    f. **Handle the result**:
       - **`status: "succeeded"`**: Add the step to `completedSteps`. Clean
-        up the temp file. Save `nextBinding` and `nextSnapshot` as the next
-        iteration's authoritative input when both are present. Otherwise
+        up the temp file. Save `nextBinding`, then read `nextSnapshotRef` as
+        the next iteration's authoritative full snapshot when both are
+        present. Inspect `timing` to attribute Core freshness, action, idle,
+        expectation, collection, and next-observation time. Otherwise
         re-observe before proposing another step.
       - **`status: "confirmationRequired"`**: Present the challenge details
         (action summary, challenge ID) to the user. Wait for explicit
@@ -364,6 +374,7 @@ explicitly requests generation without reuse.
           --project <project> \
           --session <generationId> \
           --challenge <challengeId> \
+          --compact \
           --json
         ```
         Do NOT auto-approve. If the user declines, stop and report.
@@ -392,7 +403,7 @@ explicitly requests generation without reuse.
         `generation recover --decision retry`; never silently repeat the
         potentially side-effecting action. Recovery only reactivates the
         session; it does not commit the interrupted action and does not return
-        `nextBinding` or `nextSnapshot`. Re-observe after recovery. If the
+        `nextBinding` or `nextSnapshotRef`. Re-observe after recovery. If the
         observed state proves the old action already executed, do not continue
         with a Journey that omits that action and do not replay it
         automatically. Stop and start a clean session until Core provides an
@@ -464,6 +475,8 @@ explicitly requests generation without reuse.
 - The agent does NOT modify TapHound Core source code.
 - The agent does NOT use coordinates, visual guessing, or fallback.
 - Locator priority is fixed: `resourceId` > `text` > `contentDescription`.
+- Repeated elements use a deterministic `within` ancestor scope when
+  available, then a zero-based `index` after identity-field narrowing.
 - A proposed step only includes `activity.before`, never `activity.after`.
   The Core determines `after` from live device observation.
 - Temp files are cleaned up after each step and at the end of the session.

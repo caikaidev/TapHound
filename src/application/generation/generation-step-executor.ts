@@ -76,15 +76,38 @@ export interface GenerationStepFailure {
   details?: unknown;
 }
 
+export interface GenerationStepTiming {
+  freshnessCheckMs: number;
+  evidenceSetupMs: number;
+  logcatStartMs: number;
+  preActionObservationMs: number;
+  actionExecutionMs: number;
+  idleWaitMs: number;
+  postActionObservationMs: number;
+  expectationMs: number;
+  logcatStopMs: number;
+  totalMs: number;
+  nextObservationMs?: number | undefined;
+}
+
 export type GenerationStepExecutionResult =
   | {
       status: "succeeded";
       step: JourneyStep;
+      timing?: GenerationStepTiming | undefined;
       nextObservation?: RuntimeObservation | undefined;
       nextObservationFailure?: GenerationStepFailure | undefined;
     }
-  | { status: "failed"; failure: GenerationStepFailure }
-  | { status: "cancelled"; failure: GenerationStepFailure };
+  | {
+      status: "failed";
+      failure: GenerationStepFailure;
+      timing?: GenerationStepTiming | undefined;
+    }
+  | {
+      status: "cancelled";
+      failure: GenerationStepFailure;
+      timing?: GenerationStepTiming | undefined;
+    };
 
 export interface GenerationStepExecutorDependencies {
   store: Pick<
@@ -379,6 +402,19 @@ export class GenerationStepExecutor {
   public readonly execute = async (
     input: GenerationStepExecutionInput
   ): Promise<GenerationStepExecutionResult> => {
+    const executionStartedAt = this.dependencies.clock.now();
+    const timing: GenerationStepTiming = {
+      freshnessCheckMs: 0,
+      evidenceSetupMs: 0,
+      logcatStartMs: 0,
+      preActionObservationMs: 0,
+      actionExecutionMs: 0,
+      idleWaitMs: 0,
+      postActionObservationMs: 0,
+      expectationMs: 0,
+      logcatStopMs: 0,
+      totalMs: 0
+    };
     const proposal = ProposedStepSchema.parse(input.proposal);
     const snapshot = RuntimeSnapshotSchema.parse(input.snapshot);
     const source = z.enum(["planner", "manualOverride"]).parse(input.source);
@@ -445,10 +481,14 @@ export class GenerationStepExecutor {
     }
     let fresh: RuntimeSnapshot;
     try {
+      const freshnessStartedAt = this.dependencies.clock.now();
       fresh = await this.dependencies.freshnessGuard.assertFresh(
         proposal.binding,
         input.signal,
         approved
+      );
+      timing.freshnessCheckMs = (
+        this.dependencies.clock.now() - freshnessStartedAt
       );
     } catch (error) {
       await clearApproved();
@@ -528,6 +568,7 @@ export class GenerationStepExecutor {
     let proposalEvidenceSha256: string;
     let snapshotEvidenceSha256: string;
     try {
+      const evidenceStartedAt = this.dependencies.clock.now();
       await this.dependencies.store.writeEvidence(
         session.id,
         proposalEvidencePath,
@@ -540,6 +581,9 @@ export class GenerationStepExecutor {
         snapshot
       );
       snapshotEvidenceSha256 = sha256(canonicalEvidenceBytes(snapshot));
+      timing.evidenceSetupMs = (
+        this.dependencies.clock.now() - evidenceStartedAt
+      );
     } catch (error) {
       await this.markRecovery(session.id, inFlight);
       throw error;
@@ -560,18 +604,26 @@ export class GenerationStepExecutor {
     let postActionRuntime: LiveRuntime | undefined;
     const stepStartedAt = this.dependencies.clock.now();
     try {
+      const logcatStartedAt = this.dependencies.clock.now();
       await logcat.start({
         deviceSerial: session.target.deviceSerial,
         ...(input.signal === undefined ? {} : { signal: input.signal })
       });
+      timing.logcatStartMs = (
+        this.dependencies.clock.now() - logcatStartedAt
+      );
       logcatStarted = true;
       throwIfCancelled(input.signal);
+      const preActionStartedAt = this.dependencies.clock.now();
       const preAction = await this.observeLive(
         session,
         authoritativePid,
         proposal.activity.before,
         input.signal,
         fresh
+      );
+      timing.preActionObservationMs = (
+        this.dependencies.clock.now() - preActionStartedAt
       );
       logcat.scopeToPids(preAction.pids);
       throwIfCancelled(input.signal);
@@ -592,6 +644,7 @@ export class GenerationStepExecutor {
       );
 
       if (provisional.action === "scrollTo") {
+        const actionStartedAt = this.dependencies.clock.now();
         const scroll = await new ScrollToExecutor({
           androidCli: this.dependencies.androidCli,
           actionExecutor,
@@ -617,6 +670,14 @@ export class GenerationStepExecutor {
           },
           requireLiveContainerCapability: true
         }).execute(provisional, input.signal, preAction.layout);
+        const scrollDurationMs = (
+          this.dependencies.clock.now() - actionStartedAt
+        );
+        timing.idleWaitMs = scroll.idleDurationMs;
+        timing.actionExecutionMs = Math.max(
+          0,
+          scrollDurationMs - timing.idleWaitMs
+        );
         throwIfCancelled(input.signal);
         if (scroll.status === "cancelled") {
           outcome = {
@@ -651,10 +712,14 @@ export class GenerationStepExecutor {
             input.signal
           );
           throwIfCancelled(input.signal);
+          const actionStartedAt = this.dependencies.clock.now();
           const action = await actionExecutor.execute(
             provisional,
             target,
             input.signal
+          );
+          timing.actionExecutionMs = (
+            this.dependencies.clock.now() - actionStartedAt
           );
           if (isCancelled(input.signal)) {
             outcome = {
@@ -669,9 +734,13 @@ export class GenerationStepExecutor {
           }
         }
         if (outcome === undefined) {
+          const idleStartedAt = this.dependencies.clock.now();
           const idle = await idleWaiter.waitUntilIdle(
             this.dependencies.idle,
             input.signal
+          );
+          timing.idleWaitMs = (
+            this.dependencies.clock.now() - idleStartedAt
           );
           if (idle.status === "cancelled") {
             outcome = {
@@ -696,6 +765,7 @@ export class GenerationStepExecutor {
 
       if (outcome === undefined) {
         throwIfCancelled(input.signal);
+        const postActionStartedAt = this.dependencies.clock.now();
         const after = await this.observeLive(
           session,
           authoritativePid,
@@ -705,6 +775,9 @@ export class GenerationStepExecutor {
           this.dependencies.idle.timeoutMs,
           stableLayout
         );
+        timing.postActionObservationMs = (
+          this.dependencies.clock.now() - postActionStartedAt
+        );
         postActionRuntime = after;
         logcat.scopeToPids(after.pids);
         finalStep = executableStep(
@@ -713,6 +786,7 @@ export class GenerationStepExecutor {
           after.activity
         );
         if (finalStep.expect !== undefined) {
+          const expectationStartedAt = this.dependencies.clock.now();
           let expectationRuntime: LiveRuntime | undefined;
           const expectation = await new ExpectationEvaluator(
             this.dependencies.adb,
@@ -802,6 +876,9 @@ export class GenerationStepExecutor {
                 );
             throwIfCancelled(input.signal);
           }
+          timing.expectationMs = (
+            this.dependencies.clock.now() - expectationStartedAt
+          );
         }
       }
     } catch (error) {
@@ -812,6 +889,7 @@ export class GenerationStepExecutor {
 
     let stopFailure: GenerationStepFailure | undefined;
     if (logcatStarted) {
+      const logcatStopStartedAt = this.dependencies.clock.now();
       try {
         const stopped = await logcat.stop();
         if (isCancelled(input.signal)) {
@@ -833,10 +911,15 @@ export class GenerationStepExecutor {
             : "Logcat collector failed to stop"
         };
       }
+      timing.logcatStopMs = (
+        this.dependencies.clock.now() - logcatStopStartedAt
+      );
     }
     outcome ??= stopFailure === undefined
       ? { status: "succeeded", step: finalStep as JourneyStep }
       : { status: "failed", failure: stopFailure };
+    timing.totalMs = this.dependencies.clock.now() - executionStartedAt;
+    outcome = { ...outcome, timing };
 
     const log = logcatStarted
       ? logcat.lines().map((line) => line.raw).join("\n")
@@ -941,6 +1024,7 @@ export class GenerationStepExecutor {
       ) {
         return outcome;
       }
+      const nextObservationStartedAt = this.dependencies.clock.now();
       try {
         const nextObservation = await this.dependencies.observeNext({
           generationId: session.id,
@@ -953,10 +1037,25 @@ export class GenerationStepExecutor {
           },
           ...(input.signal === undefined ? {} : { signal: input.signal })
         });
-        return { ...outcome, nextObservation };
+        return {
+          ...outcome,
+          timing: {
+            ...timing,
+            nextObservationMs: (
+              this.dependencies.clock.now() - nextObservationStartedAt
+            )
+          },
+          nextObservation
+        };
       } catch (error) {
         return {
           ...outcome,
+          timing: {
+            ...timing,
+            nextObservationMs: (
+              this.dependencies.clock.now() - nextObservationStartedAt
+            )
+          },
           nextObservationFailure: asFailure(error)
         };
       }

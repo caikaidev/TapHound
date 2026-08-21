@@ -1,6 +1,9 @@
 import { z } from "zod";
 
-import { DEFAULT_ARTIFACTS_DIR } from "./workspace.js";
+import {
+  DEFAULT_ARTIFACTS_DIR,
+  isInvalidRelativeArtifactDirectory
+} from "./workspace.js";
 
 const PackageNameSchema = z.string().regex(
   /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/,
@@ -27,7 +30,10 @@ export const TapHoundConfigSchema = z.strictObject({
     stablePolls: z.number().int().positive(),
     timeoutMs: z.number().int().positive()
   }),
-  artifactsDir: z.string().trim().min(1).default(DEFAULT_ARTIFACTS_DIR)
+  artifactsDir: z.string().trim().min(1).refine(
+    (path) => !isInvalidRelativeArtifactDirectory(path),
+    "artifactsDir inside .taphound/ must stay under .taphound/build/"
+  ).default(DEFAULT_ARTIFACTS_DIR)
 });
 
 export type TapHoundConfig = z.infer<typeof TapHoundConfigSchema>;

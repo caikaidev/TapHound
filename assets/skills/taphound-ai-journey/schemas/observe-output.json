@@ -2,10 +2,10 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://taphound.dev/schemas/observe-output.json",
   "title": "TapHound generation observe --json Output",
-  "description": "Reference shape for the JSON result of `generation observe --json`. The agent parses this to extract binding fields and the full snapshot for the next proposed-step envelope.",
+  "description": "Reference shape for the JSON result of `generation observe --json`. snapshotRef is the authoritative project-relative snapshot evidence path. With --compact, snapshot is omitted and the agent reads snapshotRef before constructing the next proposed-step envelope.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["status", "exitCode", "generationId", "baseRevision", "snapshotHash", "snapshot"],
+  "required": ["status", "exitCode", "generationId", "baseRevision", "snapshotHash", "snapshotRef"],
   "properties": {
     "status": { "const": "observed" },
     "exitCode": { "const": 0 },
@@ -15,9 +15,14 @@
     },
     "baseRevision": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
     "snapshotHash": { "type": "string", "pattern": "^[a-f\\d]{64}$" },
+    "snapshotRef": {
+      "type": "string",
+      "pattern": "^\\.taphound/build/generations/[^/]+/evidence/snapshots/revision-\\d{6}/[^/]+/snapshot\\.json$",
+      "description": "Authoritative project-relative RuntimeSnapshot evidence path."
+    },
     "snapshot": {
       "type": "object",
-      "description": "Full RuntimeSnapshot. See proposed-step-envelope.json $defs/RuntimeSnapshot for the detailed schema.",
+      "description": "Full RuntimeSnapshot. Omitted only when --compact is used. See proposed-step-envelope.json $defs/RuntimeSnapshot for the detailed schema.",
       "required": ["version", "generationId", "baseRevision", "deviceSerial", "expectedPackageName", "foregroundPackageName", "activity", "pid", "capturedAt", "layout"],
       "properties": {
         "version": { "const": 1 },

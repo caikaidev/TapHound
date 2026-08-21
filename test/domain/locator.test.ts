@@ -24,6 +24,24 @@ describe("LocatorSchema", () => {
     expect(LocatorSchema.parse(locator)).toEqual(locator);
   });
 
+  it("accepts an ordinal after identity narrowing", () => {
+    const locator = { resourceId: "row", text: "Item", index: 2 };
+
+    expect(LocatorSchema.parse(locator)).toEqual(locator);
+  });
+
+  it("accepts a recursively scoped Locator", () => {
+    const locator = {
+      text: "Item",
+      within: {
+        resourceId: "results",
+        within: { contentDescription: "Main panel" }
+      }
+    };
+
+    expect(LocatorSchema.parse(locator)).toEqual(locator);
+  });
+
   it("rejects an empty Locator", () => {
     expect(() => LocatorSchema.parse({})).toThrow();
   });
@@ -31,6 +49,14 @@ describe("LocatorSchema", () => {
   it("rejects XPath and direct coordinates", () => {
     expect(() => LocatorSchema.parse({ xpath: "//button" })).toThrow();
     expect(() => LocatorSchema.parse({ x: 10, y: 20 })).toThrow();
+  });
+
+  it("rejects invalid ordinals and unknown fields at every scope", () => {
+    expect(() => LocatorSchema.parse({ text: "Item", index: -1 })).toThrow();
+    expect(() => LocatorSchema.parse({
+      text: "Item",
+      within: { resourceId: "results", xpath: "//list" }
+    })).toThrow();
   });
 });
 

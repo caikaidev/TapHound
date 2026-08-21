@@ -135,10 +135,13 @@ under `.taphound/build/`, so a single ignore line covers all generated data.
 ```
 
 Add `.taphound/build/` to `.gitignore` and commit the rest. TapHound creates
-`.taphound/.gitignore` with `build/` the first time it creates a generation
-session and never rewrites a file you already own. Earlier layouts used
+`.taphound/.gitignore` with `build/` before record, verify, or generation work
+and never rewrites a file you already own. `artifactsDir` and `verify
+--reports` may point outside `.taphound`, but any path inside `.taphound` must
+stay under `.taphound/build/`. Earlier layouts used
 `.taphound/generations`, `.taphound/jobs`, and `.taphound/runs`; TapHound stops
 with `CONFIG_INVALID` and prints the exact `mv` commands when it finds them.
+Root-level timestamped Verify run directories are detected the same way.
 
 ## Interactive Recording
 
@@ -162,8 +165,10 @@ The repository ships a [`taphound-ai-journey` Skill](assets/skills/taphound-ai-j
 
 1. Discover Gradle modules and generate a compact Project Context v2 index plus one semantic/evidence shard per module.
 2. Use `context list` to choose Goal-relevant modules and `context validate` / `context status` to check shard, evidence, and inventory freshness.
-3. Start a `generation` session with `--module`, observe once, then reuse each
-   successful step's `nextBinding` and `nextSnapshot` when present.
+3. Start a `generation` session with `--module`. Without `--base-flow`, Core
+   force-stops and launches the configured Activity before creating the
+   session. Use `observe --compact` and read its authoritative `snapshotRef`;
+   successful compact steps return `nextBinding` and `nextSnapshotRef`.
 4. Use `generation status` to inspect durable state. An interrupted in-flight
    action can only be reactivated with the explicit
    `generation recover --decision retry` acknowledgement because it may already
@@ -182,6 +187,11 @@ taphound generation start \
 ```
 
 The device is bound at `generation start`; subsequent `observe`, `step`, `confirm`, and `manual` commands use that binding via the session. See the Skill's [`GUIDE.md`](assets/skills/taphound-ai-journey/GUIDE.md) for the full workflow.
+
+`generation manual` interactively builds, executes, and records a deterministic
+Journey step. Generation step JSON includes phase timing for freshness,
+observation, action, idle waiting, expectations, Logcat collection, and the
+optional next observation.
 
 ### Installing the Skill for Other AI Agents
 

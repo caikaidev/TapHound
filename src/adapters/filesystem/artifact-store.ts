@@ -2,6 +2,7 @@ import {
   access,
   mkdir,
   mkdtemp,
+  realpath,
   rename,
   rm,
   writeFile
@@ -22,6 +23,44 @@ import type {
 function assertRunDirectoryName(name: string): void {
   if (!/^[A-Za-z0-9._-]+$/.test(name)) {
     throw new Error("Invalid artifact run directory name");
+  }
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
+}
+
+async function projectedRealPath(path: string): Promise<string> {
+  const missing: string[] = [];
+  let current = resolve(path);
+  for (;;) {
+    try {
+      return resolve(await realpath(current), ...missing.reverse());
+    } catch (error) {
+      if (!isNodeError(error) || error.code !== "ENOENT") {
+        throw error;
+      }
+      const parent = dirname(current);
+      if (parent === current) {
+        throw error;
+      }
+      missing.push(current.slice(parent.length + 1));
+      current = parent;
+    }
+  }
+}
+
+async function assertArtifactAuthorityBoundary(path: string): Promise<void> {
+  const canonical = await projectedRealPath(path);
+  const segments = canonical.split(/[\\/]+/);
+  const workspaceIndex = segments.lastIndexOf(".taphound");
+  if (
+    workspaceIndex >= 0
+    && segments[workspaceIndex + 1] !== "build"
+  ) {
+    throw new Error(
+      `Artifact path inside .taphound/ must stay under .taphound/build/: ${path}`
+    );
   }
 }
 
@@ -113,6 +152,7 @@ export class FileSystemArtifactStore implements ArtifactStore {
     runDirectoryName: string
   ): Promise<ArtifactSession> => {
     assertRunDirectoryName(runDirectoryName);
+    await assertArtifactAuthorityBoundary(baseDirectory);
     await mkdir(baseDirectory, { recursive: true });
     const temporaryDirectory = await mkdtemp(
       join(baseDirectory, `.${runDirectoryName}.tmp-`)

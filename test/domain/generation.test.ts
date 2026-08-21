@@ -135,6 +135,7 @@ describe("generation error contract", () => {
       "CONTEXT_STALE",
       "FLOW_INVALID",
       "FLOW_REPLAY_FAILED",
+      "APP_LAUNCH_FAILED",
       "SNAPSHOT_STALE",
       "PACKAGE_ESCAPE",
       "APP_CRASHED",

@@ -1,9 +1,11 @@
 import {
+  mkdir,
   mkdtemp,
   readFile,
   readdir,
   rm,
-  stat
+  stat,
+  symlink
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -64,5 +66,18 @@ describe("FileSystemArtifactStore", () => {
     await session.discard();
 
     expect(await readdir(root)).toEqual([]);
+  });
+
+  it("rejects a symlink alias into authoritative workspace content", async () => {
+    const root = await temporaryRoot();
+    const authority = join(root, ".taphound", "journeys");
+    await mkdir(authority, { recursive: true });
+    const alias = join(root, "reports");
+    await symlink(authority, alias);
+
+    await expect(
+      new FileSystemArtifactStore().begin(alias, "run-123")
+    ).rejects.toThrow(/must stay under \.taphound\/build/);
+    await expect(readdir(authority)).resolves.toEqual([]);
   });
 });

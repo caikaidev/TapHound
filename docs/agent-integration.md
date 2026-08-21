@@ -15,7 +15,7 @@ A typical flow: a developer uses Claude Code or another Agent CLI to implement a
 taphound verify \
   --project /workspace/android-app \
   --config /workspace/android-app/taphound.config.json \
-  --journey /workspace/android-app/journeys/search.json \
+  --journey /workspace/android-app/.taphound/journeys/search.json \
   --device emulator-5554 \
   --json
 ```
@@ -64,14 +64,18 @@ The generation flow uses the in-repo [`taphound-ai-journey` Skill](../assets/ski
 1. `project describe --json` outputs stable Package and Activity information.
 2. The Agent analyzes each Gradle module independently and produces a Project Context v2 root index plus module shards.
 3. `context list` exposes the compact module catalog. `context validate` / `context status` check the index, shard hashes, source evidence, and per-module file inventory. `context refresh` recomputes evidence hashes for an existing Context without re-analyzing source.
-4. `generation start --module ...` binds the project, config, selected module dependency closure, and device.
-5. The Agent observes once, submits a proposal strictly bound to that snapshot,
+4. `journey list-flows --json` validates reusable local prefixes. The Agent
+   selects the deepest applicable valid Flow, never by filename alone.
+5. `generation start --module ... [--base-flow ...]` binds the project,
+   config, selected module dependency closure, device, and optional cleanly
+   replayed Flow prefix.
+6. The Agent observes once, submits a proposal strictly bound to that snapshot,
    then reuses successful steps' `nextBinding` and `nextSnapshot` when present.
    It uses `generation confirm` when human approval is required, and
    `generation manual` for local TTY overrides.
-6. `generation status` exposes durable state. Interrupted work is retried only
+7. `generation status` exposes durable state. Interrupted work is retried only
    after explicit `generation recover --decision retry` acknowledgement.
-7. `generation finalize --detach` survives caller interruption and fully
+8. `generation finalize --detach` survives caller interruption and fully
    Replays from the initial state. The Journey and immutable evidence are
    published only after exact verification passes.
 
@@ -81,10 +85,14 @@ taphound context validate \
   --project /workspace/android-app \
   --context .taphound/context/project-context.json \
   --json
+taphound journey list-flows \
+  --project /workspace/android-app \
+  --json
 taphound generation start \
   --project /workspace/android-app \
   --context .taphound/context/project-context.json \
   --module :feature:search \
+  --base-flow search/open \
   --device emulator-5554 \
   --json
 ```
@@ -106,7 +114,7 @@ Refresh never invents semantic knowledge. It stops with `exitCode: 1` and `statu
 
 By default, changed source evidence stops generation with `CONTEXT_STALE`. For frequent implementation-only edits, an agent may explicitly pass `--allow-evidence-drift` to both `generation start` and `generation finalize`. This does not bypass Context shard integrity, project/config/session bindings, locator safety, or final replay verification. It only allows the validator's evidence-file drift result to proceed; the final replay remains authoritative. JSON output reports `evidenceDriftAllowed: true` when this opt-in is active.
 
-Generation's `--json` commands likewise write only one machine-readable JSON value to stdout and indicate the result with `exitCode`. The Agent must retain `generationId`, `baseRevision`, `snapshotHash`, and the full snapshot, and must not fabricate or reuse expired bindings on its own. Detached finalize progress and stdout live under `.taphound/jobs/<generationId>/`, outside the authoritative bundle. For the full protocol, retry rules, and Context update strategy, see the Skill's [`GUIDE.md`](../assets/skills/taphound-ai-journey/GUIDE.md).
+Generation's `--json` commands likewise write only one machine-readable JSON value to stdout and indicate the result with `exitCode`. The Agent must retain `generationId`, `baseRevision`, `snapshotHash`, and the full snapshot, and must not fabricate or reuse expired bindings on its own. Detached finalize progress and stdout live under `.taphound/build/jobs/<generationId>/`, outside the authoritative bundle. For the full protocol, retry rules, and Context update strategy, see the Skill's [`GUIDE.md`](../assets/skills/taphound-ai-journey/GUIDE.md).
 
 ## Installing the Skill for AI Agents
 
@@ -138,7 +146,7 @@ The Skill ships with the npm package (`assets/skills/`), and `taphound init` cop
 
 ```text
 After implementation is complete, run:
-taphound verify --project . --journey journeys/search.json --json
+taphound verify --project . --journey .taphound/journeys/search.json --json
 Parse the JSON; acceptance passes only when exitCode=0.
 If it fails, report report.primaryFailure first, and include reportPath.
 Do not modify the Journey to mask implementation defects.
@@ -147,3 +155,12 @@ Do not modify the Journey to mask implementation defects.
 ## Safety and Determinism
 
 TapHound Replay never invokes AI. The Agent may select an existing Journey or propose new steps in a generation session, but the final judgment of Locator, Activity, Layout Diff, risk policy, and Expect is performed by deterministic code. The Agent must not automatically loosen assertions, swap the Package, delete steps, or bypass confirmation after a failure.
+
+Generation binds the normalized config for the lifetime of the session. Agents
+must choose `idle.strategy` before `generation start` and must start a new
+session after any config change. `hybrid` falls back from active frame counters
+to Core-owned UIAutomator layout hashes; `layoutDiff` selects structural
+stability directly. An action attempt that returns
+`status: "recoveryRequired"` may already have executed. Inspect
+`generation status`, obtain explicit user approval before `recover`, and never
+assume that recovery committed the interrupted action or returned a snapshot.

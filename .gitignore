@@ -1,6 +1,7 @@
 .worktrees/
 
-.taphound/
+.taphound/build/
+.taphound/context/
 .gradle/
 .env
 .env.*

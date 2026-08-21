@@ -236,7 +236,25 @@ type "hello world" in the search box, click submit, and verify the log
 shows "submitted query=hello world".
 ```
 
-### 3.2 Step 1 — Start a Generation Session
+### 3.2 Select a Reusable Flow
+
+Before each Goal, inspect the project-local Flow catalog:
+
+```bash
+taphound journey list-flows \
+  --project /path/to/android-project \
+  --json
+```
+
+Read `prompts/select-flow.md`. Choose the deepest `status: \"valid\"` Flow
+whose `exitActivity` is a prerequisite for the Goal. For a Goal inside chat
+detail, prefer `chat/open-thread` over `core/authenticated-home` when both are
+valid. Never select only because a filename contains a Goal keyword.
+
+If a reusable prefix is selected, keep its name for the next command. If no
+Flow applies, continue without `--base-flow`.
+
+### 3.3 Step 1 — Start a Generation Session
 
 ```bash
 taphound generation start \
@@ -245,8 +263,14 @@ taphound generation start \
   --context .taphound/context/project-context.json \
   --module :feature:search \
   --device emulator-5554 \
+  --base-flow search/open \
   --json
 ```
+
+Omit `--base-flow` when no existing Flow applies. With a base Flow, Core first
+cold-launches and exactly replays the resolved prefix. A clean replay becomes
+the immutable candidate prefix, and the first `observe` starts from the Flow's
+exit Activity.
 
 **Output** (`--json` mode writes exactly one JSON object to stdout):
 
@@ -273,12 +297,13 @@ The selected device is also bound. Session operations such as `observe`,
 
 | Exit code | Meaning | Action |
 |-----------|---------|--------|
-| 2 | `CONFIG_INVALID` / `CONTEXT_INVALID` | Check config and Context files |
+| 2 | `CONFIG_INVALID` / `CONTEXT_INVALID` / `FLOW_INVALID` | Check config, Context, and Flow files |
 | 1 | `CONTEXT_STALE` | Source changed, update Context per Section 5 |
+| 1 | `FLOW_REPLAY_FAILED` | Repair/re-record the shared Flow; do not silently bypass it |
 | 3 | Environment issue | Run `doctor` first |
 | 4 | Internal error | Check stderr output |
 
-### 3.3 Step 2 — Observe Current Device State
+### 3.4 Step 2 — Observe Current Device State
 
 ```bash
 taphound generation observe \
@@ -337,7 +362,7 @@ around the failure with absolute coordinates or screenshot guessing.
 > foreground is not the target app, `observe` records that state, and the
 > next proposed step is rejected with `PACKAGE_ESCAPE`.
 
-### 3.4 Step 3 — AI Generates Next Proposed Step
+### 3.5 Step 3 — AI Generates Next Proposed Step
 
 The AI agent reads `prompts/generate-step.md` and is given:
 
@@ -366,7 +391,7 @@ the AI might generate:
 }
 ```
 
-### 3.5 Step 4 — Build Envelope and Execute
+### 3.6 Step 4 — Build Envelope and Execute
 
 Combine the AI-generated proposed step with the binding and snapshot into
 a complete envelope:
@@ -459,7 +484,7 @@ taphound generation confirm \
 > **Important**: The AI agent does NOT auto-approve. The user must manually
 > approve in a TTY terminal.
 
-**Failure** (locator not found, activity mismatch, etc.):
+**Rejected before an ambiguous action attempt**:
 
 ```json
 {
@@ -476,7 +501,39 @@ On failure, the AI agent should read the error, re-observe (Step 2),
 re-generate the step (Step 3) with a corrected locator, and retry. Up to
 3 retries.
 
-### 3.6 Step 5 — Repeat Until Goal is Complete
+**Recovery required after an action attempt**:
+
+```json
+{
+  "status": "recoveryRequired",
+  "exitCode": 1,
+  "generationId": "a1b2c3d4-...",
+  "failure": {
+    "code": "IDLE_TIMEOUT",
+    "message": "Layout did not become stable before timeout",
+    "details": {
+      "idle": {
+        "strategy": "hybrid",
+        "backend": "uiautomator",
+        "fallbackUsed": true,
+        "frameActivityDetected": true,
+        "polls": 30,
+        "durationMs": 30000,
+        "samplingDurationMs": 12000,
+        "lastDiff": []
+      }
+    }
+  }
+}
+```
+
+The action may already have executed. Inspect `generation status`, ask the
+user before `generation recover --decision retry`, then re-observe. Recovery
+does not commit the interrupted action and does not return a snapshot. If the
+new state shows that the old action executed, stop and start a clean session;
+do not silently omit or repeat the action.
+
+### 3.7 Step 5 — Repeat Until Goal is Complete
 
 After each successful step, use its `nextBinding` and `nextSnapshot` for the
 new device state. Return to Step 2 (`observe`) only when the post-action
@@ -488,7 +545,7 @@ The AI agent checks whether the Goal is complete before each step (reads
 **Loop limit**: default maximum 30 steps. If exceeded, stop and report
 incomplete.
 
-### 3.7 Step 6 — Finalize and Verify
+### 3.8 Step 6 — Finalize and Verify
 
 After all steps are complete, start finalize detached:
 
@@ -497,7 +554,7 @@ taphound generation finalize \
   --project /path/to/android-project \
   --session <generationId> \
   --context .taphound/context/project-context.json \
-  --output journeys/generated-search.json \
+  --output .taphound/journeys/generated-search.json \
   --device emulator-5554 \
   --detach \
   --json
@@ -525,9 +582,9 @@ finalize JSON at `outputPath`.
   "status": "verified",
   "exitCode": 0,
   "generationId": "a1b2c3d4-...",
-  "bundlePath": "/path/to/project/.taphound/generations/a1b2c3d4-...",
-  "journeyPath": "/path/to/project/journeys/generated-search.json",
-  "metaPath": "/path/to/project/journeys/generated-search.meta.json",
+  "bundlePath": "/path/to/project/.taphound/build/generations/a1b2c3d4-...",
+  "journeyPath": "/path/to/project/.taphound/journeys/generated-search.json",
+  "metaPath": "/path/to/project/.taphound/journeys/generated-search.meta.json",
   "replayed": true
 }
 ```
@@ -537,7 +594,7 @@ Finalize performs:
 2. Launch and replay all candidate steps in one pass
 3. Verify no fallback, no crash, all assertions pass
 4. Atomically publish the authoritative bundle to
-   `.taphound/generations/<id>/`
+   `.taphound/build/generations/<id>/`
 5. Export Journey v1 and sidecar meta to the `--output` path
 
 **Failure**: troubleshoot by `failure.code`. Common:
@@ -549,23 +606,23 @@ Finalize performs:
 | `ACTIVITY_*_MISMATCH` | Activity mismatch |
 | `EXPORT_FAILED` | Export failed (can retry finalize without replay) |
 
-### 3.8 Verify Artifacts
+### 3.9 Verify Artifacts
 
 ```bash
 # Exported Journey (standard Journey v1, can be replayed with verify)
-cat /path/to/project/journeys/generated-search.json
+cat /path/to/project/.taphound/journeys/generated-search.json
 
 # Sidecar meta (verification status, binding hashes, manual override records)
-cat /path/to/project/journeys/generated-search.meta.json
+cat /path/to/project/.taphound/journeys/generated-search.meta.json
 
 # Authoritative bundle (full evidence: per-step proposal/snapshot/logcat/result)
-ls /path/to/project/.taphound/generations/<id>/
+ls /path/to/project/.taphound/build/generations/<id>/
 ```
 
 Authoritative bundle directory structure:
 
 ```
-.taphound/generations/<id>/
+.taphound/build/generations/<id>/
 ├── manifest.json                    # Content file list + hashes
 ├── meta.json                        # Generation meta (status: verified)
 ├── candidate/journey.json           # Candidate Journey
@@ -587,7 +644,7 @@ Authoritative bundle directory structure:
         └── result.json
 ```
 
-### 3.9 Re-verify with Standard verify (Optional)
+### 3.10 Re-verify with Standard verify (Optional)
 
 The generated Journey is a standard Journey v1 and can be independently
 replayed with the regular verify command:
@@ -595,7 +652,7 @@ replayed with the regular verify command:
 ```bash
 taphound verify \
   --project /path/to/android-project \
-  --journey journeys/generated-search.json \
+  --journey .taphound/journeys/generated-search.json \
   --device emulator-5554 \
   --json
 ```
@@ -656,7 +713,7 @@ taphound generation finalize \
   --project examples/taphound-android-demo \
   --session <generationId> \
   --context .taphound/context/project-context.json \
-  --output journeys/generated-search.json \
+  --output .taphound/journeys/generated-search.json \
   --device emulator-5554 \
   --json
 ```
@@ -752,14 +809,14 @@ taphound context refresh \
   | `MODULE_INVENTORY_CHANGED` | `acceptSourceChanges` | The on-disk file set grew or shrank. Re-run with `--accept-source-changes` to accept the new inventory hash. Re-analyze only when new UI files were added that the summary must cover. |
   | `EVIDENCE_UNRESOLVED` | `reanalyze` | An evidence file is unreadable/escaped/too large (not a clean deletion). Fix the file or regenerate that module's shard (below). |
 
-  The typical one-shot reconcile for routine edits + deletions:
+The typical one-shot reconcile for routine edits + deletions:
 
-  ```bash
-  taphound context refresh \
-    --project /path/to/android-project \
-    --context /path/to/android-project/.taphound/context/project-context.json \
-    --prune-deleted --accept-source-changes --json
-  ```
+```bash
+taphound context refresh \
+  --project /path/to/android-project \
+  --context /path/to/android-project/.taphound/context/project-context.json \
+  --prune-deleted --accept-source-changes --json
+```
 
 `--module <id...>` narrows the scope. `--accept-source-changes` rehashes
 semantic and inventory drift; use it only after confirming the recorded module
@@ -865,15 +922,15 @@ regenerating the Context.
 ```bash
 # Scenario 1: Search feature
 # -> generation start -> observe -> step x4 -> finalize
-# -> journeys/generated-search.json
+# -> .taphound/journeys/generated-search.json
 
 # Scenario 2: Navigation back test
 # -> generation start (new session) -> observe -> step xN -> finalize
-# -> journeys/generated-back-test.json
+# -> .taphound/journeys/generated-back-test.json
 
 # Scenario 3: Input boundary test
 # -> generation start (new session) -> observe -> step xN -> finalize
-# -> journeys/generated-input-edge.json
+# -> .taphound/journeys/generated-input-edge.json
 ```
 
 Each Goal is an independent generation session and does not affect others.
@@ -892,6 +949,7 @@ Each Goal is an independent generation session and does not affect others.
 | `SNAPSHOT_STALE` | Device state has changed | Re-observe |
 | `PACKAGE_ESCAPE` | Foreground switched to another app | Ensure app is in foreground, re-observe |
 | `APP_CRASHED` | App process crashed | Check Logcat, restart app |
+| `IDLE_TIMEOUT` | Configured idle strategy did not stabilize | Inspect `failure.details.idle`; use a new session for config changes |
 | `RISK_CONFIRMATION_REQUIRED` | Action requires user confirmation | Wait for user confirmation |
 | `ACTION_FORBIDDEN` | Action is forbidden by policy | Use a different action or adjust policy |
 | `RECOVERY_REQUIRED` | Session entered recovery state | Inspect status and ask before explicit retry |
@@ -926,6 +984,17 @@ taphound generation recover \
   --decision retry \
   --json
 ```
+
+`recover` only clears the recovery lock after explicit acknowledgement. It
+does not commit the previous action, capture a post-action snapshot, or return
+`nextBinding`/`nextSnapshot`. Run `generation observe` afterward. If the
+action already took effect, stop rather than continuing with a candidate that
+omits it or automatically repeating it.
+
+The config, including `idle.strategy`, is bound when the session starts.
+Changing it requires a new session. For continuously rendering screens use
+`layoutDiff`, or retain the default `hybrid`, which falls back from frame
+activity to Core-owned structural layout hashing.
 
 ---
 

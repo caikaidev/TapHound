@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "kind": "flow",
+  "name": "core/authenticated-home",
+  "includes": [],
+  "steps": [
+    {
+      "action": "wait",
+      "activity": {
+        "before": "com.example.app.HomeActivity",
+        "after": "com.example.app.HomeActivity"
+      },
+      "expect": {
+        "type": "element",
+        "locator": {
+          "resourceId": "home_root"
+        },
+        "timeoutMs": 3000
+      }
+    }
+  ]
+}

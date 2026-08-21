@@ -41,7 +41,11 @@ import { logcatStopFailed } from "../collector/logcat-stop.js";
 import { ActionExecutor, type ActionTarget } from "../interaction/action-executor.js";
 import { ScrollToExecutor } from "../interaction/scroll-to-executor.js";
 import { resolveLocator } from "../locator/locator-resolver.js";
-import { IdleWaiter, type IdleConfig } from "../wait/idle-waiter.js";
+import {
+  IdleWaiter,
+  type IdleConfig,
+  type IdleResult
+} from "../wait/idle-waiter.js";
 import {
   summarizeProposedStep
 } from "./generation-confirmation-service.js";
@@ -69,6 +73,7 @@ export interface GenerationStepExecutionInput {
 export interface GenerationStepFailure {
   code: string;
   message: string;
+  details?: unknown;
 }
 
 export type GenerationStepExecutionResult =
@@ -182,7 +187,8 @@ function asFailure(error: unknown): GenerationStepFailure {
   ) {
     return {
       code: error.code,
-      message: error instanceof Error ? error.message : error.code
+      message: error instanceof Error ? error.message : error.code,
+      ...("details" in error ? { details: error.details } : {})
     };
   }
   return {
@@ -191,8 +197,28 @@ function asFailure(error: unknown): GenerationStepFailure {
   };
 }
 
-function fail(code: string, message: string): never {
-  throw Object.assign(new Error(message), { code });
+function fail(code: string, message: string, details?: unknown): never {
+  throw Object.assign(
+    new Error(message),
+    { code, ...(details === undefined ? {} : { details }) }
+  );
+}
+
+function idleTimeoutDetails(
+  idle: Extract<IdleResult, { status: "timeout" }>
+): Record<string, unknown> {
+  return {
+    idle: {
+      strategy: idle.strategy,
+      ...(idle.backend === undefined ? {} : { backend: idle.backend }),
+      polls: idle.polls,
+      durationMs: idle.durationMs,
+      samplingDurationMs: idle.samplingDurationMs,
+      fallbackUsed: idle.fallbackUsed,
+      frameActivityDetected: idle.frameActivityDetected,
+      lastDiff: idle.lastDiff
+    }
+  };
 }
 
 function sameSession(
@@ -598,7 +624,13 @@ export class GenerationStepExecutor {
             failure: { code: "RECOVERY_REQUIRED", message: "Step was cancelled" }
           };
         } else if (scroll.status === "failed") {
-          fail(scroll.code, scroll.message);
+          fail(
+            scroll.code,
+            scroll.message,
+            scroll.idle === undefined
+              ? undefined
+              : { idle: scroll.idle }
+          );
         }
       } else {
         const target = requireTarget(preAction.layout, provisional);
@@ -650,7 +682,11 @@ export class GenerationStepExecutor {
               }
             };
           } else if (idle.status === "timeout") {
-            fail(idle.code, "Layout did not become stable before timeout");
+            fail(
+              idle.code,
+              "Layout did not become stable before timeout",
+              idleTimeoutDetails(idle)
+            );
           } else {
             stableLayout = idle.layout;
           }

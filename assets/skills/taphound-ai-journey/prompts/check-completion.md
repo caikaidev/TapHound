@@ -8,6 +8,7 @@ the completed steps in this TapHound generation session.
 - **Goal**: the user's natural-language test scenario.
 - **Completed steps**: the list of steps that have succeeded so far, each
   with its action, locator, and result.
+- **Base Flow**: optional reusable navigation prefix and its exit Activity.
 
 ## Your Task
 
@@ -31,6 +32,8 @@ completed steps.
    - A `click` step with the right locator satisfies a "click X" sub-task.
    - An `inputText` step with the right text satisfies a "type X" sub-task.
    - A step with an `expect` that passed satisfies a "verify X" sub-task.
+   - A bound Base Flow may satisfy navigation to its exit Activity, but it
+     never satisfies business actions or assertions that belong to the Goal.
 
 3. **Return the result**:
    - If every sub-task has a corresponding completed step:

@@ -30,10 +30,11 @@ run(npmCommand, ["run", "lint"], "Lint");
 run(npmCommand, ["run", "build"], "Build");
 run(
   process.execPath,
-  [resolve(repositoryRoot, "dist", "cli", "main.js"), "--help"],
-  "Smoke-test built CLI"
+  [resolve(repositoryRoot, "dist", "cli", "main.js"), "--version"],
+  "Verify built CLI version"
 );
 run(npmCommand, ["link"], "Register global taphound command");
+run(taphoundCommand, ["--version"], "Verify registered taphound version");
 run(taphoundCommand, ["--help"], "Verify registered taphound command");
 
 process.stdout.write(

@@ -138,3 +138,71 @@ The Recorder does not auto-generate business assertions. A step may carry one `e
 ```
 
 Logcat is matched only within this step's `[T0, T1]` window. `match` may be `literal` or `regex`; the regex must be valid. For a full executable example see [`examples/search.journey.json`](../examples/search.journey.json).
+
+## Reusable Flow Composition
+
+Journey v1 remains the only runtime Replay protocol. Reuse is an authoring
+layer that resolves strict Flow and Journey Source documents into a complete,
+flat Journey v1 before verification.
+
+Reusable Flows live under `.taphound/flows/`:
+
+```json
+{
+  "version": 1,
+  "kind": "flow",
+  "name": "chat/open-thread",
+  "includes": ["core/authenticated-home"],
+  "steps": [
+    {
+      "action": "click",
+      "locator": { "resourceId": "test_thread" },
+      "activity": {
+        "before": "com.example.app.HomeActivity",
+        "after": "com.example.app.ChatActivity"
+      }
+    }
+  ]
+}
+```
+
+Leaf authoring documents live under `.taphound/sources/`:
+
+```json
+{
+  "version": 1,
+  "kind": "journeySource",
+  "name": "chat/send-message",
+  "includes": ["chat/open-thread"],
+  "steps": [
+    {
+      "action": "wait",
+      "activity": {
+        "before": "com.example.app.ChatActivity",
+        "after": "com.example.app.ChatActivity"
+      }
+    }
+  ]
+}
+```
+
+Resolve a source explicitly:
+
+```bash
+taphound journey resolve \
+  --project . \
+  --source .taphound/sources/chat/send-message.json \
+  --output .taphound/journeys/chat/send-message.json \
+  --json
+```
+
+Resolution expands dependencies depth-first in declared order, rejects cycles,
+duplicate or diamond inclusion, missing Flows, unsafe paths, and Activity
+boundary gaps, then writes both the flat Journey and a `.resolve.json`
+dependency/hash manifest. `verify` continues to accept only the resolved
+Journey v1.
+
+List reusable prefixes with `taphound journey list-flows --project . --json`.
+For AI generation, `generation start --base-flow chat/open-thread` performs a
+clean cold-start replay before session creation, binds the Flow resolution and
+verification hashes, and lets planning begin at the Flow exit Activity.

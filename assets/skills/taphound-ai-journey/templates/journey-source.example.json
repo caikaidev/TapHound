@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "kind": "journeySource",
+  "name": "chat/send-message",
+  "includes": [
+    "chat/open-thread"
+  ],
+  "steps": [
+    {
+      "action": "wait",
+      "activity": {
+        "before": "com.example.app.ChatActivity",
+        "after": "com.example.app.ChatActivity"
+      }
+    }
+  ]
+}

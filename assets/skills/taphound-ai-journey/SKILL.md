@@ -33,16 +33,21 @@ assets/skills/taphound-ai-journey/
 ├── GUIDE.md                              # Detailed step-by-step usage guide
 ├── prompts/
 │   ├── analyze-project.md                # Phase 1: source analysis guidance
+│   ├── select-flow.md                    # Phase 1.5: reusable Flow selection
 │   ├── generate-step.md                  # Phase 2: next-step generation guidance
 │   └── check-completion.md               # Phase 2: Goal completion check
 ├── schemas/
 │   ├── project-context.json              # v2 root index JSON Schema
 │   ├── project-context-module.json       # v2 module shard JSON Schema
 │   ├── proposed-step-envelope.json       # {version, proposal, snapshot} envelope
-│   └── observe-output.json               # generation observe --json output shape
+│   ├── observe-output.json               # generation observe --json output shape
+│   ├── flow.json                         # reusable Flow authoring shape
+│   └── journey-source.json               # composed leaf Journey source shape
 └── templates/
     ├── project-context.example.json      # Root index example
-    └── project-context-module.example.json # Module shard example
+    ├── project-context-module.example.json # Module shard example
+    ├── flow.example.json                 # reusable Flow example
+    └── journey-source.example.json       # composed leaf source example
 ```
 
 When this document says "Read `prompts/analyze-project.md`", the full path is
@@ -89,15 +94,15 @@ templates, then call the TapHound CLI.
 
 ## Inputs
 
-| Parameter  | Required | Default                        | Description                          |
-|------------|----------|--------------------------------|--------------------------------------|
-| project    | yes      | —                              | Android project root path            |
-| goal       | yes      | —                              | Natural-language test scenario       |
-| config     | no       | `taphound.config.json`         | TapHound config path (relative to project) |
-| device     | no       | doctor selects                  | Device serial                        |
-| output     | no       | `journeys/generated.json`      | Output journey path (relative to project) |
-| maxSteps   | no       | 30                             | Maximum generation steps             |
-| retryCount | no       | 3                              | Retries per rejected step            |
+| Parameter  | Required | Default                               | Description                          |
+|------------|----------|---------------------------------------|--------------------------------------|
+| project    | yes      | —                                     | Android project root path            |
+| goal       | yes      | —                                     | Natural-language test scenario       |
+| config     | no       | `taphound.config.json`                | TapHound config path (relative to project) |
+| device     | no       | doctor selects                        | Device serial                        |
+| output     | no       | `.taphound/journeys/generated.json`   | Output journey path (relative to project) |
+| maxSteps   | no       | 30                                    | Maximum generation steps             |
+| retryCount | no       | 3                                     | Retries per rejected step            |
 
 ## Phase 0: Preflight
 
@@ -216,6 +221,30 @@ templates, then call the TapHound CLI.
    - Path containing `..` or starting with `/`.
    - File listed in manifest but not found on disk.
 
+## Phase 1.5: Reusable Flow Discovery
+
+Before starting generation, inspect the validated local Flow catalog:
+
+```bash
+taphound journey list-flows \
+  --project <project> \
+  --json
+```
+
+Read `prompts/select-flow.md`. Select the deepest valid Flow whose exit
+Activity is a deterministic prerequisite for the Goal. Do not select by name
+alone. Invalid Flows are not reusable; report their diagnostics instead of
+silently regenerating the shared prefix.
+
+Pass a selected Flow to `generation start` as `--base-flow <name>`. Core
+cold-launches and exactly replays the resolved Flow before creating the
+generation session. It binds the resolution, Journey, and verification hashes,
+and records the Flow steps as the immutable candidate prefix.
+
+If no Flow applies, omit `--base-flow`. If replay fails, stop and report
+`FLOW_REPLAY_FAILED`. Only bypass a failed reusable Flow when the user
+explicitly requests generation without reuse.
+
 ## Phase 2: Journey Generation
 
 > Read `schemas/proposed-step-envelope.json` to understand the envelope
@@ -236,15 +265,30 @@ templates, then call the TapHound CLI.
      --context .taphound/context/project-context.json \
      --module :feature:chat :core:ui \
      --device <serial> \
+     --base-flow <selected-flow> \
      --json
    ```
+   Omit `--base-flow` when Phase 1.5 selected no reusable prefix.
    Omit `--module` only when all modules are intentionally needed. Capture
    `generationId` and `contextSelection` from the result. The config path is relative to
    the project root. The selected device is bound to this session; subsequent
    `observe`, `step`, `confirm`, and `manual` commands use the session binding
    and do not accept `--device`.
+   The normalized config is also immutable for the session. Choose
+   `idle.strategy` before starting:
+   - `hybrid` (default) uses fast frame counters and falls back to Core-owned
+     UIAutomator layout hashes when rendering continues.
+   - `layoutDiff` uses structural layout stability directly and is appropriate
+     for apps with known continuous animation or polling.
+   - `frameStats` requires frame quiescence and can intentionally time out on
+     continuously rendering screens.
+   If the config changes for any reason, discard this session and start a new
+   one. Do not retry a command against a mismatched session.
 
-3. Initialize a `completedSteps` list (empty at start).
+3. Initialize a `completedSteps` list (empty at start). When `baseFlow` is
+   present, treat its exit Activity as an already satisfied navigation
+   precondition, but do not count it as completing Goal-specific business
+   actions or assertions.
 
 4. Observe once before the loop. After a successful step, prefer the returned
    `nextBinding` and `nextSnapshot`; call `generation observe` only when either
@@ -325,6 +369,13 @@ templates, then call the TapHound CLI.
         Do NOT auto-approve. If the user declines, stop and report.
       - **`status: "error"` (any failure code)**: Read the failure code and
         message. Decrement the retry budget for this step.
+        This status means Core did not start an ambiguous action attempt, so
+        the session normally remains active.
+        - For `IDLE_TIMEOUT`, inspect `failure.details.idle`, including
+          `strategy`, `backend`, `fallbackUsed`, `frameActivityDetected`,
+          `polls`, `durationMs`, and `lastDiff`. Do not edit the bound config
+          and continue the same session. If another idle strategy is needed,
+          stop and start a new session with the updated config.
         - For `WINDOW_HIERARCHY_INCOMPLETE`, do not substitute coordinates or
           visual guessing. Re-observe once. If it persists, report the
           structured diagnostics and use Layout Inspector for developer
@@ -339,7 +390,13 @@ templates, then call the TapHound CLI.
         its immutable attempt outcome plus `actionMayHaveExecuted`. Stop for
         the user's explicit retry decision. Only after approval run
         `generation recover --decision retry`; never silently repeat the
-        potentially side-effecting action.
+        potentially side-effecting action. Recovery only reactivates the
+        session; it does not commit the interrupted action and does not return
+        `nextBinding` or `nextSnapshot`. Re-observe after recovery. If the
+        observed state proves the old action already executed, do not continue
+        with a Journey that omits that action and do not replay it
+        automatically. Stop and start a clean session until Core provides an
+        explicit reconcile transition.
 
    g. Clean up the temp envelope file after each iteration (success or
       failure).
@@ -387,15 +444,20 @@ templates, then call the TapHound CLI.
 |------------------------|---------------------------------------------|
 | Doctor fails           | Stop, report environment issue              |
 | Context validation fails | Fix JSON, retry validation                |
-| Step rejected          | Re-observe + re-generate (up to retryCount) |
+| Step rejected before execution | Re-observe + re-generate (up to retryCount) |
 | Confirmation required  | Present to user, wait for approval          |
-| Recovery required      | Inspect status; ask before explicit retry   |
+| Recovery required      | Inspect status; ask before retry; re-observe |
+| Config changed         | Start a new session; never rebind in place  |
 | Max steps exceeded     | Stop, report incomplete Goal                |
 | Finalize not verified  | Report failure detail, do not claim success |
 
 ## Key Rules
 
 - The agent NEVER auto-approves a confirmation challenge.
+- The agent ALWAYS checks reusable local Flows before generation and chooses
+  the deepest applicable valid prefix.
+- The agent NEVER silently bypasses a selected Flow that fails validation or
+  replay.
 - The agent NEVER bypasses Core safety (package guard, risk policy, locator
   uniqueness).
 - SHA-256 hashes are ALWAYS computed via shell, never guessed.

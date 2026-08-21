@@ -45,11 +45,14 @@ const IdleReportSchema = z.strictObject({
   polls: z.number().int().nonnegative(),
   durationMs: z.number().nonnegative().optional(),
   samplingDurationMs: z.number().nonnegative().optional(),
+  strategy: z.enum(["hybrid", "layoutDiff", "frameStats"]).optional(),
   backend: z.enum([
     "uiautomator",
     "androidCli",
     "gfxFrameStats"
   ]).optional(),
+  fallbackUsed: z.boolean().optional(),
+  frameActivityDetected: z.boolean().optional(),
   lastDiff: z.array(z.unknown()).optional()
 });
 

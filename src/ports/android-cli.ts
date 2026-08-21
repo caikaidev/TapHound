@@ -9,6 +9,7 @@ export interface Point {
 export interface DeviceCommandOptions {
   deviceSerial: string;
   packageName?: string | undefined;
+  stabilityBackend?: "frameStats" | "uiautomator" | undefined;
   signal?: AbortSignal | undefined;
   timeoutMs?: number | undefined;
 }

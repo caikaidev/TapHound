@@ -7,6 +7,10 @@ import { createProgram } from "../../src/cli/program.js";
 import { TapHoundConfigSchema } from "../../src/domain/config.js";
 import { FAILURE_CODES } from "../../src/domain/failure.js";
 import { JourneySchema } from "../../src/domain/journey.js";
+import {
+  FlowSchema,
+  JourneySourceSchema
+} from "../../src/domain/journey-composition.js";
 
 const root = process.cwd();
 
@@ -38,6 +42,30 @@ describe("TapHound documentation examples", () => {
     expect(journey.steps[1]?.action).toBe("scrollTo");
   });
 
+  it("keeps reusable Flow composition examples schema-valid", async () => {
+    const core = FlowSchema.parse(await json(
+      "examples/composition/.taphound/flows/core/authenticated-home.json"
+    ));
+    const feature = FlowSchema.parse(await json(
+      "examples/composition/.taphound/flows/chat/open-thread.json"
+    ));
+    const source = JourneySourceSchema.parse(await json(
+      "examples/composition/.taphound/sources/chat/send-message.json"
+    ));
+    const skillFlow = FlowSchema.parse(await json(
+      "assets/skills/taphound-ai-journey/templates/flow.example.json"
+    ));
+    const skillSource = JourneySourceSchema.parse(await json(
+      "assets/skills/taphound-ai-journey/templates/journey-source.example.json"
+    ));
+
+    expect(core.includes).toEqual([]);
+    expect(feature.includes).toEqual(["core/authenticated-home"]);
+    expect(source.includes).toEqual(["chat/open-thread"]);
+    expect(skillFlow.kind).toBe("flow");
+    expect(skillSource.kind).toBe("journeySource");
+  });
+
   it("documents every executable command and its primary workflow", async () => {
     const readme = await text("README.md");
     const readmeZh = await text("README.zh-CN.md");
@@ -49,6 +77,7 @@ describe("TapHound documentation examples", () => {
       "verify",
       "project",
       "context",
+      "journey",
       "generation",
       "init"
     ]);
@@ -64,6 +93,7 @@ describe("TapHound documentation examples", () => {
       for (const workflow of [
         "project describe",
         "context validate",
+        "journey resolve",
         "generation start",
         "taphound init"
       ]) {
@@ -72,6 +102,8 @@ describe("TapHound documentation examples", () => {
       expect(doc).toContain("Node.js 22");
       expect(doc).toContain("macOS");
       expect(doc).toContain("scrollTo");
+      expect(doc).toContain(".taphound/journeys/");
+      expect(doc).toContain(".taphound/build/");
     }
     // Chinese-specific content lives in the zh-CN README.
     expect(readmeZh).toContain("Android CLI 官方 Journey");
@@ -144,7 +176,7 @@ describe("TapHound documentation examples", () => {
     expect(journey).toContain("taphound.config.json");
     expect(journey).not.toMatch(/\bAPR\b|\bapr\b/);
     expect(report).toContain("TapHound Report");
-    expect(report).toContain(".taphound/runs");
+    expect(report).toContain(".taphound/build/runs");
     expect(report).not.toMatch(/\bAPR\b|\bapr\b/);
   });
 
@@ -168,7 +200,7 @@ describe("TapHound documentation examples", () => {
     expect(testing).toContain("npm test");
     expect(testing).toContain("npm run acceptance:device");
     expect(testing).toContain("npm run acceptance:generation");
-    expect(testing).toContain("taphound-0.2.0-dev.1.tgz");
+    expect(testing).toContain("taphound-0.2.0-dev.2.tgz");
     expect(testing).toContain("examples/taphound-android-demo");
     for (const command of [
       "doctor",
@@ -192,7 +224,8 @@ describe("TapHound documentation examples", () => {
       "node_modules/",
       "dist/",
       "coverage/",
-      ".taphound/",
+      ".taphound/build/",
+      ".taphound/context/",
       ".gradle/",
       "**/build/",
       "local.properties",

@@ -19,10 +19,10 @@ This checklist is for cross-machine validation and the subsequent pre-release af
 
 ## Cross-Machine Validation
 
-- [ ] Regenerate `taphound-0.2.0-dev.1.tgz` and verify the size, SHA-256, npm shasum, integrity, and file listing.
+- [ ] Regenerate `taphound-0.2.0-dev.2.tgz` and verify the size, SHA-256, npm shasum, integrity, and file listing.
 - [ ] Install from the exact tarball and verify `taphound --help`, confirming there is no legacy binary entry.
 - [ ] Run doctor and the Demo Journey on an Emulator or USB Device.
-- [ ] Inspect the reports, screenshots, and logs in `.taphound/runs/`; record the device, tool versions, and failure reproduction steps.
+- [ ] Inspect the reports, screenshots, and logs in `.taphound/build/runs/`; record the device, tool versions, and failure reproduction steps.
 - [ ] If issues are found, create a separate fix branch from remote `main`; do not rewrite already-pushed history.
 
 ## npm `dev` Pre-release
@@ -31,7 +31,7 @@ This checklist is for cross-machine validation and the subsequent pre-release af
 - [ ] Check the npm login identity, 2FA requirements, and `taphound` package name status; do not record tokens or OTPs.
 - [ ] Re-run the full quality gate and the exact-tarball install smoke.
 - [ ] Show the user the account, version, public access, `dev` tag, tarball digest, and file listing, and obtain an independent explicit confirmation.
-- [ ] Publish only `taphound@0.2.0-dev.1` to `dev`; do not create or move `latest`, and do not publish a different tarball.
+- [ ] Publish only `taphound@0.2.0-dev.2` to `dev`; do not create or move `latest`, and do not publish a different tarball.
 - [ ] Freshly install `taphound@dev` from the registry and run the CLI smoke.
 - [ ] Write the registry evidence back into the release audit, commit, and push normally; never force-push.
 

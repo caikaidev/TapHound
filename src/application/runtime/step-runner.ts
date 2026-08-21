@@ -396,9 +396,13 @@ export class StepRunner {
             status: "timeout",
             polls: scroll.idle.polls,
             durationMs: scroll.idle.durationMs,
-            ...(scroll.idle.samplingDurationMs === undefined
+            samplingDurationMs: scroll.idle.samplingDurationMs,
+            strategy: scroll.idle.strategy,
+            ...(scroll.idle.backend === undefined
               ? {}
-              : { samplingDurationMs: scroll.idle.samplingDurationMs }),
+              : { backend: scroll.idle.backend }),
+            fallbackUsed: scroll.idle.fallbackUsed,
+            frameActivityDetected: scroll.idle.frameActivityDetected,
             lastDiff: [...scroll.idle.lastDiff]
           };
         }
@@ -515,9 +519,11 @@ export class StepRunner {
             status: "timeout",
             polls: idle.polls,
             durationMs: idle.durationMs,
-            ...(idle.samplingDurationMs === undefined
-              ? {}
-              : { samplingDurationMs: idle.samplingDurationMs }),
+            samplingDurationMs: idle.samplingDurationMs,
+            strategy: idle.strategy,
+            ...(idle.backend === undefined ? {} : { backend: idle.backend }),
+            fallbackUsed: idle.fallbackUsed,
+            frameActivityDetected: idle.frameActivityDetected,
             lastDiff: [...idle.lastDiff]
           }
         : {
@@ -527,12 +533,13 @@ export class StepRunner {
             ...(idle.status !== "stable"
               ? {}
               : {
-                  ...(idle.samplingDurationMs === undefined
-                    ? {}
-                    : { samplingDurationMs: idle.samplingDurationMs }),
+                  samplingDurationMs: idle.samplingDurationMs,
                   ...(idle.backend === undefined
                     ? {}
-                    : { backend: idle.backend })
+                    : { backend: idle.backend }),
+                  strategy: idle.strategy,
+                  fallbackUsed: idle.fallbackUsed,
+                  frameActivityDetected: idle.frameActivityDetected
                 })
           };
       if (idle.status === "cancelled") {

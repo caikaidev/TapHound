@@ -72,6 +72,8 @@ git diff --exit-code -- assets/brand/png
 - `project describe`：输出稳定的 Android 项目事实。
 - `context list` / `validate` / `status`：查看或校验 v2 Project Context 索引及模块分片。
 - `context refresh`：在不重新分析源码的前提下，重算 Context 证据哈希（含语义哈希）。
+- `journey list-flows` / `journey resolve`：校验可复用 Flow，并将组合式 Journey
+  Source 解析为扁平 Journey v1。
 - `generation start` / `observe` / `step` / `confirm` / `manual` / `status` /
   `recover` / `finalize`：管理确定性 Journey 生成会话。
 - `init`：为 AI Agent 安装 TapHound AI Journey Skill。
@@ -88,13 +90,52 @@ git diff --exit-code -- assets/brand/png
     "activity": ".MainActivity"
   },
   "idle": {
+    "strategy": "hybrid",
     "pollIntervalMs": 200,
     "stablePolls": 2,
     "timeoutMs": 5000
   },
-  "artifactsDir": ".taphound/runs"
+  "artifactsDir": ".taphound/build/runs"
 }
 ```
+
+`artifactsDir` 可省略，默认为 `.taphound/build/runs`。
+`idle.strategy` 默认为 `hybrid`：TapHound 先使用快速帧计数，再用 Core 自行采集的
+UIAutomator 结构确认稳定。如果页面持续绘制，`hybrid` 会回退到结构稳定性判定，
+不会仅因帧计数持续变化而超时。已知存在持续重绘的应用可使用 `layoutDiff` 完全跳过
+帧计数；只有确实需要像素帧静止时才使用 `frameStats`。
+
+Generation 会在 session 启动时绑定规范化后的完整配置。请在
+`generation start` 前确定 idle 策略与超时时间；配置变更后必须创建新 session。
+
+## 工作目录结构
+
+TapHound 在 Android 项目中只留下一份可预测的目录结构：需要提交的输入与产物放在
+`.taphound/` 顶层，所有临时数据都在 `.taphound/build/` 下，因此一条忽略规则即可
+覆盖全部生成物。
+
+```text
+<project>/
+  taphound.config.json
+  .taphound/
+    .gitignore            # 首次生成，内容为 "build/"；不会被覆盖
+    context/              # 需提交的 Project Context bundle
+      project-context.json
+      modules/*.json
+    flows/                # 需提交的可复用导航前缀
+    sources/              # 需提交的组合式叶子 Journey source
+    journeys/             # 需提交的 Journey 及 <name>.meta.json 附属文件
+    build/                # 临时数据，可安全删除，由 Git 忽略
+      generations/<id>/   # 权威 generation bundle
+      jobs/<id>/          # 分离式 finalize 的 stdout 与进度
+      runs/<runId>/       # verify 报告、截图、Logcat
+```
+
+请把 `.taphound/build/` 加入 `.gitignore`，其余内容提交入库。首次创建 generation
+会话时，TapHound 会写入内容为 `build/` 的 `.taphound/.gitignore`，并且永远不会覆盖
+你自己维护的同名文件。旧结构使用 `.taphound/generations`、`.taphound/jobs` 与
+`.taphound/runs`；一旦检测到这些目录，TapHound 会以 `CONFIG_INVALID` 停止并打印
+需要执行的 `mv` 命令。
 
 ## 交互式录制
 
@@ -105,7 +146,7 @@ taphound record \
   --project /path/to/android-project \
   --config taphound.config.json \
   --name "Search flow" \
-  --output journeys/search.json
+  --output .taphound/journeys/search.json
 ```
 
 Recorder 不自动生成业务 `expect`。Activity、Element 或 Logcat 断言应由开发者或外部 Agent 显式补充。协议细节见 [Journey Schema](docs/journey-schema.md)。
@@ -176,7 +217,7 @@ Skill 随 npm 包发布，`taphound init` 从包内复制到目标目录。重�
 taphound verify \
   --project /path/to/android-project \
   --config taphound.config.json \
-  --journey journeys/search.json
+  --journey .taphound/journeys/search.json
 ```
 
 临时覆盖 Package、Activity、设备或报告路径：
@@ -184,7 +225,7 @@ taphound verify \
 ```bash
 taphound verify \
   --project /path/to/android-project \
-  --journey journeys/search.json \
+  --journey .taphound/journeys/search.json \
   --device emulator-5554 \
   --package com.example.app \
   --activity .MainActivity \
@@ -194,7 +235,7 @@ taphound verify \
 Agent 调用时使用：
 
 ```bash
-taphound verify --project . --journey journeys/search.json --json
+taphound verify --project . --journey .taphound/journeys/search.json --json
 ```
 
 `--json` 模式保证 stdout 只有一个最终 JSON 值，进度和诊断写入 stderr。详见 [Agent 集成](docs/agent-integration.md) 与 [报告协议](docs/report-schema.md)。

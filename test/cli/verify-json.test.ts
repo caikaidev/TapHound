@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createProgram } from "../../src/cli/program.js";
 import type { CliDependencies, TextOutput } from "../../src/cli/dependencies.js";
 import { runtimeConfig, runtimeJourney } from "../fakes/runtime-fixture.js";
+import { fakeWorkspaceLayout } from "../fakes/workspace-layout.js";
 import { validReport } from "../fixtures/report.js";
 
 class BufferOutput implements TextOutput {
@@ -60,6 +61,7 @@ function baseDependencies(exitCodes: number[]): CliDependencies {
     runtimeObserver: {
       observe: vi.fn(() => Promise.reject(new Error("unused")))
     },
+    workspaceLayout: fakeWorkspaceLayout(),
     readJson: vi.fn((path: string) => Promise.resolve(
       path.includes("journey") ? runtimeJourney : runtimeConfig
     )),
@@ -159,5 +161,31 @@ describe("verify --json", () => {
       });
     expect(invalidCodes).toEqual([2]);
     expect(environmentCodes).toEqual([3]);
+  });
+
+  it("refuses to run against a legacy workspace layout", async () => {
+    const exitCodes: number[] = [];
+    const dependencies = baseDependencies(exitCodes);
+    dependencies.workspaceLayout = fakeWorkspaceLayout([
+      ".taphound/generations",
+      ".taphound/runs"
+    ]);
+
+    await runVerify(dependencies);
+
+    const output = JSON.parse(
+      (dependencies.stdout as BufferOutput).value
+    ) as { exitCode: number; failure: { code: string; message: string } };
+    expect(output.exitCode).toBe(2);
+    expect(output.failure.code).toBe("CONFIG_INVALID");
+    expect(output.failure.message).toContain(
+      "mv .taphound/generations .taphound/build/generations"
+    );
+    expect(output.failure.message).toContain(
+      "mv .taphound/runs .taphound/build/runs"
+    );
+    expect(output.failure.message).not.toContain(".taphound/jobs");
+    expect(dependencies.verifier.verify).not.toHaveBeenCalled();
+    expect(exitCodes).toEqual([2]);
   });
 });

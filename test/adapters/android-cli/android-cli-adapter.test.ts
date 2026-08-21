@@ -110,6 +110,83 @@ describe("AndroidCliAdapter", () => {
     });
   });
 
+  it("hashes Core-owned UIAutomator layouts for structural stability", async () => {
+    const runner = processRunner();
+    vi.mocked(runner.run).mockResolvedValue(commandResult());
+    vi.mocked(runner.run)
+      .mockResolvedValueOnce(commandResult())
+      .mockResolvedValueOnce(commandResult({
+        stdout: "<hierarchy><node text='Home' bounds='[0,0][100,100]' " +
+          "enabled='true' /></hierarchy>"
+      }))
+      .mockResolvedValueOnce(commandResult())
+      .mockResolvedValueOnce(commandResult())
+      .mockResolvedValueOnce(commandResult({
+        stdout: "<hierarchy><node text='Home' bounds='[0,0][100,100]' " +
+          "enabled='true' /></hierarchy>"
+      }));
+    const adapter = new AndroidCliAdapter(
+      runner,
+      () => "/sdcard/taphound-uiautomator.xml"
+    );
+    const options = {
+      deviceSerial: "emulator-5554",
+      packageName: "com.example.app",
+      stabilityBackend: "uiautomator" as const
+    };
+
+    const first = await adapter.layoutDiff(options);
+    expect(Array.isArray(first)).toBe(false);
+    if (!Array.isArray(first)) {
+      expect(first.backend).toBe("uiautomator");
+      expect(first.layout).toHaveLength(1);
+      expect(first.changes).toHaveLength(1);
+      const change = first.changes[0];
+      expect(change).toBeTypeOf("object");
+      if (
+        change !== null
+        && typeof change === "object"
+        && "layoutSha256" in change
+      ) {
+        expect(change.layoutSha256).toMatch(/^[a-f\d]{64}$/);
+      }
+    }
+    const second = await adapter.layoutDiff(options);
+    expect(Array.isArray(second)).toBe(false);
+    if (!Array.isArray(second)) {
+      expect(second).toMatchObject({
+        changes: [],
+        backend: "uiautomator"
+      });
+      expect(second.layout).toHaveLength(1);
+    }
+    expect(vi.mocked(runner.run).mock.calls.some(([spec]) => (
+      spec.args.includes("gfxinfo")
+    ))).toBe(false);
+  });
+
+  it("falls back to Android CLI structural diff when UIAutomator is unavailable", async () => {
+    const runner = processRunner();
+    vi.mocked(runner.run)
+      .mockResolvedValueOnce(commandResult({ exitCode: 1 }))
+      .mockResolvedValueOnce(commandResult())
+      .mockResolvedValueOnce(commandResult({ stdout: "[]" }));
+    const adapter = new AndroidCliAdapter(runner);
+
+    await expect(adapter.layoutDiff({
+      deviceSerial: "emulator-5554",
+      packageName: "com.example.app",
+      stabilityBackend: "uiautomator"
+    })).resolves.toMatchObject({
+      changes: [],
+      backend: "androidCli"
+    });
+    expect(vi.mocked(runner.run)).toHaveBeenNthCalledWith(3, {
+      executable: "android",
+      args: ["layout", "--diff", "--device=emulator-5554"]
+    });
+  });
+
   it("does not fall back after a UIAutomator timeout", async () => {
     const runner = processRunner(commandResult({
       exitCode: null,

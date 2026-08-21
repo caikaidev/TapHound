@@ -27,6 +27,10 @@ import type {
 import { hashRuntimeSnapshot } from "../../src/domain/runtime-snapshot.js";
 import { runtimeConfig } from "../fakes/runtime-fixture.js";
 import {
+  fakeWorkspaceLayout,
+  type FakeWorkspaceLayout
+} from "../fakes/workspace-layout.js";
+import {
   contextSelection,
   projectContextIndex,
   projectContextModule,
@@ -80,12 +84,14 @@ interface Harness {
   assertConfigIdentity: Mock;
   recoveryStatus: Mock;
   retry: Mock;
+  workspaceLayout: FakeWorkspaceLayout;
 }
 
 function harness(signal?: AbortSignal): Harness {
   const stdout = new BufferOutput();
   const stderr = new BufferOutput();
   const exitCodes: number[] = [];
+  const workspaceLayout = fakeWorkspaceLayout();
   const request = vi.fn<() => Promise<ConfirmationRequestResult>>(() => Promise.resolve({
     status: "approved" as const,
     proposal
@@ -124,9 +130,9 @@ function harness(signal?: AbortSignal): Harness {
       steps: []
     },
     meta: {},
-    bundlePath: "/project/.taphound/generations/final/generation-1",
-    journeyPath: "/project/journeys/generated.json",
-    metaPath: "/project/journeys/generated.meta.json",
+    bundlePath: "/project/.taphound/build/generations/final/generation-1",
+    journeyPath: "/project/.taphound/journeys/generated.json",
+    metaPath: "/project/.taphound/journeys/generated.meta.json",
     replayed: true
   }));
   const assertConfigIdentity = vi.fn(() => Promise.resolve());
@@ -203,6 +209,7 @@ function harness(signal?: AbortSignal): Harness {
     },
     generationStarter: { start: vi.fn() },
     runtimeObserver: { observe: vi.fn() },
+    workspaceLayout,
     generationRuntime: vi.fn(() => ({
       confirmation: {
         request,
@@ -248,7 +255,8 @@ function harness(signal?: AbortSignal): Harness {
     finalize,
     assertConfigIdentity,
     recoveryStatus,
-    retry
+    retry,
+    workspaceLayout
   };
 }
 
@@ -271,6 +279,7 @@ describe("generation JSON process protocol", () => {
     const config = {
       ...runtimeConfig,
       idle: {
+        strategy: "hybrid" as const,
         timeoutMs: 12_345,
         pollIntervalMs: 67,
         stablePolls: 4
@@ -383,6 +392,31 @@ describe("generation JSON process protocol", () => {
     expect(test.requestManual).not.toHaveBeenCalled();
     expect(test.observe).not.toHaveBeenCalled();
     expect(test.execute).not.toHaveBeenCalled();
+  });
+
+  it("rejects a legacy workspace layout before any generation work", async () => {
+    const test = harness();
+    test.workspaceLayout.legacyDirectories = [".taphound/jobs"];
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "observe",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--json"
+    ]);
+
+    const output = JSON.parse(test.stdout.value) as {
+      exitCode: number;
+      failure: { code: string; message: string };
+    };
+    expect(output.exitCode).toBe(2);
+    expect(output.failure.code).toBe("CONFIG_INVALID");
+    expect(output.failure.message).toContain(
+      "mv .taphound/jobs .taphound/build/jobs"
+    );
+    expect(test.observe).not.toHaveBeenCalled();
+    expect(test.assertConfigIdentity).not.toHaveBeenCalled();
+    expect(test.exitCodes).toEqual([2]);
   });
 
   it("rejects unknown planner envelope fields before requesting confirmation", async () => {
@@ -666,7 +700,19 @@ describe("generation JSON process protocol", () => {
     const failed = harness();
     failed.execute.mockResolvedValueOnce({
       status: "failed",
-      failure: { code: "ACTION_FAILED", message: "adb failed" }
+      failure: {
+        code: "IDLE_TIMEOUT",
+        message: "Layout did not become stable before timeout",
+        details: {
+          idle: {
+            strategy: "hybrid",
+            backend: "uiautomator",
+            fallbackUsed: true,
+            frameActivityDetected: true,
+            polls: 30
+          }
+        }
+      }
     });
     await createProgram(failed.dependencies).parseAsync([
       "node", "taphound", "generation", "step",
@@ -676,9 +722,21 @@ describe("generation JSON process protocol", () => {
       "--json"
     ]);
     expect(JSON.parse(failed.stdout.value)).toMatchObject({
-      status: "error",
+      status: "recoveryRequired",
       exitCode: 1,
-      failure: { code: "ACTION_FAILED" }
+      generationId: "generation-1",
+      failure: {
+        code: "IDLE_TIMEOUT",
+        details: {
+          idle: {
+            strategy: "hybrid",
+            backend: "uiautomator",
+            fallbackUsed: true,
+            frameActivityDetected: true,
+            polls: 30
+          }
+        }
+      }
     });
     expect(failed.exitCodes).toEqual([1]);
 
@@ -695,8 +753,9 @@ describe("generation JSON process protocol", () => {
       "--json"
     ]);
     expect(JSON.parse(cancelled.stdout.value)).toMatchObject({
-      status: "error",
+      status: "recoveryRequired",
       exitCode: 1,
+      generationId: "generation-1",
       failure: { code: "RECOVERY_REQUIRED" }
     });
     expect(cancelled.exitCodes).toEqual([1]);
@@ -1010,7 +1069,7 @@ describe("generation JSON process protocol", () => {
       "--project", "/project",
       "--session", "generation-1",
       "--context", "context.json",
-      "--output", "journeys/generated.json",
+      "--output", ".taphound/journeys/generated.json",
       "--json"
     ]);
 
@@ -1019,7 +1078,7 @@ describe("generation JSON process protocol", () => {
       projectRoot: "/project",
       config: runtimeConfig,
       context: generationContext,
-      outputPath: "journeys/generated.json",
+      outputPath: ".taphound/journeys/generated.json",
       deviceSerial: "emulator-5554",
       toolVersions: {
         node: "24.1.0",
@@ -1031,9 +1090,9 @@ describe("generation JSON process protocol", () => {
       status: "verified",
       exitCode: 0,
       generationId: "generation-1",
-      bundlePath: "/project/.taphound/generations/final/generation-1",
-      journeyPath: "/project/journeys/generated.json",
-      metaPath: "/project/journeys/generated.meta.json",
+      bundlePath: "/project/.taphound/build/generations/final/generation-1",
+      journeyPath: "/project/.taphound/journeys/generated.json",
+      metaPath: "/project/.taphound/journeys/generated.meta.json",
       replayed: true
     });
     expect(test.dependencies.doctor.run).toHaveBeenCalledWith(
@@ -1165,7 +1224,7 @@ describe("generation JSON process protocol", () => {
       "--project", "/project",
       "--session", "generation-1",
       "--context", "context.json",
-      "--output", "journeys/generated.json",
+      "--output", ".taphound/journeys/generated.json",
       "--detach",
       "--json"
     ]);
@@ -1174,7 +1233,7 @@ describe("generation JSON process protocol", () => {
       expect.objectContaining({
         executable: process.execPath,
         cwd: "/project",
-        stdoutPath: "/project/.taphound/jobs/generation-1/job-1-output.json"
+        stdoutPath: "/project/.taphound/build/jobs/generation-1/job-1-output.json"
       })
     );
     expect(test.dependencies.doctor.run).not.toHaveBeenCalled();

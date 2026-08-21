@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "kind": "flow",
+  "name": "chat/open-thread",
+  "includes": [
+    "core/authenticated-home"
+  ],
+  "steps": [
+    {
+      "action": "click",
+      "locator": {
+        "resourceId": "test_thread"
+      },
+      "activity": {
+        "before": "com.example.app.HomeActivity",
+        "after": "com.example.app.ChatActivity"
+      }
+    }
+  ]
+}

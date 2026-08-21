@@ -71,6 +71,8 @@ describe("VerifyRuntime", () => {
       "step-layout",
       "action",
       "idle",
+      "idle",
+      "idle",
       "pid",
       "activity-search",
       "screenshot",
@@ -92,7 +94,9 @@ describe("VerifyRuntime", () => {
     const result = await new VerifyRuntime(test.dependencies).verify(input());
 
     expect(result).toMatchObject({ status: "passed", exitCode: 0 });
-    expect(test.dependencies.clock).toMatchObject({ sleeps: [100] });
+    expect(test.dependencies.clock).toMatchObject({
+      sleeps: [100, 100, 100]
+    });
   });
 
   it("waits for a delayed App process within one launch-readiness budget", async () => {
@@ -108,8 +112,8 @@ describe("VerifyRuntime", () => {
 
     expect(result).toMatchObject({ status: "passed", exitCode: 0 });
     expect(test.dependencies.clock).toMatchObject({
-      currentTime: 400,
-      sleeps: [100, 100, 100, 100]
+      currentTime: 600,
+      sleeps: [100, 100, 100, 100, 100, 100]
     });
     expect(test.adb.appProcesses).toHaveBeenNthCalledWith(5, {
       packageName: runtimeConfig.run.packageName,

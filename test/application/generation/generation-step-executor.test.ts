@@ -957,6 +957,20 @@ describe("GenerationStepExecutor", () => {
       "evidence/steps/0-attempt-1/logcat.txt",
       "evidence/steps/0-attempt-1/result.json"
     ]);
+    if (code === "IDLE_TIMEOUT") {
+      expect(result).toMatchObject({
+        failure: {
+          details: {
+            idle: {
+              strategy: "hybrid",
+              fallbackUsed: false,
+              frameActivityDetected: false,
+              lastDiff: [{ changed: true }]
+            }
+          }
+        }
+      });
+    }
   });
 
   it.each(["SIGTERM", "SIGKILL"] as const)(

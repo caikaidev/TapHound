@@ -8,6 +8,7 @@ import { createContextCommand } from "./commands/context.js";
 import { createDoctorCommand } from "./commands/doctor.js";
 import { createGenerationCommand } from "./commands/generation.js";
 import { createInitCommand } from "./commands/init.js";
+import { createJourneyCommand } from "./commands/journey.js";
 import { createProjectCommand } from "./commands/project.js";
 import { createRecordCommand } from "./commands/record.js";
 import { createVerifyCommand } from "./commands/verify.js";
@@ -63,6 +64,7 @@ export function createProgram(
     .addCommand(configureOutput(createVerifyCommand(dependencies)))
     .addCommand(configureOutput(createProjectCommand(dependencies)))
     .addCommand(configureOutput(createContextCommand(dependencies)))
+    .addCommand(configureOutput(createJourneyCommand(dependencies)))
     .addCommand(configureOutput(createGenerationCommand(dependencies)))
     .addCommand(configureOutput(createInitCommand(dependencies)));
 }

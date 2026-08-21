@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import { JourneyStepSchema } from "./journey.js";
+import { FlowNameSchema } from "./journey-composition.js";
 import { ProjectRelativePathSchema } from "./project-context.js";
 import { InteractionPolicySchema } from "./project-context.js";
 import { ContextSelectionSchema } from "./project-context.js";
@@ -16,9 +17,12 @@ export const GENERATION_ERROR_CODES = [
   "CONFIG_INVALID",
   "CONTEXT_INVALID",
   "CONTEXT_STALE",
+  "FLOW_INVALID",
+  "FLOW_REPLAY_FAILED",
   "SNAPSHOT_STALE",
   "PACKAGE_ESCAPE",
   "APP_CRASHED",
+  "IDLE_TIMEOUT",
   "WINDOW_HIERARCHY_INCOMPLETE",
   "ACTION_UNSUPPORTED",
   "RISK_CONFIRMATION_REQUIRED",
@@ -35,6 +39,21 @@ export const GenerationErrorCodeSchema = z.enum(GENERATION_ERROR_CODES);
 export type GenerationErrorCode = z.infer<typeof GenerationErrorCodeSchema>;
 
 const Sha256Schema = z.string().regex(/^[a-f\d]{64}$/);
+
+export const GenerationStepSourceSchema = z.enum([
+  "flow",
+  "planner",
+  "manualOverride"
+]);
+
+export const GenerationBaseFlowSchema = z.strictObject({
+  name: FlowNameSchema,
+  resolutionSha256: Sha256Schema,
+  journeySha256: Sha256Schema,
+  verificationReportSha256: Sha256Schema,
+  verificationRunId: z.string().min(1),
+  stepCount: z.number().int().positive()
+});
 
 export const GenerationSessionIdSchema = z.string().regex(
   /^[A-Za-z\d](?:[A-Za-z\d._-]*[A-Za-z\d])?$/,
@@ -134,8 +153,9 @@ export const GenerationSessionSchema = z.strictObject({
   }),
   contextSelection: ContextSelectionSchema,
   variables: GenerationVariablesSchema,
+  baseFlow: GenerationBaseFlowSchema.optional(),
   candidateSteps: z.array(JourneyStepSchema),
-  candidateSources: z.array(z.enum(["planner", "manualOverride"])),
+  candidateSources: z.array(GenerationStepSourceSchema),
   inFlight: GenerationInFlightSchema.nullable(),
   pendingConfirmation: PendingConfirmationSchema.nullable(),
   verification: VerificationSchema,
@@ -146,6 +166,27 @@ export const GenerationSessionSchema = z.strictObject({
       code: "custom",
       path: ["candidateSources"],
       message: "Candidate provenance must align exactly with candidate steps"
+    });
+  }
+  const flowStepCount = session.candidateSources.filter(
+    (source) => source === "flow"
+  ).length;
+  if (
+    (session.baseFlow === undefined && flowStepCount !== 0)
+    || (
+      session.baseFlow !== undefined
+      && (
+        flowStepCount !== session.baseFlow.stepCount
+        || session.candidateSources.slice(0, flowStepCount).some(
+          (source) => source !== "flow"
+        )
+      )
+    )
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["baseFlow"],
+      message: "Base Flow provenance must be a contiguous candidate prefix"
     });
   }
   if (session.state === "recoveryRequired" && session.inFlight === null) {
@@ -288,6 +329,7 @@ export const GenerationMetaSchema = z.strictObject({
     runId: z.string().min(1),
     runs: z.literal(1)
   }),
+  baseFlow: GenerationBaseFlowSchema.optional(),
   manualOverrideStepIndexes: z.array(z.number().int().nonnegative())
 });
 
@@ -297,7 +339,7 @@ export const GenerationReportSchema = z.strictObject({
   status: z.literal("verified"),
   steps: z.array(z.strictObject({
     index: z.number().int().nonnegative(),
-    source: z.enum(["planner", "manualOverride"])
+    source: GenerationStepSourceSchema
   })).min(1)
 }).superRefine((report, context) => {
   for (const [index, step] of report.steps.entries()) {
@@ -356,6 +398,7 @@ export interface GenerationCoreIdentity {
   target: GenerationSession["target"];
   contextSelection: GenerationSession["contextSelection"];
   variables: GenerationSession["variables"];
+  baseFlow?: NonNullable<GenerationSession["baseFlow"]> | undefined;
 }
 
 export function generationCoreIdentity(
@@ -370,7 +413,8 @@ export function generationCoreIdentity(
     },
     target: session.target,
     contextSelection: session.contextSelection,
-    variables: session.variables
+    variables: session.variables,
+    ...(session.baseFlow === undefined ? {} : { baseFlow: session.baseFlow })
   };
 }
 

@@ -33,7 +33,8 @@ import {
   FileSystemJourneyWriter
 } from "../../../src/adapters/filesystem/journey-writer.js";
 import {
-  GenerationFinalizer
+  GenerationFinalizer,
+  GenerationOutputPathSchema
 } from "../../../src/application/generation/generation-finalizer.js";
 import {
   GenerationPublisher
@@ -89,8 +90,13 @@ function sha256(value: string): string {
 const config: TapHoundConfig = {
   version: 1,
   run: { packageName: "com.example.app", activity: ".MainActivity" },
-  idle: { pollIntervalMs: 100, stablePolls: 2, timeoutMs: 5_000 },
-  artifactsDir: ".taphound/reports"
+  idle: {
+    strategy: "hybrid",
+    pollIntervalMs: 100,
+    stablePolls: 2,
+    timeoutMs: 5_000
+  },
+  artifactsDir: ".taphound/build/reports"
 };
 
 const context: ResolvedProjectContext = {
@@ -337,7 +343,7 @@ function input(root: string): {
     config,
     context,
     project: project(root),
-    outputPath: "journeys/generated.json",
+    outputPath: ".taphound/journeys/generated.json",
     deviceSerial: "emulator-5554",
     toolVersions: { adb: "1" }
   };
@@ -405,7 +411,7 @@ describe("GenerationFinalizer", () => {
     }));
     const manifest = JSON.parse(await readFile(join(
       test.root,
-      ".taphound/generations/generation-1/manifest.json"
+      ".taphound/build/generations/generation-1/manifest.json"
     ), "utf8")) as { files: { path: string }[] };
     expect(manifest.files.map((file) => file.path)).toEqual([
       "candidate/journey.json",
@@ -417,11 +423,11 @@ describe("GenerationFinalizer", () => {
       "verified/journey.json"
     ]);
     await expect(readFile(
-      join(test.root, "journeys/generated.json"),
+      join(test.root, ".taphound/journeys/generated.json"),
       "utf8"
     )).resolves.toContain('"version": 1');
     await expect(readFile(
-      join(test.root, "journeys/generated.meta.json"),
+      join(test.root, ".taphound/journeys/generated.meta.json"),
       "utf8"
     )).resolves.toContain('"status": "verified"');
   });
@@ -441,7 +447,7 @@ describe("GenerationFinalizer", () => {
     });
     candidatePath = join(
       test.root,
-      ".taphound/generations/.generation-1.work/candidate/journey.json"
+      ".taphound/build/generations/.generation-1.work/candidate/journey.json"
     );
 
     await expect(test.finalize.finalize(input(test.root))).rejects.toBeInstanceOf(
@@ -449,11 +455,11 @@ describe("GenerationFinalizer", () => {
     );
     await expect(readFile(join(
       test.root,
-      ".taphound/generations/.generation-1.work/manifest.json"
+      ".taphound/build/generations/.generation-1.work/manifest.json"
     ))).rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(join(
       test.root,
-      ".taphound/generations/generation-1/manifest.json"
+      ".taphound/build/generations/generation-1/manifest.json"
     ))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
@@ -597,7 +603,7 @@ describe("GenerationFinalizer", () => {
     await writeCrashRecoveryEvidence(test);
     const workRoot = join(
       test.root,
-      ".taphound/generations/.generation-1.work"
+      ".taphound/build/generations/.generation-1.work"
     );
     const outside = await mkdtemp(join(tmpdir(), "taphound-receipt-outside-"));
     roots.push(outside);
@@ -901,13 +907,31 @@ describe("GenerationFinalizer", () => {
   it("rejects output paths that overlap the authoritative generation bundle", async () => {
     const test = await fixture();
     const invalid = input(test.root);
-    invalid.outputPath = ".taphound/generations/generation-1/journey.json";
+    invalid.outputPath = ".taphound/build/generations/generation-1/journey.json";
 
     await expect(test.finalize.finalize(invalid)).rejects.toThrow(
       /authoritative bundle/i
     );
     expect(test.forceStop).not.toHaveBeenCalled();
     expect(test.verify).not.toHaveBeenCalled();
+  });
+
+  it("accepts committed Journey outputs and rejects the build subtree", () => {
+    expect(
+      GenerationOutputPathSchema.parse(".taphound/journeys/x.json")
+    ).toBe(".taphound/journeys/x.json");
+    expect(GenerationOutputPathSchema.parse("journeys/x.json")).toBe(
+      "journeys/x.json"
+    );
+    for (const invalid of [
+      ".taphound/build",
+      ".taphound/build/runs/x.json",
+      ".taphound/build/generations/generation-1/journey.json"
+    ]) {
+      expect(() => GenerationOutputPathSchema.parse(invalid)).toThrow(
+        /authoritative bundle/i
+      );
+    }
   });
 
   it("cannot export a different Journey identity after verification", async () => {
@@ -928,7 +952,7 @@ describe("GenerationFinalizer", () => {
     const test = await fixture();
     const outside = await mkdtemp(join(tmpdir(), "taphound-export-outside-"));
     roots.push(outside);
-    await symlink(outside, join(test.root, "journeys"));
+    await symlink(outside, join(test.root, ".taphound/journeys"));
 
     await expect(test.finalize.finalize(input(test.root))).rejects.toMatchObject({
       code: "EXPORT_FAILED"
@@ -936,7 +960,7 @@ describe("GenerationFinalizer", () => {
     await expect(readdir(outside)).resolves.toEqual([]);
     const manifestPath = join(
       test.root,
-      ".taphound/generations/generation-1/manifest.json"
+      ".taphound/build/generations/generation-1/manifest.json"
     );
     const manifest = await readFile(manifestPath, "utf8");
     await expect(test.finalize.finalize(input(test.root))).rejects.toMatchObject({
@@ -949,8 +973,8 @@ describe("GenerationFinalizer", () => {
   it("does not export through an alias into the authority bundle", async () => {
     const test = await fixture();
     await symlink(
-      join(test.root, ".taphound/generations/generation-1"),
-      join(test.root, "journeys")
+      join(test.root, ".taphound/build/generations/generation-1"),
+      join(test.root, ".taphound/journeys")
     );
 
     await expect(test.finalize.finalize(input(test.root))).rejects.toMatchObject({
@@ -958,7 +982,7 @@ describe("GenerationFinalizer", () => {
     });
     await expect(readFile(join(
       test.root,
-      ".taphound/generations/generation-1/manifest.json"
+      ".taphound/build/generations/generation-1/manifest.json"
     ), "utf8")).resolves.toContain('"generationId": "generation-1"');
   });
 
@@ -966,17 +990,17 @@ describe("GenerationFinalizer", () => {
     const test = await fixture();
     const outside = await mkdtemp(join(tmpdir(), "taphound-export-outside-"));
     roots.push(outside);
-    await mkdir(join(test.root, "journeys"));
+    await mkdir(join(test.root, ".taphound/journeys"));
     const victim = join(outside, "victim.json");
     await writeFile(victim, "unchanged", "utf8");
-    await symlink(victim, join(test.root, "journeys/generated.meta.json"));
+    await symlink(victim, join(test.root, ".taphound/journeys/generated.meta.json"));
 
     await expect(test.finalize.finalize(input(test.root))).rejects.toMatchObject({
       code: "EXPORT_FAILED"
     });
     await expect(readFile(victim, "utf8")).resolves.toBe("unchanged");
     await expect(readFile(
-      join(test.root, "journeys/generated.json"),
+      join(test.root, ".taphound/journeys/generated.json"),
       "utf8"
     )).resolves.toContain('"version": 1');
   });

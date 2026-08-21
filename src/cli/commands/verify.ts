@@ -11,6 +11,7 @@ import {
   writeJson,
   writeLine
 } from "../output.js";
+import { assertNoLegacyWorkspace } from "../workspace-guard.js";
 
 interface VerifyOptions {
   project: string;
@@ -59,6 +60,7 @@ export function createVerifyCommand(dependencies: CliDependencies): Command {
           },
           artifactsDir: options.reports ?? parsed.artifactsDir
         });
+        await assertNoLegacyWorkspace(dependencies, options.project);
         journey = JourneySchema.parse(await dependencies.readJson(
           resolve(options.project, options.journey)
         ));

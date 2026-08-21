@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "kind": "journeySource",
+  "name": "chat/send-message",
+  "includes": [
+    "chat/open-thread"
+  ],
+  "steps": [
+    {
+      "action": "click",
+      "locator": {
+        "resourceId": "message_input"
+      },
+      "activity": {
+        "before": "com.example.app.ChatActivity",
+        "after": "com.example.app.ChatActivity"
+      }
+    },
+    {
+      "action": "inputText",
+      "text": "hello",
+      "activity": {
+        "before": "com.example.app.ChatActivity",
+        "after": "com.example.app.ChatActivity"
+      }
+    }
+  ]
+}

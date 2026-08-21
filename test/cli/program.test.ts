@@ -12,7 +12,7 @@ describe("createProgram", () => {
     );
   });
 
-  it("publishes commands in stable order, including project and context", () => {
+  it("publishes commands in stable order, including Journey composition", () => {
     const names = createProgram().commands.map((command) => command.name());
 
     expect(names).toEqual([
@@ -21,6 +21,7 @@ describe("createProgram", () => {
       "verify",
       "project",
       "context",
+      "journey",
       "generation",
       "init"
     ]);
@@ -32,6 +33,10 @@ describe("createProgram", () => {
       createProgram().commands.find((command) => command.name() === "context")
         ?.commands.map((command) => command.name())
     ).toEqual(["validate", "status", "list", "refresh"]);
+    expect(
+      createProgram().commands.find((command) => command.name() === "journey")
+        ?.commands.map((command) => command.name())
+    ).toEqual(["resolve", "list-flows"]);
     expect(
       createProgram().commands.find((command) => command.name() === "generation")
         ?.commands.map((command) => command.name())

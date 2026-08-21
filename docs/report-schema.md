@@ -1,6 +1,6 @@
 # TapHound Report Schema v2
 
-TapHound Report is written to `.taphound/runs/<runId>/` by default, or to the configured `<artifactsDir>/<runId>/`:
+TapHound Report is written to `.taphound/build/runs/<runId>/` by default, or to the configured `<artifactsDir>/<runId>/`:
 
 ```text
 report.json
@@ -66,7 +66,9 @@ The JSON `exitCode` of `taphound verify --json` matches the process exit code. S
 
 Each step records monotonic time, duration, and the step Logcat path. Idle
 evidence records poll count and, when available, total wait duration,
-sampling-command duration, and the stability backend. The Locator report
+sampling-command duration, requested strategy, final stability backend,
+whether hybrid structural fallback was used, and whether frame activity was
+detected. The Locator report
 includes matched fields and fallback evidence; on Idle timeout the last Layout
 Diff is saved; Activity and Expect each record the expected value, actual
 result, and fixed failure code. A `scrollTo` step records a

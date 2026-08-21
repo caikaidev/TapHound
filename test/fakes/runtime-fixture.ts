@@ -25,11 +25,12 @@ export const runtimeConfig: TapHoundConfig = {
     activity: ".MainActivity"
   },
   idle: {
+    strategy: "hybrid",
     pollIntervalMs: 100,
     stablePolls: 1,
     timeoutMs: 500
   },
-  artifactsDir: ".taphound/runs"
+  artifactsDir: ".taphound/build/runs"
 };
 
 export const runtimeJourney: Journey = {

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
 
 import type {
@@ -102,6 +102,7 @@ function terminalBackendFailure(error: unknown): boolean {
 
 export class AndroidCliAdapter implements AndroidCliPort {
   private readonly frameSignatures = new Map<string, string>();
+  private readonly layoutSignatures = new Map<string, string>();
 
   public constructor(
     private readonly runner: ProcessRunner,
@@ -177,6 +178,40 @@ export class AndroidCliAdapter implements AndroidCliPort {
     options: DeviceCommandOptions
   ): Promise<LayoutDiffObservation> {
     const startedAt = performance.now();
+    if (options.stabilityBackend === "uiautomator") {
+      try {
+        const current = await this.readUiAutomator(options);
+        const signature = createHash("sha256")
+          .update(JSON.stringify(current.layout))
+          .digest("hex");
+        const key = options.deviceSerial;
+        const previous = this.layoutSignatures.get(key);
+        this.layoutSignatures.set(key, signature);
+        return {
+          changes: previous === signature
+            ? []
+            : [{ layoutSha256: signature }],
+          layout: current.layout,
+          backend: "uiautomator",
+          durationMs: performance.now() - startedAt
+        };
+      } catch (error) {
+        if (terminalBackendFailure(error)) throw error;
+        const result = await this.runner.run(commandSpec([
+          "layout",
+          "--diff",
+          `--device=${options.deviceSerial}`
+        ], options.signal, options.timeoutMs === undefined
+          ? undefined
+          : Math.max(1, options.timeoutMs - (performance.now() - startedAt))));
+        assertSuccess(result, "layout --diff");
+        return {
+          changes: parseLayoutDiff(result.stdout),
+          backend: "androidCli",
+          durationMs: performance.now() - startedAt
+        };
+      }
+    }
     if (options.packageName !== undefined) {
       const result = await this.runner.run(adbCommandSpec(
         options.deviceSerial,

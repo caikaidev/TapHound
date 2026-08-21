@@ -7,10 +7,22 @@ import type {
 } from "../../ports/android-cli.js";
 import type { Clock } from "../../ports/clock.js";
 
+export type IdleStrategy = "hybrid" | "layoutDiff" | "frameStats";
+export type IdleBackend = "uiautomator" | "androidCli" | "gfxFrameStats";
+
 export interface IdleConfig {
+  strategy?: IdleStrategy | undefined;
   pollIntervalMs: number;
   stablePolls: number;
   timeoutMs: number;
+}
+
+interface IdleTelemetry {
+  strategy: IdleStrategy;
+  backend?: IdleBackend | undefined;
+  fallbackUsed: boolean;
+  frameActivityDetected: boolean;
+  samplingDurationMs: number;
 }
 
 export type IdleResult =
@@ -19,12 +31,11 @@ export type IdleResult =
       polls: number;
       durationMs: number;
       layout?: readonly LayoutElement[] | undefined;
-      backend?:
-        | "uiautomator"
-        | "androidCli"
-        | "gfxFrameStats"
-        | undefined;
-      samplingDurationMs?: number | undefined;
+      backend?: IdleBackend | undefined;
+      strategy: IdleStrategy;
+      fallbackUsed: boolean;
+      frameActivityDetected: boolean;
+      samplingDurationMs: number;
     }
   | {
       status: "timeout";
@@ -32,7 +43,11 @@ export type IdleResult =
       polls: number;
       durationMs: number;
       lastDiff: readonly unknown[];
-      samplingDurationMs?: number | undefined;
+      backend?: IdleBackend | undefined;
+      strategy: IdleStrategy;
+      fallbackUsed: boolean;
+      frameActivityDetected: boolean;
+      samplingDurationMs: number;
     }
   | {
       status: "cancelled";
@@ -52,15 +67,23 @@ function normalizeObservation(
     : result as LayoutDiffObservation;
 }
 
-export class IdleWaiter {
-  /**
-   * Minimum remaining time (milliseconds) required to attempt a layout
-   * diff confirmation poll.  When the remaining timeout budget is below
-   * this threshold, the waiter declares stable without confirmation
-   * rather than risking a partial confirmation poll.
-   */
-  private static readonly MIN_CONFIRMATION_BUDGET_MS = 1000;
+function telemetry(
+  strategy: IdleStrategy,
+  backend: IdleBackend | undefined,
+  fallbackUsed: boolean,
+  frameActivityDetected: boolean,
+  samplingDurationMs: number
+): IdleTelemetry {
+  return {
+    strategy,
+    ...(backend === undefined ? {} : { backend }),
+    fallbackUsed,
+    frameActivityDetected,
+    samplingDurationMs
+  };
+}
 
+export class IdleWaiter {
   public constructor(
     private readonly androidCli: AndroidCliPort,
     private readonly clock: Clock,
@@ -72,18 +95,19 @@ export class IdleWaiter {
     config: IdleConfig,
     signal?: AbortSignal
   ): Promise<IdleResult> {
+    const strategy = config.strategy ?? "hybrid";
     const startedAt = this.clock.now();
     let polls = 0;
     let consecutiveEmpty = 0;
+    let consecutiveFrameChanges = 0;
     let lastDiff: readonly unknown[] = [];
     let lastLayout: readonly LayoutElement[] | undefined;
-    let backend:
-      | "uiautomator"
-      | "androidCli"
-      | "gfxFrameStats"
-      | undefined;
-    let needsLayoutConfirmation = false;
+    let backend: IdleBackend | undefined;
+    let fallbackUsed = false;
+    let frameActivityDetected = false;
     let samplingDurationMs = 0;
+    let useStructuralBackend = strategy === "layoutDiff"
+      || (strategy === "hybrid" && this.packageName === undefined);
 
     for (;;) {
       if (isAborted(signal)) {
@@ -96,12 +120,18 @@ export class IdleWaiter {
 
       const elapsedBeforePoll = this.clock.now() - startedAt;
       polls += 1;
-      let observation: Awaited<ReturnType<AndroidCliPort["layoutDiff"]>>;
+      let observation: LayoutDiffObservation;
       try {
         observation = normalizeObservation(await this.androidCli.layoutDiff({
           deviceSerial: this.deviceSerial,
-          ...(this.packageName === undefined
-            ? {} : { packageName: this.packageName }),
+          ...(useStructuralBackend
+            ? { stabilityBackend: "uiautomator" as const }
+            : this.packageName === undefined
+              ? {}
+              : {
+                  packageName: this.packageName,
+                  stabilityBackend: "frameStats" as const
+                }),
           ...(signal === undefined ? {} : { signal }),
           timeoutMs: Math.max(1, config.timeoutMs - elapsedBeforePoll)
         }));
@@ -117,91 +147,69 @@ export class IdleWaiter {
             polls,
             durationMs: elapsed,
             lastDiff,
-            samplingDurationMs
+            ...telemetry(
+              strategy,
+              backend,
+              fallbackUsed,
+              frameActivityDetected,
+              samplingDurationMs
+            )
           };
         }
         throw error;
       }
+
       const diff = observation.changes;
       samplingDurationMs += observation.durationMs ?? 0;
       lastLayout = observation.layout ?? lastLayout;
       backend = observation.backend ?? backend;
-      if (observation.backend === "gfxFrameStats") {
-        needsLayoutConfirmation = true;
+      if (observation.backend === "gfxFrameStats" && diff.length > 0) {
+        frameActivityDetected = true;
+        consecutiveFrameChanges += 1;
+      } else {
+        consecutiveFrameChanges = 0;
       }
-      if (diff.length === 0) {
+
+      if (
+        strategy === "hybrid"
+        && !useStructuralBackend
+        && consecutiveFrameChanges >= config.stablePolls
+      ) {
+        useStructuralBackend = true;
+        fallbackUsed = true;
+        consecutiveEmpty = 0;
+      } else if (useStructuralBackend) {
+        consecutiveEmpty = diff.length === 0
+          ? consecutiveEmpty + 1
+          : 1;
+        if (diff.length > 0) lastDiff = diff;
+      } else if (diff.length === 0) {
         consecutiveEmpty += 1;
       } else {
         consecutiveEmpty = 0;
         lastDiff = diff;
       }
 
-      if (consecutiveEmpty >= config.stablePolls) {
-        if (needsLayoutConfirmation) {
-          const remaining = config.timeoutMs
-            - (this.clock.now() - startedAt);
-          if (remaining < IdleWaiter.MIN_CONFIRMATION_BUDGET_MS) {
-            return {
-              status: "stable",
-              polls,
-              durationMs: this.clock.now() - startedAt,
-              ...(lastLayout === undefined ? {} : { layout: lastLayout }),
-              ...(backend === undefined ? {} : { backend }),
-              samplingDurationMs
-            };
-          }
-          polls += 1;
-          try {
-            const confirm = normalizeObservation(
-              await this.androidCli.layoutDiff({
-                deviceSerial: this.deviceSerial,
-                ...(signal === undefined ? {} : { signal }),
-                timeoutMs: Math.max(1, remaining)
-              })
-            );
-            samplingDurationMs += confirm.durationMs ?? 0;
-            if (confirm.changes.length > 0) {
-              consecutiveEmpty = 0;
-              lastDiff = confirm.changes;
-            } else {
-              return {
-                status: "stable",
-                polls,
-                durationMs: this.clock.now() - startedAt,
-                ...(lastLayout === undefined ? {} : { layout: lastLayout }),
-                ...(backend === undefined ? {} : { backend }),
-                samplingDurationMs
-              };
-            }
-          } catch (error) {
-            const elapsed = this.clock.now() - startedAt;
-            if (isAborted(signal)) {
-              return {
-                status: "cancelled",
-                polls,
-                durationMs: elapsed
-              };
-            }
-            if (elapsed >= config.timeoutMs) {
-              return {
-                status: "timeout",
-                code: "IDLE_TIMEOUT",
-                polls,
-                durationMs: elapsed,
-                lastDiff,
-                samplingDurationMs
-              };
-            }
-            throw error;
-          }
+      const requiredStableObservations = useStructuralBackend
+        ? Math.max(2, config.stablePolls)
+        : config.stablePolls;
+      if (consecutiveEmpty >= requiredStableObservations) {
+        if (strategy === "hybrid" && !useStructuralBackend) {
+          useStructuralBackend = true;
+          consecutiveEmpty = 0;
         } else {
           return {
             status: "stable",
             polls,
             durationMs: this.clock.now() - startedAt,
             ...(lastLayout === undefined ? {} : { layout: lastLayout }),
-            ...(backend === undefined ? {} : { backend }),
-            samplingDurationMs
+            ...telemetry(
+              strategy,
+              backend,
+              fallbackUsed,
+              frameActivityDetected,
+              samplingDurationMs
+            )
           };
         }
       }
@@ -213,7 +221,13 @@ export class IdleWaiter {
           polls,
           durationMs: this.clock.now() - startedAt,
           lastDiff,
-          samplingDurationMs
+          ...telemetry(
+            strategy,
+            backend,
+            fallbackUsed,
+            frameActivityDetected,
+            samplingDurationMs
+          )
         };
       }
 
@@ -226,7 +240,13 @@ export class IdleWaiter {
           polls,
           durationMs: this.clock.now() - startedAt,
           lastDiff,
-          samplingDurationMs
+          ...telemetry(
+            strategy,
+            backend,
+            fallbackUsed,
+            frameActivityDetected,
+            samplingDurationMs
+          )
         };
       }
       try {

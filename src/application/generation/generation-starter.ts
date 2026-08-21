@@ -22,6 +22,14 @@ import {
 import type {
   GenerationSessionStore
 } from "../../ports/generation-session-store.js";
+import { JourneySchema, type Journey } from "../../domain/journey.js";
+import { normalizeActivity } from "../../domain/activity.js";
+import { FlowNameSchema } from "../../domain/journey-composition.js";
+import {
+  TapHoundReportSchema,
+  hashJourney,
+  type TapHoundReport
+} from "../../domain/report.js";
 
 export interface GenerationRecoveryDetails {
   diagnostics: readonly {
@@ -37,7 +45,7 @@ export class GenerationOperationError extends Error {
   public constructor(
     public readonly code: GenerationErrorCode,
     message: string,
-    public readonly details?: GenerationRecoveryDetails | undefined
+    public readonly details?: unknown
   ) {
     super(message);
   }
@@ -50,6 +58,12 @@ export interface GenerationStartInput {
   project: ProjectDescription;
   deviceSerial: string;
   allowEvidenceDrift?: boolean | undefined;
+  baseFlow?: {
+    name: string;
+    resolutionSha256: string;
+    journey: Journey;
+    verificationReport: TapHoundReport;
+  } | undefined;
 }
 
 export interface GenerationStarterDependencies {
@@ -144,6 +158,88 @@ export class GenerationStarter {
       );
     }
 
+    const baseFlow = input.baseFlow === undefined
+      ? undefined
+      : ((): {
+          journey: Journey;
+          binding: NonNullable<GenerationSession["baseFlow"]>;
+        } => {
+          const journey = JourneySchema.parse(input.baseFlow.journey);
+          const report = TapHoundReportSchema.parse(
+            input.baseFlow.verificationReport
+          );
+          const journeySha256 = hashJourney(journey);
+          if (
+            report.status !== "passed"
+            || report.primaryFailure !== undefined
+            || report.secondaryErrors.length !== 0
+            || report.fallbackUsed
+            || Object.values(report.layers).some(
+              (status) => status !== "passed"
+            )
+            || report.journey.name !== journey.name
+            || report.journey.sha256 !== journeySha256
+            || report.steps.length !== journey.steps.length
+            || report.project.root !== input.projectRoot
+            || report.project.packageName !== config.run.packageName
+            || report.project.launchActivity !== normalizeActivity(
+              config.run.packageName,
+              config.run.activity
+            )
+            || report.environment.deviceSerial !== input.deviceSerial
+            || journey.steps.some((step, index) => {
+              const result = report.steps[index];
+              const expectationType = step.expect?.type;
+              const requiresLocator = step.action === "click"
+                || step.action === "longClick"
+                || step.action === "swipe";
+              return result === undefined
+                || result.index !== index
+                || result.action !== step.action
+                || result.status !== "passed"
+                || result.activity?.before.status !== "passed"
+                || result.activity.before.expected !== step.activity.before
+                || result.activity.before.actual !== step.activity.before
+                || result.activity.after.status !== "passed"
+                || result.activity.after.expected !== step.activity.after
+                || result.activity.after.actual !== step.activity.after
+                || (
+                  expectationType === undefined
+                    ? result.expectation !== undefined
+                    : (
+                        result.expectation?.type !== expectationType
+                        || result.expectation.status !== "passed"
+                      )
+                )
+                || (
+                  requiresLocator
+                    ? (
+                        result.locator?.status !== "found"
+                        || result.locator.fallbackUsed
+                      )
+                    : result.locator !== undefined
+                )
+                || result.locator?.fallbackUsed === true;
+            })
+          ) {
+            throw new GenerationOperationError(
+              "FLOW_REPLAY_FAILED",
+              "Base Flow requires a clean exact replay before generation"
+            );
+          }
+          return {
+            journey,
+            binding: {
+              name: FlowNameSchema.parse(input.baseFlow.name),
+              resolutionSha256: input.baseFlow.resolutionSha256,
+              journeySha256,
+              verificationReportSha256: hashGenerationBinding(report),
+              verificationRunId: report.runId,
+              stepCount: journey.steps.length
+            }
+          };
+        })();
+
     const generationId = this.dependencies.generateId();
     const runId = distinctId(generationId, this.dependencies.generateId);
     const session = GenerationSessionSchema.parse({
@@ -169,8 +265,9 @@ export class GenerationStarter {
         timestamp: this.dependencies.now().toISOString(),
         randomHex: randomHex(this.dependencies.randomBytes(16))
       },
-      candidateSteps: [],
-      candidateSources: [],
+      ...(baseFlow === undefined ? {} : { baseFlow: baseFlow.binding }),
+      candidateSteps: baseFlow?.journey.steps ?? [],
+      candidateSources: baseFlow?.journey.steps.map(() => "flow") ?? [],
       inFlight: null,
       pendingConfirmation: null,
       verification: { status: "notRun" },

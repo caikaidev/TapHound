@@ -3,7 +3,12 @@ import type { JourneyStep } from "../../domain/journey.js";
 import type { LayoutElement } from "../../domain/layout.js";
 import type { AndroidCliPort } from "../../ports/android-cli.js";
 import { resolveLocator } from "../locator/locator-resolver.js";
-import type { IdleConfig, IdleWaiter } from "../wait/idle-waiter.js";
+import type {
+  IdleBackend,
+  IdleConfig,
+  IdleStrategy,
+  IdleWaiter
+} from "../wait/idle-waiter.js";
 import type { ActionExecutor } from "./action-executor.js";
 
 export type ScrollToExecutionResult =
@@ -16,7 +21,11 @@ export type ScrollToExecutionResult =
     idle?: {
       polls: number;
       durationMs: number;
-      samplingDurationMs?: number | undefined;
+      samplingDurationMs: number;
+      strategy: IdleStrategy;
+      backend?: IdleBackend | undefined;
+      fallbackUsed: boolean;
+      frameActivityDetected: boolean;
       lastDiff: readonly unknown[];
     };
   }
@@ -251,9 +260,11 @@ export class ScrollToExecutor {
           idle: {
             polls: idle.polls,
             durationMs: idle.durationMs,
-            ...(idle.samplingDurationMs === undefined
-              ? {}
-              : { samplingDurationMs: idle.samplingDurationMs }),
+            samplingDurationMs: idle.samplingDurationMs,
+            strategy: idle.strategy,
+            ...(idle.backend === undefined ? {} : { backend: idle.backend }),
+            fallbackUsed: idle.fallbackUsed,
+            frameActivityDetected: idle.frameActivityDetected,
             lastDiff: idle.lastDiff
           }
         };

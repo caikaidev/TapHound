@@ -183,10 +183,26 @@ export class RuntimeObserver {
       );
       if (idle.status !== "stable") {
         throw new GenerationOperationError(
-          "RECOVERY_REQUIRED",
+          idle.status === "cancelled" ? "RECOVERY_REQUIRED" : "IDLE_TIMEOUT",
           idle.status === "cancelled"
             ? "Runtime observation was cancelled while waiting for layout stability"
-            : "Layout did not become stable before observation"
+            : "Layout did not become stable before observation",
+          idle.status === "cancelled"
+            ? undefined
+            : {
+                idle: {
+                  strategy: idle.strategy,
+                  ...(idle.backend === undefined
+                    ? {}
+                    : { backend: idle.backend }),
+                  polls: idle.polls,
+                  durationMs: idle.durationMs,
+                  samplingDurationMs: idle.samplingDurationMs,
+                  fallbackUsed: idle.fallbackUsed,
+                  frameActivityDetected: idle.frameActivityDetected,
+                  lastDiff: idle.lastDiff
+                }
+              }
         );
       }
       stableLayout = idle.layout;

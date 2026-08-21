@@ -38,7 +38,7 @@ async function temporaryRoot(): Promise<string> {
 }
 
 function generationRoot(root: string): string {
-  return join(root, ".taphound", "generations");
+  return join(root, ".taphound", "build", "generations");
 }
 
 function activeDirectory(root: string): string {
@@ -165,7 +165,7 @@ async function markPublishable(
     revision: passed.revision + 1,
     publication: {
       status: "published" as const,
-      journeyPath: "journeys/generated.json"
+      journeyPath: ".taphound/journeys/generated.json"
     }
   };
   await store.markBundlePublishable(
@@ -213,6 +213,7 @@ describe("FileSystemGenerationSessionStore", () => {
     await expect(readFile(join(
       root,
       ".taphound",
+      "build",
       "generations",
       ".generation-1.work",
       "state.json"
@@ -1118,6 +1119,7 @@ describe("FileSystemGenerationSessionStore", () => {
     const workDirectory = join(
       root,
       ".taphound",
+      "build",
       "generations",
       ".generation-1.work"
     );
@@ -1405,6 +1407,7 @@ describe("FileSystemGenerationSessionStore", () => {
     const evidencePath = join(
       root,
       ".taphound",
+      "build",
       "generations",
       ".generation-1.work",
       "evidence",
@@ -1697,6 +1700,34 @@ describe("FileSystemGenerationSessionStore", () => {
     await expect(readdir(outside)).resolves.toEqual([]);
   });
 
+  it("ignores only the ephemeral build subtree on session creation", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+
+    await store.create(validSession());
+
+    await expect(
+      readFile(join(root, ".taphound", ".gitignore"), "utf8")
+    ).resolves.toBe("build/\n");
+  });
+
+  it("never overwrites an existing .taphound/.gitignore", async () => {
+    const root = await temporaryRoot();
+    await mkdir(join(root, ".taphound"));
+    await writeFile(
+      join(root, ".taphound", ".gitignore"),
+      "build/\nruns/\n",
+      "utf8"
+    );
+    const store = new FileSystemGenerationSessionStore(root);
+
+    await store.create(validSession());
+
+    await expect(
+      readFile(join(root, ".taphound", ".gitignore"), "utf8")
+    ).resolves.toBe("build/\nruns/\n");
+  });
+
   it("syncs the generation root and each newly created evidence ancestor", async () => {
     const root = await temporaryRoot();
     const synced: string[] = [];
@@ -1711,6 +1742,7 @@ describe("FileSystemGenerationSessionStore", () => {
     await store.create(validSession());
     expect(synced).toContain(root);
     expect(synced).toContain(join(root, ".taphound"));
+    expect(synced).toContain(join(root, ".taphound", "build"));
     expect(synced).toContain(generationRoot(root));
     synced.length = 0;
 
@@ -1842,6 +1874,7 @@ describe("FileSystemGenerationSessionStore", () => {
     const workDirectory = join(
       root,
       ".taphound",
+      "build",
       "generations",
       ".generation-1.work"
     );
@@ -1875,6 +1908,7 @@ describe("FileSystemGenerationSessionStore", () => {
     const workDirectory = join(
       root,
       ".taphound",
+      "build",
       "generations",
       ".generation-1.work"
     );
@@ -1936,12 +1970,14 @@ describe("FileSystemGenerationSessionStore", () => {
     expect(published).toBe(join(
       root,
       ".taphound",
+      "build",
       "generations",
       "generation-1"
     ));
     await expect(readdir(join(
       root,
       ".taphound",
+      "build",
       "generations"
     ))).resolves.toEqual([".locks", "generation-1"]);
     await expect(readFile(join(
@@ -1993,7 +2029,7 @@ describe("FileSystemGenerationSessionStore", () => {
       },
       publication: {
         status: "published",
-        journeyPath: "journeys/generated.json"
+        journeyPath: ".taphound/journeys/generated.json"
       }
     });
     const store = new FileSystemGenerationSessionStore(root, {
@@ -2026,7 +2062,7 @@ describe("FileSystemGenerationSessionStore", () => {
     const root = await temporaryRoot();
     const store = new FileSystemGenerationSessionStore(root);
     await store.create(validSession());
-    const generationRoot = join(root, ".taphound", "generations");
+    const generationRoot = join(root, ".taphound", "build", "generations");
     const finalDirectory = join(generationRoot, "generation-1");
     await mkdir(finalDirectory);
     await writeFile(join(finalDirectory, "owner.txt"), "existing", "utf8");
@@ -2093,6 +2129,7 @@ describe("FileSystemGenerationSessionStore", () => {
     const statePath = join(
       root,
       ".taphound",
+      "build",
       "generations",
       ".generation-1.work",
       "state.json"
@@ -2121,7 +2158,7 @@ describe("FileSystemGenerationSessionStore", () => {
     const root = await temporaryRoot();
     const store = new FileSystemGenerationSessionStore(root);
     await store.create(validSession());
-    const generationRoot = join(root, ".taphound", "generations");
+    const generationRoot = join(root, ".taphound", "build", "generations");
     await rename(
       join(generationRoot, ".generation-1.work"),
       join(generationRoot, ".different-generation.work")

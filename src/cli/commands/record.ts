@@ -10,6 +10,7 @@ import {
   writeJson,
   writeLine
 } from "../output.js";
+import { assertNoLegacyWorkspace } from "../workspace-guard.js";
 
 interface RecordOptions {
   project: string;
@@ -35,6 +36,7 @@ export function createRecordCommand(dependencies: CliDependencies): Command {
         config = TapHoundConfigSchema.parse(await dependencies.readJson(
           resolve(options.project, options.config)
         ));
+        await assertNoLegacyWorkspace(dependencies, options.project);
       } catch (error) {
         const output = failureOutput(2, "CONFIG_INVALID", errorMessage(error));
         if (options.json === true) {

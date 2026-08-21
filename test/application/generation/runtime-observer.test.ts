@@ -229,7 +229,11 @@ function harness(): ObserverHarness {
     return Promise.resolve({
       status: "stable",
       polls: 2,
-      durationMs: 150
+      durationMs: 150,
+      strategy: "hybrid",
+      fallbackUsed: false,
+      frameActivityDetected: false,
+      samplingDurationMs: 50
     });
   });
   return {
@@ -269,6 +273,48 @@ describe("RuntimeObserver", () => {
       undefined,
       "com.example.app"
     );
+  });
+
+  it("reports structured IDLE_TIMEOUT diagnostics without changing session state", async () => {
+    const test = harness();
+    test.waitUntilIdle.mockResolvedValueOnce({
+      status: "timeout",
+      code: "IDLE_TIMEOUT",
+      polls: 4,
+      durationMs: 3000,
+      lastDiff: [{ layoutSha256: "changing" }],
+      strategy: "hybrid",
+      backend: "uiautomator",
+      fallbackUsed: true,
+      frameActivityDetected: true,
+      samplingDurationMs: 1800
+    });
+
+    await expect(test.observer.observe({
+      generationId: "generation-1",
+      idle: {
+        strategy: "hybrid",
+        pollIntervalMs: 150,
+        stablePolls: 2,
+        timeoutMs: 3000
+      }
+    })).rejects.toMatchObject({
+      code: "IDLE_TIMEOUT",
+      details: {
+        idle: {
+          strategy: "hybrid",
+          backend: "uiautomator",
+          fallbackUsed: true,
+          frameActivityDetected: true,
+          polls: 4,
+          lastDiff: [{ layoutSha256: "changing" }]
+        }
+      }
+    });
+    expect(test.store.current).toMatchObject({
+      revision: 0,
+      state: "active"
+    });
   });
 
   it("persists normalized evidence and commits its authoritative binding", async () => {

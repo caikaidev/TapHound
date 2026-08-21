@@ -30,9 +30,15 @@ import {
   type PendingConfirmation
 } from "../../domain/generation.js";
 import {
+  BUILD_DIR,
+  GENERATIONS_DIR,
+  TAPHOUND_DIR
+} from "../../domain/workspace.js";
+import {
   GenerationSessionStoreError,
   type GenerationSessionStore
 } from "../../ports/generation-session-store.js";
+import { ensureBuildIgnored } from "./workspace-layout.js";
 
 export interface FileSystemGenerationSessionStoreOptions {
   lockTimeoutMs?: number;
@@ -429,6 +435,7 @@ function transitionStableState(
     bindings: session.bindings,
     target: session.target,
     variables: session.variables,
+    ...(session.baseFlow === undefined ? {} : { baseFlow: session.baseFlow }),
     candidateSteps: session.candidateSteps,
     candidateSources: session.candidateSources,
     pendingConfirmation: session.pendingConfirmation,
@@ -1174,11 +1181,7 @@ implements GenerationSessionStore {
   ) {
     const configuration = parseStoreConfiguration(projectRoot, options);
     this.projectRoot = configuration.projectRoot;
-    this.generationRoot = join(
-      this.projectRoot,
-      ".taphound",
-      "generations"
-    );
+    this.generationRoot = join(this.projectRoot, GENERATIONS_DIR);
     this.locksRoot = join(this.generationRoot, ".locks");
     this.options = configuration.options;
     this.now = configuration.now;
@@ -2448,16 +2451,21 @@ implements GenerationSessionStore {
   private readonly ensureGenerationRoot = async (): Promise<void> => {
     try {
       await requireRealDirectory(this.projectRoot);
-      const taphoundDirectory = join(this.projectRoot, ".taphound");
+      const taphoundDirectory = join(this.projectRoot, TAPHOUND_DIR);
       if (await createOrRequireDirectory(taphoundDirectory)) {
         await this.syncDirectory(this.projectRoot);
       }
-      if (await createOrRequireDirectory(this.generationRoot)) {
+      const buildDirectory = join(this.projectRoot, BUILD_DIR);
+      if (await createOrRequireDirectory(buildDirectory)) {
         await this.syncDirectory(taphoundDirectory);
+      }
+      if (await createOrRequireDirectory(this.generationRoot)) {
+        await this.syncDirectory(buildDirectory);
       }
       if (await createOrRequireDirectory(this.locksRoot)) {
         await this.syncDirectory(this.generationRoot);
       }
+      await ensureBuildIgnored(this.projectRoot);
     } catch (error) {
       throw asStoreIoError(error, "initialize its generation directory");
     }

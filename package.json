@@ -1,6 +1,6 @@
 {
   "name": "taphound",
-  "version": "0.2.0-dev.1",
+  "version": "0.2.0-dev.2",
   "description": "Deterministic app journey recording and verification",
   "license": "Apache-2.0",
   "repository": {

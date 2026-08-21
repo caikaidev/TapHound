@@ -42,11 +42,12 @@ const config: TapHoundConfig = {
     activity: ".MainActivity"
   },
   idle: {
+    strategy: "hybrid",
     pollIntervalMs: 100,
     stablePolls: 2,
     timeoutMs: 3000
   },
-  artifactsDir: ".taphound/runs"
+  artifactsDir: ".taphound/build/runs"
 };
 
 const APP_SOURCE = "app/src/main/java/com/example/app/MainActivity.kt";

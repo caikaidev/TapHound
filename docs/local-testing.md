@@ -73,7 +73,7 @@ mkdir -p /private/tmp/taphound-pack-smoke
 npm pack --json \
   --pack-destination /private/tmp/taphound-pack-smoke \
   --cache /private/tmp/taphound-npm-cache
-shasum -a 256 /private/tmp/taphound-pack-smoke/taphound-0.2.0-dev.1.tgz
+shasum -a 256 /private/tmp/taphound-pack-smoke/taphound-0.2.0-dev.2.tgz
 ```
 
 Compare the digest and the size, shasum, integrity, and entryCount from `npm pack --json` against the [release-ready audit](verification/taphound-v0.2-dev.1-audit.md). Any difference means you must redo the install smoke in this section; you cannot reuse the validation conclusion from a previous machine.
@@ -85,7 +85,7 @@ mkdir -p /private/tmp/taphound-install-smoke
 npm install \
   --prefix /private/tmp/taphound-install-smoke \
   --cache /private/tmp/taphound-npm-cache \
-  /private/tmp/taphound-pack-smoke/taphound-0.2.0-dev.1.tgz
+  /private/tmp/taphound-pack-smoke/taphound-0.2.0-dev.2.tgz
 /private/tmp/taphound-install-smoke/node_modules/.bin/taphound --help
 test ! -e "/private/tmp/taphound-install-smoke/node_modules/.bin/$(printf 'a\160r')"
 ```
@@ -141,12 +141,12 @@ When multiple devices are present, specify the serial directly:
 node dist/cli/main.js verify \
   --project examples/taphound-android-demo \
   --config taphound.config.json \
-  --journey journeys/search.json \
+  --journey .taphound/journeys/search.json \
   --device emulator-5554 \
   --json
 ```
 
-Replace `emulator-5554` with the target serial returned by `adb devices -l`. The report is written to `examples/taphound-android-demo/.taphound/runs/` and always contains `report.json` and `summary.txt`; screenshots, full Logcat, and step logs are provided depending on the run phase and collection results, and collection failures are recorded as secondary errors.
+Replace `emulator-5554` with the target serial returned by `adb devices -l`. The report is written to `examples/taphound-android-demo/.taphound/build/runs/` and always contains `report.json` and `summary.txt`; screenshots, full Logcat, and step logs are provided depending on the run phase and collection results, and collection failures are recorded as secondary errors.
 
 TapHound uses its own in-repo JSON Journey; do not replace it with Android CLI's XML Journey.
 

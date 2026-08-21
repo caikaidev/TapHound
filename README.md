@@ -72,6 +72,8 @@ See the [local testing guide](docs/local-testing.md) for source, npm tarball, an
 - `project describe`: output stable Android project facts.
 - `context list` / `validate` / `status`: inspect or validate a v2 Project Context index and module shards.
 - `context refresh`: recompute Context evidence hashes, including semantic hashes, without re-analyzing source.
+- `journey list-flows` / `journey resolve`: validate reusable Flows and resolve
+  composed Journey Sources into flat Journey v1 files.
 - `generation start` / `observe` / `step` / `confirm` / `manual` / `status` /
   `recover` / `finalize`: manage deterministic Journey generation sessions.
 - `init`: install the TapHound AI Journey Skill for AI agents.
@@ -88,13 +90,55 @@ Create a `taphound.config.json` in the Android project. `run.packageName` is req
     "activity": ".MainActivity"
   },
   "idle": {
+    "strategy": "hybrid",
     "pollIntervalMs": 200,
     "stablePolls": 2,
     "timeoutMs": 5000
   },
-  "artifactsDir": ".taphound/runs"
+  "artifactsDir": ".taphound/build/runs"
 }
 ```
+
+`artifactsDir` is optional and defaults to `.taphound/build/runs`.
+`idle.strategy` defaults to `hybrid`: TapHound uses fast frame counters, then
+confirms a stable Core-owned UIAutomator layout. If frames keep rendering,
+`hybrid` falls back to structural layout stability instead of timing out only
+because the frame counter changes. Use `layoutDiff` to skip frame counters
+entirely for apps with known continuous rendering, or `frameStats` only when
+pixel-level frame quiescence is required.
+
+Generation binds the normalized configuration when a session starts. Choose
+the idle strategy and timeout before `generation start`; changing the config
+requires a new session.
+
+## Workspace Layout
+
+TapHound keeps one predictable footprint in the Android project. Committed
+inputs and outputs live at the top of `.taphound/`; everything ephemeral lives
+under `.taphound/build/`, so a single ignore line covers all generated data.
+
+```text
+<project>/
+  taphound.config.json
+  .taphound/
+    .gitignore            # generated once with "build/"; never overwritten
+    context/              # committed Project Context bundle
+      project-context.json
+      modules/*.json
+    flows/                # committed reusable navigation prefixes
+    sources/              # committed composed leaf Journey sources
+    journeys/             # committed Journeys and <name>.meta.json sidecars
+    build/                # ephemeral, safe to delete, ignored by Git
+      generations/<id>/   # authoritative generation bundles
+      jobs/<id>/          # detached finalize stdout and progress
+      runs/<runId>/       # verify reports, screenshots, Logcat
+```
+
+Add `.taphound/build/` to `.gitignore` and commit the rest. TapHound creates
+`.taphound/.gitignore` with `build/` the first time it creates a generation
+session and never rewrites a file you already own. Earlier layouts used
+`.taphound/generations`, `.taphound/jobs`, and `.taphound/runs`; TapHound stops
+with `CONFIG_INVALID` and prints the exact `mv` commands when it finds them.
 
 ## Interactive Recording
 
@@ -105,7 +149,7 @@ taphound record \
   --project /path/to/android-project \
   --config taphound.config.json \
   --name "Search flow" \
-  --output journeys/search.json
+  --output .taphound/journeys/search.json
 ```
 
 The Recorder does not auto-generate business `expect` assertions. Activity, Element, or Logcat assertions should be added explicitly by developers or external agents. See [Journey Schema](docs/journey-schema.md) for protocol details.
@@ -177,7 +221,7 @@ The Skill is published with the npm package; `taphound init` copies it from the 
 taphound verify \
   --project /path/to/android-project \
   --config taphound.config.json \
-  --journey journeys/search.json
+  --journey .taphound/journeys/search.json
 ```
 
 Temporarily override package, activity, device, or report path:
@@ -185,7 +229,7 @@ Temporarily override package, activity, device, or report path:
 ```bash
 taphound verify \
   --project /path/to/android-project \
-  --journey journeys/search.json \
+  --journey .taphound/journeys/search.json \
   --device emulator-5554 \
   --package com.example.app \
   --activity .MainActivity \
@@ -195,7 +239,7 @@ taphound verify \
 For agent invocations:
 
 ```bash
-taphound verify --project . --journey journeys/search.json --json
+taphound verify --project . --journey .taphound/journeys/search.json --json
 ```
 
 `--json` mode guarantees exactly one final JSON value on stdout; progress and diagnostics go to stderr. See [Agent Integration](docs/agent-integration.md) and [Report Schema](docs/report-schema.md).

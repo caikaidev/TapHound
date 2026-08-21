@@ -30,6 +30,7 @@ import {
   TapHoundConfigSchema,
   type TapHoundConfig
 } from "../../domain/config.js";
+import { BUILD_DIR } from "../../domain/workspace.js";
 import {
   GenerationSessionStoreError,
   type GenerationSessionStore
@@ -105,10 +106,7 @@ export const GenerationOutputPathSchema = ProjectRelativePathSchema.refine(
   ),
   "Generation output path must be normalized"
 ).refine(
-  (path) => (
-    path !== ".taphound/generations"
-    && !path.startsWith(".taphound/generations/")
-  ),
+  (path) => path !== BUILD_DIR && !path.startsWith(`${BUILD_DIR}/`),
   "Generation output cannot overlap the authoritative bundle"
 );
 
@@ -1147,6 +1145,9 @@ export class GenerationFinalizer {
         runId: report.runId,
         runs: 1
       },
+      ...(session.baseFlow === undefined
+        ? {}
+        : { baseFlow: session.baseFlow }),
       manualOverrideStepIndexes: session.candidateSources.flatMap(
         (source, index) => source === "manualOverride" ? [index] : []
       )

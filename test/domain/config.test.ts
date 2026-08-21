@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { TapHoundConfigSchema } from "../../src/domain/config.js";
+import { DEFAULT_ARTIFACTS_DIR } from "../../src/domain/workspace.js";
 
 const validConfig = {
   version: 1,
@@ -9,16 +10,41 @@ const validConfig = {
     activity: ".MainActivity"
   },
   idle: {
+    strategy: "hybrid" as const,
     pollIntervalMs: 200,
     stablePolls: 2,
     timeoutMs: 5000
   },
-  artifactsDir: ".taphound/runs"
+  artifactsDir: ".taphound/build/runs"
 };
 
 describe("TapHoundConfigSchema", () => {
   it("accepts the approved version 1 configuration", () => {
     expect(TapHoundConfigSchema.parse(validConfig)).toEqual(validConfig);
+  });
+
+  it("defaults the idle strategy to hybrid", () => {
+    const config = structuredClone(validConfig);
+    Reflect.deleteProperty(config.idle, "strategy");
+
+    expect(TapHoundConfigSchema.parse(config).idle.strategy).toBe("hybrid");
+  });
+
+  it.each(["hybrid", "layoutDiff", "frameStats"] as const)(
+    "accepts the %s idle strategy",
+    (strategy) => {
+      expect(TapHoundConfigSchema.parse({
+        ...validConfig,
+        idle: { ...validConfig.idle, strategy }
+      }).idle.strategy).toBe(strategy);
+    }
+  );
+
+  it("rejects an unknown idle strategy", () => {
+    expect(() => TapHoundConfigSchema.parse({
+      ...validConfig,
+      idle: { ...validConfig.idle, strategy: "eventQueue" }
+    })).toThrow();
   });
 
   it("requires a package name", () => {
@@ -41,6 +67,30 @@ describe("TapHoundConfigSchema", () => {
       expect(() => TapHoundConfigSchema.parse(config)).toThrow();
     }
   );
+
+  it("defaults artifactsDir to the ephemeral build runs directory", () => {
+    const config = structuredClone(validConfig);
+    Reflect.deleteProperty(config, "artifactsDir");
+
+    expect(TapHoundConfigSchema.parse(config).artifactsDir).toBe(
+      DEFAULT_ARTIFACTS_DIR
+    );
+    expect(DEFAULT_ARTIFACTS_DIR).toBe(".taphound/build/runs");
+  });
+
+  it("keeps an explicit artifactsDir override", () => {
+    expect(TapHoundConfigSchema.parse({
+      ...validConfig,
+      artifactsDir: "/tmp/taphound-runs"
+    }).artifactsDir).toBe("/tmp/taphound-runs");
+  });
+
+  it("rejects an empty artifactsDir instead of falling back", () => {
+    expect(() => TapHoundConfigSchema.parse({
+      ...validConfig,
+      artifactsDir: "   "
+    })).toThrow();
+  });
 
   it("rejects unknown fields instead of silently ignoring them", () => {
     expect(() => TapHoundConfigSchema.parse({ ...validConfig, device: "first" })).toThrow();

@@ -15,9 +15,15 @@ import { FileSystemContextDocumentWriter } from "../adapters/filesystem/context-
 import { FileSystemGenerationMetaWriter } from "../adapters/filesystem/generation-meta-writer.js";
 import { FileSystemGenerationSessionStore } from "../adapters/filesystem/generation-session-store.js";
 import { FileSystemJourneyWriter } from "../adapters/filesystem/journey-writer.js";
+import {
+  FileSystemJourneyCompositionStore
+} from "../adapters/filesystem/journey-composition-store.js";
 import { NodeProjectFileInspector } from "../adapters/filesystem/project-file-inspector.js";
 import { NodeProjectInventoryInspector } from "../adapters/filesystem/project-inventory-inspector.js";
 import { FileSystemSkillInstaller } from "../adapters/filesystem/skill-installer.js";
+import {
+  FileSystemWorkspaceLayout
+} from "../adapters/filesystem/workspace-layout.js";
 import { NodeProcessRunner } from "../adapters/process/node-process-runner.js";
 import {
   NodeDetachedProcessLauncher
@@ -61,6 +67,7 @@ import {
   type RuntimeObserveInput
 } from "../application/generation/runtime-observer.js";
 import { InitService, type InitInput } from "../application/init/init-service.js";
+import { JourneyResolver } from "../application/journey/journey-resolver.js";
 import { ProjectDescriber } from "../application/project/project-describer.js";
 import { RecorderService, type RecordInput, type RecordResult } from "../application/recorder/recorder-service.js";
 import { ReportWriter } from "../application/report/report-writer.js";
@@ -76,6 +83,10 @@ import type {
 import type {
   DetachedProcessLauncher
 } from "../ports/detached-process-launcher.js";
+import type { WorkspaceLayoutPort } from "../ports/workspace-layout.js";
+import type {
+  JourneyCompositionStore
+} from "../ports/journey-composition-store.js";
 
 export interface TextOutput {
   write: (content: string) => void;
@@ -109,6 +120,14 @@ export interface CliDependencies {
   contextValidator: Pick<ContextValidator, "validate">;
   contextLoader: Pick<ContextLoader, "load" | "readIndex">;
   contextRefresher: Pick<ContextRefresher, "refresh">;
+  journeyResolver?: Pick<
+    JourneyResolver,
+    "resolve" | "resolveFlow" | "listFlows"
+  > | undefined;
+  journeyCompositionStore?: Pick<
+    JourneyCompositionStore,
+    "writeText"
+  > | undefined;
   generationStarter: {
     start: (input: GenerationStartInput) => Promise<
       Awaited<ReturnType<GenerationStarter["start"]>>
@@ -130,6 +149,7 @@ export interface CliDependencies {
     install: (input: InitInput) => Promise<InitResult>;
   };
   initPrompt: Pick<InitPromptPort, "selectAgents">;
+  workspaceLayout: WorkspaceLayoutPort;
   readJson: (path: string) => Promise<unknown>;
   cwd: () => string;
   stdout: TextOutput;
@@ -192,6 +212,8 @@ export function createProductionDependencies(
     loader: contextLoader,
     writer: new FileSystemContextDocumentWriter()
   });
+  const journeyCompositionStore = new FileSystemJourneyCompositionStore();
+  const journeyResolver = new JourneyResolver(journeyCompositionStore);
   return {
     ...(signal === undefined ? {} : { signal }),
     doctor: new DoctorService({
@@ -251,12 +273,15 @@ export function createProductionDependencies(
     contextValidator,
     contextLoader,
     contextRefresher,
+    journeyResolver,
+    journeyCompositionStore,
     init: new InitService({
       installer: new FileSystemSkillInstaller(),
       cwd: process.cwd(),
       homedir: homedir()
     }),
     initPrompt: new InquirerInitPrompt(),
+    workspaceLayout: new FileSystemWorkspaceLayout(),
     generationStarter: {
       start: async (input): Promise<
         Awaited<ReturnType<GenerationStarter["start"]>>

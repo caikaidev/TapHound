@@ -71,9 +71,35 @@ The code follows ports and adapters:
   `src/cli/dependencies.ts` wires production adapters into application services.
   `src/cli/main.ts` is the executable entry point.
 
-The CLI exposes `doctor`, `record`, `verify`, `project`, `context`,
+The CLI exposes `doctor`, `record`, `verify`, `project`, `context`, `journey`,
 `generation`, and `init`. Keep external tools and filesystem effects behind
 ports so application tests can inject fakes.
+
+### Host Project Workspace
+
+`src/domain/workspace.ts` is the single source of truth for the host project
+layout; derive every path from it instead of writing `.taphound` literals:
+
+```text
+<project>/
+  taphound.config.json
+  .taphound/
+    .gitignore            # generated once with "build/"; never overwritten
+    context/              # committed Project Context Bundle
+    flows/                # committed reusable Flow prefixes
+    sources/              # committed composed leaf Journey sources
+    journeys/             # committed Journeys and <name>.meta.json sidecars
+    build/                # ephemeral and Git-ignored
+      generations/<id>/   # authoritative generation bundles (+ .locks)
+      jobs/<id>/          # detached finalize stdout and progress
+      runs/<runId>/       # verify reports, screenshots, Logcat
+```
+
+`artifactsDir` is optional and defaults to `.taphound/build/runs`.
+`record`, `verify`, and every `generation` subcommand refuse to run with
+`CONFIG_INVALID` (exit code 2) when the legacy `.taphound/generations`,
+`.taphound/jobs`, or `.taphound/runs` directories still exist. There is no
+silent fallback and no automatic migration.
 
 ### Verification Flow
 
@@ -126,6 +152,9 @@ Generation is a revisioned, evidence-backed state machine:
 4. `GenerationFinalizer` revalidates all bindings, resets the app, replays the
    complete candidate Journey through `VerifyRuntime`, and publishes the Journey,
    metadata, report, receipt, and manifest only after exact verification passes.
+   The `--output` Journey path must stay outside `.taphound/build`, which is the
+   project-bound authority subtree; `.taphound/journeys/<name>.json` is the
+   conventional destination.
 
 `generation status` exposes durable step and verification ownership.
 `generation recover --decision retry` is the only CLI transition out of an
@@ -134,10 +163,12 @@ decision is required because the interrupted action or replay may already have
 produced business side effects. Long finalization can run with `--detach`; job
 stdout and progress stay outside the authoritative generation bundle.
 
-`FileSystemGenerationSessionStore` is the authoritative persistence boundary for
-generation state and immutable evidence. Its revision checks, locking, atomic
-renames, path validation, recovery state, and core-identity invariants are part
-of the protocol; do not bypass them with direct filesystem writes.
+`FileSystemGenerationSessionStore` owns `.taphound/build/generations` and is the
+authoritative persistence boundary for generation state and immutable evidence.
+It creates the ephemeral build subtree and `.taphound/.gitignore` on demand. Its
+revision checks, locking, atomic renames, path validation, recovery state, and
+core-identity invariants are part of the protocol; do not bypass them with
+direct filesystem writes.
 
 ## Protocol and Implementation Constraints
 

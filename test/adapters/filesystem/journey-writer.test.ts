@@ -41,13 +41,13 @@ describe("FileSystemJourneyWriter", () => {
     const root = await mkdtemp(join(tmpdir(), "taphound-journey-"));
     const outside = await mkdtemp(join(tmpdir(), "taphound-outside-"));
     roots.push(root, outside);
-    await mkdir(join(root, ".taphound"));
-    await symlink(outside, join(root, "journeys"));
+    await mkdir(join(root, ".taphound", "build"), { recursive: true });
+    await symlink(outside, join(root, ".taphound", "journeys"));
 
     await expect(new FileSystemJourneyWriter().writeProjectBound({
       projectRoot: root,
-      authorityRoot: join(root, ".taphound"),
-      outputPath: join(root, "journeys", "search.json"),
+      authorityRoot: join(root, ".taphound", "build"),
+      outputPath: join(root, ".taphound", "journeys", "search.json"),
       journey: runtimeJourney
     })).rejects.toThrow(/symlink|directory|safe/i);
     await expect(readdir(outside)).resolves.toEqual([]);
@@ -56,16 +56,16 @@ describe("FileSystemJourneyWriter", () => {
   it("rejects aliases into the authority subtree", async () => {
     const root = await mkdtemp(join(tmpdir(), "taphound-journey-"));
     roots.push(root);
-    const authority = join(root, ".taphound");
+    const authority = join(root, ".taphound", "build");
     const generation = join(authority, "generations", "generation-1");
     await mkdir(generation, { recursive: true });
     await writeFile(join(generation, "manifest.json"), "authority", "utf8");
-    await symlink(generation, join(root, "journeys"));
+    await symlink(generation, join(root, ".taphound", "journeys"));
 
     await expect(new FileSystemJourneyWriter().writeProjectBound({
       projectRoot: root,
       authorityRoot: authority,
-      outputPath: join(root, "journeys", "search.json"),
+      outputPath: join(root, ".taphound", "journeys", "search.json"),
       journey: runtimeJourney
     })).rejects.toThrow(/authority|symlink|safe/i);
     await expect(readFile(
@@ -78,16 +78,16 @@ describe("FileSystemJourneyWriter", () => {
     const root = await mkdtemp(join(tmpdir(), "taphound-journey-"));
     const outside = await mkdtemp(join(tmpdir(), "taphound-outside-"));
     roots.push(root, outside);
-    await mkdir(join(root, ".taphound"));
-    await mkdir(join(root, "journeys"));
+    await mkdir(join(root, ".taphound", "build"), { recursive: true });
+    await mkdir(join(root, ".taphound", "journeys"));
     const victim = join(outside, "victim.json");
     await writeFile(victim, "unchanged", "utf8");
-    await symlink(victim, join(root, "journeys", "search.json"));
+    await symlink(victim, join(root, ".taphound", "journeys", "search.json"));
 
     await expect(new FileSystemJourneyWriter().writeProjectBound({
       projectRoot: root,
-      authorityRoot: join(root, ".taphound"),
-      outputPath: join(root, "journeys", "search.json"),
+      authorityRoot: join(root, ".taphound", "build"),
+      outputPath: join(root, ".taphound", "journeys", "search.json"),
       journey: runtimeJourney
     })).rejects.toThrow(/regular|symlink|safe/i);
     await expect(readFile(victim, "utf8")).resolves.toBe("unchanged");
@@ -97,49 +97,49 @@ describe("FileSystemJourneyWriter", () => {
     const root = await mkdtemp(join(tmpdir(), "taphound-journey-"));
     const outside = await mkdtemp(join(tmpdir(), "taphound-outside-"));
     roots.push(root, outside);
-    await mkdir(join(root, ".taphound"));
-    await mkdir(join(root, "journeys"));
-    const moved = join(root, "journeys-moved");
+    await mkdir(join(root, ".taphound", "build"), { recursive: true });
+    await mkdir(join(root, ".taphound", "journeys"));
+    const moved = join(root, ".taphound", "journeys-moved");
     const writer = new FileSystemJourneyWriter({
       beforeBoundInstall: async (): Promise<void> => {
-        await rename(join(root, "journeys"), moved);
-        await symlink(outside, join(root, "journeys"));
+        await rename(join(root, ".taphound", "journeys"), moved);
+        await symlink(outside, join(root, ".taphound", "journeys"));
       }
     });
 
     await expect(writer.writeProjectBound({
       projectRoot: root,
-      authorityRoot: join(root, ".taphound"),
-      outputPath: join(root, "journeys", "search.json"),
+      authorityRoot: join(root, ".taphound", "build"),
+      outputPath: join(root, ".taphound", "journeys", "search.json"),
       journey: runtimeJourney
     })).rejects.toThrow(/identity|symlink|safe/i);
     await expect(readdir(outside)).resolves.toEqual([]);
-    await expect(readdir(join(root, ".taphound"))).resolves.toEqual([]);
+    await expect(readdir(join(root, ".taphound", "build"))).resolves.toEqual([]);
   });
 
   it("detects parent substitution before generation meta install", async () => {
     const root = await mkdtemp(join(tmpdir(), "taphound-meta-"));
     const outside = await mkdtemp(join(tmpdir(), "taphound-outside-"));
     roots.push(root, outside);
-    await mkdir(join(root, ".taphound"));
-    await mkdir(join(root, "journeys"));
-    const moved = join(root, "journeys-moved");
+    await mkdir(join(root, ".taphound", "build"), { recursive: true });
+    await mkdir(join(root, ".taphound", "journeys"));
+    const moved = join(root, ".taphound", "journeys-moved");
     const writer = new FileSystemGenerationMetaWriter({
       beforeBoundInstall: async (): Promise<void> => {
-        await rename(join(root, "journeys"), moved);
-        await symlink(outside, join(root, "journeys"));
+        await rename(join(root, ".taphound", "journeys"), moved);
+        await symlink(outside, join(root, ".taphound", "journeys"));
       }
     });
 
     await expect(writer.writeProjectBound({
       projectRoot: root,
-      authorityRoot: join(root, ".taphound"),
-      outputPath: join(root, "journeys", "search.meta.json"),
+      authorityRoot: join(root, ".taphound", "build"),
+      outputPath: join(root, ".taphound", "journeys", "search.meta.json"),
       meta: {
         version: 1,
         status: "verified",
         generationId: "generation-1",
-        journeyPath: "journeys/search.json",
+        journeyPath: ".taphound/journeys/search.json",
         bindings: {
           projectHash: "a".repeat(64),
           configHash: "b".repeat(64),

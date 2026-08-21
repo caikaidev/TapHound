@@ -21,6 +21,7 @@ import type { TapHoundConfig } from "../../domain/config.js";
 import { GenerationSessionIdSchema } from "../../domain/generation.js";
 import { ProposedStepSchema } from "../../domain/proposed-step.js";
 import { RuntimeSnapshotSchema } from "../../domain/runtime-snapshot.js";
+import { JOBS_DIR } from "../../domain/workspace.js";
 import {
   GenerationSessionStoreError
 } from "../../ports/generation-session-store.js";
@@ -33,6 +34,7 @@ import {
   writeJson,
   writeLine
 } from "../output.js";
+import { assertNoLegacyWorkspace } from "../workspace-guard.js";
 
 interface GenerationStartOptions {
   project: string;
@@ -41,6 +43,7 @@ interface GenerationStartOptions {
   module?: string[] | undefined;
   device?: string | undefined;
   allowEvidenceDrift?: boolean | undefined;
+  baseFlow?: string | undefined;
   json?: boolean | undefined;
 }
 
@@ -111,18 +114,28 @@ function writeFailure(
   options: GenerationOptions,
   exitCode: 1 | 2 | 3 | 4,
   code: string,
-  error: unknown
+  error: unknown,
+  outputOptions: {
+    status?: "error" | "recoveryRequired";
+    details?: unknown;
+    generationId?: string;
+  } = {}
 ): void {
   const output = {
-    status: "error" as const,
+    status: outputOptions.status ?? "error",
     exitCode,
+    ...(outputOptions.generationId === undefined
+      ? {}
+      : { generationId: outputOptions.generationId }),
     failure: {
       code,
       message: errorMessage(error),
-      ...(error instanceof GenerationOperationError
-        && error.details !== undefined
-        ? { details: error.details }
-        : {})
+      ...(outputOptions.details !== undefined
+        ? { details: outputOptions.details }
+        : error instanceof GenerationOperationError
+          && error.details !== undefined
+          ? { details: error.details }
+          : {})
     }
   };
   if (options.json === true) {
@@ -138,9 +151,11 @@ async function loadConfig(
   options: { project: string; config: string }
 ): Promise<TapHoundConfig> {
   try {
-    return TapHoundConfigSchema.parse(await dependencies.readJson(
+    const config = TapHoundConfigSchema.parse(await dependencies.readJson(
       resolve(options.project, options.config)
     ));
+    await assertNoLegacyWorkspace(dependencies, options.project);
+    return config;
   } catch (error) {
     throw new GenerationOperationError(
       "CONFIG_INVALID",
@@ -209,6 +224,7 @@ function mappedFailure(
   if (error instanceof GenerationOperationError) {
     const exitCode = error.code === "CONFIG_INVALID"
       || error.code === "CONTEXT_INVALID"
+      || error.code === "FLOW_INVALID"
       ? 2
       : 1;
     writeFailure(dependencies, options, exitCode, error.code, error);
@@ -276,7 +292,14 @@ async function executeApproved(
       options,
       1,
       result.failure.code,
-      result.failure.message
+      result.failure.message,
+      {
+        status: "recoveryRequired",
+        generationId: input.generationId,
+        ...(result.failure.details === undefined
+          ? {}
+          : { details: result.failure.details })
+      }
     );
     return;
   }
@@ -328,6 +351,10 @@ function createStartCommand(dependencies: CliDependencies): Command {
     .option("--module <id...>", "Select Context modules for this session")
     .option("--device <serial>", "Select an online Android device")
     .option(
+      "--base-flow <name>",
+      "Replay a reusable Flow before AI step generation"
+    )
+    .option(
       "--allow-evidence-drift",
       "Allow changed source evidence; replay remains mandatory"
     )
@@ -372,12 +399,66 @@ function createStartCommand(dependencies: CliDependencies): Command {
             ? {}
             : { signal: dependencies.signal })
         });
+        const baseFlow = options.baseFlow === undefined
+          ? undefined
+          : await (async (): Promise<NonNullable<
+              Parameters<CliDependencies["generationStarter"]["start"]>[0]["baseFlow"]
+            >> => {
+              if (dependencies.journeyResolver === undefined) {
+                throw new GenerationOperationError(
+                  "FLOW_INVALID",
+                  "Journey Flow resolver is unavailable"
+                );
+              }
+              const resolution = await dependencies.journeyResolver.resolveFlow({
+                projectRoot: options.project,
+                name: options.baseFlow as string
+              }).catch((error: unknown) => {
+                throw new GenerationOperationError(
+                  "FLOW_INVALID",
+                  errorMessage(error)
+                );
+              });
+              writeLine(
+                dependencies.stderr,
+                `TapHound: replaying base Flow ${options.baseFlow as string}`
+              );
+              const verification = await dependencies.verifier.verify({
+                config,
+                journey: resolution.journey,
+                projectRoot: options.project,
+                deviceSerial,
+                toolVersions: tools(doctor.checks),
+                requireFocusedInput: true,
+                generatedReplayPolicy: true,
+                ...(dependencies.signal === undefined
+                  ? {}
+                  : { signal: dependencies.signal })
+              });
+              if (
+                verification.status !== "passed"
+                || verification.exitCode !== 0
+              ) {
+                throw new GenerationOperationError(
+                  "FLOW_REPLAY_FAILED",
+                  verification.report.primaryFailure?.message
+                    ?? `Base Flow ${options.baseFlow as string} did not replay cleanly`
+                );
+              }
+              return {
+                name: options.baseFlow as string,
+                resolutionSha256: resolution.manifest.resolutionSha256,
+                journey: resolution.journey,
+                verificationReport: verification.report
+              };
+            })();
         const session = await dependencies.generationStarter.start({
           projectRoot: options.project,
           config,
           context,
           project,
           deviceSerial,
+          ...(baseFlow === undefined ? {} : { baseFlow }),
           ...(options.allowEvidenceDrift === true
             ? { allowEvidenceDrift: true }
             : {})
@@ -393,7 +474,10 @@ function createStartCommand(dependencies: CliDependencies): Command {
             ? { evidenceDriftAllowed: true }
             : {}),
           variables: session.variables,
-          target: session.target
+          target: session.target,
+          ...(session.baseFlow === undefined
+            ? {}
+            : { baseFlow: session.baseFlow })
         };
         if (options.json === true) {
           writeJson(dependencies.stdout, output);
@@ -691,9 +775,9 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
         }
         const jobId = dependencies.createDetachedJobId();
         const outputJobPath =
-          `.taphound/jobs/${generationId}/${jobId}-output.json`;
+          `${JOBS_DIR}/${generationId}/${jobId}-output.json`;
         const progressJobPath =
-          `.taphound/jobs/${generationId}/${jobId}-progress.log`;
+          `${JOBS_DIR}/${generationId}/${jobId}-progress.log`;
         const args = [
           dependencies.cliEntryPath,
           "generation",

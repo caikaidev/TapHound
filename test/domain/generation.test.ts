@@ -133,9 +133,12 @@ describe("generation error contract", () => {
       "CONFIG_INVALID",
       "CONTEXT_INVALID",
       "CONTEXT_STALE",
+      "FLOW_INVALID",
+      "FLOW_REPLAY_FAILED",
       "SNAPSHOT_STALE",
       "PACKAGE_ESCAPE",
       "APP_CRASHED",
+      "IDLE_TIMEOUT",
       "WINDOW_HIERARCHY_INCOMPLETE",
       "ACTION_UNSUPPORTED",
       "RISK_CONFIRMATION_REQUIRED",
@@ -156,7 +159,7 @@ describe("generation finalization evidence schemas", () => {
       version: 1,
       status: "verified",
       generationId: "generation-1",
-      journeyPath: "journeys/generated.json",
+      journeyPath: ".taphound/journeys/generated.json",
       bindings: {
         projectHash: "a".repeat(64),
         configHash: "b".repeat(64),
@@ -168,6 +171,14 @@ describe("generation finalization evidence schemas", () => {
         runId: "verify-run",
         runs: 1
       },
+      baseFlow: {
+        name: "core/home",
+        resolutionSha256: "e".repeat(64),
+        journeySha256: "f".repeat(64),
+        verificationReportSha256: "1".repeat(64),
+        verificationRunId: "base-run",
+        stepCount: 1
+      },
       manualOverrideStepIndexes: [1]
     })).toMatchObject({ status: "verified" });
     expect(GenerationReportSchema.parse({
@@ -175,7 +186,7 @@ describe("generation finalization evidence schemas", () => {
       generationId: "generation-1",
       status: "verified",
       steps: [
-        { index: 0, source: "planner" },
+        { index: 0, source: "flow" },
         { index: 1, source: "manualOverride" }
       ]
     }).steps).toHaveLength(2);
@@ -278,6 +289,35 @@ describe("GenerationSessionSchema", () => {
     });
   });
 
+  it("binds Flow provenance only as a contiguous candidate prefix", () => {
+    const flowStep = {
+      action: "wait" as const,
+      activity: {
+        before: "com.example.app.MainActivity",
+        after: "com.example.app.MainActivity"
+      }
+    };
+    const parsed = GenerationSessionSchema.parse({
+      ...(validSession() as object),
+      baseFlow: {
+        name: "core/home",
+        resolutionSha256: "1".repeat(64),
+        journeySha256: "2".repeat(64),
+        verificationReportSha256: "3".repeat(64),
+        verificationRunId: "base-run",
+        stepCount: 1
+      },
+      candidateSteps: [flowStep],
+      candidateSources: ["flow"]
+    });
+    expect(parsed.baseFlow?.name).toBe("core/home");
+
+    expect(() => GenerationSessionSchema.parse({
+      ...parsed,
+      candidateSources: ["planner"]
+    })).toThrow(/provenance/i);
+  });
+
   it("projects every immutable Core-owned identity field", () => {
     const session = GenerationSessionSchema.parse(validSession());
 
@@ -349,7 +389,7 @@ describe("GenerationSessionSchema", () => {
       ...(validSession() as object),
       publication: {
         status: "published",
-        journeyPath: "journeys/generated.json"
+        journeyPath: ".taphound/journeys/generated.json"
       }
     })).toThrow(/verification/i);
   });
@@ -375,13 +415,13 @@ describe("GenerationSessionSchema", () => {
       verification: passedVerification,
       publication: {
         status: "published",
-        journeyPath: String.raw`journeys\generated.json`
+        journeyPath: String.raw`.taphound\journeys\generated.json`
       }
     });
 
     expect(parsed.publication).toEqual({
       status: "published",
-      journeyPath: "journeys/generated.json"
+      journeyPath: ".taphound/journeys/generated.json"
     });
   });
 

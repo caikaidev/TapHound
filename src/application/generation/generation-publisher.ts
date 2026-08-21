@@ -14,6 +14,7 @@ import {
   TapHoundReportSchema,
   type TapHoundReport
 } from "../../domain/report.js";
+import { BUILD_DIR } from "../../domain/workspace.js";
 import type {
   ProjectBoundGenerationMetaWriterPort
 } from "../../ports/generation-meta-writer.js";
@@ -195,7 +196,7 @@ export class GenerationPublisher {
     const meta = GenerationMetaSchema.parse(input.meta);
     const journeyPath = resolve(input.projectRoot, input.journeyPath);
     const metaPath = generationMetaOutputPath(journeyPath);
-    const authorityRoot = resolve(input.projectRoot, ".taphound");
+    const authorityRoot = resolve(input.projectRoot, BUILD_DIR);
     try {
       await this.dependencies.journeyWriter.writeProjectBound({
         projectRoot: input.projectRoot,

@@ -5,9 +5,9 @@
     "activity": ".MainActivity"
   },
   "idle": {
+    "strategy": "hybrid",
     "pollIntervalMs": 200,
     "stablePolls": 2,
     "timeoutMs": 5000
-  },
-  "artifactsDir": ".taphound/runs"
+  }
 }

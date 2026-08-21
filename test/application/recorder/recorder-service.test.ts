@@ -236,7 +236,9 @@ describe("RecorderService", () => {
       journeyName: "Delayed process",
       outputPath: "/project/delayed.json"
     })).resolves.toEqual({ status: "cancelled", stepsRecorded: 0 });
-    expect(runtime.dependencies.clock).toMatchObject({ sleeps: [100] });
+    expect(runtime.dependencies.clock).toMatchObject({
+      sleeps: [100, 100, 100]
+    });
     expect(runtime.androidCli.layout).toHaveBeenCalled();
     expect(journeyWriter.write).not.toHaveBeenCalled();
   });
@@ -316,7 +318,12 @@ describe("RecorderService", () => {
     await expect(service.record({
       config: {
         ...runtimeConfig,
-        idle: { pollIntervalMs: 100, stablePolls: 2, timeoutMs: 100 }
+        idle: {
+          strategy: "hybrid",
+          pollIntervalMs: 100,
+          stablePolls: 2,
+          timeoutMs: 500
+        }
       },
       projectRoot: "/project",
       deviceSerial: "emulator-5554",
@@ -363,6 +370,8 @@ describe("RecorderService", () => {
     vi.mocked(runtime.androidCli.layoutDiff)
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ layoutSha256: "startup" }])
+      .mockResolvedValueOnce([])
       .mockResolvedValue([{ changed: "text" }]);
     const recorderPrompt = prompt(["click", "finish"]);
     const journeyWriter = writer();
@@ -377,7 +386,12 @@ describe("RecorderService", () => {
     const result = await service.record({
       config: {
         ...runtimeConfig,
-        idle: { pollIntervalMs: 100, stablePolls: 2, timeoutMs: 100 }
+        idle: {
+          strategy: "hybrid",
+          pollIntervalMs: 100,
+          stablePolls: 2,
+          timeoutMs: 500
+        }
       },
       projectRoot: "/project",
       deviceSerial: "emulator-5554",

@@ -9,6 +9,7 @@ import type { AgentId, InitResult } from "../../src/domain/init.js";
 import {
   InitPromptCancelledError
 } from "../../src/ports/init-prompt.js";
+import { fakeWorkspaceLayout } from "../fakes/workspace-layout.js";
 
 class BufferOutput implements TextOutput {
   public value = "";
@@ -83,6 +84,7 @@ function harness(
     runtimeObserver: {
       observe: vi.fn(() => Promise.reject(new Error("unused")))
     },
+    workspaceLayout: fakeWorkspaceLayout(),
     readJson: vi.fn(() => Promise.reject(new Error("unused"))),
     cwd: () => "/project",
     stdout,

@@ -12,6 +12,8 @@ You are generating the next proposed step in a TapHound journey. You have:
   properties) and the current `activity`.
 - **Completed steps**: a list of steps that have already succeeded in this
   session.
+- **Base Flow**: optional bound reusable prefix metadata. Its exit Activity is
+  the generation starting checkpoint; its navigation is already complete.
 
 ## Your Task
 
@@ -22,7 +24,8 @@ the observe result).
 ## How to Decide
 
 1. **Identify what remains**: Compare the Goal against completed steps. What
-   is the next logical action?
+   is the next logical action? Do not regenerate navigation already supplied by
+   the bound Base Flow.
 
 2. **Verify Context coverage**: Find `snapshot.activity` in the selected
    module summaries. If no selected shard covers it, return

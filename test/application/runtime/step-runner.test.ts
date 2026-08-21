@@ -217,7 +217,12 @@ describe("StepRunner", () => {
           matchedBy: "resourceId",
           fallbackUsed: false
         },
-        idle: { status: "stable", polls: 1 },
+        idle: {
+          status: "stable",
+          polls: 3,
+          strategy: "hybrid",
+          fallbackUsed: false
+        },
         activity: {
           before: { status: "passed", actual: checkpoint.before },
           after: { status: "passed", actual: checkpoint.after }

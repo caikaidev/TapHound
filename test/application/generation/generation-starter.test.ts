@@ -9,7 +9,10 @@ import type {
   ResolvedProjectContext
 } from "../../../src/domain/project-context.js";
 import type { GenerationSession } from "../../../src/domain/generation.js";
+import { hashJourney } from "../../../src/domain/report.js";
 import { contextSelection } from "../../fixtures/project-context.js";
+import { validReport } from "../../fixtures/report.js";
+import { runtimeJourney } from "../../fakes/runtime-fixture.js";
 
 const config: TapHoundConfig = {
   version: 1,
@@ -17,8 +20,13 @@ const config: TapHoundConfig = {
     packageName: "com.example.app",
     activity: ".MainActivity"
   },
-  idle: { pollIntervalMs: 100, stablePolls: 2, timeoutMs: 5_000 },
-  artifactsDir: ".taphound/reports"
+  idle: {
+    strategy: "hybrid",
+    pollIntervalMs: 100,
+    stablePolls: 2,
+    timeoutMs: 5_000
+  },
+  artifactsDir: ".taphound/build/reports"
 };
 
 const context: ResolvedProjectContext = {
@@ -151,6 +159,81 @@ describe("GenerationStarter", () => {
     });
 
     expect(right.bindings).toEqual(left.bindings);
+  });
+
+  it("binds a clean replayed Flow as the candidate prefix", async () => {
+    const test = starter();
+    const validStep = validReport().steps[0];
+    if (validStep === undefined) {
+      throw new Error("Expected valid report step fixture");
+    }
+    const stepWithoutExpectation = { ...validStep };
+    delete stepWithoutExpectation.expectation;
+    const verificationReport = validReport({
+      journey: {
+        name: runtimeJourney.name,
+        sha256: hashJourney(runtimeJourney)
+      },
+      steps: [stepWithoutExpectation]
+    });
+
+    const session = await test.service.start({
+      projectRoot: "/project",
+      config,
+      context,
+      project,
+      deviceSerial: "emulator-5554",
+      baseFlow: {
+        name: "core/home",
+        resolutionSha256: "f".repeat(64),
+        journey: runtimeJourney,
+        verificationReport
+      }
+    });
+
+    expect(session.baseFlow).toMatchObject({
+      name: "core/home",
+      resolutionSha256: "f".repeat(64),
+      journeySha256: hashJourney(runtimeJourney),
+      verificationRunId: verificationReport.runId,
+      stepCount: 1
+    });
+    expect(session.candidateSteps).toEqual(runtimeJourney.steps);
+    expect(session.candidateSources).toEqual(["flow"]);
+  });
+
+  it("rejects a failed or mismatched base Flow replay", async () => {
+    const test = starter();
+    const validStep = validReport().steps[0];
+    if (validStep === undefined) {
+      throw new Error("Expected valid report step fixture");
+    }
+    const stepWithoutExpectation = { ...validStep };
+    delete stepWithoutExpectation.expectation;
+
+    await expect(test.service.start({
+      projectRoot: "/project",
+      config,
+      context,
+      project,
+      deviceSerial: "emulator-5554",
+      baseFlow: {
+        name: "core/home",
+        resolutionSha256: "f".repeat(64),
+        journey: runtimeJourney,
+        verificationReport: validReport({
+          status: "failed",
+          journey: {
+            name: runtimeJourney.name,
+            sha256: hashJourney(runtimeJourney)
+          },
+          steps: [stepWithoutExpectation]
+        })
+      }
+    })).rejects.toMatchObject({
+      code: "FLOW_REPLAY_FAILED"
+    });
+    expect(test.created).toEqual([]);
   });
 
   it.each([

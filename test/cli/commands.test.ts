@@ -16,6 +16,7 @@ import {
   GenerationSessionStoreError
 } from "../../src/ports/generation-session-store.js";
 import { runtimeConfig, runtimeJourney } from "../fakes/runtime-fixture.js";
+import { fakeWorkspaceLayout } from "../fakes/workspace-layout.js";
 import { validReport } from "../fixtures/report.js";
 import {
   contextSelection,
@@ -23,6 +24,7 @@ import {
   projectContextModule,
   resolvedProjectContext
 } from "../fixtures/project-context.js";
+import { hashJourney } from "../../src/domain/report.js";
 
 const generationContext = resolvedProjectContext;
 
@@ -163,6 +165,7 @@ function dependencies(): {
           publication: { status: "notRun" as const }
         }))
       },
+      workspaceLayout: fakeWorkspaceLayout(),
       runtimeObserver: {
         observe: vi.fn(() => Promise.resolve({
           binding: {
@@ -242,7 +245,7 @@ describe("TapHound CLI commands", () => {
       "--project", "/project",
       "--config", "/project/taphound.config.json",
       "--name", "Recorded",
-      "--output", "/project/journeys/recorded.json"
+      "--output", "/project/.taphound/journeys/recorded.json"
     ]);
 
     expect(test.value.recorder.record).toHaveBeenCalledWith({
@@ -250,7 +253,7 @@ describe("TapHound CLI commands", () => {
       projectRoot: "/project",
       deviceSerial: "emulator-5554",
       journeyName: "Recorded",
-      outputPath: "/project/journeys/recorded.json"
+      outputPath: "/project/.taphound/journeys/recorded.json"
     });
     expect(test.stdout.value).toContain("Recorded 1 step");
     expect(test.exitCodes).toEqual([0]);
@@ -391,6 +394,251 @@ describe("TapHound CLI commands", () => {
     expect(test.exitCodes).toEqual([0]);
   });
 
+  it("replays and binds a base Flow before generation starts", async () => {
+    const test = dependencies();
+    const journey = runtimeJourney;
+    const manifest = {
+      version: 1 as const,
+      source: {
+        path: ".taphound/flows/core/home.json",
+        sha256: "1".repeat(64)
+      },
+      flows: [{
+        name: "core/home",
+        path: ".taphound/flows/core/home.json",
+        sha256: "1".repeat(64),
+        stepCount: 1
+      }],
+      expansion: ["core/home"],
+      journey: {
+        name: journey.name,
+        sha256: hashJourney(journey),
+        stepCount: 1
+      },
+      resolutionSha256: "2".repeat(64)
+    };
+    test.value.journeyResolver = {
+      resolve: vi.fn(),
+      resolveFlow: vi.fn(() => Promise.resolve({ journey, manifest })),
+      listFlows: vi.fn()
+    };
+    const report = validReport({
+      journey: {
+        name: journey.name,
+        sha256: hashJourney(journey)
+      }
+    });
+    vi.mocked(test.value.verifier.verify).mockResolvedValueOnce({
+      status: "passed",
+      exitCode: 0,
+      report,
+      reportPath: "/reports/base/report.json",
+      summaryPath: "/reports/base/summary.txt"
+    });
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "generation", "start",
+      "--project", "/project",
+      "--context", "context.json",
+      "--base-flow", "core/home",
+      "--json"
+    ]);
+
+    expect(test.value.verifier.verify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: runtimeConfig,
+        journey,
+        deviceSerial: "emulator-5554",
+        requireFocusedInput: true,
+        generatedReplayPolicy: true
+      })
+    );
+    expect(test.value.generationStarter.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        baseFlow: {
+          name: "core/home",
+          resolutionSha256: "2".repeat(64),
+          journey,
+          verificationReport: report
+        }
+      })
+    );
+    expect(test.stderr.value).toContain(
+      "TapHound: replaying base Flow core/home"
+    );
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "started",
+      exitCode: 0
+    });
+  });
+
+  it("fails closed when a selected base Flow does not replay", async () => {
+    const test = dependencies();
+    const journey = runtimeJourney;
+    test.value.journeyResolver = {
+      resolve: vi.fn(),
+      resolveFlow: vi.fn(() => Promise.resolve({
+        journey,
+        manifest: {
+          version: 1 as const,
+          source: {
+            path: ".taphound/flows/core/home.json",
+            sha256: "1".repeat(64)
+          },
+          flows: [{
+            name: "core/home",
+            path: ".taphound/flows/core/home.json",
+            sha256: "1".repeat(64),
+            stepCount: 1
+          }],
+          expansion: ["core/home"],
+          journey: {
+            name: journey.name,
+            sha256: hashJourney(journey),
+            stepCount: 1
+          },
+          resolutionSha256: "2".repeat(64)
+        }
+      })),
+      listFlows: vi.fn()
+    };
+    vi.mocked(test.value.verifier.verify).mockResolvedValueOnce({
+      status: "failed",
+      exitCode: 1,
+      report: validReport({
+        status: "failed",
+        primaryFailure: {
+          code: "LOCATOR_NOT_FOUND",
+          message: "shared navigation changed",
+          phase: "locator",
+          stepIndex: 0
+        }
+      }),
+      reportPath: "/reports/base/report.json",
+      summaryPath: "/reports/base/summary.txt"
+    });
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "generation", "start",
+      "--project", "/project",
+      "--context", "context.json",
+      "--base-flow", "core/home",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toEqual({
+      status: "error",
+      exitCode: 1,
+      failure: {
+        code: "FLOW_REPLAY_FAILED",
+        message: "shared navigation changed"
+      }
+    });
+    expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
+    expect(test.value.generationStarter.start).not.toHaveBeenCalled();
+    expect(test.exitCodes).toEqual([1]);
+  });
+
+  it("resolves a composed Journey with one exact JSON result", async () => {
+    const test = dependencies();
+    const journey = runtimeJourney;
+    const manifest = {
+      version: 1 as const,
+      source: {
+        path: ".taphound/sources/search.json",
+        sha256: "1".repeat(64)
+      },
+      flows: [{
+        name: "core/home",
+        path: ".taphound/flows/core/home.json",
+        sha256: "2".repeat(64),
+        stepCount: 1
+      }],
+      expansion: ["core/home"],
+      journey: {
+        name: journey.name,
+        sha256: hashJourney(journey),
+        stepCount: journey.steps.length
+      },
+      resolutionSha256: "3".repeat(64)
+    };
+    const writes: Array<{ relativePath: string; content: string }> = [];
+    test.value.journeyResolver = {
+      resolve: vi.fn(() => Promise.resolve({ journey, manifest })),
+      resolveFlow: vi.fn(),
+      listFlows: vi.fn()
+    };
+    test.value.journeyCompositionStore = {
+      writeText: vi.fn((input: {
+        relativePath: string;
+        content: string;
+      }) => {
+        writes.push({
+          relativePath: input.relativePath,
+          content: input.content
+        });
+        return Promise.resolve();
+      })
+    };
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "journey", "resolve",
+      "--project", "/project",
+      "--source", ".taphound/sources/search.json",
+      "--output", ".taphound/journeys/search.json",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toEqual({
+      status: "resolved",
+      exitCode: 0,
+      journeyPath: ".taphound/journeys/search.json",
+      manifestPath: ".taphound/journeys/search.resolve.json",
+      journeySha256: hashJourney(journey),
+      resolutionSha256: "3".repeat(64),
+      stepCount: 1,
+      flows: ["core/home"]
+    });
+    expect(writes.map((write) => write.relativePath)).toEqual([
+      ".taphound/journeys/search.json",
+      ".taphound/journeys/search.resolve.json"
+    ]);
+    expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
+    expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("lists reusable Flows with one exact JSON result", async () => {
+    const test = dependencies();
+    test.value.journeyResolver = {
+      resolve: vi.fn(),
+      resolveFlow: vi.fn(),
+      listFlows: vi.fn(() => Promise.resolve([{
+        name: "core/home",
+        path: ".taphound/flows/core/home.json",
+        status: "valid" as const,
+        entryActivity: "com.example.app.MainActivity",
+        exitActivity: "com.example.app.HomeActivity",
+        stepCount: 1,
+        resolutionSha256: "3".repeat(64)
+      }]))
+    };
+    test.value.journeyCompositionStore = { writeText: vi.fn() };
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "journey", "list-flows",
+      "--project", "/project",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "listed",
+      exitCode: 0,
+      flows: [{ name: "core/home", status: "valid" }]
+    });
+    expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
+    expect(test.exitCodes).toEqual([0]);
+  });
+
   it("observes a generation with one exact JSON result", async () => {
     const test = dependencies();
 
@@ -428,6 +676,7 @@ describe("TapHound CLI commands", () => {
       projectRoot: "/project",
       generationId: "generation-1",
       idle: {
+        strategy: "hybrid",
         pollIntervalMs: 100,
         stablePolls: 1,
         timeoutMs: 500

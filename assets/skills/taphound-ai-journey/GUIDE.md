@@ -721,7 +721,7 @@ coverage gaps, not successful full generation.
 |------------------|----------------|--------|
 | `valid` | All selected modules complete | Proceed to test |
 | `valid` | Any module incomplete | Complete that module shard |
-| `stale` | Existing module changed | Run `context refresh`, then regenerate any shard it reports as blocked |
+| `stale` | Existing module changed | Run `context refresh --json`, then act on each block's `resolution` (see 5.2) |
 | `stale` | Module catalog changed | Update index and generate new shards |
 | `invalid` | — | Repair or regenerate Bundle |
 
@@ -742,16 +742,35 @@ taphound context refresh \
   values are backfilled, formatting- or comment-only edits are rehashed,
   drifted shard hashes in the index are repaired, and the Context is current.
 - `"blocked"`: the response lists the modules and files that changed
-  semantically, whose inventory changed, or whose evidence is missing. Only
-  those modules need the steps below.
+  semantically, whose inventory changed, or whose evidence is missing. Each
+  block carries a `resolution` field — act on it, do not blanket re-analyze:
 
-`--module <id...>` narrows the scope. `--accept-source-changes` also rehashes
+  | block `code` | `resolution` | Action |
+  |---|---|---|
+  | `EVIDENCE_UNRESOLVED` | `pruneDeleted` | A tracked file was deleted. Re-run with `--prune-deleted` (drops the entry). Combine with `--accept-source-changes` if inventory also drifted. |
+  | `EVIDENCE_SEMANTIC_CHANGED` | `acceptSourceChanges` | A tracked file's semantics changed. Re-run with `--accept-source-changes` to rehash. Re-analyze (below) only if the module summary is now wrong. |
+  | `MODULE_INVENTORY_CHANGED` | `acceptSourceChanges` | The on-disk file set grew or shrank. Re-run with `--accept-source-changes` to accept the new inventory hash. Re-analyze only when new UI files were added that the summary must cover. |
+  | `EVIDENCE_UNRESOLVED` | `reanalyze` | An evidence file is unreadable/escaped/too large (not a clean deletion). Fix the file or regenerate that module's shard (below). |
+
+  The typical one-shot reconcile for routine edits + deletions:
+
+  ```bash
+  taphound context refresh \
+    --project /path/to/android-project \
+    --context /path/to/android-project/.taphound/context/project-context.json \
+    --prune-deleted --accept-source-changes --json
+  ```
+
+`--module <id...>` narrows the scope. `--accept-source-changes` rehashes
 semantic and inventory drift; use it only after confirming the recorded module
 summary (screens, elements, transitions, Logcat) is still accurate, because
-`refresh` never updates semantics.
+`refresh` never updates semantics. `--prune-deleted` only drops entries for
+files that are truly gone (`notFound`); unreadable or escaped files stay
+blocked as `reanalyze`.
 
-When `refresh` reports `"blocked"`, regenerate the affected module shards
-instead of reanalyzing unrelated features:
+When a block's `resolution` is `reanalyze`, or when `acceptSourceChanges`
+would hide newly added UI screens the Goal may reach, regenerate the affected
+module shards instead of reanalyzing unrelated features:
 
 1. Identify which files changed (the `context status` output lists them).
 2. Recompute SHA-256 for each changed file.

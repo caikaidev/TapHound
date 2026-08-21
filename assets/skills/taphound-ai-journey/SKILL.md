@@ -122,25 +122,43 @@ templates, then call the TapHound CLI.
      --json
    ```
    - `"valid"`: Index, shard, evidence, and module inventory hashes match.
-   - `"stale"`: Tracked files changed. Run `context refresh` first (see
-     below); only re-analyze the modules it reports as blocked.
+   - `"stale"`: Tracked files changed. The `--json` output carries a
+     `scopes` array (one entry per module: `inventoryChanged`,
+     `missingPaths`, `changedPaths`) so you can see exactly which modules
+     drifted without a second call. Resolve per the matrix below.
    - `"invalid"`: Needs full regeneration.
    - If the file does not exist, proceed to Phase 1 (full generation).
 
-   Hash-only maintenance never requires re-analysis:
+   When `status` is `stale`, run `context refresh --json` to get the
+   scoped, machine-readable diagnostic. `refresh` returns a `blocked`
+   array; each block has a `code` **and a `resolution`** field. Act on
+   the `resolution`, NOT a blanket "re-analyze":
+
+   | block `code` | `resolution` | What it means | Action |
+   |---|---|---|---|
+   | `EVIDENCE_UNRESOLVED` | `pruneDeleted` | A tracked evidence file was deleted from disk | `refresh --prune-deleted` (drops the stale entry). Combine with `--accept-source-changes` if inventory also drifted. |
+   | `EVIDENCE_SEMANTIC_CHANGED` | `acceptSourceChanges` | A tracked file's semantics changed | `refresh --accept-source-changes` rehashes it. Only re-analyze (Phase 1) if the module summary is now wrong. |
+   | `MODULE_INVENTORY_CHANGED` | `acceptSourceChanges` | The on-disk file set grew or shrank | `refresh --accept-source-changes` accepts the new inventory hash. Re-analyze (Phase 1) only when new UI files were added that the summary must cover. |
+   | `EVIDENCE_UNRESOLVED` | `reanalyze` | An evidence file is unreadable/escaped/too large (not a clean deletion) | Fix the file or regenerate that module's shard in Phase 1. |
+
+   The typical reconcile for routine edits + deletions is one command:
    ```bash
    taphound context refresh \
      --project <project> \
      --context .taphound/context/project-context.json \
-     --json
+     --prune-deleted --accept-source-changes --json
    ```
-   `refresh` backfills each evidence file's `semanticSha256`, rehashes
-   formatting- or comment-only changes, and repairs drifted shard hashes in the
-   index. It exits 1 with `"blocked"` when evidence changed semantically, a
-   module inventory changed, or an evidence file is missing; those modules need
-   re-analysis in Phase 1. `--module <id...>` narrows the scope, and
-   `--accept-source-changes` also rehashes semantic changes when the recorded
-   module summary is verified to still be accurate.
+   `--prune-deleted` drops entries for files no longer on disk;
+   `--accept-source-changes` rehashes semantic edits and accepts inventory
+   drift. `--module <id...>` narrows the scope. `refresh` backfills
+   `semanticSha256`, rehashes formatting-only changes, and repairs
+   drifted shard/index hashes. It never removes a file for a non-deletion
+   reason (unreadable/escape/too-large stay blocked as `reanalyze`).
+   **Caveat:** `--accept-source-changes` makes the Context pass freshness
+   checks by hash, but it does NOT re-analyze newly added Activities or
+   layouts into the module summary. If the Goal may reach a newly added
+   screen, re-analyze that module in Phase 1 instead; otherwise a
+   `Context coverage gap` can surface during generation.
 
 5. When status is valid, list the compact module index and choose the modules
    relevant to the Goal:
@@ -414,11 +432,14 @@ templates, then call the TapHound CLI.
   the app requires human approval during generation. Leave empty unless
   ALL instances of that action are genuinely dangerous. The Core risk
   evaluator handles per-step risk assessment at runtime.
-- If `context status` returns `"stale"`, run `context refresh` first. When it
-  reports `"refreshed"` the Context is current again. When it reports
-  `"blocked"`, the named modules changed semantically and must be re-analyzed
-  before starting a new generation session. A stale Context will cause
-  `generation start` to fail with `CONTEXT_STALE`.
+- If `context status` returns `"stale"`, run `context refresh --json` first.
+  When it reports `"refreshed"` the Context is current again. When it reports
+  `"blocked"`, read each block's `resolution` field and act on it — do NOT
+  blanket re-analyze. `pruneDeleted` → `--prune-deleted`;
+  `acceptSourceChanges` → `--accept-source-changes` (only re-analyze when the
+  module summary is now wrong or new UI files were added); `reanalyze` →
+  Phase 1 for that module. A stale Context will cause `generation start` to
+  fail with `CONTEXT_STALE`.
 - `finalize` performs a full replay from scratch (forceStop, relaunch).
   TapHound does not build or install the APK; ensure the app is installed
   before calling `finalize`. It is not incremental. Prefer `--detach` and

@@ -2,7 +2,8 @@ import { normalizeActivity } from "../../domain/activity.js";
 import { semanticSha256 } from "./evidence-hash.js";
 import type { TapHoundConfig } from "../../domain/config.js";
 import {
-  ResolvedProjectContextSchema
+  ResolvedProjectContextSchema,
+  type ProjectContextModule
 } from "../../domain/project-context.js";
 import {
   type ProjectFileInspection,
@@ -33,15 +34,24 @@ export interface ContextValidationReason {
   message: string;
 }
 
+export interface ContextValidationScope {
+  id: string;
+  inventoryChanged: boolean;
+  missingPaths: string[];
+  changedPaths: string[];
+}
+
 export type ContextValidationResult =
-  | { status: "valid" }
-  | { status: "stale"; reason: ContextValidationReason }
-  | { status: "invalid"; reason: ContextValidationReason };
+  | { status: "valid"; scopes?: ContextValidationScope[] }
+  | { status: "stale"; reason: ContextValidationReason; scopes?: ContextValidationScope[] }
+  | { status: "invalid"; reason: ContextValidationReason; scopes?: ContextValidationScope[] };
 
 export interface ContextValidationInput {
   context: unknown;
   projectRoot: string;
   config: TapHoundConfig;
+  modules?: ProjectContextModule[] | undefined;
+  reportScopes?: boolean | undefined;
 }
 
 const SECRET_FILE_NAMES = new Set([
@@ -264,8 +274,67 @@ export class ContextValidator {
       }
     }
 
+    const scopes = input.reportScopes === true && input.modules !== undefined
+      ? await this.inspectScopes(input.projectRoot, input.modules)
+      : undefined;
+
     return staleReason === undefined
-      ? { status: "valid" }
-      : { status: "stale", reason: staleReason };
+      ? { status: "valid", ...(scopes === undefined ? {} : { scopes }) }
+      : {
+          status: "stale",
+          reason: staleReason,
+          ...(scopes === undefined ? {} : { scopes })
+        };
+  };
+
+  private readonly inspectScopes = async (
+    projectRoot: string,
+    modules: ProjectContextModule[]
+  ): Promise<ContextValidationScope[]> => {
+    const scopes: ContextValidationScope[] = [];
+    for (const module of modules) {
+      const inventory = this.inventory === undefined
+        ? undefined
+        : await this.inventory.inspectProjectInventory({
+          projectRoot,
+          projectDir: module.projectDir,
+          categories: module.inventory.categories
+        });
+      const inventoryChanged = inventory !== undefined
+        && inventory.status === "inspected"
+        && inventory.pathSetSha256 !== module.inventory.pathSetSha256;
+      const missingPaths: string[] = [];
+      const changedPaths: string[] = [];
+      for (const evidence of module.manifest.files) {
+        const inspection = await this.files.inspectProjectFile({
+          projectRoot,
+          relativePath: evidence.path,
+          maximumBytes: MAX_CONTEXT_EVIDENCE_BYTES
+        });
+        if (inspection.status !== "inspected") {
+          if (inspection.status === "notFound") {
+            missingPaths.push(evidence.path);
+          }
+          continue;
+        }
+        if (inspection.bytes === undefined) {
+          continue;
+        }
+        const semantic = semanticSha256(inspection.bytes);
+        const unchanged = evidence.semanticSha256 !== undefined
+          ? semantic === evidence.semanticSha256
+          : inspection.sha256 === evidence.sha256;
+        if (!unchanged) {
+          changedPaths.push(evidence.path);
+        }
+      }
+      scopes.push({
+        id: module.moduleId,
+        inventoryChanged,
+        missingPaths,
+        changedPaths
+      });
+    }
+    return scopes;
   };
 }

@@ -110,6 +110,7 @@ function dependencies(): {
             formattingRehashed: 1,
             semanticChanged: [],
             unresolved: [],
+            pruned: 0,
             inventoryChanged: false
           }],
           blocked: []
@@ -671,11 +672,21 @@ describe("TapHound CLI commands", () => {
       });
       expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
       expect(test.stderr.value).toBe("");
-      expect(test.value.contextValidator.validate).toHaveBeenCalledWith({
-        context: generationContext,
-        projectRoot: "/project",
-        config: runtimeConfig
-      });
+      expect(test.value.contextValidator.validate).toHaveBeenCalledWith(
+        command === "status"
+          ? {
+              context: generationContext,
+              projectRoot: "/project",
+              config: runtimeConfig,
+              modules: [projectContextModule],
+              reportScopes: true
+            }
+          : {
+              context: generationContext,
+              projectRoot: "/project",
+              config: runtimeConfig
+            }
+      );
       expect(test.exitCodes).toEqual([exitCode]);
     }
   );
@@ -740,6 +751,7 @@ describe("TapHound CLI commands", () => {
       scopes: [],
       blocked: [{
         code: "EVIDENCE_SEMANTIC_CHANGED",
+        resolution: "acceptSourceChanges" as const,
         message: ":app: 1 evidence files changed semantically (a.kt)"
       }]
     });
@@ -829,5 +841,85 @@ describe("TapHound CLI commands", () => {
     expect(test.stderr.value).toBe("");
     expect(test.value.contextValidator.validate).not.toHaveBeenCalled();
     expect(test.exitCodes).toEqual([2]);
+  });
+
+  it("passes --prune-deleted through to the refresher", async () => {
+    const test = dependencies();
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "context", "refresh",
+      "--project", "/project",
+      "--context", ".taphound/context/project-context.json",
+      "--prune-deleted",
+      "--accept-source-changes",
+      "--json"
+    ]);
+
+    expect(test.value.contextRefresher.refresh).toHaveBeenCalledWith({
+      projectRoot: "/project",
+      contextPath: "/project/.taphound/context/project-context.json",
+      pruneDeleted: true,
+      acceptSourceChanges: true
+    });
+    expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("includes validator scopes in context status --json output", async () => {
+    const test = dependencies();
+    vi.mocked(test.value.contextValidator.validate).mockResolvedValueOnce({
+      status: "stale",
+      reason: {
+        code: "EVIDENCE_HASH_MISMATCH",
+        message: "Evidence file changed: app/src/main/source.kt"
+      },
+      scopes: [{
+        id: ":app",
+        inventoryChanged: false,
+        missingPaths: [],
+        changedPaths: ["app/src/main/source.kt"]
+      }]
+    });
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "context", "status",
+      "--project", "/project",
+      "--config", "taphound.config.json",
+      "--context", "project.context.json",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "stale",
+      scopes: [{
+        id: ":app",
+        changedPaths: ["app/src/main/source.kt"]
+      }]
+    });
+    expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("defaults --context to the conventional project Context path", async () => {
+    const test = dependencies();
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "context", "status",
+      "--project", "/project",
+      "--config", "taphound.config.json",
+      "--json"
+    ]);
+
+    expect(test.value.contextLoader.load).toHaveBeenCalledWith({
+      projectRoot: "/project",
+      contextPath: "/project/.taphound/context/project-context.json",
+      allowIncomplete: true
+    });
+  });
+
+  it("registers a top-level --version option", () => {
+    const program = createProgram(dependencies().value);
+    const versionOption = program.options.find(
+      (option) => option.long === "--version"
+    );
+    expect(versionOption).toBeDefined();
   });
 });

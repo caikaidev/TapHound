@@ -60,6 +60,8 @@ const APP_SOURCE_CONTENT = [
 const SETTINGS_CONTENT = "include(\":app\")\n";
 const CONTEXT_PATH = ".taphound/context/project-context.json";
 const SHARD_PATH = ".taphound/context/modules/app.json";
+const HELPER_SOURCE = "app/src/main/java/com/example/app/Helper.kt";
+const HELPER_SOURCE_CONTENT = "class Helper\n";
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map(
@@ -130,6 +132,84 @@ async function fixture(): Promise<{ root: string }> {
         sha256: sha256(APP_SOURCE_CONTENT),
         confidence: "sourceConfirmed"
       }]
+    },
+    summary: {
+      features: ["launch"],
+      activities: [{
+        name: "com.example.app.MainActivity",
+        entryPoints: [],
+        screens: ["home"]
+      }],
+      elements: [],
+      transitions: [],
+      logcat: []
+    }
+  };
+  const shardHash = await writeJson(root, SHARD_PATH, shard);
+  await writeJson(root, CONTEXT_PATH, {
+    version: 2,
+    packageName: "com.example.app",
+    launchActivity: "com.example.app.MainActivity",
+    manifest: {
+      version: 1,
+      files: [{
+        path: "settings.gradle.kts",
+        sha256: sha256(SETTINGS_CONTENT),
+        confidence: "sourceConfirmed"
+      }]
+    },
+    interactionPolicy: {
+      allowedActions: ["click", "wait"],
+      confirmationRequiredActions: [],
+      forbiddenActions: []
+    },
+    modules: [{
+      id: ":app",
+      projectDir: "app",
+      kind: "application",
+      contextPath: SHARD_PATH,
+      sha256: shardHash,
+      features: ["launch"],
+      activities: ["com.example.app.MainActivity"],
+      dependsOn: [],
+      status: "complete"
+    }]
+  });
+  return { root };
+}
+
+async function twoSourceFixture(): Promise<{ root: string }> {
+  const root = await mkdtemp(join(tmpdir(), "taphound-context-refresh-"));
+  roots.push(root);
+  await mkdir(join(root, dirname(APP_SOURCE)), { recursive: true });
+  await writeFile(join(root, "settings.gradle.kts"), SETTINGS_CONTENT, "utf8");
+  await writeFile(join(root, APP_SOURCE), APP_SOURCE_CONTENT, "utf8");
+  await writeFile(join(root, HELPER_SOURCE), HELPER_SOURCE_CONTENT, "utf8");
+  const inventoryPaths = [HELPER_SOURCE, APP_SOURCE].sort();
+  const shard: ProjectContextModule = {
+    version: 2,
+    moduleId: ":app",
+    projectDir: "app",
+    status: "complete",
+    inventory: {
+      version: 2,
+      pathSetSha256: sha256(inventoryPaths.join("\n")),
+      categories: ["sources"]
+    },
+    manifest: {
+      version: 1,
+      files: [
+        {
+          path: APP_SOURCE,
+          sha256: sha256(APP_SOURCE_CONTENT),
+          confidence: "sourceConfirmed"
+        },
+        {
+          path: HELPER_SOURCE,
+          sha256: sha256(HELPER_SOURCE_CONTENT),
+          confidence: "sourceConfirmed"
+        }
+      ]
     },
     summary: {
       features: ["launch"],
@@ -314,7 +394,8 @@ describe("ContextRefresher", () => {
 
     expect(blocked.status).toBe("blocked");
     expect(blocked.blocked).toEqual([expect.objectContaining({
-      code: "EVIDENCE_SEMANTIC_CHANGED"
+      code: "EVIDENCE_SEMANTIC_CHANGED",
+      resolution: "acceptSourceChanges"
     })]);
     expect(await readFile(join(test.root, SHARD_PATH), "utf8")).toBe(before);
     expect(await validate(test.root)).toBe("stale");
@@ -344,7 +425,8 @@ describe("ContextRefresher", () => {
 
     expect(blocked.status).toBe("blocked");
     expect(blocked.blocked).toEqual([expect.objectContaining({
-      code: "MODULE_INVENTORY_CHANGED"
+      code: "MODULE_INVENTORY_CHANGED",
+      resolution: "acceptSourceChanges"
     })]);
 
     const accepted = await refresher().refresh({
@@ -369,8 +451,59 @@ describe("ContextRefresher", () => {
 
     expect(result.status).toBe("blocked");
     expect(result.blocked).toEqual([expect.objectContaining({
-      code: "EVIDENCE_UNRESOLVED"
+      code: "EVIDENCE_UNRESOLVED",
+      resolution: "pruneDeleted"
     })]);
+  });
+
+  it("prunes deleted evidence entries and accepts the inventory drift", async () => {
+    const test = await twoSourceFixture();
+    await rm(join(test.root, HELPER_SOURCE));
+
+    const result = await refresher().refresh({
+      projectRoot: test.root,
+      contextPath: join(test.root, CONTEXT_PATH),
+      pruneDeleted: true,
+      acceptSourceChanges: true
+    });
+
+    expect(result.status).toBe("refreshed");
+    expect(result.blocked).toEqual([]);
+    expect(result.scopes).toContainEqual(expect.objectContaining({
+      id: ":app",
+      pruned: 1,
+      unresolved: [],
+      inventoryChanged: true
+    }));
+    const shard = await readJson(test.root, SHARD_PATH) as {
+      manifest: { files: Array<{ path: string }> };
+    };
+    expect(shard.manifest.files.map((file) => file.path)).toEqual([APP_SOURCE]);
+    expect(await validate(test.root)).toBe("valid");
+  });
+
+  it("keeps deleted evidence blocked until prune-deleted is requested", async () => {
+    const test = await twoSourceFixture();
+    await rm(join(test.root, HELPER_SOURCE));
+
+    const blocked = await refresher().refresh({
+      projectRoot: test.root,
+      contextPath: join(test.root, CONTEXT_PATH),
+      acceptSourceChanges: true
+    });
+
+    expect(blocked.status).toBe("blocked");
+    expect(blocked.blocked).toContainEqual(expect.objectContaining({
+      code: "EVIDENCE_UNRESOLVED",
+      resolution: "pruneDeleted"
+    }));
+    const shard = await readJson(test.root, SHARD_PATH) as {
+      manifest: { files: Array<{ path: string }> };
+    };
+    expect(shard.manifest.files.map((file) => file.path)).toEqual([
+      APP_SOURCE,
+      HELPER_SOURCE
+    ]);
   });
 
   it("refreshes only the requested modules", async () => {

@@ -93,7 +93,11 @@ function createContextOperation(
     )
     .option("--project <path>", "Android project root", dependencies.cwd())
     .option("--config <path>", "TapHound config path", "taphound.config.json")
-    .requiredOption("--context <path>", "Project Context index path")
+    .option(
+      "--context <path>",
+      "Project Context index path",
+      ".taphound/context/project-context.json"
+    )
     .option("--module <id...>", "Select Context modules")
     .option("--json", "Emit one machine-readable JSON value")
     .action(async (options: ContextOptions): Promise<void> => {
@@ -123,7 +127,9 @@ function createContextOperation(
         const result = await dependencies.contextValidator.validate({
           context: loaded.context,
           projectRoot: options.project,
-          config
+          config,
+          ...(name === "status" ? { modules: loaded.modules } : {}),
+          ...(name === "status" ? { reportScopes: true } : {})
         });
         writeContextResult(dependencies, options, name, result, {
           contextSelection: loaded.context.selection,
@@ -157,7 +163,11 @@ function createContextListCommand(dependencies: CliDependencies): Command {
   return new Command("list")
     .description("List Project Context modules without loading shards")
     .option("--project <path>", "Android project root", dependencies.cwd())
-    .requiredOption("--context <path>", "Project Context index path")
+    .option(
+      "--context <path>",
+      "Project Context index path",
+      ".taphound/context/project-context.json"
+    )
     .option("--json", "Emit one machine-readable JSON value")
     .action(async (options: Pick<
       ContextOptions,
@@ -214,6 +224,7 @@ interface ContextRefreshOptions {
   context: string;
   module?: string[] | undefined;
   acceptSourceChanges?: boolean | undefined;
+  pruneDeleted?: boolean | undefined;
   json?: boolean | undefined;
 }
 
@@ -232,6 +243,7 @@ function writeRefreshText(
       && scope.formattingRehashed === 0
       && scope.semanticChanged.length === 0
       && scope.unresolved.length === 0
+      && scope.pruned === 0
       && !scope.inventoryChanged
     ) {
       continue;
@@ -242,11 +254,15 @@ function writeRefreshText(
       + `, rehashed ${String(scope.formattingRehashed)}`
       + `, changed ${String(scope.semanticChanged.length)}`
       + `, unresolved ${String(scope.unresolved.length)}`
+      + `, pruned ${String(scope.pruned)}`
       + (scope.inventoryChanged ? ", inventory changed" : "")
     );
   }
   for (const block of result.blocked) {
-    writeLine(dependencies.stderr, `${block.code}: ${block.message}`);
+    writeLine(
+      dependencies.stderr,
+      `${block.code} [${block.resolution}]: ${block.message}`
+    );
   }
 }
 
@@ -254,11 +270,19 @@ function createContextRefreshCommand(dependencies: CliDependencies): Command {
   return new Command("refresh")
     .description("Recompute Project Context evidence hashes without analysis")
     .option("--project <path>", "Android project root", dependencies.cwd())
-    .requiredOption("--context <path>", "Project Context index path")
+    .option(
+      "--context <path>",
+      "Project Context index path",
+      ".taphound/context/project-context.json"
+    )
     .option("--module <id...>", "Refresh only the listed Context modules")
     .option(
       "--accept-source-changes",
       "Also rehash evidence whose semantics changed"
+    )
+    .option(
+      "--prune-deleted",
+      "Drop evidence entries for files no longer on disk"
     )
     .option("--json", "Emit one machine-readable JSON value")
     .action(async (options: ContextRefreshOptions): Promise<void> => {
@@ -269,7 +293,10 @@ function createContextRefreshCommand(dependencies: CliDependencies): Command {
           ...(options.module === undefined ? {} : { moduleIds: options.module }),
           ...(options.acceptSourceChanges === undefined
             ? {}
-            : { acceptSourceChanges: options.acceptSourceChanges })
+            : { acceptSourceChanges: options.acceptSourceChanges }),
+          ...(options.pruneDeleted === undefined
+            ? {}
+            : { pruneDeleted: options.pruneDeleted })
         });
         const exitCode = refreshExitCode(result);
         if (options.json === true) {

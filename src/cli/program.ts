@@ -1,3 +1,7 @@
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { Command } from "commander";
 
 import { createContextCommand } from "./commands/context.js";
@@ -11,6 +15,19 @@ import {
   createProductionDependencies,
   type CliDependencies
 } from "./dependencies.js";
+
+function readCliVersion(): string {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const pkgPath = resolve(here, "../../package.json");
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as {
+      version?: string;
+    };
+    return pkg.version ?? "unknown";
+  } catch {
+    return "unknown";
+  }
+}
 
 export function createProgram(
   dependencies: CliDependencies = createProductionDependencies()
@@ -32,6 +49,7 @@ export function createProgram(
   return new Command()
     .name("taphound")
     .description("Deterministic app journey recording and verification")
+    .version(readCliVersion(), "-v, --version")
     .configureOutput({
       writeOut: (content): void => {
         dependencies.stdout.write(content);

@@ -94,7 +94,7 @@ describe("runMain", () => {
     const test = dependencies(exitCodes);
 
     await runMain([
-      "node", "taphound", "context", "validate", "--json"
+      "node", "taphound", "generation", "observe", "--json"
     ], test);
 
     const stdout = (test.stdout as BufferOutput).value;
@@ -105,7 +105,7 @@ describe("runMain", () => {
     });
     expect(stdout.trim().split("\n")).toHaveLength(1);
     expect((test.stderr as BufferOutput).value)
-      .toContain("required option '--context <path>' not specified");
+      .toContain("required option '--session <id>' not specified");
     expect(exitCodes).toEqual([2]);
   });
 

@@ -42,8 +42,14 @@ export type ContextRefreshBlockCode =
   | "EVIDENCE_SEMANTIC_CHANGED"
   | "MODULE_INVENTORY_CHANGED";
 
+export type ContextRefreshResolution =
+  | "pruneDeleted"
+  | "acceptSourceChanges"
+  | "reanalyze";
+
 export interface ContextRefreshBlock {
   code: ContextRefreshBlockCode;
+  resolution: ContextRefreshResolution;
   message: string;
 }
 
@@ -56,6 +62,7 @@ export interface ContextRefreshScopeReport {
   formattingRehashed: number;
   semanticChanged: string[];
   unresolved: string[];
+  pruned: number;
   inventoryChanged: boolean;
 }
 
@@ -72,6 +79,7 @@ export interface ContextRefreshInput {
   contextPath: string;
   moduleIds?: string[] | undefined;
   acceptSourceChanges?: boolean | undefined;
+  pruneDeleted?: boolean | undefined;
 }
 
 export interface ContextRefresherDependencies {
@@ -90,6 +98,7 @@ interface ManifestRefresh {
   formattingRehashed: number;
   semanticChanged: string[];
   unresolved: string[];
+  pruned: number;
 }
 
 interface ModuleRefresh {
@@ -143,8 +152,12 @@ function scopeBlocks(
 ): ContextRefreshBlock[] {
   const blocks: ContextRefreshBlock[] = [];
   if (report.unresolved.length > 0) {
+    const allNotFound = report.unresolved.every(
+      (entry) => entry.endsWith(": notFound")
+    );
     blocks.push({
       code: "EVIDENCE_UNRESOLVED",
+      resolution: allNotFound ? "pruneDeleted" : "reanalyze",
       message: `${report.id}: evidence cannot be hashed (${
         report.unresolved.join(", ")
       })`
@@ -156,6 +169,7 @@ function scopeBlocks(
   if (report.semanticChanged.length > 0) {
     blocks.push({
       code: "EVIDENCE_SEMANTIC_CHANGED",
+      resolution: "acceptSourceChanges",
       message: `${report.id}: ${
         String(report.semanticChanged.length)
       } evidence files changed semantically (${report.semanticChanged.join(", ")})`
@@ -164,6 +178,7 @@ function scopeBlocks(
   if (report.inventoryChanged) {
     blocks.push({
       code: "MODULE_INVENTORY_CHANGED",
+      resolution: "acceptSourceChanges",
       message: `${report.id}: module file inventory changed`
     });
   }
@@ -184,12 +199,14 @@ export class ContextRefresher {
       contextPath: input.contextPath
     });
     const acceptSourceChanges = input.acceptSourceChanges === true;
+    const pruneDeleted = input.pruneDeleted === true;
     const references = selectedReferences(bundle, input.moduleIds);
 
     const root = await this.refreshManifest(
       input.projectRoot,
       bundle.manifest,
-      acceptSourceChanges
+      acceptSourceChanges,
+      pruneDeleted
     );
     const rootReport: ContextRefreshScopeReport = {
       scope: "index",
@@ -200,6 +217,7 @@ export class ContextRefresher {
       formattingRehashed: root.formattingRehashed,
       semanticChanged: root.semanticChanged,
       unresolved: root.unresolved,
+      pruned: root.pruned,
       inventoryChanged: false
     };
 
@@ -208,7 +226,8 @@ export class ContextRefresher {
       modules.push(await this.refreshModule(
         input.projectRoot,
         reference,
-        acceptSourceChanges
+        acceptSourceChanges,
+        pruneDeleted
       ));
     }
 
@@ -296,13 +315,15 @@ export class ContextRefresher {
   private readonly refreshModule = async (
     projectRoot: string,
     reference: ContextModuleReference,
-    acceptSourceChanges: boolean
+    acceptSourceChanges: boolean,
+    pruneDeleted: boolean
   ): Promise<ModuleRefresh> => {
     const shard = await this.readShard(projectRoot, reference);
     const manifest = await this.refreshManifest(
       projectRoot,
       shard.document.manifest,
-      acceptSourceChanges
+      acceptSourceChanges,
+      pruneDeleted
     );
     const inventory = await this.dependencies.inventory.inspectProjectInventory({
       projectRoot,
@@ -351,6 +372,7 @@ export class ContextRefresher {
         formattingRehashed: manifest.formattingRehashed,
         semanticChanged: manifest.semanticChanged,
         unresolved: manifest.unresolved,
+        pruned: manifest.pruned,
         inventoryChanged
       }
     };
@@ -359,7 +381,8 @@ export class ContextRefresher {
   private readonly refreshManifest = async (
     projectRoot: string,
     manifest: ContextManifest,
-    acceptSourceChanges: boolean
+    acceptSourceChanges: boolean,
+    pruneDeleted: boolean
   ): Promise<ManifestRefresh> => {
     const files: ContextEvidence[] = [];
     const semanticChanged: string[] = [];
@@ -367,6 +390,7 @@ export class ContextRefresher {
     let modified = false;
     let semanticBackfilled = 0;
     let formattingRehashed = 0;
+    let pruned = 0;
 
     for (const evidence of manifest.files) {
       const inspection = await this.dependencies.files.inspectProjectFile({
@@ -375,6 +399,11 @@ export class ContextRefresher {
         maximumBytes: MAX_CONTEXT_EVIDENCE_BYTES
       });
       if (inspection.status !== "inspected" || inspection.bytes === undefined) {
+        if (pruneDeleted && inspection.status === "notFound") {
+          pruned += 1;
+          modified = true;
+          continue;
+        }
         unresolved.push(`${evidence.path}: ${inspection.status}`);
         files.push(evidence);
         continue;
@@ -419,7 +448,8 @@ export class ContextRefresher {
       semanticBackfilled,
       formattingRehashed,
       semanticChanged,
-      unresolved
+      unresolved,
+      pruned
     };
   };
 

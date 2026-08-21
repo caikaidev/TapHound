@@ -22,6 +22,9 @@ import type { ProjectFileInspector } from "../../../src/ports/project-file-inspe
 import type {
   ProjectInventoryInspector
 } from "../../../src/ports/project-inventory-inspector.js";
+import type {
+  ProjectContextModule
+} from "../../../src/domain/project-context.js";
 
 const temporaryRoots: string[] = [];
 
@@ -401,6 +404,91 @@ describe("ContextValidator", () => {
         message: "Module file inventory changed: :app"
       }
     });
+  });
+
+  it("reports per-module scopes only when reportScopes is requested", async () => {
+    const root = await temporaryRoot();
+    const matched = "app/src/main/matched.kt";
+    const changed = "app/src/main/changed.kt";
+    const missing = "app/src/main/missing.kt";
+    await writeEvidence(root, matched, "matched content");
+    await writeEvidence(root, changed, "current content");
+    const inventory: ProjectInventoryInspector = {
+      inspectProjectInventory: vi.fn(() => Promise.resolve({
+        status: "inspected" as const,
+        paths: [matched, changed],
+        pathSetSha256: "b".repeat(64)
+      }))
+    };
+    const files = new NodeProjectFileInspector();
+    const modules: ProjectContextModule[] = [{
+      version: 2,
+      moduleId: ":app",
+      projectDir: "app",
+      status: "complete",
+      inventory: {
+        version: 2,
+        pathSetSha256: "c".repeat(64),
+        categories: ["sources"]
+      },
+      manifest: {
+        version: 1,
+        files: [
+          {
+            path: matched,
+            sha256: sha256("matched content"),
+            confidence: "sourceConfirmed"
+          },
+          {
+            path: changed,
+            sha256: sha256("old content"),
+            confidence: "sourceConfirmed"
+          },
+          {
+            path: missing,
+            sha256: "a".repeat(64),
+            confidence: "sourceConfirmed"
+          }
+        ]
+      },
+      summary: {
+        features: ["launch"],
+        activities: [],
+        elements: [],
+        transitions: [],
+        logcat: []
+      }
+    }];
+
+    const result = await new ContextValidator(files, inventory).validate({
+      context: contextFor([{
+        path: matched,
+        sha256: sha256("matched content")
+      }]),
+      projectRoot: root,
+      config,
+      modules,
+      reportScopes: true
+    });
+
+    expect(result.status).toBe("stale");
+    expect(result.scopes).toEqual([{
+      id: ":app",
+      inventoryChanged: true,
+      missingPaths: [missing],
+      changedPaths: [changed]
+    }]);
+
+    const withoutScopes = await new ContextValidator(files, inventory).validate({
+      context: contextFor([{
+        path: matched,
+        sha256: sha256("matched content")
+      }]),
+      projectRoot: root,
+      config,
+      modules
+    });
+    expect(withoutScopes.scopes).toBeUndefined();
   });
 
   it("rejects evidence larger than the explicit maximum", async () => {

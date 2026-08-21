@@ -457,8 +457,8 @@ captured from the post-action state and authoritatively committed. If either
 is absent, run `generation observe`. Phase timing distinguishes Core action
 and idle time from caller/agent latency.
 
-**Confirmation required** (if the action is in
-`confirmationRequiredActions`):
+**Confirmation required** (if the action is selected by the interaction policy
+or Core semantic risk evaluation):
 
 ```json
 {
@@ -476,7 +476,8 @@ and idle time from caller/agent latency.
 }
 ```
 
-Human confirmation is required. Run in a TTY terminal:
+Human confirmation is required. In a local terminal, omit `--decision` to use
+the TTY prompt:
 
 ```bash
 taphound generation confirm \
@@ -487,8 +488,33 @@ taphound generation confirm \
   --json
 ```
 
-> **Important**: The AI agent does NOT auto-approve. The user must manually
-> approve in a TTY terminal.
+In a sandbox without PTY access, first present `actionSummary`, `challengeId`,
+and `expiresAt` to the user. Only after the user explicitly approves that exact
+challenge, run:
+
+```bash
+taphound generation confirm \
+  --project /path/to/android-project \
+  --session <generationId> \
+  --challenge <challengeId> \
+  --decision approve \
+  --compact \
+  --json
+```
+
+If the user declines, replace `approve` with `decline`; Core clears that exact
+challenge and does not execute the action. The flag records delegated approval
+but is not permission to auto-approve. Never infer a decision, reuse approval
+for another challenge, or enable session-wide approval.
+
+Before executing an approved action, Core atomically records the challenge ID
+and `approvalMode` (`localTty` or `delegated`) in the in-flight attempt. The
+same audit data is included in immutable step result evidence.
+
+`generation status --json` reports the pending challenge with a computed
+`expired` flag. A pending challenge blocks observation with
+`RISK_CONFIRMATION_REQUIRED`. Expired challenges cannot execute; clear the
+exact challenge with `--decision decline`, then observe and propose again.
 
 **Rejected before an ambiguous action attempt**:
 
@@ -957,7 +983,7 @@ Each Goal is an independent generation session and does not affect others.
 | `PACKAGE_ESCAPE` | Foreground switched to another app | Ensure app is in foreground, re-observe |
 | `APP_CRASHED` | App process crashed | Check Logcat, restart app |
 | `IDLE_TIMEOUT` | Configured idle strategy did not stabilize | Inspect `failure.details.idle`; use a new session for config changes |
-| `RISK_CONFIRMATION_REQUIRED` | Action requires user confirmation | Wait for user confirmation |
+| `RISK_CONFIRMATION_REQUIRED` | Action requires user confirmation or a pending challenge blocks progress | Inspect `generation status`, present the exact challenge, and apply only the user's explicit decision |
 | `ACTION_FORBIDDEN` | Action is forbidden by policy | Use a different action or adjust policy |
 | `RECOVERY_REQUIRED` | Session entered recovery state | Inspect status and ask before explicit retry |
 | `APP_LAUNCH_FAILED` | No-Base-Flow startup could not reach the configured app process and Activity | Check installation, launch Activity, and device state, then start a new session |
@@ -1009,7 +1035,8 @@ activity to Core-owned structural layout hashing.
 ## 8. Safety Constraints
 
 - The AI agent does NOT auto-approve `confirmationRequired` steps; human
-  approval is mandatory.
+  approval of the exact challenge is mandatory. `--decision approve` only
+  relays that explicit decision from a non-TTY environment.
 - The AI agent does NOT bypass Core safety boundaries (package guard, risk
   policy, locator uniqueness).
 - SHA-256 hashes are ALWAYS computed via shell; the AI never guesses hash

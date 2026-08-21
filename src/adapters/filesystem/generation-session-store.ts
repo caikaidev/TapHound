@@ -25,6 +25,7 @@ import {
   GenerationSessionSchema,
   PendingConfirmationSchema,
   generationCoreIdentity,
+  isGenerationConfirmationExpired,
   type GenerationInFlight,
   type GenerationSession,
   type PendingConfirmation
@@ -711,8 +712,17 @@ function assertConfirmationTransition(
   } else if (
     before.status === "pending"
     && after.status === "approved"
-    && JSON.stringify({ ...before, status: undefined })
-      === JSON.stringify({ ...after, status: undefined })
+    && before.approvalMode === undefined
+    && after.approvalMode !== undefined
+    && JSON.stringify({
+      ...before,
+      status: undefined,
+      approvalMode: undefined
+    }) === JSON.stringify({
+      ...after,
+      status: undefined,
+      approvalMode: undefined
+    })
   ) {
     return;
   }
@@ -1477,6 +1487,14 @@ implements GenerationSessionStore {
             || approvedConfirmation.snapshotHash !== inFlight.snapshotHash
           )
         )
+        || JSON.stringify(inFlight.confirmation) !== JSON.stringify(
+          approvedConfirmation === undefined
+            ? undefined
+            : {
+                challengeId: approvedConfirmation.challengeId,
+                approvalMode: approvedConfirmation.approvalMode ?? "localTty"
+              }
+        )
       ) {
         throw new GenerationSessionStoreError(
           "INVALID_TRANSITION",
@@ -1506,8 +1524,7 @@ implements GenerationSessionStore {
             if (
               !(now instanceof Date)
               || !Number.isFinite(now.getTime())
-              || now.getTime()
-                >= new Date(approvedConfirmation.expiresAt).getTime()
+              || isGenerationConfirmationExpired(approvedConfirmation, now)
             ) {
               throw new GenerationSessionStoreError(
                 "INVALID_TRANSITION",

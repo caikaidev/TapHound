@@ -142,6 +142,7 @@ function harness(signal?: AbortSignal): Harness {
     state: "active" as const,
     candidateStepCount: 1,
     inFlight: null,
+    pendingConfirmation: null,
     verification: { status: "notRun" as const },
     publication: { status: "notRun" as const },
     recovery: {
@@ -419,6 +420,38 @@ describe("generation JSON process protocol", () => {
     expect(test.exitCodes).toEqual([2]);
   });
 
+  it("maps pending-confirmation observation blocking to structured risk", async () => {
+    const test = harness();
+    test.observe.mockRejectedValueOnce(new GenerationOperationError(
+      "RISK_CONFIRMATION_REQUIRED",
+      "Generation confirmation challenge-1 must be resolved before observation",
+      {
+        challenge: {
+          challengeId: "challenge-1",
+          expiresAt: "2026-08-21T19:00:00.000Z"
+        }
+      }
+    ));
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "observe",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "error",
+      exitCode: 1,
+      failure: {
+        code: "RISK_CONFIRMATION_REQUIRED",
+        details: {
+          challenge: { challengeId: "challenge-1" }
+        }
+      }
+    });
+  });
+
   it("rejects unknown planner envelope fields before requesting confirmation", async () => {
     const test = harness();
     vi.mocked(test.dependencies.readJson).mockResolvedValueOnce(runtimeConfig)
@@ -542,6 +575,7 @@ describe("generation JSON process protocol", () => {
     const test = harness();
     test.request.mockResolvedValueOnce({
       status: "confirmationRequired",
+      revision: 3,
       challenge: {
         challengeId: "challenge-1",
         stepIndex: 0,
@@ -580,6 +614,7 @@ describe("generation JSON process protocol", () => {
     const test = harness();
     test.request.mockResolvedValueOnce({
       status: "confirmationRequired",
+      revision: 3,
       challenge: {
         challengeId: "lost-response",
         stepIndex: 0,
@@ -788,6 +823,74 @@ describe("generation JSON process protocol", () => {
     });
   });
 
+  it("executes an exact delegated approval without requiring a prompt", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "confirm",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--challenge", "challenge-1",
+      "--decision", "approve",
+      "--json"
+    ]);
+
+    expect(test.confirmStored).toHaveBeenCalledWith({
+      generationId: "generation-1",
+      challengeId: "challenge-1",
+      decision: "approve"
+    });
+    expect(test.execute).toHaveBeenCalledOnce();
+  });
+
+  it("clears an exact delegated decline without executing", async () => {
+    const test = harness();
+    test.confirmStored.mockResolvedValueOnce({ status: "declined" });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "confirm",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--challenge", "challenge-1",
+      "--decision", "decline",
+      "--json"
+    ]);
+
+    expect(test.confirmStored).toHaveBeenCalledWith({
+      generationId: "generation-1",
+      challengeId: "challenge-1",
+      decision: "decline"
+    });
+    expect(test.execute).not.toHaveBeenCalled();
+    expect(JSON.parse(test.stdout.value)).toEqual({
+      status: "declined",
+      exitCode: 0,
+      generationId: "generation-1",
+      challengeId: "challenge-1"
+    });
+  });
+
+  it("rejects an invalid delegated decision before confirmation", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "confirm",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--challenge", "challenge-1",
+      "--decision", "always",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "error",
+      exitCode: 2,
+      failure: { code: "CONFIG_INVALID" }
+    });
+    expect(test.confirmStored).not.toHaveBeenCalled();
+    expect(test.execute).not.toHaveBeenCalled();
+  });
+
   it("fails a non-TTY confirmation closed without executing", async () => {
     const test = harness();
     test.confirmStored.mockRejectedValueOnce(
@@ -906,6 +1009,7 @@ describe("generation JSON process protocol", () => {
     const test = harness();
     test.findPendingManual.mockResolvedValueOnce({
       status: "confirmationRequired",
+      revision: 3,
       challenge: {
         challengeId: "manual-lost-response",
         stepIndex: 0,
@@ -1189,6 +1293,7 @@ describe("generation JSON process protocol", () => {
       state: "active",
       candidateStepCount: 3,
       inFlight: null,
+      pendingConfirmation: null,
       verification: {
         status: "running",
         attemptId: "verify-1",
@@ -1215,6 +1320,7 @@ describe("generation JSON process protocol", () => {
     expect(test.stdout.value).toContain("Generation: generation-1");
     expect(test.stdout.value).toContain("Revision: 7");
     expect(test.stdout.value).toContain("Candidate steps: 3");
+    expect(test.stdout.value).toContain("Pending confirmation: none");
     expect(test.stdout.value).toContain(
       "Verification: running (attempt verify-1)"
     );
@@ -1234,6 +1340,7 @@ describe("generation JSON process protocol", () => {
       state: "active",
       candidateStepCount: 1,
       inFlight: null,
+      pendingConfirmation: null,
       verification: { status: "notRun" },
       publication: { status: "notRun" },
       recovery: {

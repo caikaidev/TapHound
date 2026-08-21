@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import {
   GenerationSessionSchema,
+  isGenerationConfirmationExpired,
   type GenerationSession
 } from "../../domain/generation.js";
 import {
@@ -20,6 +21,10 @@ export interface GenerationRecoveryStatus {
   state: GenerationSession["state"];
   candidateStepCount: number;
   inFlight: GenerationSession["inFlight"];
+  pendingConfirmation: (
+    & NonNullable<GenerationSession["pendingConfirmation"]>
+    & { expired: boolean }
+  ) | null;
   verification: GenerationSession["verification"];
   publication: GenerationSession["publication"];
   recovery: {
@@ -38,6 +43,7 @@ export interface GenerationRecoveryDependencies {
     "read" | "readEvidence" | "recover" | "recoverVerification"
   >;
   ownerAlive?: ((pid: number) => boolean) | undefined;
+  now: () => Date;
 }
 
 function resultPath(session: GenerationSession): string | undefined {
@@ -119,6 +125,15 @@ export class GenerationRecoveryService {
       state: session.state,
       candidateStepCount: session.candidateSteps.length,
       inFlight: session.inFlight,
+      pendingConfirmation: session.pendingConfirmation === null
+        ? null
+        : {
+            ...session.pendingConfirmation,
+            expired: isGenerationConfirmationExpired(
+              session.pendingConfirmation,
+              this.dependencies.now()
+            )
+          },
       verification: session.verification,
       publication: session.publication,
       recovery: {

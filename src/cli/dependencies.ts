@@ -381,6 +381,7 @@ export function createProductionDependencies(
       });
       const recovery = new GenerationRecoveryService({
         store,
+        now: (): Date => new Date(),
         ownerAlive: (pid): boolean => {
           try {
             process.kill(pid, 0);

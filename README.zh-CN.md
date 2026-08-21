@@ -164,8 +164,10 @@ Recorder 不自动生成业务 `expect`。Activity、Element 或 Logcat 断言�
 3. 使用 `--module` 启动 `generation` 会话。不带 `--base-flow` 时，Core 会先
    force-stop 并启动配置的 Activity。使用 `observe --compact` 并读取权威
    `snapshotRef`；成功的 compact step 会返回 `nextBinding` 与 `nextSnapshotRef`。
-4. 使用 `generation status` 检查持久化状态。中断的 in-flight action 可能已执行，
-   只有显式运行 `generation recover --decision retry` 承认该风险后才会恢复。
+4. 使用 `generation status` 检查持久化状态，包括待确认与已过期 challenge。确认默认
+   使用本地 TTY；用户明确审阅具体 challenge 后，沙箱 Agent 可运行
+   `generation confirm --decision approve|decline`。中断的 in-flight action
+   可能已执行，只有显式运行 `generation recover --decision retry` 承认该风险后才会恢复。
 5. 长耗时 Replay 使用 `generation finalize --detach`，随后轮询
    `generation status`（或使用 `--wait`）。只有精确验证通过后才发布 Journey。
 

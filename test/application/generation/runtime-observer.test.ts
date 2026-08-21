@@ -254,6 +254,34 @@ function harness(): ObserverHarness {
 }
 
 describe("RuntimeObserver", () => {
+  it("reports a pending confirmation as a structured generation failure", async () => {
+    const test = harness();
+    test.store.current = {
+      ...test.store.current,
+      revision: 1,
+      pendingConfirmation: {
+        challengeId: "challenge-1",
+        stepIndex: 0,
+        proposalHash: "a".repeat(64),
+        snapshotHash: "b".repeat(64),
+        evidenceHash: "c".repeat(64),
+        actionSummary: "click send",
+        expiresAt: "2026-07-22T12:10:00.000Z",
+        status: "pending"
+      }
+    };
+
+    await expect(test.observer.observe({
+      generationId: "generation-1"
+    })).rejects.toMatchObject({
+      code: "RISK_CONFIRMATION_REQUIRED",
+      details: {
+        challenge: { challengeId: "challenge-1" }
+      }
+    });
+    expect(test.androidCli.layout).not.toHaveBeenCalled();
+  });
+
   it("waits for a stable layout when observe receives idle config", async () => {
     const test = harness();
     const idle = {

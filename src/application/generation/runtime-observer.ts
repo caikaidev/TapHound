@@ -105,10 +105,16 @@ function revisionPath(revision: number): string {
 }
 
 function assertObservable(session: GenerationSession): void {
+  if (session.pendingConfirmation !== null) {
+    throw new GenerationOperationError(
+      "RISK_CONFIRMATION_REQUIRED",
+      `Generation confirmation ${session.pendingConfirmation.challengeId} must be resolved before observation`,
+      { challenge: session.pendingConfirmation }
+    );
+  }
   if (
     session.state !== "active"
     || session.inFlight !== null
-    || session.pendingConfirmation !== null
   ) {
     throw new Error("Generation session must be active and idle to observe");
   }

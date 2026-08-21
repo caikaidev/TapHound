@@ -165,7 +165,14 @@ Generation is a revisioned, evidence-backed state machine:
    project-bound authority subtree; `.taphound/journeys/<name>.json` is the
    conventional destination.
 
-`generation status` exposes durable step and verification ownership.
+`generation status` exposes pending confirmation expiry plus durable step and
+verification ownership. Risk confirmations default to a local TTY. After a
+human explicitly approves or declines the exact displayed challenge, a
+sandboxed caller may use `generation confirm --decision approve|decline`; an
+Agent must never infer approval or apply it to another challenge.
+Approved challenge ID and approval mode are persisted atomically in the
+in-flight attempt before device mutation, then copied into successful or failed
+step result evidence for audit.
 `generation recover --decision retry` is the only CLI transition out of an
 interrupted action or dead receipt-free verification attempt. The explicit
 decision is required because the interrupted action or replay may already have

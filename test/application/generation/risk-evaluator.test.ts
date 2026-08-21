@@ -160,4 +160,43 @@ describe("RiskEvaluator", () => {
       }
     });
   });
+
+  it("does not let search context suppress a send action", () => {
+    const snapshot = RuntimeSnapshotSchema.parse({
+      version: 1,
+      generationId: "generation-1",
+      baseRevision: 1,
+      deviceSerial: "emulator-5554",
+      expectedPackageName: "com.example.app",
+      foregroundPackageName: "com.example.app",
+      activity: "com.example.app.SearchActivity",
+      pid: 42,
+      capturedAt: "2026-07-23T00:00:00.000Z",
+      layout: [{
+        id: "send-results",
+        resourceId: "send_search_results",
+        clickable: true,
+        enabled: true,
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+        children: []
+      }]
+    });
+
+    expect(evaluator.evaluate({
+      action: "click",
+      locator: { resourceId: "send_search_results" },
+      activity: { before: "com.example.app.SearchActivity" },
+      binding: {
+        generationId: "generation-1",
+        baseRevision: 1,
+        snapshotHash: "a".repeat(64)
+      }
+    }, policy({ allowedActions: ["click"] }), snapshot)).toMatchObject({
+      effectiveRisk: "confirmationRequired",
+      semanticSideEffect: {
+        category: "externalCommit",
+        matchedTerm: "send"
+      }
+    });
+  });
 });

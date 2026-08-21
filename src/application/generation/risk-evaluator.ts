@@ -87,10 +87,15 @@ function semanticSideEffect(
       return { category, matchedTerm };
     }
   }
-  if (allTokens.some((token) => NON_COMMIT_CONTEXT.has(token))) return undefined;
   const matchedTerm = SEMANTIC_TERMS.externalCommit.find(
     (term) => allTokens.includes(term)
   );
+  if (
+    matchedTerm === "submit"
+    && allTokens.some((token) => NON_COMMIT_CONTEXT.has(token))
+  ) {
+    return undefined;
+  }
   if (matchedTerm !== undefined) {
     return { category: "externalCommit", matchedTerm };
   }

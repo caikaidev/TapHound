@@ -98,6 +98,7 @@ function harness(initial: GenerationSession, ownerAlive = false): {
         recover,
         recoverVerification
       },
+      now: () => new Date("2026-08-20T12:00:00.000Z"),
       ownerAlive: () => ownerAlive
     }),
     current: () => current,
@@ -107,6 +108,29 @@ function harness(initial: GenerationSession, ownerAlive = false): {
 }
 
 describe("GenerationRecoveryService", () => {
+  it("exposes an expired pending confirmation without treating it as recovery", async () => {
+    const test = harness(session({
+      pendingConfirmation: {
+        challengeId: "challenge-1",
+        stepIndex: 0,
+        proposalHash: "a".repeat(64),
+        snapshotHash: "d".repeat(64),
+        evidenceHash: "b".repeat(64),
+        actionSummary: "click send",
+        expiresAt: "2026-08-20T11:59:59.000Z",
+        status: "pending"
+      }
+    }));
+
+    await expect(test.service.status("generation-1")).resolves.toMatchObject({
+      pendingConfirmation: {
+        challengeId: "challenge-1",
+        expired: true
+      },
+      recovery: { available: false }
+    });
+  });
+
   it("reactivates an explicitly retried interrupted step", async () => {
     const inFlight = {
       stepIndex: 0,

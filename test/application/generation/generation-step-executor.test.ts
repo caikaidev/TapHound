@@ -413,7 +413,8 @@ describe("GenerationStepExecutor", () => {
       evidenceHash: confirmationEvidenceHash(step, runtime),
       actionSummary: "Back from com.example.app.MainActivity",
       expiresAt: "2026-07-22T12:00:30.000Z",
-      status: "approved" as const
+      status: "approved" as const,
+      approvalMode: "delegated" as const
     };
     const test = harness(session(runtime, {
       revision: 4,
@@ -426,6 +427,14 @@ describe("GenerationStepExecutor", () => {
       snapshot: runtime,
       source: "planner"
     })).resolves.toMatchObject({ status: "succeeded" });
+    expect(test.evidence.get(
+      "evidence/steps/0-attempt-1/result.json"
+    )).toMatchObject({
+      confirmation: {
+        challengeId: "challenge-1",
+        approvalMode: "delegated"
+      }
+    });
     expect(test.clearApproved).not.toHaveBeenCalled();
     await expect(test.execute({
       generationId: "generation-1",

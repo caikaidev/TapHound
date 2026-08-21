@@ -81,7 +81,11 @@ export const GenerationInFlightSchema = z.strictObject({
   stepIndex: z.number().int().nonnegative(),
   snapshotHash: Sha256Schema,
   proposalHash: Sha256Schema,
-  attemptId: GenerationSessionIdSchema
+  attemptId: GenerationSessionIdSchema,
+  confirmation: z.strictObject({
+    challengeId: GenerationSessionIdSchema,
+    approvalMode: z.enum(["localTty", "delegated"])
+  }).optional()
 });
 
 export const PendingConfirmationSchema = z.strictObject({
@@ -92,7 +96,8 @@ export const PendingConfirmationSchema = z.strictObject({
   evidenceHash: Sha256Schema,
   actionSummary: z.string().trim().min(1),
   expiresAt: z.iso.datetime(),
-  status: z.enum(["pending", "approved"])
+  status: z.enum(["pending", "approved"]),
+  approvalMode: z.enum(["localTty", "delegated"]).optional()
 });
 
 const GenerationFailureSchema = z.strictObject({
@@ -256,6 +261,13 @@ export type GenerationVariables = z.infer<typeof GenerationVariablesSchema>;
 export type GenerationInFlight = z.infer<typeof GenerationInFlightSchema>;
 export type PendingConfirmation = z.infer<typeof PendingConfirmationSchema>;
 export type GenerationSession = z.infer<typeof GenerationSessionSchema>;
+
+export function isGenerationConfirmationExpired(
+  challenge: PendingConfirmation,
+  now: Date
+): boolean {
+  return now.getTime() >= new Date(challenge.expiresAt).getTime();
+}
 
 export const GenerationConfirmationEvidenceSchema = z.strictObject({
   version: z.literal(1),

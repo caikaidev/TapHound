@@ -75,7 +75,10 @@ The generation flow uses the in-repo [`taphound-ai-journey` Skill](../assets/ski
    to that full snapshot. Compact successful steps return `nextBinding` and
    `nextSnapshotRef`; the Agent reads the reference before the next proposal.
    It uses `generation confirm` when human approval is required, and
-   `generation manual` for local TTY overrides.
+   `generation manual` for local TTY overrides. Confirmation defaults to a
+   local prompt. In a non-TTY sandbox, the Agent may pass
+   `--decision approve|decline` only after the user explicitly reviews that
+   exact challenge; the decision remains bound to Core-owned evidence.
 7. `generation status` exposes durable state. Interrupted work is retried only
    after explicit `generation recover --decision retry` acknowledgement.
 8. `generation finalize --detach` survives caller interruption and fully
@@ -130,6 +133,17 @@ Logcat, and optional next observation. Detached finalize progress and stdout
 live under `.taphound/build/jobs/<generationId>/`, outside the authoritative
 bundle. For the full protocol, retry rules, and Context update strategy, see
 the Skill's [`GUIDE.md`](../assets/skills/taphound-ai-journey/GUIDE.md).
+
+`generation status` includes `pendingConfirmation` and its computed `expired`
+flag. While a challenge is pending, `observe` returns
+`RISK_CONFIRMATION_REQUIRED` with challenge details rather than an internal
+error. An expired challenge cannot be approved; resolve it with the exact
+challenge ID (for example `confirm --decision decline`) before observing and
+submitting a fresh proposal.
+For approved actions, the challenge ID and `approvalMode` (`localTty` or
+`delegated`) are stored in the in-flight attempt before device mutation and in
+the immutable step result, so interrupted-action recovery retains the approval
+audit.
 
 ## Installing the Skill for AI Agents
 

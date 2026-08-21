@@ -73,6 +73,7 @@ interface GenerationStepOptions extends GenerationObserveOptions {
 
 interface GenerationConfirmOptions extends GenerationObserveOptions {
   challenge: string;
+  decision?: string | undefined;
 }
 
 interface GenerationManualOptions extends GenerationObserveOptions {
@@ -224,6 +225,13 @@ function generationStatusText(status: GenerationRecoveryStatus): string {
   const inFlight = status.inFlight === null
     ? "none"
     : `step ${String(status.inFlight.stepIndex)}, attempt ${status.inFlight.attemptId}`;
+  const confirmation = status.pendingConfirmation === null
+    ? "none"
+    : `${status.pendingConfirmation.challengeId} (${
+        status.pendingConfirmation.expired
+          ? "expired"
+          : status.pendingConfirmation.status
+      }, expires ${status.pendingConfirmation.expiresAt})`;
   const recovery = status.recovery.available
     ? `${status.recovery.kind ?? "unknown"}; decision=${
         status.recovery.requiredDecision ?? "none"
@@ -235,6 +243,7 @@ function generationStatusText(status: GenerationRecoveryStatus): string {
     `Revision: ${String(status.revision)}`,
     `Candidate steps: ${String(status.candidateStepCount)}`,
     `In flight: ${inFlight}`,
+    `Pending confirmation: ${confirmation}`,
     `Verification: ${status.verification.status} (attempt ${verificationAttempt})`,
     `Verification owner: ${owner}`,
     `Publication: ${status.publication.status}`,
@@ -692,12 +701,11 @@ function createStepCommand(dependencies: CliDependencies): Command {
         source: "planner"
       });
       if (confirmation.status === "confirmationRequired") {
-        const session = await runtime.readSession(generationId);
         writeSuccess(dependencies, options, {
           status: "confirmationRequired",
           exitCode: 0,
           generationId,
-          revision: session.revision,
+          revision: confirmation.revision,
           challenge: confirmation.challenge
         }, `Confirmation required: ${confirmation.challenge.challengeId}`);
         return;
@@ -722,22 +730,47 @@ function createConfirmCommand(dependencies: CliDependencies): Command {
         "--compact",
         "Return authoritative nextSnapshotRef instead of the full next snapshot"
       )
+      .option(
+        "--decision <decision>",
+        "Delegated non-TTY decision after explicit human review: approve or decline"
+      )
       .requiredOption("--challenge <id>", "Core confirmation challenge id"),
     dependencies
   ).action(async (options: GenerationConfirmOptions): Promise<void> => {
     try {
       const generationId = GenerationSessionIdSchema.parse(options.session);
       const challengeId = GenerationSessionIdSchema.parse(options.challenge);
+      if (
+        options.decision !== undefined
+        && options.decision !== "approve"
+        && options.decision !== "decline"
+      ) {
+        throw new GenerationOperationError(
+          "CONFIG_INVALID",
+          "generation confirm --decision must be approve or decline"
+        );
+      }
+      const decision = options.decision;
       const config = await loadConfig(dependencies, options);
       const runtime = requireRuntime(dependencies, options.project, config);
       await assertRuntimeConfig(runtime, generationId);
       const approved = await runtime.confirmation.confirmStored({
         generationId,
         challengeId,
+        ...(decision === undefined ? {} : { decision }),
         ...(dependencies.signal === undefined
           ? {}
           : { signal: dependencies.signal })
       });
+      if (approved.status === "declined") {
+        writeSuccess(dependencies, options, {
+          status: "declined",
+          exitCode: 0,
+          generationId,
+          challengeId
+        }, `Generation confirmation declined: ${challengeId}`);
+        return;
+      }
       await executeApproved(dependencies, options, runtime, {
         generationId,
         proposal: approved.proposal,
@@ -775,12 +808,11 @@ function createManualCommand(dependencies: CliDependencies): Command {
         action
       });
       if (existing !== null) {
-        const session = await runtime.readSession(generationId);
         writeSuccess(dependencies, options, {
           status: "confirmationRequired",
           exitCode: 0,
           generationId,
-          revision: session.revision,
+          revision: existing.revision,
           challenge: existing.challenge
         }, `Confirmation required: ${existing.challenge.challengeId}`);
         return;
@@ -805,12 +837,11 @@ function createManualCommand(dependencies: CliDependencies): Command {
           : { signal: dependencies.signal })
       });
       if (confirmation.status === "confirmationRequired") {
-        const session = await runtime.readSession(generationId);
         writeSuccess(dependencies, options, {
           status: "confirmationRequired",
           exitCode: 0,
           generationId,
-          revision: session.revision,
+          revision: confirmation.revision,
           challenge: confirmation.challenge
         }, `Confirmation required: ${confirmation.challenge.challengeId}`);
         return;

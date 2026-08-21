@@ -380,13 +380,18 @@ describe("FileSystemGenerationSessionStore", () => {
     });
     const approved = {
       ...pendingConfirmation("challenge-1"),
-      status: "approved" as const
+      status: "approved" as const,
+      approvalMode: "delegated" as const
     };
     const inFlight = {
       stepIndex: 0,
       snapshotHash: "b".repeat(64),
       proposalHash: "c".repeat(64),
-      attemptId: "attempt-1"
+      attemptId: "attempt-1",
+      confirmation: {
+        challengeId: "challenge-1",
+        approvalMode: "delegated" as const
+      }
     };
     await store.create(validSession(0, {
       pendingConfirmation: approved
@@ -438,7 +443,8 @@ describe("FileSystemGenerationSessionStore", () => {
     });
     const approved = {
       ...pendingConfirmation("challenge-1"),
-      status: "approved" as const
+      status: "approved" as const,
+      approvalMode: "localTty" as const
     };
     const initial = validSession(0, { pendingConfirmation: approved });
     await store.create(initial);
@@ -448,7 +454,11 @@ describe("FileSystemGenerationSessionStore", () => {
       stepIndex: 0,
       snapshotHash: "b".repeat(64),
       proposalHash: "c".repeat(64),
-      attemptId: "attempt-1"
+      attemptId: "attempt-1",
+      confirmation: {
+        challengeId: "challenge-1",
+        approvalMode: "localTty"
+      }
     }, approved), "INVALID_TRANSITION");
     await expect(store.read("generation-1")).resolves.toEqual(initial);
   });
@@ -1070,14 +1080,22 @@ describe("FileSystemGenerationSessionStore", () => {
       "INVALID_TRANSITION");
 
     const approved = validSession(2, {
-      pendingConfirmation: { ...pending, status: "approved" }
+      pendingConfirmation: {
+        ...pending,
+        status: "approved",
+        approvalMode: "localTty"
+      }
     });
     await store.updateConfirmation("generation-1", 1, approved);
     await expectStoreError(store.updateConfirmation(
       "generation-1",
       2,
       validSession(3, {
-        pendingConfirmation: { ...pending, status: "approved" }
+        pendingConfirmation: {
+          ...pending,
+          status: "approved",
+          approvalMode: "localTty"
+        }
       })
     ), "INVALID_TRANSITION");
 

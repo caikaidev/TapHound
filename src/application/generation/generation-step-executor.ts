@@ -11,6 +11,7 @@ import {
   GenerationInFlightSchema,
   expandProposedStepVariables,
   hashGenerationConfirmationEvidence,
+  isGenerationConfirmationExpired,
   type GenerationInFlight,
   type GenerationSession,
   type PendingConfirmation
@@ -274,7 +275,7 @@ function exactApprovedChallenge(
       source
     })
     || challenge.actionSummary !== summarizeProposedStep(proposal)
-    || now.getTime() >= new Date(challenge.expiresAt).getTime()
+    || isGenerationConfirmationExpired(challenge, now)
   ) {
     throw new GenerationOperationError(
       "RISK_CONFIRMATION_REQUIRED",
@@ -530,7 +531,15 @@ export class GenerationStepExecutor {
         stepIndex: session.candidateSteps.length,
         snapshotHash: proposal.binding.snapshotHash,
         proposalHash: hashProposedStep(proposal),
-        attemptId: this.dependencies.generateAttemptId()
+        attemptId: this.dependencies.generateAttemptId(),
+        ...(approved === undefined
+          ? {}
+          : {
+              confirmation: {
+                challengeId: approved.challengeId,
+                approvalMode: approved.approvalMode ?? "localTty"
+              }
+            })
       });
     } catch (error) {
       await clearApproved();
@@ -957,6 +966,9 @@ export class GenerationStepExecutor {
             path: snapshotEvidencePath,
             sha256: snapshotEvidenceSha256
           },
+          ...(inFlight.confirmation === undefined
+            ? {}
+            : { confirmation: inFlight.confirmation }),
           outcome,
           ...(stopFailure === undefined
             ? {}

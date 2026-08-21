@@ -3,6 +3,7 @@ import {
   GenerationSessionIdSchema,
   GenerationSessionSchema,
   hashGenerationConfirmationEvidence,
+  isGenerationConfirmationExpired,
   type GenerationConfirmationEvidence,
   type GenerationSession,
   type PendingConfirmation
@@ -52,14 +53,18 @@ export interface ConfirmationRequestInput {
 
 export interface ConfirmationApproveInput extends ConfirmationRequestInput {
   challengeId: string;
+  decision?: ConfirmationDecision | undefined;
   signal?: AbortSignal | undefined;
 }
 
 export interface StoredConfirmationApproveInput {
   generationId: string;
   challengeId: string;
+  decision?: ConfirmationDecision | undefined;
   signal?: AbortSignal | undefined;
 }
+
+export type ConfirmationDecision = "approve" | "decline";
 
 export interface ManualConfirmationRequestInput {
   generationId: string;
@@ -75,6 +80,7 @@ export interface PendingManualConfirmationInput {
 
 export interface ConfirmationRequiredResult {
   status: "confirmationRequired";
+  revision: number;
   challenge: PendingConfirmation;
 }
 
@@ -82,12 +88,14 @@ export type ConfirmationRequestResult =
   | { status: "approved"; proposal: ProposedStep }
   | ConfirmationRequiredResult;
 
-export interface StoredConfirmationApproveResult {
-  status: "approved";
-  proposal: ProposedStep;
-  snapshot: RuntimeSnapshot;
-  source: "planner" | "manualOverride";
-}
+export type StoredConfirmationApproveResult =
+  | {
+      status: "approved";
+      proposal: ProposedStep;
+      snapshot: RuntimeSnapshot;
+      source: "planner" | "manualOverride";
+    }
+  | { status: "declined" };
 
 interface PendingChallengeToken {
   expectedRevision: number;
@@ -168,6 +176,18 @@ export class GenerationConfirmationService {
       session.pendingConfirmation !== null
       && session.pendingConfirmation.status === "pending"
     ) {
+      if (isGenerationConfirmationExpired(
+        session.pendingConfirmation,
+        this.dependencies.now()
+      )) {
+        await this.clearExactChallenge(session.id, {
+          expectedRevision: session.revision,
+          expectedChallenge: session.pendingConfirmation
+        });
+        throw bindingFailure(
+          "Generation confirmation challenge expired and was cleared; observe again before proposing a step"
+        );
+      }
       const storedEvidence = await this.readStoredEvidence({
         generationId: session.id,
         challengeId: session.pendingConfirmation.challengeId
@@ -181,7 +201,11 @@ export class GenerationConfirmationService {
         session,
         storedEvidence
       );
-      return { status: "confirmationRequired", challenge };
+      return {
+        status: "confirmationRequired",
+        revision: session.revision,
+        challenge
+      };
     }
     const proposal = this.validator.validate({
       session,
@@ -240,7 +264,11 @@ export class GenerationConfirmationService {
       session.revision,
       next
     );
-    return { status: "confirmationRequired", challenge };
+    return {
+      status: "confirmationRequired",
+      revision: next.revision,
+      challenge
+    };
   };
 
   public readonly requestManual = async (
@@ -271,6 +299,15 @@ export class GenerationConfirmationService {
     if (pending === null || pending.status !== "pending") {
       return null;
     }
+    if (isGenerationConfirmationExpired(pending, this.dependencies.now())) {
+      await this.clearExactChallenge(session.id, {
+        expectedRevision: session.revision,
+        expectedChallenge: pending
+      });
+      throw bindingFailure(
+        "Generation confirmation challenge expired and was cleared; observe again before manual takeover"
+      );
+    }
     const evidence = await this.readStoredEvidence({
       generationId: session.id,
       challengeId: pending.challengeId
@@ -284,21 +321,31 @@ export class GenerationConfirmationService {
       );
     }
     const challenge = this.requireExactPendingChallenge(session, evidence);
-    return { status: "confirmationRequired", challenge };
+    return {
+      status: "confirmationRequired",
+      revision: session.revision,
+      challenge
+    };
   };
 
   public readonly confirmStored = async (
     input: StoredConfirmationApproveInput
   ): Promise<StoredConfirmationApproveResult> => {
     const evidence = await this.readStoredEvidence(input);
-    await this.confirm({
+    const result = await this.confirm({
       generationId: input.generationId,
       challengeId: input.challengeId,
       proposal: evidence.proposal,
       snapshot: evidence.snapshot,
       source: evidence.source,
+      ...(input.decision === undefined
+        ? {}
+        : { decision: input.decision }),
       signal: input.signal
     });
+    if (result.status === "declined") {
+      return result;
+    }
     return {
       status: "approved",
       proposal: evidence.proposal,
@@ -309,7 +356,10 @@ export class GenerationConfirmationService {
 
   public readonly confirm = async (
     input: ConfirmationApproveInput
-  ): Promise<{ status: "approved"; proposal: ProposedStep }> => {
+  ): Promise<
+    | { status: "approved"; proposal: ProposedStep }
+    | { status: "declined" }
+  > => {
     const session = GenerationSessionSchema.parse(
       await this.dependencies.store.read(input.generationId)
     );
@@ -333,9 +383,22 @@ export class GenerationConfirmationService {
       expectedChallenge: challenge
     };
 
-    const expired = this.dependencies.now().getTime()
-      >= new Date(challenge.expiresAt).getTime();
+    const expired = isGenerationConfirmationExpired(
+      challenge,
+      this.dependencies.now()
+    );
     const challengeMatches = challenge.challengeId === input.challengeId;
+    if (input.decision === "decline") {
+      if (!challengeMatches || !await this.clearExactChallenge(
+        session.id,
+        cleanupToken
+      )) {
+        throw bindingFailure(
+          "Generation confirmation binding is no longer authoritative"
+        );
+      }
+      return { status: "declined" };
+    }
     const proposalMatches = challenge.proposalHash
       === hashProposedStep(proposal);
     const evidenceMatches = challenge.evidenceHash === evidenceHash;
@@ -397,15 +460,17 @@ export class GenerationConfirmationService {
       return { status: "approved", proposal };
     }
 
-    let confirmed: boolean;
-    try {
-      confirmed = await this.dependencies.prompt.confirm(
-        challenge,
-        input.signal
-      );
-    } catch (error) {
-      await this.clearExactChallenge(session.id, cleanupToken);
-      throw error;
+    let confirmed = input.decision === "approve";
+    if (input.decision === undefined) {
+      try {
+        confirmed = await this.dependencies.prompt.confirm(
+          challenge,
+          input.signal
+        );
+      } catch (error) {
+        await this.clearExactChallenge(session.id, cleanupToken);
+        throw error;
+      }
     }
     if (input.signal?.aborted === true) {
       await this.cancelPrompt(session.id, cleanupToken);
@@ -424,8 +489,10 @@ export class GenerationConfirmationService {
     const stillAuthoritative = latest.revision === session.revision
       && JSON.stringify(latest.pendingConfirmation)
         === JSON.stringify(challenge)
-      && this.dependencies.now().getTime()
-        < new Date(challenge.expiresAt).getTime();
+      && !isGenerationConfirmationExpired(
+        challenge,
+        this.dependencies.now()
+      );
     if (!stillAuthoritative) {
       await this.clearExactChallenge(session.id, cleanupToken);
       throw bindingFailure(
@@ -444,7 +511,10 @@ export class GenerationConfirmationService {
       revision: latest.revision + 1,
       pendingConfirmation: {
         ...challenge,
-        status: "approved"
+        status: "approved",
+        approvalMode: input.decision === "approve"
+          ? "delegated"
+          : "localTty"
       }
     });
     await this.dependencies.store.updateConfirmation(
@@ -479,7 +549,7 @@ export class GenerationConfirmationService {
   private async clearExactChallenge(
     generationId: string,
     token: PendingChallengeToken
-  ): Promise<void> {
+  ): Promise<boolean> {
     const latest = GenerationSessionSchema.parse(
       await this.dependencies.store.read(generationId)
     );
@@ -489,7 +559,7 @@ export class GenerationConfirmationService {
       || pending === null
       || JSON.stringify(pending) !== JSON.stringify(token.expectedChallenge)
     ) {
-      return;
+      return false;
     }
     if (latest.revision === Number.MAX_SAFE_INTEGER) {
       throw bindingFailure("Generation revision cannot clear challenge");
@@ -504,6 +574,7 @@ export class GenerationConfirmationService {
       latest.revision,
       cleared
     );
+    return true;
   }
 
   private async cancelPrompt(
@@ -559,8 +630,10 @@ export class GenerationConfirmationService {
       || challenge.snapshotHash !== proposal.binding.snapshotHash
       || challenge.evidenceHash !== hashGenerationConfirmationEvidence(evidence)
       || challenge.actionSummary !== summarizeProposedStep(proposal)
-      || this.dependencies.now().getTime()
-        >= new Date(challenge.expiresAt).getTime()
+      || isGenerationConfirmationExpired(
+        challenge,
+        this.dependencies.now()
+      )
     ) {
       throw bindingFailure(
         "Pending generation confirmation does not match stored evidence"

@@ -367,17 +367,22 @@ explicitly requests generation without reuse.
         expectation, collection, and next-observation time. Otherwise
         re-observe before proposing another step.
       - **`status: "confirmationRequired"`**: Present the challenge details
-        (action summary, challenge ID) to the user. Wait for explicit
-        human approval. If approved, run:
+        (action summary, challenge ID, and expiry) to the user. Wait for an
+        explicit decision on that exact challenge. If approved, run:
         ```bash
         taphound generation confirm \
           --project <project> \
           --session <generationId> \
           --challenge <challengeId> \
+          --decision approve \
           --compact \
           --json
         ```
-        Do NOT auto-approve. If the user declines, stop and report.
+        `--decision approve` is a delegated non-TTY attestation, not an
+        auto-approval switch. Use it only after the user explicitly approves
+        this challenge. If the user declines, run the same command with
+        `--decision decline` to clear the exact challenge, then stop and
+        report. Omitting `--decision` keeps the local TTY prompt.
       - **`status: "error"` (any failure code)**: Read the failure code and
         message. Decrement the retry budget for this step.
         This status means Core did not start an ambiguous action attempt, so
@@ -464,7 +469,9 @@ explicitly requests generation without reuse.
 
 ## Key Rules
 
-- The agent NEVER auto-approves a confirmation challenge.
+- The agent NEVER auto-approves a confirmation challenge. It uses delegated
+  `--decision approve` only after the user explicitly approves the exact
+  displayed challenge; approval of one challenge never carries to another.
 - The agent ALWAYS checks reusable local Flows before generation and chooses
   the deepest applicable valid prefix.
 - The agent NEVER silently bypasses a selected Flow that fails validation or
@@ -500,8 +507,15 @@ explicitly requests generation without reuse.
   it from live observation. Including it will cause validation failure.
 - `inputText` steps do not include a `locator` — the Core uses the
   currently focused element.
-- `confirmationRequired` steps must be approved by a human in a TTY
-  terminal. The agent must NOT auto-approve.
+- `confirmationRequired` steps require an explicit human decision. Local
+  terminals may omit `--decision` for a TTY prompt. Sandboxed callers may use
+  the exact challenge-bound `--decision approve|decline` only after relaying
+  the challenge and receiving that decision; the agent must NOT auto-approve.
+- `generation status --json` exposes `pendingConfirmation.expired`. While a
+  challenge remains pending, `observe` returns
+  `RISK_CONFIRMATION_REQUIRED`, not a retryable observation failure. An
+  expired challenge cannot be approved; clear it with the exact challenge ID
+  and `--decision decline`, then observe and propose again.
 - `confirmationRequiredActions` in the interaction policy is
   per-action-TYPE, not per-element. Listing `click` means EVERY click in
   the app requires human approval during generation. Leave empty unless

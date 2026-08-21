@@ -169,7 +169,10 @@ The repository ships a [`taphound-ai-journey` Skill](assets/skills/taphound-ai-j
    force-stops and launches the configured Activity before creating the
    session. Use `observe --compact` and read its authoritative `snapshotRef`;
    successful compact steps return `nextBinding` and `nextSnapshotRef`.
-4. Use `generation status` to inspect durable state. An interrupted in-flight
+4. Use `generation status` to inspect durable state, including pending and
+   expired confirmations. Confirmation defaults to a local TTY; after the user
+   explicitly reviews the exact challenge, a sandboxed Agent can pass
+   `generation confirm --decision approve|decline`. An interrupted in-flight
    action can only be reactivated with the explicit
    `generation recover --decision retry` acknowledgement because it may already
    have executed.

@@ -376,6 +376,7 @@ describe("GenerationConfirmationService", () => {
 
     expect(retry).toEqual({
       status: "confirmationRequired",
+      revision: 3,
       challenge: installed
     });
     expect(test.evidence.size).toBe(1);
@@ -438,7 +439,58 @@ describe("GenerationConfirmationService", () => {
     expect(approved.status).toBe("approved");
     expect(test.current()).toMatchObject({
       revision: 4,
-      pendingConfirmation: { status: "approved" }
+      pendingConfirmation: {
+        status: "approved",
+        approvalMode: "localTty"
+      }
+    });
+  });
+
+  it("accepts an exact delegated approval without opening a prompt", async () => {
+    const runtime = snapshot();
+    const test = harness();
+    await test.service.request({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime
+    });
+
+    const approved = await test.service.confirmStored({
+      generationId: "generation-1",
+      challengeId: "challenge-1",
+      decision: "approve"
+    });
+
+    expect(approved.status).toBe("approved");
+    expect(test.confirm).not.toHaveBeenCalled();
+    expect(test.current()).toMatchObject({
+      revision: 4,
+      pendingConfirmation: {
+        status: "approved",
+        approvalMode: "delegated"
+      }
+    });
+  });
+
+  it("clears an exact delegated decline without executing or prompting", async () => {
+    const runtime = snapshot();
+    const test = harness();
+    await test.service.request({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime
+    });
+
+    await expect(test.service.confirmStored({
+      generationId: "generation-1",
+      challengeId: "challenge-1",
+      decision: "decline"
+    })).resolves.toEqual({ status: "declined" });
+
+    expect(test.confirm).not.toHaveBeenCalled();
+    expect(test.current()).toMatchObject({
+      revision: 4,
+      pendingConfirmation: null
     });
   });
 
@@ -737,6 +789,26 @@ describe("GenerationConfirmationService", () => {
     expect(test.current().pendingConfirmation).toBeNull();
   });
 
+  it("clears an expired pending challenge when the step is resubmitted", async () => {
+    const runtime = snapshot();
+    const test = harness();
+    await test.service.request({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime
+    });
+    test.setNow(new Date("2026-07-22T12:00:31.000Z"));
+
+    await expect(test.service.request({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime
+    })).rejects.toThrow(/expired and was cleared/i);
+
+    expect(test.current().pendingConfirmation).toBeNull();
+    expect(test.confirm).not.toHaveBeenCalled();
+  });
+
   it("decline clears the challenge deterministically", async () => {
     const runtime = snapshot();
     const test = harness(false);
@@ -979,6 +1051,7 @@ describe("GenerationConfirmationService", () => {
 
     expect(result).toEqual({
       status: "confirmationRequired",
+      revision: 3,
       challenge: installed
     });
     expect(test.evidence.size).toBe(1);

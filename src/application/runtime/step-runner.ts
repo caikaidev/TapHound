@@ -3,7 +3,11 @@ import {
   appProcessPids,
   primaryAppPid
 } from "../../domain/app-process.js";
-import type { JourneyStep } from "../../domain/journey.js";
+import type {
+  ExternalStep,
+  JourneyStep
+} from "../../domain/journey.js";
+import type { LayoutElement } from "../../domain/layout.js";
 import type {
   ReportFailure,
   StepReport
@@ -95,7 +99,7 @@ export class StepRunner {
       idle: options.idle,
       ...(options.generatedReplayPolicy === true
         ? {
-            readLayout: async (): Promise<readonly import("../../domain/layout.js").LayoutElement[]> => (
+            readLayout: async (): Promise<readonly LayoutElement[]> => (
               this.captureGeneratedLayout(this.currentSignal)
             ),
             beforeMutation: async (): Promise<void> => {
@@ -249,7 +253,7 @@ export class StepRunner {
 
   private async captureGeneratedLayout(
     signal?: AbortSignal
-  ): Promise<readonly import("../../domain/layout.js").LayoutElement[]> {
+  ): Promise<readonly LayoutElement[]> {
     await this.assertGeneratedForeground(
       this.currentExpectedActivity,
       "ACTIVITY_BEFORE_MISMATCH",
@@ -416,7 +420,7 @@ export class StepRunner {
         return fail(scroll.code, scroll.message);
       }
     } else if (step.action === "bridge") {
-      if (this.options.manualReplay === false) {
+      if (this.options.manualReplay === false && step.replayMode !== "auto") {
         report.locator = { status: "notRun", fallbackUsed: false };
         return finish("manualRequired");
       }
@@ -492,12 +496,25 @@ export class StepRunner {
       if (triggerAction.status === "failed") {
         return fail(triggerAction.code, triggerAction.message);
       }
-      const escaped = await this.pollBridgeEscape(signal, 3000);
+      const escaped = await this.pollBridgeEscape(
+        signal,
+        step.escapeTimeoutMs ?? 3000
+      );
       if (escaped === null) {
         return fail(
           "BRIDGE_NO_ESCAPE",
           "Bridge trigger did not cause a package escape during replay"
         );
+      }
+      if (step.externalSteps !== undefined) {
+        const externalFailure = await this.executeExternalStepsForReplay(
+          step,
+          index,
+          signal
+        );
+        if (externalFailure !== null) {
+          return fail(externalFailure.code, externalFailure.message);
+        }
       }
       try {
         await this.pollBridgeReturn(signal, step.returnTimeoutMs);
@@ -827,6 +844,241 @@ export class StepRunner {
     return finish("passed");
   }
 
+  private async executeExternalStepsForReplay(
+    step: Extract<JourneyStep, { action: "bridge" }>,
+    index: number,
+    signal: AbortSignal | undefined
+  ): Promise<{ code: FailureCode; message: string } | null> {
+    const escapedPackageName = step.escapedPackageName;
+    if (escapedPackageName === undefined) {
+      return {
+        code: "ACTION_FAILED",
+        message: "Bridge auto replay requires escapedPackageName"
+      };
+    }
+    if (step.externalSteps === undefined) {
+      return null;
+    }
+    const externalIdleWaiter = new IdleWaiter(
+      this.options.androidCli,
+      this.options.clock,
+      this.options.deviceSerial,
+      escapedPackageName
+    );
+    for (const [i, externalStep] of step.externalSteps.entries()) {
+      if (signal?.aborted === true) return null;
+
+      const externalIdentity = {
+        packageName: escapedPackageName,
+        deviceSerial: this.options.deviceSerial,
+        ...(signal === undefined ? {} : { signal }),
+        timeoutMs: 5000
+      };
+      const foreground = await this.options.adb.foregroundComponent(
+        externalIdentity
+      );
+      if (foreground.packageName !== escapedPackageName) {
+        return {
+          code: "EXTERNAL_PACKAGE_MISMATCH",
+          message: `External app foreground changed during replay: expected "${escapedPackageName}", got "${foreground.packageName}"`
+        };
+      }
+      if (foreground.activity !== externalStep.expectedActivity) {
+        return {
+          code: "EXTERNAL_ACTIVITY_MISMATCH",
+          message: `External Activity mismatch during replay: expected "${externalStep.expectedActivity}", got "${foreground.activity}"`
+        };
+      }
+
+      const layout = await this.options.androidCli.layout({
+        deviceSerial: this.options.deviceSerial,
+        ...(signal === undefined ? {} : { signal }),
+        timeoutMs: this.options.idle.timeoutMs
+      });
+
+      if (externalStep.action === "scrollTo") {
+        const journeyStep = externalStepToJourneyStepForReplay(externalStep) as Extract<
+          JourneyStep,
+          { action: "scrollTo" }
+        >;
+        const externalScrollToExecutor = new ScrollToExecutor({
+          androidCli: this.options.androidCli,
+          actionExecutor: this.actionExecutor,
+          idleWaiter: externalIdleWaiter,
+          deviceSerial: this.options.deviceSerial,
+          idle: this.options.idle,
+          requireLiveContainerCapability: true
+        });
+        const scroll = await externalScrollToExecutor.execute(
+          journeyStep,
+          signal,
+          layout
+        );
+        if (scroll.status === "cancelled") {
+          return null;
+        }
+        if (scroll.status === "failed") {
+          return {
+            code: scroll.code,
+            message: scroll.message
+          };
+        }
+      } else {
+        const journeyStep = externalStepToJourneyStepForReplay(externalStep);
+        let target: ActionTarget | undefined;
+        if (
+          externalStep.action === "click"
+          || externalStep.action === "longClick"
+          || externalStep.action === "swipe"
+        ) {
+          const resolution = resolveLocator(layout, externalStep.locator, {
+            ...(externalStep.action === "click"
+              ? { requiredCapability: "clickable" as const }
+              : {}),
+            ...(externalStep.action === "longClick"
+              ? { requiredCapability: "longClickable" as const }
+              : {})
+          });
+          if (resolution.status !== "found") {
+            return {
+              code: resolution.code,
+              message: resolution.message
+            };
+          }
+          if (
+            externalStep.action === "click"
+            && resolution.element.clickable !== true
+          ) {
+            return {
+              code: "ACTION_FAILED",
+              message: "External click target is not clickable during replay"
+            };
+          }
+          if (
+            externalStep.action === "longClick"
+            && resolution.element.longClickable !== true
+          ) {
+            return {
+              code: "ACTION_FAILED",
+              message: "External longClick target is not longClickable during replay"
+            };
+          }
+          if (
+            externalStep.action === "swipe"
+            && (
+              resolution.element.scrollable !== true
+              || resolution.element.bounds === undefined
+            )
+          ) {
+            return {
+              code: "ACTION_FAILED",
+              message: "External swipe target lacks scrollable bounds during replay"
+            };
+          }
+          target = {
+            point: resolution.point,
+            ...(resolution.element.bounds === undefined
+              ? {}
+              : { bounds: resolution.element.bounds })
+          };
+        }
+        const action = await this.actionExecutor.execute(
+          journeyStep,
+          target,
+          signal
+        );
+        if (action.status === "failed") {
+          return {
+            code: action.code,
+            message: action.message
+          };
+        }
+      }
+
+      const idle = await externalIdleWaiter.waitUntilIdle(
+        this.options.idle,
+        signal
+      );
+      if (idle.status === "cancelled") {
+        return null;
+      }
+      if (idle.status === "timeout") {
+        await this.options.artifacts.writeJson(
+          stepPath(
+            index,
+            `external-${String(i + 1).padStart(3, "0")}-layout-diff.json`
+          ),
+          idle.lastDiff
+        );
+        return {
+          code: idle.code,
+          message: "External app layout did not become stable after step during replay"
+        };
+      }
+
+      if (externalStep.expect !== undefined) {
+        const expectFailure = await this.evaluateExternalExpectForReplay(
+          externalStep,
+          escapedPackageName,
+          signal
+        );
+        if (expectFailure !== null) {
+          return expectFailure;
+        }
+      }
+    }
+    return null;
+  }
+
+  private async evaluateExternalExpectForReplay(
+    step: ExternalStep,
+    escapedPackageName: string,
+    signal: AbortSignal | undefined
+  ): Promise<{ code: FailureCode; message: string } | null> {
+    const expect = step.expect;
+    if (expect === undefined) return null;
+    const identity = {
+      packageName: escapedPackageName,
+      deviceSerial: this.options.deviceSerial,
+      ...(signal === undefined ? {} : { signal }),
+      timeoutMs: expect.timeoutMs
+    };
+    if (expect.type === "activity") {
+      const expectedPackage = expect.packageName ?? escapedPackageName;
+      const foreground = await this.options.adb.foregroundComponent({
+        ...identity,
+        packageName: expectedPackage
+      });
+      if (foreground.activity !== expect.value) {
+        return {
+          code: "EXTERNAL_STEP_FAILED",
+          message: `External expect Activity mismatch during replay: expected "${expect.value}", got "${foreground.activity}"`
+        };
+      }
+    } else if (expect.type === "element") {
+      const layout = await this.options.androidCli.layout({
+        deviceSerial: this.options.deviceSerial,
+        ...(signal === undefined ? {} : { signal }),
+        timeoutMs: expect.timeoutMs
+      });
+      const resolution = resolveLocator(layout, expect.locator, {
+        requireEnabled: false
+      });
+      if (resolution.status !== "found") {
+        return {
+          code: "EXTERNAL_STEP_FAILED",
+          message: `External expect element not found during replay: ${resolution.message}`
+        };
+      }
+    } else {
+      return {
+        code: "EXTERNAL_STEP_FAILED",
+        message: "logcat expectations are not supported for external steps during replay"
+      };
+    }
+    return null;
+  }
+
   private async pollBridgeEscape(
     signal: AbortSignal | undefined,
     timeoutMs: number
@@ -883,4 +1135,15 @@ export class StepRunner {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function externalStepToJourneyStepForReplay(step: ExternalStep): JourneyStep {
+  const { expectedActivity, ...rest } = step;
+  return {
+    ...rest,
+    activity: {
+      before: expectedActivity,
+      after: expectedActivity
+    }
+  };
 }

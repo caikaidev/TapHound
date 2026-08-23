@@ -1187,4 +1187,224 @@ describe("scrollTo replay", () => {
     expect(result).toMatchObject({ status: "passed" });
     expect(vi.mocked(test.adb.tap)).toHaveBeenCalledTimes(1);
   });
+
+  it("replays external steps in auto mode even when manualReplay is false", async () => {
+    const adb = bridgeAdb([
+      { packageName: "com.android.camera", activity: "com.android.camera.CameraActivity" },
+      { packageName: "com.android.camera", activity: "com.android.camera.CameraActivity" },
+      { packageName: "com.example.app", activity: checkpoint.after }
+    ]);
+    const cli = bridgeCli();
+    cli.layout = vi.fn()
+      .mockResolvedValueOnce([{
+        id: "camera-button",
+        resourceId: "camera-button",
+        enabled: true,
+        clickable: true,
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+        children: []
+      }])
+      .mockResolvedValueOnce([{
+        id: "shutter",
+        resourceId: "shutter",
+        enabled: true,
+        clickable: true,
+        bounds: { left: 50, top: 50, right: 150, bottom: 150 },
+        children: []
+      }]);
+    const test = fixture({
+      adb,
+      androidCli: cli,
+      manualReplay: false
+    });
+
+    const result = await test.runner.run(bridgeStep({
+      replayMode: "auto",
+      escapedPackageName: "com.android.camera",
+      externalSteps: [{
+        action: "click",
+        locator: { resourceId: "shutter" },
+        expectedActivity: "com.android.camera.CameraActivity"
+      }]
+    }), 0);
+
+    expect(result).toMatchObject({ status: "passed" });
+    expect(vi.mocked(adb.tap)).toHaveBeenCalledTimes(2);
+  });
+
+  it("replays external back steps in auto mode", async () => {
+    const adb = bridgeAdb([
+      { packageName: "com.android.camera", activity: "com.android.camera.CameraActivity" },
+      { packageName: "com.android.camera", activity: "com.android.camera.CameraActivity" },
+      { packageName: "com.example.app", activity: checkpoint.after }
+    ]);
+    const cli = bridgeCli();
+    const test = fixture({
+      adb,
+      androidCli: cli,
+      manualReplay: false
+    });
+
+    const result = await test.runner.run(bridgeStep({
+      replayMode: "auto",
+      escapedPackageName: "com.android.camera",
+      externalSteps: [{
+        action: "back",
+        expectedActivity: "com.android.camera.CameraActivity"
+      }]
+    }), 0);
+
+    expect(result).toMatchObject({ status: "passed" });
+    expect(vi.mocked(adb.tap)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(adb.back)).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails with EXTERNAL_PACKAGE_MISMATCH when external app changes during step", async () => {
+    const adb = bridgeAdb([
+      { packageName: "com.android.camera", activity: "com.android.camera.CameraActivity" },
+      { packageName: "com.other.app", activity: "com.other.app.OtherActivity" }
+    ]);
+    const cli = bridgeCli();
+    const test = fixture({
+      adb,
+      androidCli: cli,
+      manualReplay: false
+    });
+
+    const result = await test.runner.run(bridgeStep({
+      replayMode: "auto",
+      escapedPackageName: "com.android.camera",
+      externalSteps: [{
+        action: "click",
+        locator: { resourceId: "shutter" },
+        expectedActivity: "com.android.camera.CameraActivity"
+      }]
+    }), 0);
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { code: "EXTERNAL_PACKAGE_MISMATCH", phase: "replay" }
+    });
+    expect(vi.mocked(adb.tap)).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails with EXTERNAL_ACTIVITY_MISMATCH when external activity differs", async () => {
+    const adb = bridgeAdb([
+      { packageName: "com.android.camera", activity: "com.android.camera.CameraActivity" },
+      { packageName: "com.android.camera", activity: "com.android.camera.OtherActivity" }
+    ]);
+    const cli = bridgeCli();
+    const test = fixture({
+      adb,
+      androidCli: cli,
+      manualReplay: false
+    });
+
+    const result = await test.runner.run(bridgeStep({
+      replayMode: "auto",
+      escapedPackageName: "com.android.camera",
+      externalSteps: [{
+        action: "click",
+        locator: { resourceId: "shutter" },
+        expectedActivity: "com.android.camera.CameraActivity"
+      }]
+    }), 0);
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { code: "EXTERNAL_ACTIVITY_MISMATCH", phase: "replay" }
+    });
+    expect(vi.mocked(adb.tap)).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails with LOCATOR_NOT_FOUND when external step locator does not resolve", async () => {
+    const adb = bridgeAdb([
+      { packageName: "com.android.camera", activity: "com.android.camera.CameraActivity" },
+      { packageName: "com.android.camera", activity: "com.android.camera.CameraActivity" },
+      { packageName: "com.example.app", activity: checkpoint.after }
+    ]);
+    const cli = bridgeCli();
+    cli.layout = vi.fn()
+      .mockResolvedValueOnce([{
+        id: "camera-button",
+        resourceId: "camera-button",
+        enabled: true,
+        clickable: true,
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+        children: []
+      }])
+      .mockResolvedValueOnce([{
+        id: "other",
+        resourceId: "other-element",
+        enabled: true,
+        clickable: true,
+        bounds: { left: 0, top: 0, right: 50, bottom: 50 },
+        children: []
+      }]);
+    const test = fixture({
+      adb,
+      androidCli: cli,
+      manualReplay: false
+    });
+
+    const result = await test.runner.run(bridgeStep({
+      replayMode: "auto",
+      escapedPackageName: "com.android.camera",
+      externalSteps: [{
+        action: "click",
+        locator: { resourceId: "shutter" },
+        expectedActivity: "com.android.camera.CameraActivity"
+      }]
+    }), 0);
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { code: "LOCATOR_NOT_FOUND", phase: "replay" }
+    });
+    expect(vi.mocked(adb.tap)).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses escapeTimeoutMs from the step during replay", async () => {
+    const adb = bridgeAdb([
+      { packageName: "com.android.camera", activity: "com.android.camera.CameraActivity" },
+      { packageName: "com.android.camera", activity: "com.android.camera.CameraActivity" },
+      { packageName: "com.example.app", activity: checkpoint.after }
+    ]);
+    const cli = bridgeCli();
+    cli.layout = vi.fn()
+      .mockResolvedValueOnce([{
+        id: "camera-button",
+        resourceId: "camera-button",
+        enabled: true,
+        clickable: true,
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+        children: []
+      }])
+      .mockResolvedValueOnce([{
+        id: "shutter",
+        resourceId: "shutter",
+        enabled: true,
+        clickable: true,
+        bounds: { left: 50, top: 50, right: 150, bottom: 150 },
+        children: []
+      }]);
+    const test = fixture({
+      adb,
+      androidCli: cli,
+      manualReplay: false
+    });
+
+    const result = await test.runner.run(bridgeStep({
+      replayMode: "auto",
+      escapedPackageName: "com.android.camera",
+      escapeTimeoutMs: 8000,
+      externalSteps: [{
+        action: "click",
+        locator: { resourceId: "shutter" },
+        expectedActivity: "com.android.camera.CameraActivity"
+      }]
+    }), 0);
+
+    expect(result).toMatchObject({ status: "passed" });
+  });
 });

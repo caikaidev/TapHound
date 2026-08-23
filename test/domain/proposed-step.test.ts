@@ -177,6 +177,49 @@ describe("ProposedStepSchema", () => {
     })).not.toThrow();
   });
 
+  it("accepts a bridge proposal with a named flow", () => {
+    expect(() => ProposedStepSchema.parse({
+      binding,
+      action: "bridge",
+      scenario: "photoCapture",
+      description: "Trigger camera",
+      triggerLocator: { resourceId: "camera_button" },
+      returnTimeoutMs: 60000,
+      flow: "camera/photo-capture",
+      activity: { before: "com.example.app.MainActivity" }
+    })).not.toThrow();
+  });
+
+  it("accepts a bridge proposal with escapeTimeoutMs", () => {
+    expect(() => ProposedStepSchema.parse({
+      binding,
+      action: "bridge",
+      scenario: "photoCapture",
+      description: "Trigger camera",
+      triggerLocator: { resourceId: "camera_button" },
+      returnTimeoutMs: 60000,
+      escapeTimeoutMs: 5000,
+      activity: { before: "com.example.app.MainActivity" }
+    })).not.toThrow();
+  });
+
+  it("rejects externalSteps in a bridge proposal", () => {
+    expect(() => ProposedStepSchema.parse({
+      binding,
+      action: "bridge",
+      scenario: "photoCapture",
+      description: "Trigger camera",
+      triggerLocator: { resourceId: "camera_button" },
+      returnTimeoutMs: 60000,
+      externalSteps: [{
+        action: "click",
+        locator: { resourceId: "shutter_button" },
+        expectedActivity: "com.android.camera.CameraActivity"
+      }],
+      activity: { before: "com.example.app.MainActivity" }
+    })).toThrow();
+  });
+
   it("rejects escapedPackageName in a bridge proposal", () => {
     expect(() => ProposedStepSchema.parse({
       binding,

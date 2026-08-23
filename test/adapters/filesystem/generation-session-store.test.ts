@@ -93,6 +93,7 @@ function validSession(
       timestamp: "2026-07-22T12:00:00.000Z",
       randomHex: "c0ffee"
     },
+    externalFlows: [],
     candidateSteps: [],
     candidateSources: [],
     inFlight: null,

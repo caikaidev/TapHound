@@ -43,7 +43,23 @@ describe("exitCodeForFailure", () => {
   });
 
   it("defines exactly the approved failure vocabulary", () => {
-    expect(FAILURE_CODES).toHaveLength(21);
+    expect(FAILURE_CODES).toHaveLength(27);
+  });
+
+  it.each([
+    "EXTERNAL_PACKAGE_MISMATCH",
+    "EXTERNAL_ACTIVITY_MISMATCH",
+    "EXTERNAL_STEP_FAILED"
+  ] as const)("maps %s to verification exit code 1", (failure) => {
+    expect(exitCodeForFailure(failure)).toBe(1);
+  });
+
+  it.each([
+    "EXTERNAL_FLOW_NOT_FOUND",
+    "EXTERNAL_FLOW_STALE",
+    "EXTERNAL_LOCATOR_STRICTNESS"
+  ] as const)("maps %s to config exit code 2", (failure) => {
+    expect(exitCodeForFailure(failure)).toBe(2);
   });
 });
 

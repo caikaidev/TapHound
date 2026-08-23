@@ -15,6 +15,19 @@ describe("SYSTEM_APP_PACKAGES", () => {
     expect(SYSTEM_APP_PACKAGES.pickFile).toContain("com.android.documentsui");
   });
 
+  it("includes Media Provider packages in pickImage whitelist", () => {
+    expect(SYSTEM_APP_PACKAGES.pickImage).toContain(
+      "com.google.android.providers.media.module"
+    );
+    expect(SYSTEM_APP_PACKAGES.pickImage).toContain(
+      "com.android.providers.media.module"
+    );
+    expect(isKnownSystemPackage(
+      "pickImage",
+      "com.google.android.providers.media.module"
+    )).toBe(true);
+  });
+
   it("does not define a custom scenario list", () => {
     expect(SYSTEM_APP_PACKAGES).not.toHaveProperty("custom");
   });

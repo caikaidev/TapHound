@@ -313,7 +313,7 @@ describe("bridge step", () => {
     })).not.toThrow();
   });
 
-  it("rejects replayMode auto on a bridge step", () => {
+  it("rejects replayMode auto without flow or externalSteps", () => {
     expect(() => JourneyStepSchema.parse({
       action: "bridge",
       scenario: "photoCapture",
@@ -323,6 +323,107 @@ describe("bridge step", () => {
       replayMode: "auto",
       activity
     })).toThrow();
+  });
+
+  it("accepts replayMode auto with a named flow", () => {
+    const parsed = JourneyStepSchema.parse({
+      action: "bridge",
+      scenario: "photoCapture",
+      description: "Trigger camera",
+      triggerLocator: { resourceId: "camera_button" },
+      escapedPackageName: "com.android.camera",
+      returnTimeoutMs: 60000,
+      flow: "camera/photo-capture",
+      replayMode: "auto",
+      activity
+    });
+    expect(parsed).toMatchObject({
+      replayMode: "auto",
+      flow: "camera/photo-capture"
+    });
+  });
+
+  it("accepts replayMode auto with inline externalSteps", () => {
+    const parsed = JourneyStepSchema.parse({
+      action: "bridge",
+      scenario: "photoCapture",
+      description: "Trigger camera",
+      triggerLocator: { resourceId: "camera_button" },
+      escapedPackageName: "com.android.camera",
+      returnTimeoutMs: 60000,
+      externalSteps: [{
+        action: "click",
+        locator: { resourceId: "shutter_button" },
+        expectedActivity: "com.android.camera.CameraActivity"
+      }],
+      replayMode: "auto",
+      activity
+    });
+    expect(parsed).toMatchObject({
+      replayMode: "auto",
+      externalSteps: [{ action: "click" }]
+    });
+  });
+
+  it("rejects flow and externalSteps together", () => {
+    expect(() => JourneyStepSchema.parse({
+      action: "bridge",
+      scenario: "photoCapture",
+      description: "Trigger camera",
+      triggerLocator: { resourceId: "camera_button" },
+      escapedPackageName: "com.android.camera",
+      returnTimeoutMs: 60000,
+      flow: "camera/photo-capture",
+      externalSteps: [{
+        action: "click",
+        locator: { resourceId: "shutter_button" },
+        expectedActivity: "com.android.camera.CameraActivity"
+      }],
+      activity
+    })).toThrow(/mutually exclusive/i);
+  });
+
+  it("requires escapedPackageName when flow is present", () => {
+    expect(() => JourneyStepSchema.parse({
+      action: "bridge",
+      scenario: "photoCapture",
+      description: "Trigger camera",
+      triggerLocator: { resourceId: "camera_button" },
+      returnTimeoutMs: 60000,
+      flow: "camera/photo-capture",
+      activity
+    })).toThrow(/escapedPackageName/i);
+  });
+
+  it("requires escapedPackageName when externalSteps are present", () => {
+    expect(() => JourneyStepSchema.parse({
+      action: "bridge",
+      scenario: "photoCapture",
+      description: "Trigger camera",
+      triggerLocator: { resourceId: "camera_button" },
+      returnTimeoutMs: 60000,
+      externalSteps: [{
+        action: "click",
+        locator: { resourceId: "shutter_button" },
+        expectedActivity: "com.android.camera.CameraActivity"
+      }],
+      activity
+    })).toThrow(/escapedPackageName/i);
+  });
+
+  it("accepts an optional escapeTimeoutMs", () => {
+    const parsed = JourneyStepSchema.parse({
+      action: "bridge",
+      scenario: "photoCapture",
+      description: "Trigger camera",
+      triggerLocator: { resourceId: "camera_button" },
+      returnTimeoutMs: 60000,
+      escapeTimeoutMs: 5000,
+      activity
+    });
+    expect(parsed).toMatchObject({
+      escapeTimeoutMs: 5000
+    });
   });
 
   it("accepts an optional escapedPackageName", () => {

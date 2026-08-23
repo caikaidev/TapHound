@@ -83,6 +83,8 @@ const BridgeStepSchema = z.strictObject({
   description: z.string().min(1),
   triggerLocator: LocatorSchema,
   returnTimeoutMs: z.number().int().positive(),
+  flow: z.string().trim().min(1).optional(),
+  escapeTimeoutMs: z.number().int().positive().optional(),
   ...CommonStepShape
 });
 

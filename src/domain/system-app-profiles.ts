@@ -23,7 +23,9 @@ export const SYSTEM_APP_PACKAGES: Record<SystemScenario, readonly string[]> = {
     "com.oppo.gallery",
     "com.vivo.gallery",
     "com.android.documentsui",
-    "com.google.android.documentsui"
+    "com.google.android.documentsui",
+    "com.google.android.providers.media.module",
+    "com.android.providers.media.module"
   ],
   pickFile: [
     "com.android.documentsui",

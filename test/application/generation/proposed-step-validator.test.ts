@@ -84,7 +84,8 @@ function session(runtime: RuntimeSnapshot): GenerationSession {
     inFlight: null,
     pendingConfirmation: null,
     verification: { status: "notRun" },
-    publication: { status: "notRun" }
+    publication: { status: "notRun" },
+    externalFlows: []
   };
 }
 

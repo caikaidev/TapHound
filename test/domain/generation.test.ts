@@ -123,7 +123,8 @@ function validSession(): unknown {
     inFlight: null,
     pendingConfirmation: null,
     verification: { status: "notRun" },
-    publication: { status: "notRun" }
+    publication: { status: "notRun" },
+    externalFlows: []
   };
 }
 
@@ -141,6 +142,12 @@ describe("generation error contract", () => {
       "BRIDGE_NO_ESCAPE",
       "SCENARIO_PACKAGE_MISMATCH",
       "BRIDGE_NOT_RETURNED",
+      "EXTERNAL_FLOW_NOT_FOUND",
+      "EXTERNAL_FLOW_STALE",
+      "EXTERNAL_LOCATOR_STRICTNESS",
+      "EXTERNAL_PACKAGE_MISMATCH",
+      "EXTERNAL_ACTIVITY_MISMATCH",
+      "EXTERNAL_STEP_FAILED",
       "APP_CRASHED",
       "IDLE_TIMEOUT",
       "WINDOW_HIERARCHY_INCOMPLETE",
@@ -322,6 +329,26 @@ describe("GenerationSessionSchema", () => {
     })).toThrow(/provenance/i);
   });
 
+  it("accepts external flow bindings and rejects duplicates", () => {
+    const externalFlow = {
+      name: "camera/photo-capture",
+      flowSha256: "a".repeat(64),
+      escapedPackageName: "com.android.camera",
+      stepCount: 2
+    };
+    const parsed = GenerationSessionSchema.parse({
+      ...(validSession() as object),
+      externalFlows: [externalFlow]
+    });
+    expect(parsed.externalFlows).toHaveLength(1);
+    expect(parsed.externalFlows[0]?.name).toBe("camera/photo-capture");
+
+    expect(() => GenerationSessionSchema.parse({
+      ...(validSession() as object),
+      externalFlows: [externalFlow, externalFlow]
+    })).toThrow(/unique/i);
+  });
+
   it("projects every immutable Core-owned identity field", () => {
     const session = GenerationSessionSchema.parse(validSession());
 
@@ -334,7 +361,8 @@ describe("GenerationSessionSchema", () => {
       },
       target: session.target,
       contextSelection,
-      variables: session.variables
+      variables: session.variables,
+      externalFlows: []
     });
   });
 

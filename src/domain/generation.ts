@@ -25,6 +25,12 @@ export const GENERATION_ERROR_CODES = [
   "BRIDGE_NO_ESCAPE",
   "SCENARIO_PACKAGE_MISMATCH",
   "BRIDGE_NOT_RETURNED",
+  "EXTERNAL_FLOW_NOT_FOUND",
+  "EXTERNAL_FLOW_STALE",
+  "EXTERNAL_LOCATOR_STRICTNESS",
+  "EXTERNAL_PACKAGE_MISMATCH",
+  "EXTERNAL_ACTIVITY_MISMATCH",
+  "EXTERNAL_STEP_FAILED",
   "APP_CRASHED",
   "IDLE_TIMEOUT",
   "WINDOW_HIERARCHY_INCOMPLETE",
@@ -56,6 +62,15 @@ export const GenerationBaseFlowSchema = z.strictObject({
   journeySha256: Sha256Schema,
   verificationReportSha256: Sha256Schema,
   verificationRunId: z.string().min(1),
+  stepCount: z.number().int().positive()
+});
+
+export const GenerationExternalFlowBindingSchema = z.strictObject({
+  name: FlowNameSchema,
+  flowSha256: Sha256Schema,
+  escapedPackageName: z.string().regex(
+    /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/
+  ),
   stepCount: z.number().int().positive()
 });
 
@@ -163,6 +178,7 @@ export const GenerationSessionSchema = z.strictObject({
   contextSelection: ContextSelectionSchema,
   variables: GenerationVariablesSchema,
   baseFlow: GenerationBaseFlowSchema.optional(),
+  externalFlows: z.array(GenerationExternalFlowBindingSchema).default([]),
   candidateSteps: z.array(JourneyStepSchema),
   candidateSources: z.array(GenerationStepSourceSchema),
   inFlight: GenerationInFlightSchema.nullable(),
@@ -197,6 +213,17 @@ export const GenerationSessionSchema = z.strictObject({
       path: ["baseFlow"],
       message: "Base Flow provenance must be a contiguous candidate prefix"
     });
+  }
+  const externalFlowNames = new Set<string>();
+  for (const [index, flow] of session.externalFlows.entries()) {
+    if (externalFlowNames.has(flow.name)) {
+      context.addIssue({
+        code: "custom",
+        path: ["externalFlows", index, "name"],
+        message: "External flow bindings must be unique"
+      });
+    }
+    externalFlowNames.add(flow.name);
   }
   if (session.state === "recoveryRequired" && session.inFlight === null) {
     context.addIssue({
@@ -357,6 +384,7 @@ export const GenerationMetaSchema = z.strictObject({
     runs: z.literal(1)
   }),
   baseFlow: GenerationBaseFlowSchema.optional(),
+  externalFlows: z.array(GenerationExternalFlowBindingSchema).default([]),
   manualOverrideStepIndexes: z.array(z.number().int().nonnegative())
 });
 
@@ -426,6 +454,7 @@ export interface GenerationCoreIdentity {
   contextSelection: GenerationSession["contextSelection"];
   variables: GenerationSession["variables"];
   baseFlow?: NonNullable<GenerationSession["baseFlow"]> | undefined;
+  externalFlows: GenerationSession["externalFlows"];
 }
 
 export function generationCoreIdentity(
@@ -441,7 +470,8 @@ export function generationCoreIdentity(
     target: session.target,
     contextSelection: session.contextSelection,
     variables: session.variables,
-    ...(session.baseFlow === undefined ? {} : { baseFlow: session.baseFlow })
+    ...(session.baseFlow === undefined ? {} : { baseFlow: session.baseFlow }),
+    externalFlows: session.externalFlows
   };
 }
 

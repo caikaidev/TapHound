@@ -163,7 +163,8 @@ function dependencies(): {
           inFlight: null,
           pendingConfirmation: null,
           verification: { status: "notRun" as const },
-          publication: { status: "notRun" as const }
+          publication: { status: "notRun" as const },
+          externalFlows: []
         }))
       },
       workspaceLayout: fakeWorkspaceLayout(),

@@ -85,6 +85,7 @@ function session(overrides: Partial<GenerationSession> = {}): GenerationSession 
     pendingConfirmation: null,
     verification: { status: "notRun" },
     publication: { status: "notRun" },
+    externalFlows: [],
     ...overrides
   };
 }

@@ -58,6 +58,7 @@ function session(
     pendingConfirmation: null,
     verification: { status: "notRun" },
     publication: { status: "notRun" },
+    externalFlows: [],
     ...overrides
   };
 }

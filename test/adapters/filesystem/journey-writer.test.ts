@@ -151,7 +151,8 @@ describe("FileSystemJourneyWriter", () => {
           runId: "verify-run",
           runs: 1
         },
-        manualOverrideStepIndexes: []
+        manualOverrideStepIndexes: [],
+        externalFlows: []
       }
     })).rejects.toThrow(/identity|symlink|safe/i);
     await expect(readdir(outside)).resolves.toEqual([]);

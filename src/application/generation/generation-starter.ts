@@ -22,7 +22,11 @@ import {
 import type {
   GenerationSessionStore
 } from "../../ports/generation-session-store.js";
-import { JourneySchema, type Journey } from "../../domain/journey.js";
+import {
+  JourneySchema,
+  type Journey,
+  type JourneyStep
+} from "../../domain/journey.js";
 import { normalizeActivity } from "../../domain/activity.js";
 import { FlowNameSchema } from "../../domain/journey-composition.js";
 import {
@@ -67,6 +71,7 @@ export interface GenerationStartInput {
     resolutionSha256: string;
     journey: Journey;
     verificationReport: TapHoundReport;
+    verificationReportPath: string;
   } | undefined;
 }
 
@@ -102,6 +107,57 @@ export function hashGenerationBinding(value: unknown): string {
 
 function randomHex(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString("hex");
+}
+
+function failedFlowStepSummary(
+  step: JourneyStep | undefined,
+  stepIndex: number | undefined
+): unknown {
+  if (step === undefined || stepIndex === undefined) {
+    return null;
+  }
+  return {
+    stepIndex,
+    action: step.action,
+    activity: step.activity,
+    ...("locator" in step ? { locator: step.locator } : {}),
+    ...(step.expect === undefined ? {} : { expectation: step.expect })
+  };
+}
+
+export function flowReplayFailureDetails(input: {
+  flowName: string;
+  reportPath: string;
+  journey: Journey;
+  report: TapHoundReport;
+}): unknown {
+  const primaryFailure = input.report.primaryFailure;
+  const stepIndex = primaryFailure?.stepIndex;
+  const relatedStepIndex = stepIndex
+    ?? (primaryFailure?.phase === "readiness" ? 0 : undefined);
+  return {
+    flowName: input.flowName,
+    reportPath: input.reportPath,
+    primaryFailure: primaryFailure === undefined
+      ? null
+      : {
+          code: primaryFailure.code,
+          phase: primaryFailure.phase,
+          stepIndex: stepIndex ?? null
+        },
+    failedStep: failedFlowStepSummary(
+      relatedStepIndex === undefined
+        ? undefined
+        : input.journey.steps[relatedStepIndex],
+      relatedStepIndex
+    ),
+    recovery: [
+      "Check that the first Flow step starts from a stable Activity deterministically reached after cold launch.",
+      "Replace a transient Splash transition with a Home readiness anchor such as wait: Home -> Home plus an expectation for a unique Home element.",
+      "Repair or re-record the Flow, then retry generation start.",
+      "Omit --base-flow only when the user explicitly chooses to bypass reuse."
+    ]
+  };
 }
 
 function distinctId(
@@ -229,7 +285,13 @@ export class GenerationStarter {
           ) {
             throw new GenerationOperationError(
               "FLOW_REPLAY_FAILED",
-              "Base Flow requires a clean exact replay before generation"
+              "Base Flow requires a clean exact replay before generation",
+              flowReplayFailureDetails({
+                flowName: input.baseFlow.name,
+                reportPath: input.baseFlow.verificationReportPath,
+                journey,
+                report
+              })
             );
           }
           return {

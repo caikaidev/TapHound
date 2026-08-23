@@ -164,4 +164,64 @@ describe("ProposedStepSchema", () => {
       locator: { resourceId: "other" }
     })).not.toBe(hashProposedStep(first));
   });
+
+  it("accepts a bridge proposal with scenario, triggerLocator, and returnTimeoutMs", () => {
+    expect(() => ProposedStepSchema.parse({
+      binding,
+      action: "bridge",
+      scenario: "photoCapture",
+      description: "Trigger camera",
+      triggerLocator: { resourceId: "camera_button" },
+      returnTimeoutMs: 60000,
+      activity: { before: "com.example.app.MainActivity" }
+    })).not.toThrow();
+  });
+
+  it("rejects escapedPackageName in a bridge proposal", () => {
+    expect(() => ProposedStepSchema.parse({
+      binding,
+      action: "bridge",
+      scenario: "photoCapture",
+      description: "Trigger camera",
+      triggerLocator: { resourceId: "camera_button" },
+      escapedPackageName: "com.android.camera",
+      returnTimeoutMs: 60000,
+      activity: { before: "com.example.app.MainActivity" }
+    })).toThrow();
+  });
+
+  it("rejects replayMode in a bridge proposal", () => {
+    expect(() => ProposedStepSchema.parse({
+      binding,
+      action: "bridge",
+      scenario: "photoCapture",
+      description: "Trigger camera",
+      triggerLocator: { resourceId: "camera_button" },
+      returnTimeoutMs: 60000,
+      replayMode: "manual",
+      activity: { before: "com.example.app.MainActivity" }
+    })).toThrow();
+  });
+
+  it("hashes a bridge proposal deterministically regardless of key order", () => {
+    const first = {
+      binding,
+      action: "bridge",
+      scenario: "photoCapture",
+      description: "Trigger camera",
+      triggerLocator: { resourceId: "camera_button" },
+      returnTimeoutMs: 60000,
+      activity: { before: "com.example.app.MainActivity" }
+    };
+    const reordered = {
+      activity: { before: "com.example.app.MainActivity" },
+      returnTimeoutMs: 60000,
+      triggerLocator: { resourceId: "camera_button" },
+      description: "Trigger camera",
+      scenario: "photoCapture",
+      action: "bridge",
+      binding
+    };
+    expect(hashProposedStep(first)).toBe(hashProposedStep(reordered));
+  });
 });

@@ -52,6 +52,9 @@ A post-processing failure must not overwrite `primaryFailure`. For example, when
 - `EXPECT_ACTIVITY_FAILED`
 - `EXPECT_ELEMENT_FAILED`
 - `EXPECT_LOGCAT_FAILED`
+- `BRIDGE_NO_ESCAPE`
+- `BRIDGE_NOT_RETURNED`
+- `MANUAL_STEP_REQUIRED`
 - `COLLECTION_FAILED`
 - `INTERNAL_ERROR`
 

@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "name": "attach-pdf-from-files",
+  "steps": [
+    {
+      "action": "click",
+      "locator": { "resourceId": "attach_button" },
+      "activity": {
+        "before": "com.example.app.ChatActivity",
+        "after": "com.example.app.ChatActivity"
+      }
+    },
+    {
+      "action": "bridge",
+      "scenario": "pickFile",
+      "description": "Pick file via system picker",
+      "triggerLocator": { "text": "Choose file" },
+      "returnTimeoutMs": 60000,
+      "replayMode": "manual",
+      "escapedPackageName": "com.android.documentsui",
+      "activity": {
+        "before": "com.example.app.ChatActivity",
+        "after": "com.example.app.ChatActivity"
+      }
+    },
+    {
+      "action": "click",
+      "locator": { "resourceId": "send_button" },
+      "activity": {
+        "before": "com.example.app.ChatActivity",
+        "after": "com.example.app.ChatActivity"
+      }
+    }
+  ]
+}

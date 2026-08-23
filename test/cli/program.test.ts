@@ -46,8 +46,11 @@ describe("createProgram", () => {
       "step",
       "confirm",
       "manual",
+      "bridge",
       "status",
       "recover",
+      "archive",
+      "list",
       "finalize"
     ]);
   });

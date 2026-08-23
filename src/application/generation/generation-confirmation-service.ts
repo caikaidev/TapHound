@@ -110,6 +110,9 @@ function locatorSummary(step: ProposedStep): string {
   ) {
     return "";
   }
+  if (step.action === "bridge") {
+    return JSON.stringify(step.triggerLocator);
+  }
   return JSON.stringify(step.locator);
 }
 
@@ -128,6 +131,9 @@ export function summarizeProposedStep(step: ProposedStep): string {
     return `Scroll ${step.direction} in ${JSON.stringify(
       step.container
     )} to ${locatorSummary(step)} on ${before}`;
+  }
+  if (step.action === "bridge") {
+    return `Bridge ${step.scenario} via ${locatorSummary(step)} on ${before}`;
   }
   return `${step.action} ${locatorSummary(step)} on ${before}`;
 }

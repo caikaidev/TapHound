@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://taphound.dev/schemas/proposed-step-envelope.json",
   "title": "TapHound Proposed Step Envelope",
-  "description": "The input envelope for `generation step --input`. The proposal field is a ProposedStep; the snapshot field is the full RuntimeSnapshot from the preceding observe call.",
+  "description": "The input envelope for `generation step --input`. The proposal field is a ProposedStep; the snapshot field is the full RuntimeSnapshot from the preceding observe call. The `bridge` action is NOT submitted via this envelope; it is handled by the separate `generation bridge` CLI command which builds the proposal internally.",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "proposal", "snapshot"],
@@ -28,6 +28,16 @@
       "type": "string",
       "pattern": "^[A-Za-z\\d](?:[A-Za-z\\d._-]*[A-Za-z\\d])?$"
     },
+    "LocatorEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "semanticSha256"],
+      "properties": {
+        "version": { "const": 1 },
+        "semanticSha256": { "$ref": "#/$defs/Sha256" }
+      },
+      "description": "Core-owned non-geometric semantic evidence for the element selected by index."
+    },
     "Locator": {
       "type": "object",
       "additionalProperties": false,
@@ -43,12 +53,22 @@
         "within": {
           "$ref": "#/$defs/Locator",
           "description": "Optional deterministic ancestor scope. Only descendants of this Locator participate in target matching."
+        },
+        "evidence": {
+          "$ref": "#/$defs/LocatorEvidence",
+          "description": "Optional Core-owned evidence. Callers normally omit it; Core adds it when persisting a resolvable indexed step."
         }
       },
       "anyOf": [
         { "required": ["resourceId"] },
         { "required": ["text"] },
         { "required": ["contentDescription"] }
+      ],
+      "allOf": [
+        {
+          "if": { "required": ["evidence"] },
+          "then": { "required": ["index"] }
+        }
       ],
       "description": "At least one identity field is required. Priority: resourceId > text > contentDescription. Use within for a stable ancestor scope, then index only when identical candidates remain."
     },

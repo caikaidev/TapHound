@@ -45,6 +45,8 @@ describe("built generation CLI process contract", () => {
     ["step", ["generation", "step", "--session", "generation-1", "--json"]],
     ["confirm", ["generation", "confirm", "--session", "generation-1", "--json"]],
     ["manual", ["generation", "manual", "--session", "generation-1", "--json"]],
+    ["bridge", ["generation", "bridge", "--session", "generation-1", "--json"]],
+    ["archive", ["generation", "archive", "--session", "generation-1", "--json"]],
     ["finalize", ["generation", "finalize", "--session", "generation-1", "--json"]]
   ])("emits one JSON result for %s Commander validation", (
     _command,
@@ -95,6 +97,18 @@ describe("built generation CLI process contract", () => {
         "generation", "manual", "--session", "../invalid",
         "--action", "wait"
       ]
+    ],
+    [
+      "bridge",
+      [
+        "generation", "bridge", "--session", "../invalid",
+        "--scenario", "photoCapture",
+        "--trigger-locator", '{"resourceId":"com.example.app:id/button"}'
+      ]
+    ],
+    [
+      "archive",
+      ["generation", "archive", "--session", "../invalid"]
     ],
     [
       "finalize",

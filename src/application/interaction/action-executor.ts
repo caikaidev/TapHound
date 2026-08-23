@@ -140,6 +140,8 @@ export class ActionExecutor {
       }
       case "scrollTo":
         return failed("scrollTo is not executed via ActionExecutor");
+      case "bridge":
+        return failed("bridge is not executed via ActionExecutor");
       case "back":
         result = await this.adb.back(this.deviceSerial, signal);
         break;

@@ -104,6 +104,8 @@ export interface GenerationCliRuntime {
   observer: Pick<RuntimeObserver, "observe">;
   finalizer: Pick<GenerationFinalizer, "finalize">;
   recovery: Pick<GenerationRecoveryService, "status" | "retry">;
+  archive: (id: string) => Promise<GenerationSession>;
+  list: () => Promise<readonly GenerationSession[]>;
   readSession: (id: string) => Promise<GenerationSession>;
   assertConfigIdentity: (id: string) => Promise<void>;
 }
@@ -397,6 +399,17 @@ export function createProductionDependencies(
         observer,
         finalizer,
         recovery,
+        archive: async (id): Promise<GenerationSession> => {
+          const current = await store.read(id);
+          const next: GenerationSession = {
+            ...current,
+            revision: current.revision + 1,
+            state: "archived"
+          };
+          await store.archive(id, current.revision, next);
+          return next;
+        },
+        list: (): Promise<readonly GenerationSession[]> => store.list(),
         readSession: (id): Promise<GenerationSession> => store.read(id),
         assertConfigIdentity: async (id): Promise<void> => {
           const session = await store.read(id);

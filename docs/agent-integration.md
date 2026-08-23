@@ -65,15 +65,24 @@ The generation flow uses the in-repo [`taphound-ai-journey` Skill](../assets/ski
 2. The Agent analyzes each Gradle module independently and produces a Project Context v2 root index plus module shards.
 3. `context list` exposes the compact module catalog. `context validate` / `context status` check the index, shard hashes, source evidence, and per-module file inventory. `context refresh` recomputes evidence hashes for an existing Context without re-analyzing source.
 4. `journey list-flows --json` validates reusable local prefixes. The Agent
-   selects the deepest applicable valid Flow, never by filename alone.
+   selects the deepest applicable valid Flow, never by filename alone. The
+   first resolved step must begin at a stable Activity deterministically
+   reached after cold launch. A transient Splash must not be required to
+   remain foreground; `core/launch-home` should be a `wait: Home -> Home`
+   readiness anchor with an expectation for a unique Home element.
 5. `generation start --module ... [--base-flow ...]` binds the project,
    config, selected module dependency closure, device, and optional cleanly
-   replayed Flow prefix. Without a Base Flow, Core force-stops and launches the
-   configured Activity before creating the session.
+   replayed Flow prefix. Without a Base Flow, Core force-stops, launches the
+   configured Activity, and waits for the App process before creating the
+   session. `run.activity` is only the cold-launch entry; the subsequent
+   observation's idle/layout checks establish the stable post-redirect state.
 6. The Agent uses `generation observe --compact --json`, reads the project-
    relative authoritative `snapshotRef`, and submits a proposal strictly bound
    to that full snapshot. Compact successful steps return `nextBinding` and
    `nextSnapshotRef`; the Agent reads the reference before the next proposal.
+   Active references point into the Store-owned
+   `.<generationId>.work` bundle; publication atomically moves the same
+   evidence into the final `<generationId>` bundle.
    It uses `generation confirm` when human approval is required, and
    `generation manual` for local TTY overrides. Confirmation defaults to a
    local prompt. In a non-TTY sandbox, the Agent may pass
@@ -84,6 +93,11 @@ The generation flow uses the in-repo [`taphound-ai-journey` Skill](../assets/ski
 8. `generation finalize --detach` survives caller interruption and fully
    Replays from the initial state. The Journey and immutable evidence are
    published only after exact verification passes.
+9. `generation list --json` enumerates all sessions in the workspace (active,
+   archived, and published). `generation archive --session <id>` marks an idle
+   active session as archived so it no longer clutters active listings. Archive
+   is only permitted on sessions with no in-flight step or pending
+   confirmation; recoveryRequired sessions must be recovered first.
 
 ```bash
 taphound project describe --project /workspace/android-app --json
@@ -133,6 +147,49 @@ Logcat, and optional next observation. Detached finalize progress and stdout
 live under `.taphound/build/jobs/<generationId>/`, outside the authoritative
 bundle. For the full protocol, retry rules, and Context update strategy, see
 the Skill's [`GUIDE.md`](../assets/skills/taphound-ai-journey/GUIDE.md).
+
+The `generation step --input` envelope is a strict object with exactly three
+top-level fields. Unknown, missing, or flat (unwrapped) fields are rejected as
+`CONTEXT_INVALID`; the JSON failure includes a `hint` describing the required
+shape:
+
+```jsonc
+{
+  "version": 1,
+  "proposal": {
+    "action": "click",
+    "locator": { "resourceId": "btn_more" },
+    "binding": {
+      "generationId": "<session-id>",
+      "baseRevision": 2,
+      "snapshotHash": "<sha256-of-snapshot>"
+    },
+    "activity": { "before": "com.example.app.AIChatActivity" }
+  },
+  "snapshot": { /* full RuntimeSnapshot returned by generation observe */ }
+}
+```
+
+`proposal.binding` must match the `nextBinding`/`binding` returned by the most
+recent `observe` (or prior step), and `snapshot` must be that exact
+RuntimeSnapshot. `activity.after` and `expect` are optional on a proposal;
+Core records the observed post-action Activity and evaluates any supplied
+expectation.
+
+
+When Base Flow verification fails, `generation start --json` returns
+`FLOW_REPLAY_FAILED` details containing the Flow name, Verify report path,
+primary failure, the failed step's Activity/locator/expectation summary, and
+recovery guidance. The Agent must not silently skip reuse or treat a device
+already showing Home as an exact replay. It should repair or re-record the
+Flow, and restart without `--base-flow` only after the user explicitly chooses
+that bypass.
+When an indexed Locator is resolvable from the bound snapshot, Core persists
+versioned, non-geometric semantic evidence for the selected element. Replay
+recomputes that evidence before mutation and fails instead of using annotated
+fallback when the indexed element's represented content changed. Existing
+Journeys without this optional evidence retain their previous ordinal
+behavior.
 
 `generation status` includes `pendingConfirmation` and its computed `expired`
 flag. While a challenge is pending, `observe` returns
@@ -193,3 +250,62 @@ stability directly. An action attempt that returns
 `status: "recoveryRequired"` may already have executed. Inspect
 `generation status`, obtain explicit user approval before `recover`, and never
 assume that recovery committed the interrupted action or returned a snapshot.
+
+## Cross-Application Flows
+
+TapHound Core enforces single-package determinism. When a step causes the
+foreground to leave the configured target package — for example tapping a
+button that opens the system camera, a file picker, or a third-party share
+sheet — `generation step` and `generation manual` reject the post-action
+snapshot with `PACKAGE_ESCAPE`. This is by design: TapHound cannot
+deterministically bind or replay actions that execute in a process it does not
+own.
+
+### Bridge Action
+
+The `bridge` action lets Core own the trigger click and the return detection
+for cross-app flows within a single generation step. Core clicks the trigger,
+detects the package escape, waits for the foreground to return, and captures
+the post-return snapshot. During replay, `replayMode: "manual"` means a human
+operator completes the external portion.
+
+Use `generation bridge` with one of the built-in scenarios:
+
+- `photoCapture` — system camera (validates escaped package)
+- `pickImage` — system image picker (validates escaped package)
+- `pickFile` — system file picker (validates escaped package)
+- `custom` — any other cross-app flow (skips package validation, requires
+  `--description`)
+
+```bash
+taphound generation bridge \
+  --project . \
+  --session <id> \
+  --scenario photoCapture \
+  --trigger-locator '{"resourceId":"com.example.app:id/camera_button"}' \
+  --return-timeout-ms 60000 \
+  --json
+```
+
+Like `generation manual`, `bridge` goes through risk confirmation. If the
+action is not auto-approved, the response carries `status:
+"confirmationRequired"` and the Agent calls `generation confirm` with the human
+decision.
+
+Bridge steps commit with `replayMode: "manual"`. During replay, `verify` clicks
+the trigger, then waits for the foreground to escape and return. The human
+operator must complete the external action (take photo, pick image, etc.)
+before the return timeout expires.
+
+### Failure Codes
+
+- `BRIDGE_NO_ESCAPE` — the foreground did not leave the target package within
+  3 seconds of the trigger click.
+- `SCENARIO_PACKAGE_MISMATCH` — the escaped package is not in the known system
+  package list for the selected scenario. Use `custom` to bypass.
+- `BRIDGE_NOT_RETURNED` — the foreground did not return to the target package
+  within `returnTimeoutMs`.
+
+See [`docs/journey-schema.md`](./journey-schema.md) for the full bridge schema
+and [`examples/bridge-camera.journey.json`](../examples/bridge-camera.journey.json)
+for a complete Journey.

@@ -211,6 +211,88 @@ function report(root: string, fallbackUsed = false): TapHoundReport {
   };
 }
 
+function bridgeReport(root: string): TapHoundReport {
+  const journey = {
+    version: 1 as const,
+    name: "generated",
+    steps: [{
+      action: "bridge" as const,
+      scenario: "photoCapture" as const,
+      description: "Open camera to take a photo",
+      triggerLocator: { resourceId: "camera-button" },
+      returnTimeoutMs: 10000,
+      activity: {
+        before: "com.example.app.MainActivity",
+        after: "com.example.app.ImageEditActivity"
+      },
+      replayMode: "manual" as const
+    }]
+  };
+  return {
+    schemaVersion: 2,
+    runId: "verify-run",
+    status: "passed",
+    startedAt: "2026-07-23T00:00:00.000Z",
+    finishedAt: "2026-07-23T00:00:01.000Z",
+    durationMs: 1_000,
+    project: {
+      root,
+      packageName: "com.example.app",
+      launchActivity: "com.example.app.MainActivity"
+    },
+    journey: { name: "generated", sha256: hashJourney(journey) },
+    environment: {
+      deviceSerial: "emulator-5554",
+      tools: { adb: "1" }
+    },
+    layers: {
+      run: "passed",
+      structural: "passed",
+      activityCheckpoint: "passed",
+      explicitExpect: "passed",
+      collection: "passed"
+    },
+    steps: [{
+      index: 0,
+      action: "bridge",
+      status: "passed",
+      replayMode: "manual",
+      startedAtMs: 0,
+      finishedAtMs: 1,
+      durationMs: 1,
+      locator: {
+        status: "found",
+        matchedBy: "resourceId",
+        fallbackUsed: false
+      },
+      idle: {
+        status: "stable",
+        polls: 1
+      },
+      activity: {
+        before: {
+          status: "passed",
+          expected: "com.example.app.MainActivity",
+          actual: "com.example.app.MainActivity"
+        },
+        after: {
+          status: "passed",
+          expected: "com.example.app.ImageEditActivity",
+          actual: "com.example.app.ImageEditActivity"
+        }
+      }
+    }],
+    artifacts: {
+      directory: "/reports/verify-run",
+      report: "report.json",
+      summary: "summary.txt",
+      stepLogs: []
+    },
+    secondaryErrors: [],
+    fallbackUsed: false
+  };
+}
+
 function session(root: string): GenerationSession {
   const description = project(root);
   return {
@@ -253,6 +335,71 @@ function session(root: string): GenerationSession {
     pendingConfirmation: null,
     verification: { status: "notRun" },
     publication: { status: "notRun" }
+  };
+}
+
+function sessionWithBridge(root: string): GenerationSession {
+  const base = session(root);
+  return {
+    ...base,
+    candidateSteps: [{
+      action: "bridge",
+      scenario: "photoCapture",
+      description: "Open camera to take a photo",
+      triggerLocator: { resourceId: "camera-button" },
+      returnTimeoutMs: 10000,
+      activity: {
+        before: "com.example.app.MainActivity",
+        after: "com.example.app.ImageEditActivity"
+      },
+      replayMode: "manual"
+    }]
+  };
+}
+
+async function bridgeFixture(
+  metaWriter: ProjectBoundGenerationMetaWriterPort = (
+    new FileSystemGenerationMetaWriter()
+  ),
+  journeyWriter: ProjectBoundJourneyWriterPort = new FileSystemJourneyWriter()
+): Promise<FinalizerFixture> {
+  const root = await mkdtemp(join(tmpdir(), "taphound-finalizer-"));
+  const canonicalRoot = await realpath(root);
+  roots.push(root);
+  const store = new FileSystemGenerationSessionStore(root);
+  await store.create(sessionWithBridge(root));
+  const verify = vi.fn<VerifyFunction>(() => Promise.resolve({
+    status: "passed" as const,
+    exitCode: 0 as const,
+    report: bridgeReport(canonicalRoot),
+    reportPath: "/reports/report.json",
+    summaryPath: "/reports/summary.txt"
+  }));
+  const forceStop = vi.fn<ForceStopFunction>(
+    () => Promise.resolve(commandResult())
+  );
+  const validateContext = vi.fn(
+    () => Promise.resolve({ status: "valid" as const })
+  );
+  const publisher = new GenerationPublisher({
+    store,
+    journeyWriter,
+    metaWriter
+  });
+  return {
+    root,
+    canonicalRoot,
+    store,
+    verify,
+    forceStop,
+    finalize: new GenerationFinalizer({
+      store,
+      contextValidator: { validate: validateContext },
+      verifyRuntime: { verify },
+      publisher,
+      generateAttemptId: (): string => "verification-attempt"
+    }),
+    validateContext
   };
 }
 
@@ -1060,5 +1207,32 @@ describe("GenerationFinalizer", () => {
       code: "EXPORT_FAILED"
     });
     expect(test.verify).toHaveBeenCalledOnce();
+  });
+
+  it("refuses non-interactive finalization when the Journey contains manual steps", async () => {
+    const test = await bridgeFixture();
+    const finalizeInput = input(test.root);
+    (finalizeInput as { manualReplay?: boolean }).manualReplay = false;
+
+    await expect(test.finalize.finalize(finalizeInput)).rejects.toMatchObject({
+      code: "VERIFICATION_FAILED",
+      stage: "verification"
+    });
+    expect(test.verify).not.toHaveBeenCalled();
+    expect(test.forceStop).not.toHaveBeenCalled();
+  });
+
+  it("proceeds with interactive finalization when the Journey contains manual steps", async () => {
+    const test = await bridgeFixture();
+    const finalizeInput = input(test.root);
+    (finalizeInput as { manualReplay?: boolean }).manualReplay = true;
+
+    const result = await test.finalize.finalize(finalizeInput);
+
+    expect(result.status).toBe("verified");
+    expect(test.verify).toHaveBeenCalledOnce();
+    expect(test.verify).toHaveBeenCalledWith(expect.objectContaining({
+      manualReplay: true
+    }));
   });
 });

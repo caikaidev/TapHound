@@ -3,7 +3,7 @@
   "kind": "flow",
   "name": "chat/open-thread",
   "includes": [
-    "core/authenticated-home"
+    "core/launch-home"
   ],
   "steps": [
     {

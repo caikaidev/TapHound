@@ -140,6 +140,7 @@ export interface GenerationFinalizeInput {
   name?: string | undefined;
   deviceSerial: string;
   allowEvidenceDrift?: boolean | undefined;
+  manualReplay?: boolean | undefined;
   toolVersions: Record<string, string>;
   signal?: AbortSignal | undefined;
 }
@@ -214,10 +215,17 @@ function locatorMatchIsEligible(
     step.action !== "click"
     && step.action !== "longClick"
     && step.action !== "swipe"
+    && step.action !== "bridge"
   ) {
     return matchedBy === undefined;
   }
-  return matchedBy !== undefined && step.locator[matchedBy] !== undefined;
+  if (matchedBy === undefined) {
+    return false;
+  }
+  const locator = step.action === "bridge"
+    ? step.triggerLocator
+    : step.locator;
+  return locator[matchedBy] !== undefined;
 }
 
 function failure(
@@ -262,6 +270,17 @@ export class GenerationFinalizer {
       name,
       steps: session.candidateSteps
     });
+    if (
+      input.manualReplay === false
+      && journey.steps.some((step) => step.replayMode === "manual")
+    ) {
+      throw failure(
+        "VERIFICATION_FAILED",
+        "verification",
+        "Journey contains manual steps; cannot finalize in non-interactive mode. Re-run finalize from an interactive terminal so manual steps can be replayed with human operation of the external application",
+        false
+      );
+    }
     let replayed = false;
     let verificationReport: TapHoundReport | undefined;
 
@@ -349,6 +368,9 @@ export class GenerationFinalizer {
           toolVersions: input.toolVersions,
           requireFocusedInput: true,
           generatedReplayPolicy: true,
+          ...(input.manualReplay === undefined
+            ? {}
+            : { manualReplay: input.manualReplay }),
           ...(input.signal === undefined ? {} : { signal: input.signal })
         } satisfies VerifyInput);
         replayed = true;
@@ -767,7 +789,8 @@ export class GenerationFinalizer {
       const expectationType = candidate.expect?.type;
       const hasLocator = candidate.action === "click"
         || candidate.action === "longClick"
-        || candidate.action === "swipe";
+        || candidate.action === "swipe"
+        || candidate.action === "bridge";
       const isScrollTo = candidate.action === "scrollTo";
       if (
         step === undefined

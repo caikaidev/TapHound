@@ -113,6 +113,7 @@ export function createVerifyCommand(dependencies: CliDependencies): Command {
           projectRoot: options.project,
           deviceSerial,
           toolVersions: toolVersions(doctor.checks),
+          manualReplay: process.stdin.isTTY,
           ...(dependencies.signal === undefined
             ? {}
             : { signal: dependencies.signal })

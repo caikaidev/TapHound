@@ -84,6 +84,8 @@ interface Harness {
   assertConfigIdentity: Mock;
   recoveryStatus: Mock;
   retry: Mock;
+  archive: Mock;
+  list: Mock;
   workspaceLayout: FakeWorkspaceLayout;
 }
 
@@ -157,6 +159,22 @@ function harness(signal?: AbortSignal): Harness {
   const retry = vi.fn(() => Promise.resolve({
     revision: 5
   }));
+  const archive = vi.fn(() => Promise.resolve({
+    id: "generation-1",
+    revision: 5,
+    state: "archived" as const
+  }));
+  const list = vi.fn(() => Promise.resolve([
+    {
+      id: "generation-1",
+      revision: 5,
+      state: "archived" as const,
+      candidateSteps: [],
+      candidateSources: [],
+      verification: { status: "notRun" as const },
+      publication: { status: "notRun" as const }
+    }
+  ]));
   const readSession = vi.fn(() => Promise.resolve({
     revision: 4,
     candidateSteps: [{}],
@@ -222,6 +240,8 @@ function harness(signal?: AbortSignal): Harness {
       observer: { observe },
       finalizer: { finalize },
       recovery: { status: recoveryStatus, retry },
+      archive,
+      list,
       readSession,
       assertConfigIdentity
     })),
@@ -257,6 +277,8 @@ function harness(signal?: AbortSignal): Harness {
     assertConfigIdentity,
     recoveryStatus,
     retry,
+    archive,
+    list,
     workspaceLayout
   };
 }
@@ -478,6 +500,36 @@ describe("generation JSON process protocol", () => {
     expect(test.request).not.toHaveBeenCalled();
     expect(test.execute).not.toHaveBeenCalled();
     expect(test.exitCodes).toEqual([2]);
+  });
+
+  it("emits an envelope hint when a flat planner envelope is rejected", async () => {
+    const test = harness();
+    vi.mocked(test.dependencies.readJson).mockResolvedValueOnce(runtimeConfig)
+      .mockResolvedValueOnce({
+        action: "wait",
+        binding: proposal.binding,
+        activity: { before: "com.example.app.MainActivity" }
+      });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "step",
+      "--project", "/project",
+      "--input", "input.json",
+      "--session", "generation-1",
+      "--json"
+    ]);
+
+    const output = JSON.parse(test.stdout.value) as {
+      exitCode: number;
+      failure: { code: string; hint: string };
+    };
+    expect(output.exitCode).toBe(2);
+    expect(output.failure.code).toBe("CONTEXT_INVALID");
+    expect(output.failure.hint).toContain("version");
+    expect(output.failure.hint).toContain("proposal");
+    expect(output.failure.hint).toContain("snapshot");
+    expect(test.request).not.toHaveBeenCalled();
+    expect(test.execute).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -1380,6 +1432,53 @@ describe("generation JSON process protocol", () => {
     });
   });
 
+  it("stops waiting when dead verification ownership requires recovery", async () => {
+    const test = harness();
+    test.recoveryStatus.mockResolvedValueOnce({
+      generationId: "generation-1",
+      revision: 5,
+      state: "active",
+      candidateStepCount: 1,
+      inFlight: null,
+      pendingConfirmation: null,
+      verification: {
+        status: "running",
+        attemptId: "verification-attempt",
+        ownerPid: 4321,
+        startedAt: "2026-08-22T00:00:00.000Z"
+      },
+      publication: { status: "notRun" },
+      recovery: {
+        available: true,
+        kind: "verification",
+        actionMayHaveExecuted: true,
+        attemptOutcome: null,
+        requiredDecision: "retry",
+        ownerAlive: false
+      }
+    });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "status",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--wait",
+      "--timeout-ms", "1000",
+      "--json"
+    ]);
+
+    expect(test.recoveryStatus).toHaveBeenCalledOnce();
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "inspected",
+      verification: { status: "running" },
+      recovery: {
+        available: true,
+        kind: "verification",
+        ownerAlive: false
+      }
+    });
+  });
+
   it("times out while waiting without changing generation state", async () => {
     const test = harness();
 
@@ -1503,5 +1602,377 @@ describe("generation JSON process protocol", () => {
     });
     expect(test.dependencies.doctor.run).not.toHaveBeenCalled();
     expect(test.finalize).not.toHaveBeenCalled();
+  });
+
+  it("archives a generation session as one JSON value", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "archive",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--json"
+    ]);
+
+    expect(test.archive).toHaveBeenCalledWith("generation-1");
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "archived",
+      exitCode: 0,
+      generationId: "generation-1",
+      revision: 5
+    });
+  });
+
+  it("renders archived session for human output", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "archive",
+      "--project", "/project",
+      "--session", "generation-1"
+    ]);
+
+    expect(test.exitCodes[0]).toBe(0);
+    expect(test.stdout.value).toContain("archived");
+    expect(test.stdout.value).toContain("generation-1");
+  });
+
+  it("lists generation sessions as one JSON value", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "list",
+      "--project", "/project",
+      "--json"
+    ]);
+
+    expect(test.list).toHaveBeenCalledOnce();
+    const output = JSON.parse(test.stdout.value) as {
+      status: string;
+      sessions: { id: string; state: string }[];
+    };
+    expect(output).toMatchObject({
+      status: "listed",
+      exitCode: 0
+    });
+    expect(output.sessions).toHaveLength(1);
+    expect(output.sessions[0]).toMatchObject({
+      id: "generation-1",
+      state: "archived"
+    });
+  });
+
+  it("renders session list for human output", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "list",
+      "--project", "/project"
+    ]);
+
+    expect(test.exitCodes[0]).toBe(0);
+    expect(test.stdout.value).toContain("Generation sessions");
+    expect(test.stdout.value).toContain("generation-1");
+  });
+
+  it("renders empty list message when no sessions exist", async () => {
+    const test = harness();
+    test.list.mockResolvedValueOnce([]);
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "list",
+      "--project", "/project"
+    ]);
+
+    expect(test.exitCodes[0]).toBe(0);
+    expect(test.stdout.value).toContain("No generation sessions found.");
+  });
+
+  it("observes and requests confirmation for a bridge step", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "bridge",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--scenario", "photoCapture",
+      "--trigger-locator", '{"resourceId":"com.example.app:id/camera_button"}',
+      "--json"
+    ]);
+
+    expect(test.observe).toHaveBeenCalledWith({
+      generationId: "generation-1"
+    });
+    expect(test.request).toHaveBeenCalledWith({
+      generationId: "generation-1",
+      snapshot,
+      source: "manualOverride",
+      proposal: {
+        action: "bridge",
+        scenario: "photoCapture",
+        description: "Capture photo via system camera",
+        triggerLocator: { resourceId: "com.example.app:id/camera_button" },
+        returnTimeoutMs: 60000,
+        binding: proposal.binding,
+        activity: { before: "com.example.app.MainActivity" }
+      }
+    });
+    expect(test.execute).toHaveBeenCalledWith({
+      generationId: "generation-1",
+      proposal,
+      snapshot,
+      source: "manualOverride"
+    });
+    expect(JSON.parse(test.stdout.value)).toEqual({
+      status: "succeeded",
+      exitCode: 0,
+      generationId: "generation-1",
+      revision: 4,
+      stepIndex: 0,
+      step: {
+        action: "wait",
+        activity: {
+          before: "com.example.app.MainActivity",
+          after: "com.example.app.MainActivity"
+        }
+      },
+      source: "manualOverride"
+    });
+  });
+
+  it("returns confirmationRequired when bridge risk is not auto-approved", async () => {
+    const test = harness();
+    const challenge = {
+      challengeId: "bridge-challenge-1",
+      stepIndex: 1,
+      proposalHash: "abc",
+      snapshotHash: proposal.binding.snapshotHash,
+      evidenceHash: "def",
+      actionSummary: "Bridge photoCapture via {\"resourceId\":\"com.example.app:id/camera_button\"} on com.example.app.MainActivity",
+      expiresAt: "2026-07-23T00:05:00.000Z",
+      status: "pending" as const
+    };
+    test.request.mockResolvedValueOnce({
+      status: "confirmationRequired" as const,
+      revision: 5,
+      challenge
+    });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "bridge",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--scenario", "photoCapture",
+      "--trigger-locator", '{"resourceId":"com.example.app:id/camera_button"}',
+      "--json"
+    ]);
+
+    expect(test.execute).not.toHaveBeenCalled();
+    expect(JSON.parse(test.stdout.value)).toEqual({
+      status: "confirmationRequired",
+      exitCode: 0,
+      generationId: "generation-1",
+      revision: 5,
+      challenge
+    });
+  });
+
+  it("returns an existing pending confirmation before observing", async () => {
+    const test = harness();
+    const challenge = {
+      challengeId: "pending-bridge-1",
+      stepIndex: 0,
+      proposalHash: "abc",
+      snapshotHash: "def",
+      evidenceHash: "ghi",
+      actionSummary: "Bridge photoCapture via ...",
+      expiresAt: "2026-07-23T00:05:00.000Z",
+      status: "pending" as const
+    };
+    test.dependencies.readJson = vi.fn(() => Promise.resolve(runtimeConfig));
+    const generationRuntime = test.dependencies.generationRuntime as Mock;
+    generationRuntime.mockReturnValueOnce({
+      confirmation: {
+        request: test.request,
+        requestManual: test.requestManual,
+        confirmStored: test.confirmStored,
+        findPendingManual: test.findPendingManual
+      },
+      executor: { execute: test.execute },
+      observer: { observe: test.observe },
+      finalizer: { finalize: test.finalize },
+      recovery: { status: test.recoveryStatus, retry: test.retry },
+      archive: test.archive,
+      list: test.list,
+      readSession: vi.fn(() => Promise.resolve({
+        revision: 5,
+        candidateSteps: [],
+        contextSelection,
+        pendingConfirmation: challenge
+      })),
+      assertConfigIdentity: test.assertConfigIdentity
+    });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "bridge",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--scenario", "photoCapture",
+      "--trigger-locator", '{"resourceId":"com.example.app:id/camera_button"}',
+      "--json"
+    ]);
+
+    expect(test.observe).not.toHaveBeenCalled();
+    expect(test.request).not.toHaveBeenCalled();
+    expect(JSON.parse(test.stdout.value)).toEqual({
+      status: "confirmationRequired",
+      exitCode: 0,
+      generationId: "generation-1",
+      revision: 5,
+      challenge
+    });
+  });
+
+  it("requires --description for custom scenario", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "bridge",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--scenario", "custom",
+      "--trigger-locator", '{"resourceId":"com.example.app:id/button"}',
+      "--json"
+    ]);
+
+    expect(test.observe).not.toHaveBeenCalled();
+    const output = JSON.parse(test.stdout.value) as {
+      failure: { code: string };
+      exitCode: number;
+    };
+    expect(output.failure.code).toBe("CONTEXT_INVALID");
+    expect(output.exitCode).toBe(2);
+  });
+
+  it("accepts explicit --description for custom scenario", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "bridge",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--scenario", "custom",
+      "--description", "Open external PDF viewer",
+      "--trigger-locator", '{"resourceId":"com.example.app:id/pdf_button"}',
+      "--json"
+    ]);
+
+    expect(test.request).toHaveBeenCalledWith({
+      generationId: "generation-1",
+      snapshot,
+      source: "manualOverride",
+      proposal: {
+        action: "bridge",
+        scenario: "custom",
+        description: "Open external PDF viewer",
+        triggerLocator: { resourceId: "com.example.app:id/pdf_button" },
+        returnTimeoutMs: 60000,
+        binding: proposal.binding,
+        activity: { before: "com.example.app.MainActivity" }
+      }
+    });
+  });
+
+  it("rejects an invalid scenario with exit code 2", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "bridge",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--scenario", "invalidScenario",
+      "--trigger-locator", '{"resourceId":"com.example.app:id/button"}',
+      "--json"
+    ]);
+
+    expect(test.observe).not.toHaveBeenCalled();
+    const output = JSON.parse(test.stdout.value) as {
+      failure: { code: string };
+      exitCode: number;
+    };
+    expect(output.failure.code).toBe("CONTEXT_INVALID");
+    expect(output.exitCode).toBe(2);
+  });
+
+  it("rejects malformed trigger-locator JSON with exit code 2", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "bridge",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--scenario", "photoCapture",
+      "--trigger-locator", "not-json",
+      "--json"
+    ]);
+
+    expect(test.observe).not.toHaveBeenCalled();
+    const output = JSON.parse(test.stdout.value) as {
+      failure: { code: string };
+      exitCode: number;
+    };
+    expect(output.failure.code).toBe("CONTEXT_INVALID");
+    expect(output.exitCode).toBe(2);
+  });
+
+  it("rejects non-positive return-timeout-ms with exit code 2", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "bridge",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--scenario", "photoCapture",
+      "--trigger-locator", '{"resourceId":"com.example.app:id/button"}',
+      "--return-timeout-ms", "0",
+      "--json"
+    ]);
+
+    expect(test.observe).not.toHaveBeenCalled();
+    const output = JSON.parse(test.stdout.value) as {
+      failure: { code: string };
+      exitCode: number;
+    };
+    expect(output.failure.code).toBe("CONTEXT_INVALID");
+    expect(output.exitCode).toBe(2);
+  });
+
+  it("passes custom return-timeout-ms to the proposal", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "bridge",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--scenario", "pickImage",
+      "--trigger-locator", '{"resourceId":"com.example.app:id/gallery_button"}',
+      "--return-timeout-ms", "120000",
+      "--json"
+    ]);
+
+    expect(test.request).toHaveBeenCalledWith({
+      generationId: "generation-1",
+      snapshot,
+      source: "manualOverride",
+      proposal: {
+        action: "bridge",
+        scenario: "pickImage",
+        description: "Pick image via system picker",
+        triggerLocator: { resourceId: "com.example.app:id/gallery_button" },
+        returnTimeoutMs: 120000,
+        binding: proposal.binding,
+        activity: { before: "com.example.app.MainActivity" }
+      }
+    });
   });
 });

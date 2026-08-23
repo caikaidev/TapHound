@@ -99,6 +99,12 @@ export interface GenerationSessionStore {
     expectedRevision: number,
     next: GenerationSession
   ) => Promise<void>;
+  archive: (
+    id: string,
+    expectedRevision: number,
+    next: GenerationSession
+  ) => Promise<void>;
+  list: () => Promise<readonly GenerationSession[]>;
   markBundlePublishable: (
     id: string,
     expectedRevision: number,
@@ -120,6 +126,10 @@ export interface GenerationSessionStore {
     produce: (temporaryPath: string) => Promise<void>
   ) => Promise<void>;
   readEvidence: (id: string, relativePath: string) => Promise<Buffer>;
+  evidenceReference: (
+    id: string,
+    relativePath: string
+  ) => Promise<string>;
   listEvidence: (id: string) => Promise<readonly GenerationEvidenceFile[]>;
   publish: (id: string) => Promise<string>;
 }

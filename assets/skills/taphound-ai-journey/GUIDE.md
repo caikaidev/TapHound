@@ -248,8 +248,35 @@ taphound journey list-flows \
 
 Read `prompts/select-flow.md`. Choose the deepest `status: \"valid\"` Flow
 whose `exitActivity` is a prerequisite for the Goal. For a Goal inside chat
-detail, prefer `chat/open-thread` over `core/authenticated-home` when both are
+detail, prefer `chat/open-thread` over `core/launch-home` when both are
 valid. Never select only because a filename contains a Goal keyword.
+
+The first resolved step must start from a stable Activity that cold launch
+deterministically reaches. The configured `run.activity` is only the launch
+entry and may redirect immediately. Do not make a transient Splash Activity
+remaining foreground a Flow precondition. A launch anchor should instead use
+the stable destination and a unique readiness element:
+
+```json
+{
+  "version": 1,
+  "kind": "flow",
+  "name": "core/launch-home",
+  "includes": [],
+  "steps": [{
+    "action": "wait",
+    "activity": {
+      "before": "com.example.app.HomeActivity",
+      "after": "com.example.app.HomeActivity"
+    },
+    "expect": {
+      "type": "element",
+      "locator": { "resourceId": "home_root" },
+      "timeoutMs": 3000
+    }
+  }]
+}
+```
 
 If a reusable prefix is selected, keep its name for the next command. If no
 Flow applies, continue without `--base-flow`.
@@ -292,9 +319,11 @@ requested modules, and their declared dependencies are bound to the session.
 Omitting `--module` selects all modules. Modules cannot be added after start.
 The selected device is also bound. Session operations such as `observe`,
 `step`, `confirm`, and `manual` do not accept `--device`.
-Without `--base-flow`, Core force-stops and launches the configured Activity
-before creating the session. With a Base Flow, the verified replay prepares
-the bound post-Flow state. Launcher navigation is never a Journey step.
+Without `--base-flow`, Core force-stops, launches the configured Activity, and
+waits for the App process before creating the session. The first observation's
+idle/layout checks determine the stable post-redirect start state. With a Base
+Flow, the verified replay prepares the bound post-Flow state. Launcher
+navigation is never a Journey step.
 
 **Failure troubleshooting**:
 
@@ -302,9 +331,16 @@ the bound post-Flow state. Launcher navigation is never a Journey step.
 |-----------|---------|--------|
 | 2 | `CONFIG_INVALID` / `CONTEXT_INVALID` / `FLOW_INVALID` | Check config, Context, and Flow files |
 | 1 | `CONTEXT_STALE` | Source changed, update Context per Section 5 |
-| 1 | `FLOW_REPLAY_FAILED` | Repair/re-record the shared Flow; do not silently bypass it |
+| 1 | `FLOW_REPLAY_FAILED` | Inspect `details` (Flow, Verify report, primary failure, failed step, recovery), then repair/re-record the Flow; do not silently bypass it |
 | 3 | Environment issue | Run `doctor` first |
 | 4 | Internal error | Check stderr output |
+
+For `FLOW_REPLAY_FAILED`, first check whether the Flow starts at a stable
+cold-launch destination. Replace a timing-sensitive Splash transition with a
+Home readiness anchor when appropriate, without guessing from Activity names.
+The fact that the device currently shows Home does not make the failed replay
+exact. Omit `--base-flow` and restart only after the user explicitly chooses
+to bypass reuse.
 
 ### 3.4 Step 2 — Observe Current Device State
 
@@ -325,7 +361,7 @@ taphound generation observe \
   "generationId": "a1b2c3d4-...",
   "baseRevision": 1,
   "snapshotHash": "e5f6...",
-  "snapshotRef": ".taphound/build/generations/a1b2c3d4-.../evidence/snapshots/revision-000001/attempt-.../snapshot.json"
+  "snapshotRef": ".taphound/build/generations/.a1b2c3d4-...work/evidence/snapshots/revision-000001/attempt-.../snapshot.json"
 }
 ```
 
@@ -333,7 +369,10 @@ taphound generation observe \
 `snapshotHash`, plus `snapshotRef`. Read that project-relative authoritative
 JSON file as the full `snapshot` object required by the proposed-step
 envelope. Running without `--compact` also includes the same snapshot inline,
-but still returns `snapshotRef`. Current snapshots
+but still returns `snapshotRef`. Active sessions use the Store-owned hidden
+bundle `.<generationId>.work`; successful final publication atomically moves
+the same evidence to `<generationId>`, so callers must use the reference Core
+returns rather than constructing a path. Current snapshots
 also include `windowHierarchy` when the external tools expose enough
 metadata. `complete` means visible touchable target-app windows are covered by
 semantic roots, `unknown` means one side was unavailable, and `incomplete`
@@ -353,7 +392,9 @@ around the failure with absolute coordinates or screenshot guessing.
 
 > Core prepares the initial app state during `generation start`. If the
 > foreground later escapes the target app, `observe` records that state and
-> the next proposed step is rejected with `PACKAGE_ESCAPE`.
+> the next proposed step is rejected with `PACKAGE_ESCAPE`. Use
+> `generation bridge` to handle cross-app flows (camera, picker, share sheet)
+> within a single committed step; see **Cross-Application Bridge** below.
 
 ### 3.5 Step 3 — AI Generates Next Proposed Step
 
@@ -507,6 +548,11 @@ challenge and does not execute the action. The flag records delegated approval
 but is not permission to auto-approve. Never infer a decision, reuse approval
 for another challenge, or enable session-wide approval.
 
+The `confirmationRequired` response omits `nextBinding` and
+`nextSnapshotRef`. After approval executes successfully, the `confirm` result
+is a normal successful step result and carries both fields in compact mode
+when the post-action observation succeeded.
+
 Before executing an approved action, Core atomically records the challenge ID
 and `approvalMode` (`localTty` or `delegated`) in the in-flight attempt. The
 same audit data is included in immutable step result evidence.
@@ -577,6 +623,46 @@ The AI agent checks whether the Goal is complete before each step (reads
 
 **Loop limit**: default maximum 30 steps. If exceeded, stop and report
 incomplete.
+
+### 3.7.1 Cross-Application Bridge
+
+When the Goal requires a cross-app flow — for example tapping a button that
+opens the system camera, image picker, or file picker — a regular
+`generation step` proposal fails with `PACKAGE_ESCAPE` because the foreground
+leaves the target package. Use `generation bridge` instead:
+
+```bash
+taphound generation bridge \
+  --project /path/to/android-project \
+  --session <generationId> \
+  --scenario photoCapture \
+  --trigger-locator '{"resourceId":"camera_button"}' \
+  --return-timeout-ms 60000 \
+  --compact \
+  --json
+```
+
+Core clicks the trigger, detects the package escape, waits for the foreground
+to return, and captures the post-return snapshot. The committed step carries
+`replayMode: "manual"`.
+
+Scenarios:
+- `photoCapture` — system camera (validates escaped package)
+- `pickImage` — system image picker (validates escaped package)
+- `pickFile` — system file picker (validates escaped package)
+- `custom` — any other cross-app flow (skips validation, requires
+  `--description`)
+
+Like `generation manual`, `bridge` goes through risk confirmation. If the
+response is `confirmationRequired`, present the challenge and call
+`generation confirm` with the user's decision.
+
+A successful bridge step returns `nextBinding` and `nextSnapshotRef` like any
+other step. Continue the generation loop from that post-return state.
+
+**Replay note**: During `finalize`, a human operator must complete the
+external action (take photo, pick image, etc.) before `returnTimeoutMs`
+expires, otherwise replay fails with `BRIDGE_NOT_RETURNED`.
 
 ### 3.8 Step 6 — Finalize and Verify
 
@@ -980,7 +1066,10 @@ Each Goal is an independent generation session and does not affect others.
 | `LOCATOR_AMBIGUOUS` | Locator matches multiple elements | Narrow with identity fields or `within`, then use zero-based `index` only if duplicates remain |
 | `ACTION_UNSUPPORTED` | Element does not support the action | Check element clickable/scrollable properties |
 | `SNAPSHOT_STALE` | Device state has changed | Re-observe |
-| `PACKAGE_ESCAPE` | Foreground switched to another app | Ensure app is in foreground, re-observe |
+| `PACKAGE_ESCAPE` | Foreground would switch to another app | Use `generation bridge` with the appropriate scenario instead of `generation step` |
+| `BRIDGE_NO_ESCAPE` | Trigger did not leave the target app within 3s | Check that the trigger actually opens an external app |
+| `SCENARIO_PACKAGE_MISMATCH` | Escaped package not in known system list for scenario | Use `--scenario custom` with `--description` |
+| `BRIDGE_NOT_RETURNED` | Foreground did not return within `returnTimeoutMs` | Increase timeout or check if external app hung |
 | `APP_CRASHED` | App process crashed | Check Logcat, restart app |
 | `IDLE_TIMEOUT` | Configured idle strategy did not stabilize | Inspect `failure.details.idle`; use a new session for config changes |
 | `RISK_CONFIRMATION_REQUIRED` | Action requires user confirmation or a pending challenge blocks progress | Inspect `generation status`, present the exact challenge, and apply only the user's explicit decision |

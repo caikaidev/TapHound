@@ -4,8 +4,8 @@ import { z } from "zod";
 
 import { FAILURE_CODES } from "./failure.js";
 
-const ResultStatusSchema = z.enum(["passed", "failed", "notRun"]);
-const RunStatusSchema = z.enum(["passed", "failed", "error"]);
+const ResultStatusSchema = z.enum(["passed", "failed", "notRun", "manualRequired"]);
+const RunStatusSchema = z.enum(["passed", "failed", "error", "manualRequired"]);
 
 export const ReportFailureSchema = z.strictObject({
   code: z.enum(FAILURE_CODES),
@@ -78,9 +78,11 @@ export const StepReportSchema = z.strictObject({
     "swipe",
     "scrollTo",
     "back",
-    "wait"
+    "wait",
+    "bridge"
   ]),
   status: ResultStatusSchema,
+  replayMode: z.enum(["auto", "manual"]).optional(),
   startedAtMs: z.number().nonnegative(),
   finishedAtMs: z.number().nonnegative(),
   durationMs: z.number().nonnegative(),

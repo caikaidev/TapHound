@@ -8,8 +8,10 @@ import type {
   ProposedStep
 } from "../domain/proposed-step.js";
 
+export type ManualAction = Exclude<ProposedStep["action"], "bridge">;
+
 export interface ManualProposalInput {
-  action: ProposedStep["action"];
+  action: ManualAction;
   binding: ProposalBinding;
   before: string;
   expect?: Expectation | undefined;

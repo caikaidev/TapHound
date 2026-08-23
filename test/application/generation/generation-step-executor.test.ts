@@ -2003,4 +2003,262 @@ describe("GenerationStepExecutor", () => {
     expect(test.adb.swipe).not.toHaveBeenCalled();
     expect(test.current().state).toBe("recoveryRequired");
   });
+
+  function bridgeProposal(
+    runtime = snapshot(),
+    overrides: Partial<ProposedStep> = {}
+  ): ProposedStep {
+    return {
+      action: "bridge",
+      scenario: "photoCapture",
+      description: "Open camera to take a photo",
+      triggerLocator: { resourceId: "submit" },
+      returnTimeoutMs: 10000,
+      binding: {
+        generationId: "generation-1",
+        baseRevision: runtime.baseRevision,
+        snapshotHash: hashRuntimeSnapshot(runtime)
+      },
+      activity: { before: activity },
+      ...overrides
+    } as ProposedStep;
+  }
+
+  function bridgeSession(
+    runtime = snapshot(),
+    overrides: Partial<GenerationSession> = {}
+  ): GenerationSession {
+    return session(runtime, {
+      target: {
+        packageName: "com.example.app",
+        deviceSerial: "emulator-5554",
+        resetStrategy: "processOnly",
+        interactionPolicy: {
+          allowedActions: ["click", "inputText", "scrollTo", "back", "bridge"],
+          confirmationRequiredActions: ["back"],
+          forbiddenActions: ["longClick"]
+        }
+      },
+      ...overrides
+    });
+  }
+
+  function foregroundSequence(
+    mock: ReturnType<typeof vi.fn>,
+    sequence: Array<{ packageName: string; activity: string }>
+  ): void {
+    let index = 0;
+    mock.mockImplementation((() => {
+      const result = sequence[index] ?? sequence[sequence.length - 1];
+      index += 1;
+      return Promise.resolve(result);
+    }) as never);
+  }
+
+  it("executes a bridge step with photoCapture and commits escapedPackageName with manual replayMode", async () => {
+    const runtime = snapshot();
+    const test = harness(bridgeSession(runtime));
+    test.guard.mockResolvedValueOnce(runtime);
+    foregroundSequence(test.adb.foregroundComponent, [
+      { packageName: "com.example.app", activity },
+      { packageName: "com.example.app", activity },
+      { packageName: "com.example.app", activity },
+      { packageName: "com.android.camera", activity: "com.android.camera.CameraActivity" },
+      { packageName: "com.example.app", activity: afterActivity },
+      { packageName: "com.example.app", activity: afterActivity },
+      { packageName: "com.example.app", activity: afterActivity }
+    ]);
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: bridgeProposal(runtime),
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(test.adb.tap).toHaveBeenCalledTimes(1);
+    expect(test.current().candidateSteps).toHaveLength(1);
+    expect(test.current().candidateSteps[0]).toMatchObject({
+      action: "bridge",
+      scenario: "photoCapture",
+      triggerLocator: { resourceId: "submit" },
+      escapedPackageName: "com.android.camera",
+      replayMode: "manual",
+      activity: { before: activity, after: afterActivity }
+    });
+    expect(test.current().candidateSources).toEqual(["planner"]);
+  });
+
+  it("executes a bridge step with custom scenario without package validation", async () => {
+    const runtime = snapshot();
+    const test = harness(bridgeSession(runtime));
+    test.guard.mockResolvedValueOnce(runtime);
+    foregroundSequence(test.adb.foregroundComponent, [
+      { packageName: "com.example.app", activity },
+      { packageName: "com.example.app", activity },
+      { packageName: "com.example.app", activity },
+      { packageName: "com.some.unknown.app", activity: "com.some.unknown.app.Main" },
+      { packageName: "com.example.app", activity: afterActivity },
+      { packageName: "com.example.app", activity: afterActivity },
+      { packageName: "com.example.app", activity: afterActivity }
+    ]);
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: bridgeProposal(runtime, {
+        scenario: "custom",
+        description: "Open custom picker"
+      }),
+      snapshot: runtime,
+      source: "manualOverride"
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(test.current().candidateSteps[0]).toMatchObject({
+      action: "bridge",
+      scenario: "custom",
+      escapedPackageName: "com.some.unknown.app",
+      replayMode: "manual"
+    });
+    expect(test.current().candidateSources).toEqual(["manualOverride"]);
+  });
+
+  it("fails with BRIDGE_NO_ESCAPE when trigger does not cause a package escape", async () => {
+    const runtime = snapshot();
+    const test = harness(bridgeSession(runtime));
+    test.guard.mockResolvedValueOnce(runtime);
+    test.adb.foregroundComponent.mockImplementation((() => Promise.resolve({
+      packageName: "com.example.app",
+      activity
+    })) as never);
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: bridgeProposal(runtime),
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { code: "BRIDGE_NO_ESCAPE" }
+    });
+    expect(test.adb.tap).toHaveBeenCalledTimes(1);
+    expect(test.current().state).toBe("recoveryRequired");
+  });
+
+  it("fails with SCENARIO_PACKAGE_MISMATCH when escaped package is not known for the scenario", async () => {
+    const runtime = snapshot();
+    const test = harness(bridgeSession(runtime));
+    test.guard.mockResolvedValueOnce(runtime);
+    foregroundSequence(test.adb.foregroundComponent, [
+      { packageName: "com.example.app", activity },
+      { packageName: "com.example.app", activity },
+      { packageName: "com.example.app", activity },
+      { packageName: "com.evil.malware", activity: "com.evil.malware.Main" }
+    ]);
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: bridgeProposal(runtime),
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { code: "SCENARIO_PACKAGE_MISMATCH" }
+    });
+    expect(test.adb.tap).toHaveBeenCalledTimes(1);
+    expect(test.current().state).toBe("recoveryRequired");
+  });
+
+  it("fails with BRIDGE_NOT_RETURNED when foreground does not return within timeout", async () => {
+    const runtime = snapshot();
+    const test = harness(bridgeSession(runtime));
+    test.guard.mockResolvedValueOnce(runtime);
+    foregroundSequence(test.adb.foregroundComponent, [
+      { packageName: "com.example.app", activity },
+      { packageName: "com.example.app", activity },
+      { packageName: "com.example.app", activity },
+      { packageName: "com.android.camera", activity: "com.android.camera.CameraActivity" }
+    ]);
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: bridgeProposal(runtime, { returnTimeoutMs: 10 }),
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { code: "BRIDGE_NOT_RETURNED" }
+    });
+    expect(test.adb.tap).toHaveBeenCalledTimes(1);
+    expect(test.current().state).toBe("recoveryRequired");
+  });
+
+  it("fails when trigger locator does not resolve in the pre-action layout", async () => {
+    const runtime = snapshot();
+    const test = harness(bridgeSession(runtime));
+    test.guard.mockResolvedValueOnce(runtime);
+    foregroundSequence(test.adb.foregroundComponent, [
+      { packageName: "com.example.app", activity },
+      { packageName: "com.example.app", activity },
+      { packageName: "com.example.app", activity }
+    ]);
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: bridgeProposal(runtime, {
+        triggerLocator: { resourceId: "nonexistent" }
+      }),
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { code: "LOCATOR_NOT_FOUND" }
+    });
+    expect(test.adb.tap).not.toHaveBeenCalled();
+    expect(test.current().state).toBe("recoveryRequired");
+  });
+
+  it("fails when trigger target is not clickable", async () => {
+    const nonClickableLayout = [{
+      id: "submit",
+      resourceId: "submit",
+      text: "Continue run-42",
+      enabled: true,
+      clickable: false,
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+      children: []
+    }];
+    const runtime = { ...snapshot(), layout: nonClickableLayout };
+    const test = harness(bridgeSession(runtime));
+    test.guard.mockResolvedValueOnce(runtime);
+    test.androidCli.layout.mockResolvedValue(nonClickableLayout);
+    foregroundSequence(test.adb.foregroundComponent, [
+      { packageName: "com.example.app", activity },
+      { packageName: "com.example.app", activity },
+      { packageName: "com.example.app", activity }
+    ]);
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: bridgeProposal(runtime),
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { code: "ACTION_FAILED" }
+    });
+    expect(test.adb.tap).not.toHaveBeenCalled();
+    expect(test.current().state).toBe("recoveryRequired");
+  });
 });

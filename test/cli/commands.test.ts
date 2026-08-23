@@ -24,6 +24,7 @@ import {
   projectContextModule,
   resolvedProjectContext
 } from "../fixtures/project-context.js";
+import type { Journey } from "../../src/domain/journey.js";
 import { hashJourney } from "../../src/domain/report.js";
 
 const generationContext = resolvedProjectContext;
@@ -460,7 +461,8 @@ describe("TapHound CLI commands", () => {
           name: "core/home",
           resolutionSha256: "2".repeat(64),
           journey,
-          verificationReport: report
+          verificationReport: report,
+          verificationReportPath: "/reports/base/report.json"
         }
       })
     );
@@ -475,7 +477,23 @@ describe("TapHound CLI commands", () => {
 
   it("fails closed when a selected base Flow does not replay", async () => {
     const test = dependencies();
-    const journey = runtimeJourney;
+    const journey: Journey = {
+      version: 1,
+      name: "Home to search",
+      steps: [{
+        action: "click",
+        locator: { resourceId: "search" },
+        activity: {
+          before: "com.example.app.HomeActivity",
+          after: "com.example.app.SearchActivity"
+        },
+        expect: {
+          type: "element",
+          locator: { resourceId: "search_results" },
+          timeoutMs: 3_000
+        }
+      }]
+    };
     test.value.journeyResolver = {
       resolve: vi.fn(),
       resolveFlow: vi.fn(() => Promise.resolve({
@@ -532,7 +550,36 @@ describe("TapHound CLI commands", () => {
       exitCode: 1,
       failure: {
         code: "FLOW_REPLAY_FAILED",
-        message: "shared navigation changed"
+        message: "shared navigation changed",
+        details: {
+          flowName: "core/home",
+          reportPath: "/reports/base/report.json",
+          primaryFailure: {
+            code: "LOCATOR_NOT_FOUND",
+            phase: "locator",
+            stepIndex: 0
+          },
+          failedStep: {
+            stepIndex: 0,
+            action: "click",
+            activity: {
+              before: "com.example.app.HomeActivity",
+              after: "com.example.app.SearchActivity"
+            },
+            locator: { resourceId: "search" },
+            expectation: {
+              type: "element",
+              locator: { resourceId: "search_results" },
+              timeoutMs: 3_000
+            }
+          },
+          recovery: [
+            "Check that the first Flow step starts from a stable Activity deterministically reached after cold launch.",
+            "Replace a transient Splash transition with a Home readiness anchor such as wait: Home -> Home plus an expectation for a unique Home element.",
+            "Repair or re-record the Flow, then retry generation start.",
+            "Omit --base-flow only when the user explicitly chooses to bypass reuse."
+          ]
+        }
       }
     });
     expect(test.stdout.value.trim().split("\n")).toHaveLength(1);

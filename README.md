@@ -165,18 +165,26 @@ The repository ships a [`taphound-ai-journey` Skill](assets/skills/taphound-ai-j
 
 1. Discover Gradle modules and generate a compact Project Context v2 index plus one semantic/evidence shard per module.
 2. Use `context list` to choose Goal-relevant modules and `context validate` / `context status` to check shard, evidence, and inventory freshness.
-3. Start a `generation` session with `--module`. Without `--base-flow`, Core
-   force-stops and launches the configured Activity before creating the
-   session. Use `observe --compact` and read its authoritative `snapshotRef`;
+3. Select reusable Base Flows by their deterministic Activity contract. Their
+   first resolved step must start from a stable cold-launch destination, not
+   require a transient Splash Activity to remain foreground. For example,
+   `core/launch-home` should be `wait: Home -> Home` with an expectation for a
+   unique Home element.
+4. Start a `generation` session with `--module`. Without `--base-flow`, Core
+   force-stops, launches the configured Activity, and waits for the App process
+   before creating the session. `run.activity` is only the cold-launch entry;
+   the first observation's idle/layout checks determine the stable start after
+   redirects. Use `observe --compact` and read its authoritative `snapshotRef`;
+   active references use the Store-owned `.<generationId>.work` bundle, and
    successful compact steps return `nextBinding` and `nextSnapshotRef`.
-4. Use `generation status` to inspect durable state, including pending and
+5. Use `generation status` to inspect durable state, including pending and
    expired confirmations. Confirmation defaults to a local TTY; after the user
    explicitly reviews the exact challenge, a sandboxed Agent can pass
    `generation confirm --decision approve|decline`. An interrupted in-flight
    action can only be reactivated with the explicit
    `generation recover --decision retry` acknowledgement because it may already
    have executed.
-5. Use `generation finalize --detach` for long replay verification, then poll
+6. Use `generation finalize --detach` for long replay verification, then poll
    `generation status` (or use `--wait`). TapHound publishes the Journey only
    after exact verification passes.
 
@@ -190,6 +198,13 @@ taphound generation start \
 ```
 
 The device is bound at `generation start`; subsequent `observe`, `step`, `confirm`, and `manual` commands use that binding via the session. See the Skill's [`GUIDE.md`](assets/skills/taphound-ai-journey/GUIDE.md) for the full workflow.
+
+If Base Flow replay fails, `generation start --json` reports
+`FLOW_REPLAY_FAILED` with the Flow name, Verify report path, primary failure,
+failed-step Activity/locator/expectation summary, and recovery guidance.
+TapHound does not silently skip the Flow or accept a current Home screen as an
+exact replay. Repair or re-record it; omit `--base-flow` only when the user
+explicitly chooses to bypass reuse.
 
 `generation manual` interactively builds, executes, and records a deterministic
 Journey step. Generation step JSON includes phase timing for freshness,

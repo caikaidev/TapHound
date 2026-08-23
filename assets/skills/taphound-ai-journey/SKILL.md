@@ -236,14 +236,24 @@ Activity is a deterministic prerequisite for the Goal. Do not select by name
 alone. Invalid Flows are not reusable; report their diagnostics instead of
 silently regenerating the shared prefix.
 
+The first resolved Flow step must begin at a stable Activity that cold launch
+deterministically reaches. `run.activity` identifies only the Activity Core
+launches; it may be a transient Splash that redirects before observation.
+Never encode Splash remaining foreground as a precondition. Model a launch
+anchor such as `core/launch-home` as `wait: Home -> Home` with an `element`
+expectation for a unique Home control.
+
 Pass a selected Flow to `generation start` as `--base-flow <name>`. Core
 cold-launches and exactly replays the resolved Flow before creating the
 generation session. It binds the resolution, Journey, and verification hashes,
 and records the Flow steps as the immutable candidate prefix.
 
 If no Flow applies, omit `--base-flow`. If replay fails, stop and report
-`FLOW_REPLAY_FAILED`. Only bypass a failed reusable Flow when the user
-explicitly requests generation without reuse.
+`FLOW_REPLAY_FAILED`, including its Flow name, Verify report path, primary
+failure, failed-step summary, and recovery guidance. Do not treat a current
+Home screen as proof that the original Flow replayed. Repair or re-record the
+Flow. Only bypass it when the user explicitly requests generation without
+reuse.
 
 ## Phase 2: Journey Generation
 
@@ -274,9 +284,13 @@ explicitly requests generation without reuse.
    the project root. The selected device is bound to this session; subsequent
    `observe`, `step`, `confirm`, and `manual` commands use the session binding
    and do not accept `--device`.
-   When no Base Flow is selected, Core force-stops and launches the configured
-   Activity before it creates the session. Never add launcher or cross-package
-   navigation as a Journey step.
+   When no Base Flow is selected, Core force-stops, launches the configured
+   Activity, and waits for the App process before it creates the session.
+   `run.activity` is only the cold-launch entry; the first observation's
+    existing idle/layout checks determine the stable generation start after any
+    automatic redirect. Never add launcher navigation as a Journey step.
+    Cross-package flows (camera, picker, share sheet) use the `bridge` action
+    via `generation bridge`, not a regular `step` proposal.
    The normalized config is also immutable for the session. Choose
    `idle.strategy` before starting:
    - `hybrid` (default) uses fast frame counters and falls back to Core-owned
@@ -297,6 +311,9 @@ explicitly requests generation without reuse.
    authoritative `snapshotRef` as the full RuntimeSnapshot. After a successful
    compact step, prefer `nextBinding` and the snapshot read from
    `nextSnapshotRef`; call `generation observe` only when either is absent.
+   Active sessions use a Store-owned
+   `.taphound/build/generations/.<generationId>.work/...` reference. Final
+   publication atomically moves the same evidence under `<generationId>/...`.
 
 5. **Loop** for up to `maxSteps` iterations:
 
@@ -378,6 +395,11 @@ explicitly requests generation without reuse.
           --compact \
           --json
         ```
+        The `confirmationRequired` response omits `nextBinding` and
+        `nextSnapshotRef`; it does not return usable null bindings. A successful
+        approval executes the challenged step, and the `confirm` result carries
+        the same `nextBinding` and `nextSnapshotRef` as any successful compact
+        step. Continue from those values when both are present.
         `--decision approve` is a delegated non-TTY attestation, not an
         auto-approval switch. Use it only after the user explicitly approves
         this challenge. If the user declines, run the same command with
@@ -396,6 +418,12 @@ explicitly requests generation without reuse.
           visual guessing. Re-observe once. If it persists, report the
           structured diagnostics and use Layout Inspector for developer
           diagnosis or an opt-in debug WindowInspector backend.
+        - For `PACKAGE_ESCAPE`: the proposed action would leave the target
+          app. Do not retry the same action via `generation step`. Instead,
+          use `generation bridge` (see **Cross-Application Bridge** below)
+          which lets Core own the trigger click, detect the escape, wait for
+          return, and capture the post-return snapshot in a single committed
+          step with `replayMode: "manual"`.
         - If retries remain: re-observe (go back to step a) and re-generate
           the step, this time accounting for the failure feedback (e.g., if
           the locator was not found, try a different locator; if the
@@ -416,6 +444,49 @@ explicitly requests generation without reuse.
 
    g. Clean up the temp envelope file after each iteration (success or
       failure).
+
+### Cross-Application Bridge
+
+When the Goal requires a cross-app flow (system camera, image/file picker,
+share sheet), a regular `generation step` proposal fails with `PACKAGE_ESCAPE`
+because the foreground leaves the target package. Use `generation bridge`
+instead. Core clicks the trigger, detects the escape, waits for return, and
+commits the step with `replayMode: "manual"`.
+
+```bash
+taphound generation bridge \
+  --project <project> \
+  --session <generationId> \
+  --scenario photoCapture \
+  --trigger-locator '{"resourceId":"camera_button"}' \
+  --return-timeout-ms 60000 \
+  --compact \
+  --json
+```
+
+- `--scenario`: `photoCapture`, `pickImage`, `pickFile` (built-in, package
+  validated), or `custom` (skips validation, requires `--description`).
+- `--trigger-locator`: inline JSON Locator for the element that initiates the
+  cross-app transition. Must resolve to a clickable element.
+- `--return-timeout-ms`: how long Core waits for the foreground to return.
+
+Like `generation manual`, `bridge` goes through risk confirmation. If the
+response is `confirmationRequired`, present the challenge to the user and call
+`generation confirm --decision approve|decline` with the exact challenge ID.
+
+Bridge failure codes:
+- `BRIDGE_NO_ESCAPE`: the foreground did not leave the target app within 3
+  seconds. The trigger may not actually open an external app.
+- `SCENARIO_PACKAGE_MISMATCH`: the escaped package is not in the known system
+  list for the scenario. Use `custom` with `--description` to bypass.
+- `BRIDGE_NOT_RETURNED`: the foreground did not return within
+  `returnTimeoutMs`. The user may need more time, or the external app hung.
+
+A successful bridge step returns `nextBinding` and `nextSnapshotRef` like any
+other step. Continue the generation loop from that post-return state. The
+committed Journey step carries `replayMode: "manual"`, so during `finalize`
+replay a human operator must complete the external action before the return
+timeout.
 
 ## Phase 3: Finalize
 
@@ -461,6 +532,8 @@ explicitly requests generation without reuse.
 | Doctor fails           | Stop, report environment issue              |
 | Context validation fails | Fix JSON, retry validation                |
 | Step rejected before execution | Re-observe + re-generate (up to retryCount) |
+| PACKAGE_ESCAPE on step | Use `generation bridge` for cross-app flows |
+| Bridge no escape / mismatch / not returned | Check trigger, scenario, or timeout; retry or use `custom` |
 | Confirmation required  | Present to user, wait for approval          |
 | Recovery required      | Inspect status; ask before retry; re-observe |
 | Config changed         | Start a new session; never rebind in place  |
@@ -478,12 +551,17 @@ explicitly requests generation without reuse.
   replay.
 - The agent NEVER bypasses Core safety (package guard, risk policy, locator
   uniqueness).
+- The agent NEVER submits a `bridge` action via `generation step --input`.
+  Bridge is handled by the separate `generation bridge` CLI command.
 - SHA-256 hashes are ALWAYS computed via shell, never guessed.
 - The agent does NOT modify TapHound Core source code.
 - The agent does NOT use coordinates, visual guessing, or fallback.
 - Locator priority is fixed: `resourceId` > `text` > `contentDescription`.
 - Repeated elements use a deterministic `within` ancestor scope when
   available, then a zero-based `index` after identity-field narrowing.
+  Callers omit `evidence`; Core adds versioned non-geometric semantic evidence
+  when it persists a resolvable indexed step, and Replay rejects a mismatch
+  before mutation.
 - A proposed step only includes `activity.before`, never `activity.after`.
   The Core determines `after` from live device observation.
 - Temp files are cleaned up after each step and at the end of the session.
@@ -547,3 +625,13 @@ explicitly requests generation without reuse.
   session's selected module shards, stop and report a Context coverage gap.
   Do not add modules after start because `contextSelection` is bound to the
   authoritative session.
+- `PACKAGE_ESCAPE` from `generation step` means the action would leave the
+  target app. Switch to `generation bridge` with the appropriate scenario
+  instead of retrying the same proposal. Bridge steps commit with
+  `replayMode: "manual"`, so during `finalize` replay a human operator must
+  complete the external action before `returnTimeoutMs` expires.
+- `generation bridge` with `--scenario custom` skips system package validation
+  but requires `--description`. Use it for third-party apps or non-standard
+  pickers. Built-in scenarios (`photoCapture`, `pickImage`, `pickFile`) validate
+  the escaped package against a known list and fail with
+  `SCENARIO_PACKAGE_MISMATCH` on mismatch.

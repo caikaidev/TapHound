@@ -1448,6 +1448,42 @@ describe("FileSystemGenerationSessionStore", () => {
     );
   });
 
+  it("returns a readable project-relative evidence reference across publication", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    const initial = verificationCandidate();
+    const relativePath = "evidence/revision-000/proposal.json";
+    await store.create(initial);
+    await store.writeEvidence(
+      "generation-1",
+      relativePath,
+      { action: "click" }
+    );
+
+    const activeReference = await store.evidenceReference(
+      "generation-1",
+      relativePath
+    );
+    expect(activeReference).toBe(
+      ".taphound/build/generations/.generation-1.work/evidence/revision-000/proposal.json"
+    );
+    await expect(readFile(join(root, activeReference), "utf8"))
+      .resolves.toContain('"action": "click"');
+
+    await markPublishable(store, initial);
+    await store.publish("generation-1");
+
+    const publishedReference = await store.evidenceReference(
+      "generation-1",
+      relativePath
+    );
+    expect(publishedReference).toBe(
+      ".taphound/build/generations/generation-1/evidence/revision-000/proposal.json"
+    );
+    await expect(readFile(join(root, publishedReference), "utf8"))
+      .resolves.toContain('"action": "click"');
+  });
+
   it("writes immutable text evidence without exposing a producer path", async () => {
     const root = await temporaryRoot();
     const store = new FileSystemGenerationSessionStore(root);
@@ -2370,5 +2406,229 @@ describe("FileSystemGenerationSessionStore", () => {
       store.listEvidence("generation-1"),
       "INVALID_EVIDENCE_PATH"
     );
+  });
+
+  it("archives an idle active session", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    const initial = verificationCandidate();
+    await store.create(initial);
+
+    const archived: GenerationSession = {
+      ...initial,
+      revision: 1,
+      state: "archived"
+    };
+    await store.archive("generation-1", 0, archived);
+
+    await expect(store.read("generation-1")).resolves.toEqual(archived);
+  });
+
+  it("archive rejects a session that does not exist", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    const archived: GenerationSession = {
+      ...validSession(1),
+      state: "archived"
+    };
+
+    await expectStoreError(
+      store.archive("generation-1", 0, archived),
+      "SESSION_NOT_FOUND"
+    );
+  });
+
+  it("archive rejects a published session", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    const initial = verificationCandidate();
+    await store.create(initial);
+    await markPublishable(store, initial);
+    await store.publish("generation-1");
+
+    const archived: GenerationSession = {
+      ...initial,
+      revision: 99,
+      state: "archived"
+    };
+
+    await expectStoreError(
+      store.archive("generation-1", 98, archived),
+      "SESSION_PUBLISHED"
+    );
+  });
+
+  it("archive rejects a recoveryRequired session with inFlight", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    const initial = verificationCandidate();
+    await store.create(initial);
+
+    const inFlight = {
+      stepIndex: 1,
+      snapshotHash: "b".repeat(64),
+      proposalHash: "c".repeat(64),
+      attemptId: "attempt-1"
+    };
+    const begun = await store.beginStep("generation-1", 0, inFlight);
+    const recoveryRequired: GenerationSession = {
+      ...begun,
+      revision: begun.revision + 1,
+      state: "recoveryRequired"
+    };
+    await store.update("generation-1", begun.revision, recoveryRequired);
+
+    const archived: GenerationSession = {
+      ...recoveryRequired,
+      revision: recoveryRequired.revision + 1,
+      state: "archived",
+      inFlight: null
+    };
+
+    await expectStoreError(
+      store.archive("generation-1", recoveryRequired.revision, archived),
+      "INVALID_TRANSITION"
+    );
+  });
+
+  it("archive rejects a revision conflict", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    const initial = verificationCandidate();
+    await store.create(initial);
+
+    const archived: GenerationSession = {
+      ...initial,
+      revision: 6,
+      state: "archived"
+    };
+
+    await expectStoreError(
+      store.archive("generation-1", 5, archived),
+      "REVISION_CONFLICT"
+    );
+  });
+
+  it("archive rejects mutation of candidate steps", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    const initial = verificationCandidate();
+    await store.create(initial);
+
+    const archived: GenerationSession = {
+      ...initial,
+      revision: 1,
+      state: "archived",
+      candidateSteps: [
+        ...initial.candidateSteps,
+        successfulWaitStep()
+      ],
+      candidateSources: [
+        ...initial.candidateSources,
+        "planner"
+      ]
+    };
+
+    await expectStoreError(
+      store.archive("generation-1", 0, archived),
+      "INVALID_TRANSITION"
+    );
+  });
+
+  it("archive rejects a next state that is not archived", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    const initial = verificationCandidate();
+    await store.create(initial);
+
+    const notArchived: GenerationSession = {
+      ...initial,
+      revision: 1,
+      state: "active"
+    };
+
+    await expectStoreError(
+      store.archive("generation-1", 0, notArchived),
+      "INVALID_TRANSITION"
+    );
+  });
+
+  it("list returns an empty array when no sessions exist", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+
+    await expect(store.list()).resolves.toEqual([]);
+  });
+
+  it("list returns a created session", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    const initial = verificationCandidate();
+    await store.create(initial);
+
+    await expect(store.list()).resolves.toEqual([initial]);
+  });
+
+  it("list returns multiple sessions sorted by id", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+
+    const sessionA: GenerationSession = {
+      ...validSession(0),
+      id: "generation-a"
+    };
+    const sessionB: GenerationSession = {
+      ...validSession(0),
+      id: "generation-b"
+    };
+    const sessionC: GenerationSession = {
+      ...validSession(0),
+      id: "generation-c"
+    };
+    await store.create(sessionC);
+    await store.create(sessionA);
+    await store.create(sessionB);
+
+    const sessions = await store.list();
+    expect(sessions.map((session) => session.id)).toEqual([
+      "generation-a",
+      "generation-b",
+      "generation-c"
+    ]);
+  });
+
+  it("list returns both active and archived sessions", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+
+    const active = verificationCandidate(0, { id: "generation-active" });
+    await store.create(active);
+
+    const toArchive = verificationCandidate(0, { id: "generation-to-archive" });
+    await store.create(toArchive);
+    const archived: GenerationSession = {
+      ...toArchive,
+      revision: 1,
+      state: "archived"
+    };
+    await store.archive("generation-to-archive", 0, archived);
+
+    const sessions = await store.list();
+    expect(sessions).toHaveLength(2);
+    expect(sessions.map((session) => session.state)).toContain("active");
+    expect(sessions.map((session) => session.state)).toContain("archived");
+  });
+
+  it("list returns published sessions", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    const initial = verificationCandidate();
+    await store.create(initial);
+    await markPublishable(store, initial);
+    await store.publish("generation-1");
+
+    const sessions = await store.list();
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]?.publication.status).toBe("published");
   });
 });

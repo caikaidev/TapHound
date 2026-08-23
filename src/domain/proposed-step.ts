@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 import { z } from "zod";
 
-import { ExpectSchema } from "./journey.js";
+import { ExpectSchema, BridgeScenarioSchema } from "./journey.js";
 import { LocatorSchema } from "./layout.js";
 
 const QualifiedActivitySchema = z.string().regex(
@@ -77,6 +77,15 @@ const WaitStepSchema = z.strictObject({
   ...CommonStepShape
 });
 
+const BridgeStepSchema = z.strictObject({
+  action: z.literal("bridge"),
+  scenario: BridgeScenarioSchema,
+  description: z.string().min(1),
+  triggerLocator: LocatorSchema,
+  returnTimeoutMs: z.number().int().positive(),
+  ...CommonStepShape
+});
+
 export const ProposedStepSchema = z.discriminatedUnion("action", [
   ClickStepSchema,
   LongClickStepSchema,
@@ -84,7 +93,8 @@ export const ProposedStepSchema = z.discriminatedUnion("action", [
   SwipeStepSchema,
   ScrollToStepSchema,
   BackStepSchema,
-  WaitStepSchema
+  WaitStepSchema,
+  BridgeStepSchema
 ]);
 
 export type ProposedStep = z.infer<typeof ProposedStepSchema>;

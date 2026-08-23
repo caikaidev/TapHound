@@ -22,6 +22,9 @@ export const GENERATION_ERROR_CODES = [
   "APP_LAUNCH_FAILED",
   "SNAPSHOT_STALE",
   "PACKAGE_ESCAPE",
+  "BRIDGE_NO_ESCAPE",
+  "SCENARIO_PACKAGE_MISMATCH",
+  "BRIDGE_NOT_RETURNED",
   "APP_CRASHED",
   "IDLE_TIMEOUT",
   "WINDOW_HIERARCHY_INCOMPLETE",
@@ -142,7 +145,7 @@ export const GenerationSessionSchema = z.strictObject({
   version: z.literal(1),
   id: GenerationSessionIdSchema,
   revision: NonnegativeSafeIntegerSchema,
-  state: z.enum(["active", "recoveryRequired"]),
+  state: z.enum(["active", "recoveryRequired", "archived"]),
   bindings: z.strictObject({
     projectHash: Sha256Schema,
     configHash: Sha256Schema,
@@ -253,6 +256,17 @@ export const GenerationSessionSchema = z.strictObject({
       code: "custom",
       path: ["publication"],
       message: "Publication can only start after passed verification"
+    });
+  }
+
+  if (
+    session.state === "archived"
+    && (session.inFlight !== null || session.pendingConfirmation !== null)
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["state"],
+      message: "Archived sessions must not carry in-flight work or pending confirmation"
     });
   }
 });

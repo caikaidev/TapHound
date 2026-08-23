@@ -161,14 +161,20 @@ Recorder 不自动生成业务 `expect`。Activity、Element 或 Logcat 断言�
 
 1. 发现 Gradle 模块，生成精简的 Project Context v2 根索引以及每个模块独立的语义/证据分片。
 2. 使用 `context list` 选择 Goal 相关模块，并通过 `context validate` / `context status` 检查分片、证据与文件清单时效性。
-3. 使用 `--module` 启动 `generation` 会话。不带 `--base-flow` 时，Core 会先
-   force-stop 并启动配置的 Activity。使用 `observe --compact` 并读取权威
-   `snapshotRef`；成功的 compact step 会返回 `nextBinding` 与 `nextSnapshotRef`。
-4. 使用 `generation status` 检查持久化状态，包括待确认与已过期 challenge。确认默认
+3. 按确定性 Activity 契约选择可复用 Base Flow。解析后的首步必须从冷启动后可确定
+   到达的稳定 Activity 开始，不能要求瞬态 Splash 保持前台。例如
+   `core/launch-home` 应建模为 `wait: Home -> Home`，并断言 Home 页面唯一元素。
+4. 使用 `--module` 启动 `generation` 会话。不带 `--base-flow` 时，Core 会先
+   force-stop、启动配置的 Activity 并等待应用进程。`run.activity` 只表示冷启动入口；
+   自动跳转后的稳定起点由首次观察已有的 idle/layout 检查确定。使用
+   `observe --compact` 并读取权威
+   `snapshotRef`；活动引用位于 Store 管理的 `.<generationId>.work` bundle，
+   成功的 compact step 会返回 `nextBinding` 与 `nextSnapshotRef`。
+5. 使用 `generation status` 检查持久化状态，包括待确认与已过期 challenge。确认默认
    使用本地 TTY；用户明确审阅具体 challenge 后，沙箱 Agent 可运行
    `generation confirm --decision approve|decline`。中断的 in-flight action
    可能已执行，只有显式运行 `generation recover --decision retry` 承认该风险后才会恢复。
-5. 长耗时 Replay 使用 `generation finalize --detach`，随后轮询
+6. 长耗时 Replay 使用 `generation finalize --detach`，随后轮询
    `generation status`（或使用 `--wait`）。只有精确验证通过后才发布 Journey。
 
 ```bash
@@ -183,6 +189,12 @@ taphound generation start \
 设备在 `generation start` 时绑定，后续 `observe`、`step`、`confirm`、`manual`、
 `status` 和 `recover` 命令通过 session 使用该绑定。完整流程见 Skill 的
 [`GUIDE.md`](assets/skills/taphound-ai-journey/GUIDE.md)。
+
+Base Flow 重放失败时，`generation start --json` 会返回
+`FLOW_REPLAY_FAILED`，并附带 Flow 名称、Verify 报告路径、主失败、
+失败步骤的 Activity/locator/expectation 摘要与恢复建议。TapHound 不会静默跳过
+该 Flow，也不会把“当前恰好在 Home”当作精确重放。应修复或重录 Flow；只有用户
+显式决定绕过复用时，才可省略 `--base-flow` 重新开始。
 
 `generation manual` 会交互式构建、执行并记录一个确定性 Journey step。Generation
 step JSON 会分别报告 freshness、观察、action、idle 等待、expect、Logcat 收集及

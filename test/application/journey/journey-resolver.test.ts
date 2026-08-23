@@ -50,7 +50,7 @@ describe("JourneyResolver", () => {
   it("expands nested Flows in stable dependency order", async () => {
     const resolver = fixture({
       ".taphound/flows/core/home.json":
-        flow("core/home", [], [wait(main, home)]),
+        flow("core/home", [], [wait(home, home)]),
       ".taphound/flows/chat/open-thread.json":
         flow("chat/open-thread", ["core/home"], [wait(home, chat)]),
       ".taphound/sources/chat/send.json": {
@@ -72,7 +72,7 @@ describe("JourneyResolver", () => {
     });
 
     expect(first.journey.steps.map((step) => step.activity)).toEqual([
-      { before: main, after: home },
+      { before: home, after: home },
       { before: home, after: chat },
       { before: chat, after: chat }
     ]);
@@ -88,7 +88,7 @@ describe("JourneyResolver", () => {
   it("resolves a reusable Flow as a runnable prefix", async () => {
     const resolver = fixture({
       ".taphound/flows/core/home.json":
-        flow("core/home", [], [wait(main, home)]),
+        flow("core/home", [], [wait(home, home)]),
       ".taphound/flows/chat/open-thread.json":
         flow("chat/open-thread", ["core/home"], [wait(home, chat)])
     });
@@ -152,7 +152,7 @@ describe("JourneyResolver", () => {
   it("lists valid and invalid local Flows without hiding failures", async () => {
     const resolver = fixture({
       ".taphound/flows/core/home.json":
-        flow("core/home", [], [wait(main, home)]),
+        flow("core/home", [], [wait(home, home)]),
       ".taphound/flows/wrong.json":
         flow("declared-elsewhere", [], [wait(main, main)])
     });
@@ -161,7 +161,7 @@ describe("JourneyResolver", () => {
       expect.objectContaining({
         name: "core/home",
         status: "valid",
-        entryActivity: main,
+        entryActivity: home,
         exitActivity: home
       }),
       expect.objectContaining({

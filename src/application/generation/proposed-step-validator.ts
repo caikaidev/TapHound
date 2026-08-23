@@ -12,6 +12,9 @@ import {
   hashRuntimeSnapshot,
   type RuntimeSnapshot
 } from "../../domain/runtime-snapshot.js";
+import {
+  locatorEvidenceForElement
+} from "../../domain/locator-evidence.js";
 import { resolveLocator } from "../locator/locator-resolver.js";
 import { GenerationOperationError } from "./generation-starter.js";
 
@@ -38,17 +41,16 @@ function requireUniqueTarget(
   capability: (element: LayoutElement) => boolean,
   capabilityName: string
 ): LayoutElement {
-  const resolution = resolveLocator(snapshot.layout, locator);
   const capabilityKey = capabilityName === "clickable"
     ? "clickable"
     : capabilityName === "longClickable"
       ? "longClickable"
       : undefined;
-  const resolved = capabilityKey === undefined
-    ? resolution
-    : resolveLocator(snapshot.layout, locator, {
-        requiredCapability: capabilityKey
-      });
+  const resolved = resolveLocator(
+    snapshot.layout,
+    locator,
+    capabilityKey === undefined ? {} : { requiredCapability: capabilityKey }
+  );
   if (resolved.status !== "found") {
     rejectCapability(resolved.message);
   }
@@ -161,6 +163,81 @@ function validateAction(
         "inputText requires exactly one enabled focused visible Layout element"
       );
     }
+    return;
+  }
+  if (proposal.action === "bridge") {
+    requireUniqueTarget(
+      snapshot,
+      proposal.triggerLocator,
+      (element) => element.clickable === true,
+      "clickable"
+    );
+    return;
+  }
+}
+
+function bindLocatorEvidence(
+  layout: readonly LayoutElement[],
+  locator: Locator
+): Locator {
+  if (locator.index === undefined) {
+    return locator;
+  }
+  const resolution = resolveLocator(layout, locator, {
+    requireEnabled: false
+  });
+  // Evidence binds the identity-matched entry before capability promotion.
+  return resolution.status === "found"
+    ? {
+        ...locator,
+        evidence: locatorEvidenceForElement(resolution.element)
+      }
+    : locator;
+}
+
+function bindProposalEvidence(
+  snapshot: RuntimeSnapshot,
+  proposal: ProposedStep
+): ProposedStep {
+  const expect = proposal.expect?.type === "element"
+    ? {
+        ...proposal.expect,
+        locator: bindLocatorEvidence(
+          snapshot.layout,
+          proposal.expect.locator
+        )
+      }
+    : proposal.expect;
+  const common = expect === undefined ? {} : { expect };
+  switch (proposal.action) {
+    case "click":
+    case "longClick":
+    case "swipe":
+      return ProposedStepSchema.parse({
+        ...proposal,
+        ...common,
+        locator: bindLocatorEvidence(snapshot.layout, proposal.locator)
+      });
+    case "scrollTo":
+      return ProposedStepSchema.parse({
+        ...proposal,
+        ...common,
+        locator: bindLocatorEvidence(snapshot.layout, proposal.locator),
+        container: bindLocatorEvidence(snapshot.layout, proposal.container)
+      });
+    case "inputText":
+    case "back":
+    case "wait":
+      return ProposedStepSchema.parse({ ...proposal, ...common });
+    case "bridge":
+      return ProposedStepSchema.parse({
+        ...proposal,
+        ...common,
+        triggerLocator: bindLocatorEvidence(
+          snapshot.layout,
+          proposal.triggerLocator
+        )
+      });
   }
 }
 
@@ -187,6 +264,6 @@ export class ProposedStepValidator {
     validateBinding(session, snapshot, proposal);
     validateWindowHierarchy(snapshot);
     validateAction(snapshot, proposal);
-    return proposal;
+    return bindProposalEvidence(snapshot, proposal);
   }
 }

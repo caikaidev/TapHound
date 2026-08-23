@@ -99,6 +99,55 @@ describe("VerifyRuntime", () => {
     });
   });
 
+  it("replays a stable Home readiness anchor after a Splash redirect", async () => {
+    const test = runtimeFixture();
+    vi.mocked(test.adb.currentActivity)
+      .mockResolvedValueOnce("com.example.app.SplashActivity")
+      .mockResolvedValue("com.example.app.HomeActivity");
+    vi.mocked(test.androidCli.layout).mockResolvedValue([{
+      id: "home-root",
+      resourceId: "home_root",
+      enabled: true,
+      bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+      children: []
+    }]);
+
+    const result = await new VerifyRuntime(test.dependencies).verify({
+      ...input(),
+      journey: {
+        version: 1,
+        name: "core/launch-home",
+        steps: [{
+          action: "wait",
+          activity: {
+            before: "com.example.app.HomeActivity",
+            after: "com.example.app.HomeActivity"
+          },
+          expect: {
+            type: "element",
+            locator: { resourceId: "home_root" },
+            timeoutMs: 3_000
+          }
+        }]
+      }
+    });
+
+    expect(result).toMatchObject({
+      status: "passed",
+      exitCode: 0,
+      report: {
+        steps: [{
+          action: "wait",
+          status: "passed",
+          expectation: {
+            type: "element",
+            status: "passed"
+          }
+        }]
+      }
+    });
+  });
+
   it("waits for a delayed App process within one launch-readiness budget", async () => {
     const test = runtimeFixture();
     vi.mocked(test.adb.appProcesses)

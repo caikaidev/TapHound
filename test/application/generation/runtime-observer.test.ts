@@ -121,6 +121,13 @@ class ObservationStore {
     await produce(temporaryPath);
     this.binaryEvidence.set(path, await readFile(temporaryPath));
   });
+
+  public readonly evidenceReference = vi.fn((
+    id: string,
+    path: string
+  ): Promise<string> => Promise.resolve(
+    `.taphound/build/generations/.${id}.work/${path}`
+  ));
 }
 
 function commandResult(exitCode = 0): CommandResult {
@@ -358,7 +365,7 @@ describe("RuntimeObserver", () => {
       snapshotHash: result.snapshotHash
     });
     expect(result.snapshotRef).toMatch(
-      /^\.taphound\/build\/generations\/generation-1\/evidence\/snapshots\/revision-000001\/[^/]+\/snapshot\.json$/
+      /^\.taphound\/build\/generations\/\.generation-1\.work\/evidence\/snapshots\/revision-000001\/[^/]+\/snapshot\.json$/
     );
     expect(result.snapshot).toMatchObject({
       version: 1,

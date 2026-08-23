@@ -278,3 +278,139 @@ describe("scrollTo step", () => {
     })).toThrow();
   });
 });
+
+describe("bridge step", () => {
+  const activity = {
+    before: "com.example.app.MainActivity",
+    after: "com.example.app.MainActivity"
+  };
+
+  it("parses a valid bridge step and defaults replayMode to manual", () => {
+    const parsed = JourneyStepSchema.parse({
+      action: "bridge",
+      scenario: "photoCapture",
+      description: "Trigger camera via button",
+      triggerLocator: { resourceId: "camera_button" },
+      returnTimeoutMs: 60000,
+      activity
+    });
+    expect(parsed).toMatchObject({
+      action: "bridge",
+      scenario: "photoCapture",
+      replayMode: "manual"
+    });
+  });
+
+  it("accepts an explicit replayMode of manual", () => {
+    expect(() => JourneyStepSchema.parse({
+      action: "bridge",
+      scenario: "pickImage",
+      description: "Pick image from gallery",
+      triggerLocator: { text: "Gallery" },
+      returnTimeoutMs: 30000,
+      replayMode: "manual",
+      activity
+    })).not.toThrow();
+  });
+
+  it("rejects replayMode auto on a bridge step", () => {
+    expect(() => JourneyStepSchema.parse({
+      action: "bridge",
+      scenario: "photoCapture",
+      description: "Trigger camera",
+      triggerLocator: { resourceId: "camera_button" },
+      returnTimeoutMs: 60000,
+      replayMode: "auto",
+      activity
+    })).toThrow();
+  });
+
+  it("accepts an optional escapedPackageName", () => {
+    const parsed = JourneyStepSchema.parse({
+      action: "bridge",
+      scenario: "photoCapture",
+      description: "Trigger camera",
+      triggerLocator: { resourceId: "camera_button" },
+      escapedPackageName: "com.android.camera",
+      returnTimeoutMs: 60000,
+      activity
+    });
+    expect(parsed).toMatchObject({
+      escapedPackageName: "com.android.camera"
+    });
+  });
+
+  it("accepts an optional expect", () => {
+    expect(() => JourneyStepSchema.parse({
+      action: "bridge",
+      scenario: "pickFile",
+      description: "Pick a file",
+      triggerLocator: { resourceId: "attach_file" },
+      returnTimeoutMs: 30000,
+      activity,
+      expect: {
+        type: "activity",
+        value: "com.example.app.MainActivity",
+        timeoutMs: 5000
+      }
+    })).not.toThrow();
+  });
+
+  it.each([
+    "photoCapture",
+    "pickImage",
+    "pickFile",
+    "custom"
+  ])("accepts the %s scenario", (scenario) => {
+    expect(() => JourneyStepSchema.parse({
+      action: "bridge",
+      scenario,
+      description: "Bridge action",
+      triggerLocator: { resourceId: "trigger" },
+      returnTimeoutMs: 30000,
+      activity
+    })).not.toThrow();
+  });
+
+  it("rejects an invalid scenario", () => {
+    expect(() => JourneyStepSchema.parse({
+      action: "bridge",
+      scenario: "videoCapture",
+      description: "Trigger video",
+      triggerLocator: { resourceId: "video_button" },
+      returnTimeoutMs: 60000,
+      activity
+    })).toThrow();
+  });
+
+  it("requires a description", () => {
+    expect(() => JourneyStepSchema.parse({
+      action: "bridge",
+      scenario: "photoCapture",
+      triggerLocator: { resourceId: "camera_button" },
+      returnTimeoutMs: 60000,
+      activity
+    })).toThrow();
+  });
+
+  it("requires a triggerLocator", () => {
+    expect(() => JourneyStepSchema.parse({
+      action: "bridge",
+      scenario: "photoCapture",
+      description: "Trigger camera",
+      returnTimeoutMs: 60000,
+      activity
+    })).toThrow();
+  });
+
+  it("requires a positive returnTimeoutMs", () => {
+    expect(() => JourneyStepSchema.parse({
+      action: "bridge",
+      scenario: "photoCapture",
+      description: "Trigger camera",
+      triggerLocator: { resourceId: "camera_button" },
+      returnTimeoutMs: 0,
+      activity
+    })).toThrow();
+  });
+});

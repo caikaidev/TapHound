@@ -4,6 +4,9 @@ import type {
   Locator
 } from "../../domain/layout.js";
 import {
+  locatorEvidenceForElement
+} from "../../domain/locator-evidence.js";
+import {
   flattenLayout,
   type LayoutEntry
 } from "../locator/layout-traversal.js";
@@ -48,7 +51,11 @@ function selectLocatorInScope(
   const index = candidates.findIndex((element) => element === target);
   return index < 0 || LOCATOR_FIELDS.every((field) => locator[field] === undefined)
     ? undefined
-    : { ...locator, index };
+    : {
+        ...locator,
+        index,
+        evidence: locatorEvidenceForElement(target)
+      };
 }
 
 export function selectUniqueLocator(

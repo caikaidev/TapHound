@@ -73,8 +73,10 @@ describe("Recorder locator selection", () => {
   it("lists enabled duplicate elements with deterministic ordinal Locators", () => {
     expect(listRecorderTargets(elements, "click").map((choice) => choice.element.id))
       .toEqual(["search", "duplicate-a", "duplicate-b"]);
-    expect(listRecorderTargets(elements, "click")[1]?.locator)
-      .toEqual({ text: "Item", index: 0 });
+    const duplicateLocator = listRecorderTargets(elements, "click")[1]?.locator;
+    expect(duplicateLocator).toMatchObject({ text: "Item", index: 0 });
+    expect(duplicateLocator?.evidence?.version).toBe(1);
+    expect(duplicateLocator?.evidence?.semanticSha256).toMatch(/^[a-f\d]{64}$/);
     expect(listRecorderTargets(elements, "click")[0]?.label)
       .toContain("search_button");
   });

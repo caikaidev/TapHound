@@ -30,6 +30,23 @@ describe("LocatorSchema", () => {
     expect(LocatorSchema.parse(locator)).toEqual(locator);
   });
 
+  it("accepts versioned semantic evidence only with an ordinal", () => {
+    const evidence = {
+      version: 1 as const,
+      semanticSha256: "a".repeat(64)
+    };
+
+    expect(LocatorSchema.parse({
+      resourceId: "row",
+      index: 0,
+      evidence
+    })).toMatchObject({ evidence });
+    expect(() => LocatorSchema.parse({
+      resourceId: "row",
+      evidence
+    })).toThrow(/requires index/i);
+  });
+
   it("accepts a recursively scoped Locator", () => {
     const locator = {
       text: "Item",

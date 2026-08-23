@@ -76,6 +76,10 @@ const DEFAULT_OPTIONS: RequiredStoreOptions = {
   lockRetryMs: 10
 };
 
+function activeBundleName(id: string): string {
+  return `.${id}.work`;
+}
+
 const HOOK_NAMES = [
   "beforeLockStagingWrite",
   "beforeLockInstall",
@@ -749,6 +753,29 @@ function assertRecoveryTransition(
     throw new GenerationSessionStoreError(
       "INVALID_TRANSITION",
       "Recovery must only clear preserved inFlight evidence and reactivate state"
+    );
+  }
+}
+
+function assertArchiveTransition(
+  current: GenerationSession,
+  next: GenerationSession
+): void {
+  assertCoreIdentityPreserved(current, next);
+  assertLatestSnapshotPreserved(current, next);
+  if (
+    current.state !== "active"
+    || current.inFlight !== null
+    || current.pendingConfirmation !== null
+    || next.state !== "archived"
+    || next.inFlight !== null
+    || next.pendingConfirmation !== null
+    || JSON.stringify(transitionStableState(current))
+      !== JSON.stringify(transitionStableState(next))
+  ) {
+    throw new GenerationSessionStoreError(
+      "INVALID_TRANSITION",
+      "Archive may only mark an idle active session as archived without mutation"
     );
   }
 }
@@ -1903,6 +1930,76 @@ implements GenerationSessionStore {
     });
   };
 
+  public readonly archive = async (
+    id: string,
+    expectedRevision: number,
+    input: GenerationSession
+  ): Promise<void> => {
+    assertId(id);
+    const next = parseSession(input, true);
+    validateNextRevision(id, expectedRevision, next);
+    await this.ensureGenerationRoot();
+    await this.withLock(id, async () => {
+      const activeDirectory = this.activeDirectory(id);
+      if (!await pathExists(activeDirectory)) {
+        if (await pathExists(this.finalDirectory(id))) {
+          throw new GenerationSessionStoreError(
+            "SESSION_PUBLISHED",
+            `Published generation session cannot be archived: ${id}`
+          );
+        }
+        throw new GenerationSessionStoreError(
+          "SESSION_NOT_FOUND",
+          `Generation session does not exist: ${id}`
+        );
+      }
+      const activeEvidence = await captureStoreDirectory(activeDirectory);
+      const current = await readBoundState(
+        activeDirectory,
+        id,
+        this.hooks.afterStateOpen,
+        activeEvidence
+      );
+      if (current.revision !== expectedRevision) {
+        throw new GenerationSessionStoreError(
+          "REVISION_CONFLICT",
+          `Expected generation revision ${String(expectedRevision)}, found ${
+            String(current.revision)
+          }`
+        );
+      }
+      assertArchiveTransition(current, next);
+      await writeStateAtomically(
+        activeDirectory,
+        next,
+        this.syncDirectory,
+        this.hooks.beforeStateRename,
+        activeEvidence
+      );
+    });
+  };
+
+  public readonly list = async (): Promise<readonly GenerationSession[]> => {
+    await this.ensureGenerationRoot();
+    const entries = await readdir(this.generationRoot, {
+      withFileTypes: true
+    });
+    const sessions: GenerationSession[] = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name === ".locks") {
+        continue;
+      }
+      const directory = join(this.generationRoot, entry.name);
+      const statePath = join(directory, "state.json");
+      if (!await pathExists(statePath)) {
+        continue;
+      }
+      const session = await readStateFromDirectory(directory);
+      sessions.push(session);
+    }
+    return sessions.sort((left, right) => left.id.localeCompare(right.id));
+  };
+
   public readonly writeEvidence = async (
     id: string,
     relativePath: string,
@@ -2104,81 +2201,26 @@ implements GenerationSessionStore {
     id: string,
     relativePath: string
   ): Promise<Buffer> => {
-    assertId(id);
-    const segments = validateEvidencePath(relativePath);
-    await this.ensureGenerationRoot();
-    return this.withLock(id, async () => {
-      const finalDirectory = this.finalDirectory(id);
-      const activeDirectory = this.activeDirectory(id);
-      const directory = await pathExists(finalDirectory)
-        ? finalDirectory
-        : activeDirectory;
-      if (!await pathExists(directory)) {
-        throw new GenerationSessionStoreError(
-          "SESSION_NOT_FOUND",
-          `Generation session does not exist: ${id}`
-        );
-      }
-      const rootEvidence = await captureStoreDirectory(directory);
-      await readBoundState(
-        directory,
-        id,
-        this.hooks.afterStateOpen,
-        rootEvidence
-      );
-      let current = directory;
-      const directories: DirectoryEvidence[] = [rootEvidence];
-      for (const segment of segments.slice(0, -1)) {
-        current = join(current, segment);
-        let evidence: DirectoryEvidence;
-        try {
-          evidence = await captureDirectoryEvidence(current);
-        } catch (error) {
-          if (isNodeError(error) && error.code === "ENOENT") {
-            throw evidenceNotFound(relativePath, error);
-          }
-          throw error;
-        }
-        assertContained(rootEvidence.canonicalPath, evidence.canonicalPath);
-        directories.push(evidence);
-      }
-      const path = join(current, segments.at(-1) as string);
-      assertContained(directory, path);
-      await verifyDirectoryEvidence(rootEvidence.canonicalPath, directories);
-      let handle: Awaited<ReturnType<typeof open>>;
-      try {
-        handle = await open(
-          path,
-          constants.O_RDONLY | constants.O_NOFOLLOW
-        );
-      } catch (error) {
-        if (isNodeError(error) && error.code === "ENOENT") {
-          throw evidenceNotFound(relativePath, error);
-        }
-        throw error;
-      }
-      try {
-        const stats = await handle.stat({ bigint: true });
-        if (!stats.isFile()) {
-          throw new GenerationSessionStoreError(
-            "INVALID_EVIDENCE_PATH",
-            `Evidence is not a regular file: ${relativePath}`
-          );
-        }
-        const openedIdentity = { dev: stats.dev, ino: stats.ino };
-        const pathIdentity = await fileIdentity(path);
-        if (!sameIdentity(openedIdentity, pathIdentity)) {
-          throw new GenerationSessionStoreError(
-            "INVALID_EVIDENCE_PATH",
-            `Evidence file identity changed: ${relativePath}`
-          );
-        }
-        await verifyDirectoryEvidence(rootEvidence.canonicalPath, directories);
-        return await handle.readFile();
-      } finally {
-        await handle.close();
-      }
-    });
+    return this.withVerifiedEvidence(
+      id,
+      relativePath,
+      ({ handle }) => handle.readFile()
+    );
+  };
+
+  public readonly evidenceReference = async (
+    id: string,
+    relativePath: string
+  ): Promise<string> => {
+    return this.withVerifiedEvidence(
+      id,
+      relativePath,
+      ({ published, segments }) => (
+        `${GENERATIONS_DIR}/${
+          published ? id : activeBundleName(id)
+        }/${segments.join("/")}`
+      )
+    );
   };
 
   public readonly listEvidence = async (
@@ -2539,12 +2581,97 @@ implements GenerationSessionStore {
   };
 
   private readonly activeDirectory = (id: string): string => (
-    join(this.generationRoot, `.${id}.work`)
+    join(this.generationRoot, activeBundleName(id))
   );
 
   private readonly finalDirectory = (id: string): string => (
     join(this.generationRoot, id)
   );
+
+  private readonly withVerifiedEvidence = async <T>(
+    id: string,
+    relativePath: string,
+    operation: (input: {
+      handle: Awaited<ReturnType<typeof open>>;
+      published: boolean;
+      segments: readonly string[];
+    }) => Promise<T> | T
+  ): Promise<T> => {
+    assertId(id);
+    const segments = validateEvidencePath(relativePath);
+    await this.ensureGenerationRoot();
+    return this.withLock(id, async () => {
+      const finalDirectory = this.finalDirectory(id);
+      const activeDirectory = this.activeDirectory(id);
+      const published = await pathExists(finalDirectory);
+      const directory = published ? finalDirectory : activeDirectory;
+      if (!await pathExists(directory)) {
+        throw new GenerationSessionStoreError(
+          "SESSION_NOT_FOUND",
+          `Generation session does not exist: ${id}`
+        );
+      }
+      const rootEvidence = await captureStoreDirectory(directory);
+      await readBoundState(
+        directory,
+        id,
+        this.hooks.afterStateOpen,
+        rootEvidence
+      );
+      let current = directory;
+      const directories: DirectoryEvidence[] = [rootEvidence];
+      for (const segment of segments.slice(0, -1)) {
+        current = join(current, segment);
+        let evidence: DirectoryEvidence;
+        try {
+          evidence = await captureDirectoryEvidence(current);
+        } catch (error) {
+          if (isNodeError(error) && error.code === "ENOENT") {
+            throw evidenceNotFound(relativePath, error);
+          }
+          throw error;
+        }
+        assertContained(rootEvidence.canonicalPath, evidence.canonicalPath);
+        directories.push(evidence);
+      }
+      const path = join(current, segments.at(-1) as string);
+      assertContained(directory, path);
+      await verifyDirectoryEvidence(rootEvidence.canonicalPath, directories);
+      let handle: Awaited<ReturnType<typeof open>>;
+      try {
+        handle = await open(
+          path,
+          constants.O_RDONLY | constants.O_NOFOLLOW
+        );
+      } catch (error) {
+        if (isNodeError(error) && error.code === "ENOENT") {
+          throw evidenceNotFound(relativePath, error);
+        }
+        throw error;
+      }
+      try {
+        const stats = await handle.stat({ bigint: true });
+        if (!stats.isFile()) {
+          throw new GenerationSessionStoreError(
+            "INVALID_EVIDENCE_PATH",
+            `Evidence is not a regular file: ${relativePath}`
+          );
+        }
+        const openedIdentity = { dev: stats.dev, ino: stats.ino };
+        const pathIdentity = await fileIdentity(path);
+        if (!sameIdentity(openedIdentity, pathIdentity)) {
+          throw new GenerationSessionStoreError(
+            "INVALID_EVIDENCE_PATH",
+            `Evidence file identity changed: ${relativePath}`
+          );
+        }
+        await verifyDirectoryEvidence(rootEvidence.canonicalPath, directories);
+        return await operation({ handle, published, segments });
+      } finally {
+        await handle.close();
+      }
+    });
+  };
 
   private readonly lockPath = (id: string): string => (
     join(this.locksRoot, `${id}.lock`)

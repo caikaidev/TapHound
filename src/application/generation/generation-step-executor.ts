@@ -34,6 +34,10 @@ import type { AndroidCliPort } from "../../ports/android-cli.js";
 import type { Clock } from "../../ports/clock.js";
 import type { GenerationSessionStore } from "../../ports/generation-session-store.js";
 import {
+  isKnownSystemPackage,
+  isSystemScenario
+} from "../../domain/system-app-profiles.js";
+import {
   ExpectationEvaluator,
   type ExpectationObservationInput
 } from "../assertion/expectation-evaluator.js";
@@ -330,7 +334,8 @@ function assertBaseAuthorization(
 function executableStep(
   proposal: ProposedStep,
   variables: GenerationSession["variables"],
-  after: string
+  after: string,
+  extra?: Record<string, unknown>
 ): JourneyStep {
   const expanded = expandProposedStepVariables(proposal, variables);
   const action = Object.fromEntries(
@@ -340,6 +345,7 @@ function executableStep(
   );
   return JourneyStepSchema.parse({
     ...action,
+    ...(extra === undefined ? {} : extra),
     activity: {
       before: expanded.activity.before,
       after
@@ -384,6 +390,27 @@ function requireTarget(
     )
   ) {
     fail("ACTION_FAILED", "swipe target lacks scrollable bounds");
+  }
+  return {
+    point: resolution.point,
+    ...(resolution.element.bounds === undefined
+      ? {}
+      : { bounds: resolution.element.bounds })
+  };
+}
+
+function requireBridgeTrigger(
+  layout: readonly LayoutElement[],
+  step: Extract<JourneyStep, { action: "bridge" }>
+): ActionTarget {
+  const resolution = resolveLocator(layout, step.triggerLocator, {
+    requiredCapability: "clickable"
+  });
+  if (resolution.status !== "found") {
+    fail(resolution.code, resolution.message);
+  }
+  if (resolution.element.clickable !== true) {
+    fail("ACTION_FAILED", "bridge trigger target is not clickable");
   }
   return {
     point: resolution.point,
@@ -611,6 +638,7 @@ export class GenerationStepExecutor {
     let outcome: GenerationStepExecutionResult | undefined;
     let stableLayout: readonly LayoutElement[] | undefined;
     let postActionRuntime: LiveRuntime | undefined;
+    let bridgeEscapedPackageName: string | undefined;
     const stepStartedAt = this.dependencies.clock.now();
     try {
       const logcatStartedAt = this.dependencies.clock.now();
@@ -702,6 +730,113 @@ export class GenerationStepExecutor {
               : { idle: scroll.idle }
           );
         }
+      } else if (provisional.action === "bridge") {
+        throwIfCancelled(input.signal);
+        await this.assertForegroundIdentity(
+          session,
+          authoritativePid,
+          proposal.activity.before,
+          input.signal
+        );
+        throwIfCancelled(input.signal);
+        const triggerTarget = requireBridgeTrigger(
+          preAction.layout,
+          provisional
+        );
+        const triggerClick = JourneyStepSchema.parse({
+          action: "click",
+          locator: provisional.triggerLocator,
+          activity: {
+            before: provisional.activity.before,
+            after: provisional.activity.before
+          }
+        });
+        const actionStartedAt = this.dependencies.clock.now();
+        const action = await actionExecutor.execute(
+          triggerClick,
+          triggerTarget,
+          input.signal
+        );
+        timing.actionExecutionMs = (
+          this.dependencies.clock.now() - actionStartedAt
+        );
+        if (isCancelled(input.signal)) {
+          outcome = {
+            status: "cancelled",
+            failure: {
+              code: "RECOVERY_REQUIRED",
+              message: "Step was cancelled"
+            }
+          };
+        } else if (action.status === "failed") {
+          fail(action.code, action.message);
+        }
+        if (outcome === undefined) {
+          throwIfCancelled(input.signal);
+          const escapeStartedAt = this.dependencies.clock.now();
+          const escapedPackageName = await this.detectBridgeEscape(
+            session,
+            input.signal,
+            3000
+          );
+          timing.idleWaitMs = (
+            this.dependencies.clock.now() - escapeStartedAt
+          );
+          if (isSystemScenario(provisional.scenario)) {
+            if (
+              !isKnownSystemPackage(
+                provisional.scenario,
+                escapedPackageName
+              )
+            ) {
+              fail(
+                "SCENARIO_PACKAGE_MISMATCH",
+                `Escaped package "${escapedPackageName}" is not a known ${
+                  provisional.scenario
+                } package`
+              );
+            }
+          }
+          bridgeEscapedPackageName = escapedPackageName;
+        }
+        if (outcome === undefined) {
+          throwIfCancelled(input.signal);
+          const returnStartedAt = this.dependencies.clock.now();
+          await this.waitForBridgeReturn(
+            session,
+            input.signal,
+            provisional.returnTimeoutMs
+          );
+          timing.idleWaitMs += (
+            this.dependencies.clock.now() - returnStartedAt
+          );
+          throwIfCancelled(input.signal);
+          const idleStartedAt = this.dependencies.clock.now();
+          const idle = await idleWaiter.waitUntilIdle(
+            this.dependencies.idle,
+            input.signal
+          );
+          timing.idleWaitMs += (
+            this.dependencies.clock.now() - idleStartedAt
+          );
+          if (idle.status === "cancelled") {
+            outcome = {
+              status: "cancelled",
+              failure: {
+                code: "RECOVERY_REQUIRED",
+                message: "Step was cancelled"
+              }
+            };
+          } else if (idle.status === "timeout") {
+            fail(
+              idle.code,
+              "Layout did not become stable after bridge return",
+              idleTimeoutDetails(idle)
+            );
+          } else {
+            stableLayout = idle.layout;
+          }
+        }
       } else {
         const target = requireTarget(preAction.layout, provisional);
         if (provisional.action === "inputText") {
@@ -792,7 +927,10 @@ export class GenerationStepExecutor {
         finalStep = executableStep(
           proposal,
           session.variables,
-          after.activity
+          after.activity,
+          bridgeEscapedPackageName === undefined
+            ? undefined
+            : { escapedPackageName: bridgeEscapedPackageName }
         );
         if (finalStep.expect !== undefined) {
           const expectationStartedAt = this.dependencies.clock.now();
@@ -1255,6 +1393,59 @@ export class GenerationStepExecutor {
       generationId,
       latest.revision,
       recovery
+    );
+  }
+
+  private async detectBridgeEscape(
+    session: GenerationSession,
+    signal: AbortSignal | undefined,
+    timeoutMs: number
+  ): Promise<string> {
+    const deadline = this.dependencies.clock.now() + timeoutMs;
+    while (this.dependencies.clock.now() < deadline) {
+      throwIfCancelled(signal);
+      const foreground = await this.dependencies.adb.foregroundComponent({
+        packageName: session.target.packageName,
+        deviceSerial: session.target.deviceSerial,
+        ...(signal === undefined ? {} : { signal }),
+        timeoutMs: 5000
+      });
+      if (foreground.packageName !== session.target.packageName) {
+        return foreground.packageName;
+      }
+      await this.dependencies.clock.sleep(
+        Math.min(500, Math.max(0, deadline - this.dependencies.clock.now())),
+        signal
+      );
+    }
+    fail("BRIDGE_NO_ESCAPE", "Trigger did not cause a package escape");
+  }
+
+  private async waitForBridgeReturn(
+    session: GenerationSession,
+    signal: AbortSignal | undefined,
+    timeoutMs: number
+  ): Promise<void> {
+    const deadline = this.dependencies.clock.now() + timeoutMs;
+    while (this.dependencies.clock.now() < deadline) {
+      throwIfCancelled(signal);
+      const foreground = await this.dependencies.adb.foregroundComponent({
+        packageName: session.target.packageName,
+        deviceSerial: session.target.deviceSerial,
+        ...(signal === undefined ? {} : { signal }),
+        timeoutMs: 5000
+      });
+      if (foreground.packageName === session.target.packageName) {
+        return;
+      }
+      await this.dependencies.clock.sleep(
+        Math.min(500, Math.max(0, deadline - this.dependencies.clock.now())),
+        signal
+      );
+    }
+    fail(
+      "BRIDGE_NOT_RETURNED",
+      "Foreground did not return to target package within the timeout"
     );
   }
 }

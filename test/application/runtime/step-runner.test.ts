@@ -6,6 +6,9 @@ import {
   type StepRunnerOptions
 } from "../../../src/application/runtime/step-runner.js";
 import type { JourneyStep } from "../../../src/domain/journey.js";
+import {
+  locatorEvidenceForElement
+} from "../../../src/domain/locator-evidence.js";
 import type { AdbPort } from "../../../src/ports/adb.js";
 import type { AndroidCliPort } from "../../../src/ports/android-cli.js";
 import type { AppProcess } from "../../../src/domain/app-process.js";
@@ -67,6 +70,7 @@ function fixture(overrides: {
   idle?: StepRunnerOptions["idle"];
   requireFocusedInput?: boolean;
   generatedReplayPolicy?: boolean;
+  manualReplay?: boolean;
 } = {}): {
   runner: StepRunner;
   adb: AdbPort;
@@ -101,7 +105,10 @@ function fixture(overrides: {
         : { requireFocusedInput: overrides.requireFocusedInput }),
       ...(overrides.generatedReplayPolicy === undefined
         ? {}
-        : { generatedReplayPolicy: overrides.generatedReplayPolicy })
+        : { generatedReplayPolicy: overrides.generatedReplayPolicy }),
+      ...(overrides.manualReplay === undefined
+        ? {}
+        : { manualReplay: overrides.manualReplay })
     }),
     adb,
     androidCli: cli,
@@ -266,6 +273,63 @@ describe("StepRunner", () => {
       failure: { code: "LOCATOR_NOT_FOUND" }
     });
     expect(test.adb.tap).not.toHaveBeenCalled();
+  });
+
+  it("does not bypass indexed evidence mismatch with annotated fallback", async () => {
+    const original = {
+      id: "original",
+      resourceId: "row",
+      text: "Same",
+      enabled: true,
+      bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+      children: [{
+        id: "content",
+        text: "Original",
+        enabled: true,
+        bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+        children: []
+      }]
+    };
+    const cli = androidCli();
+    cli.layout = vi.fn(() => Promise.resolve([{
+      ...original,
+      id: "replacement",
+      children: [{
+        id: "content",
+        text: "Different",
+        enabled: true,
+        bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+        children: []
+      }]
+    }]));
+    const test = fixture({ androidCli: cli });
+
+    const failedResult = await test.runner.run({
+      ...clickStep(),
+      locator: {
+        resourceId: "row",
+        text: "Same",
+        index: 0,
+        evidence: locatorEvidenceForElement(original)
+      },
+      fallback: { type: "annotatedLabel", label: "#1" }
+    }, 0);
+    expect(failedResult).toMatchObject({
+      status: "failed",
+      failure: { code: "LOCATOR_NOT_FOUND" },
+      report: {
+        locator: {
+          status: "failed",
+          fallbackUsed: false
+        }
+      }
+    });
+    if (failedResult.status !== "failed") {
+      throw new Error("Expected evidence mismatch failure");
+    }
+    expect(failedResult.failure.message).toMatch(/evidence/i);
+    expect(vi.mocked(cli.resolveScreen)).not.toHaveBeenCalled();
+    expect(vi.mocked(test.adb.tap)).not.toHaveBeenCalled();
   });
 
   it("uses explicit annotated-label fallback and records evidence", async () => {
@@ -930,5 +994,197 @@ describe("scrollTo replay", () => {
       failure: { code: "ACTION_FAILED" }
     });
     expect(adb.swipe).not.toHaveBeenCalled();
+  });
+
+  function bridgeStep(
+    overrides: Partial<Extract<JourneyStep, { action: "bridge" }>> = {}
+  ): Extract<JourneyStep, { action: "bridge" }> {
+    return {
+      action: "bridge",
+      scenario: "photoCapture",
+      description: "Open camera to take a photo",
+      triggerLocator: { resourceId: "camera-button" },
+      returnTimeoutMs: 10000,
+      activity: { before: checkpoint.before, after: checkpoint.after },
+      replayMode: "manual",
+      ...overrides
+    };
+  }
+
+  function bridgeCli(): AndroidCliPort {
+    const cli = androidCli();
+    cli.layout = vi.fn(() => Promise.resolve([{
+      id: "camera-button",
+      resourceId: "camera-button",
+      enabled: true,
+      clickable: true,
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+      children: []
+    }]));
+    return cli;
+  }
+
+  function bridgeAdb(
+    foregroundSequence: Array<{ packageName: string; activity: string }>
+  ): AdbPort {
+    const adb = adbPort();
+    let index = 0;
+    adb.foregroundComponent = vi.fn((() => {
+      const result = foregroundSequence[index]
+        ?? foregroundSequence[foregroundSequence.length - 1];
+      index += 1;
+      return Promise.resolve(result);
+    }) as never);
+    return adb;
+  }
+
+  it("replays a bridge step by clicking the trigger and polling for return", async () => {
+    const test = fixture({
+      adb: bridgeAdb([
+        { packageName: "com.android.camera", activity: "com.android.camera.CameraActivity" },
+        { packageName: "com.example.app", activity: checkpoint.after }
+      ]),
+      androidCli: bridgeCli()
+    });
+
+    const result = await test.runner.run(bridgeStep(), 0);
+
+    expect(result).toMatchObject({
+      status: "passed",
+      report: {
+        index: 0,
+        action: "bridge",
+        status: "passed",
+        replayMode: "manual",
+        locator: {
+          status: "found",
+          matchedBy: "resourceId",
+          fallbackUsed: false
+        },
+        activity: {
+          before: { status: "passed", actual: checkpoint.before },
+          after: { status: "passed", actual: checkpoint.after }
+        }
+      }
+    });
+    expect(vi.mocked(test.adb.tap)).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails with BRIDGE_NO_ESCAPE when trigger does not cause an escape during replay", async () => {
+    const test = fixture({
+      adb: bridgeAdb([
+        { packageName: "com.example.app", activity: checkpoint.before }
+      ]),
+      androidCli: bridgeCli()
+    });
+
+    const result = await test.runner.run(bridgeStep(), 0);
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { code: "BRIDGE_NO_ESCAPE", phase: "replay" }
+    });
+    expect(vi.mocked(test.adb.tap)).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails with BRIDGE_NOT_RETURNED when foreground does not return within timeout", async () => {
+    const test = fixture({
+      adb: bridgeAdb([
+        { packageName: "com.android.camera", activity: "com.android.camera.CameraActivity" }
+      ]),
+      androidCli: bridgeCli()
+    });
+
+    const result = await test.runner.run(
+      bridgeStep({ returnTimeoutMs: 10 }),
+      0
+    );
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { code: "BRIDGE_NOT_RETURNED", phase: "replay" }
+    });
+    expect(vi.mocked(test.adb.tap)).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails when trigger locator does not resolve in the layout", async () => {
+    const test = fixture({
+      androidCli: bridgeCli()
+    });
+
+    const result = await test.runner.run(
+      bridgeStep({ triggerLocator: { resourceId: "nonexistent" } }),
+      0
+    );
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { code: "LOCATOR_NOT_FOUND" }
+    });
+    expect(vi.mocked(test.adb.tap)).not.toHaveBeenCalled();
+  });
+
+  it("fails when trigger target is not clickable", async () => {
+    const cli = bridgeCli();
+    cli.layout = vi.fn(() => Promise.resolve([{
+      id: "camera-button",
+      resourceId: "camera-button",
+      enabled: true,
+      clickable: false,
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+      children: []
+    }]));
+    const test = fixture({ androidCli: cli });
+
+    const result = await test.runner.run(bridgeStep(), 0);
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { code: "ACTION_FAILED" }
+    });
+    expect(vi.mocked(test.adb.tap)).not.toHaveBeenCalled();
+  });
+
+  it("returns manualRequired without device ops when manualReplay is false", async () => {
+    const adb = bridgeAdb([
+      { packageName: "com.android.camera", activity: "com.android.camera.CameraActivity" },
+      { packageName: "com.example.app", activity: checkpoint.after }
+    ]);
+    const test = fixture({
+      adb,
+      androidCli: bridgeCli(),
+      manualReplay: false
+    });
+
+    const result = await test.runner.run(bridgeStep(), 0);
+
+    expect(result).toMatchObject({
+      status: "manualRequired",
+      report: {
+        index: 0,
+        action: "bridge",
+        status: "manualRequired",
+        replayMode: "manual",
+        locator: { status: "notRun", fallbackUsed: false }
+      }
+    });
+    expect(vi.mocked(adb.tap)).not.toHaveBeenCalled();
+    expect(vi.mocked(adb.foregroundComponent)).not.toHaveBeenCalled();
+  });
+
+  it("replays a manual bridge step normally when manualReplay is true", async () => {
+    const test = fixture({
+      adb: bridgeAdb([
+        { packageName: "com.android.camera", activity: "com.android.camera.CameraActivity" },
+        { packageName: "com.example.app", activity: checkpoint.after }
+      ]),
+      androidCli: bridgeCli(),
+      manualReplay: true
+    });
+
+    const result = await test.runner.run(bridgeStep(), 0);
+
+    expect(result).toMatchObject({ status: "passed" });
+    expect(vi.mocked(test.adb.tap)).toHaveBeenCalledTimes(1);
   });
 });

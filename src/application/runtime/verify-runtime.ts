@@ -33,6 +33,7 @@ export interface VerifyInput {
   toolVersions: Record<string, string>;
   requireFocusedInput?: boolean | undefined;
   generatedReplayPolicy?: boolean | undefined;
+  manualReplay?: boolean | undefined;
   signal?: AbortSignal | undefined;
 }
 
@@ -56,7 +57,7 @@ export interface VerifyRuntimeDependencies {
 }
 
 export interface VerifyResult {
-  status: "passed" | "failed" | "error";
+  status: "passed" | "failed" | "error" | "manualRequired";
   exitCode: 0 | 1 | 2 | 3 | 4;
   report: TapHoundReport;
   reportPath: string;
@@ -335,11 +336,23 @@ export class VerifyRuntime {
             : { requireFocusedInput: input.requireFocusedInput }),
           ...(input.generatedReplayPolicy === undefined
             ? {}
-            : { generatedReplayPolicy: input.generatedReplayPolicy })
+            : { generatedReplayPolicy: input.generatedReplayPolicy }),
+          ...(input.manualReplay === undefined
+            ? {}
+            : { manualReplay: input.manualReplay })
         });
         for (const [index, step] of input.journey.steps.entries()) {
           const result = await runner.run(step, index, input.signal);
           steps.push(result.report);
+          if (result.status === "manualRequired") {
+            setPrimary(
+              "MANUAL_STEP_REQUIRED",
+              `Step ${String(index)} requires manual replay and the run is non-interactive`,
+              "replay",
+              index
+            );
+            break;
+          }
           if (result.status === "cancelled") {
             setPrimary(
               "INTERNAL_ERROR",
@@ -417,13 +430,15 @@ export class VerifyRuntime {
     const failure = primaryFailure;
     const status: TapHoundReport["status"] = failure === undefined
       ? "passed"
-      : [
-          "CONFIG_INVALID",
-          "ENVIRONMENT_MISSING_TOOL",
-          "DEVICE_UNAVAILABLE",
-          "APP_NOT_INSTALLED",
-          "INTERNAL_ERROR"
-        ].includes(failure.code)
+      : failure.code === "MANUAL_STEP_REQUIRED"
+        ? "manualRequired"
+        : [
+            "CONFIG_INVALID",
+            "ENVIRONMENT_MISSING_TOOL",
+            "DEVICE_UNAVAILABLE",
+            "APP_NOT_INSTALLED",
+            "INTERNAL_ERROR"
+          ].includes(failure.code)
         ? "error"
         : "failed";
     const report: TapHoundReport = {

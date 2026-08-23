@@ -53,8 +53,16 @@ export const ExpectSchema = z.discriminatedUnion("type", [
 
 const CommonStepShape = {
   activity: ActivityCheckpointSchema,
-  expect: ExpectSchema.optional()
+  expect: ExpectSchema.optional(),
+  replayMode: z.enum(["auto", "manual"]).optional()
 };
+
+export const BridgeScenarioSchema = z.enum([
+  "photoCapture",
+  "pickImage",
+  "pickFile",
+  "custom"
+]);
 
 export const AnnotatedLabelFallbackSchema = z.strictObject({
   type: z.literal("annotatedLabel"),
@@ -112,6 +120,17 @@ const WaitStepSchema = z.strictObject({
   ...CommonStepShape
 });
 
+const BridgeStepSchema = z.strictObject({
+  action: z.literal("bridge"),
+  scenario: BridgeScenarioSchema,
+  description: z.string().min(1),
+  triggerLocator: LocatorSchema,
+  escapedPackageName: z.string().min(1).optional(),
+  returnTimeoutMs: z.number().int().positive(),
+  ...CommonStepShape,
+  replayMode: z.literal("manual").default("manual")
+});
+
 export const JourneyStepSchema = z.discriminatedUnion("action", [
   ClickStepSchema,
   LongClickStepSchema,
@@ -119,7 +138,8 @@ export const JourneyStepSchema = z.discriminatedUnion("action", [
   SwipeStepSchema,
   ScrollToStepSchema,
   BackStepSchema,
-  WaitStepSchema
+  WaitStepSchema,
+  BridgeStepSchema
 ]);
 
 export const JourneySchema = z.strictObject({
@@ -132,6 +152,7 @@ export type ActivityCheckpoint = z.infer<typeof ActivityCheckpointSchema>;
 export type AnnotatedLabelFallback = z.infer<
   typeof AnnotatedLabelFallbackSchema
 >;
+export type BridgeScenario = z.infer<typeof BridgeScenarioSchema>;
 export type Expectation = z.infer<typeof ExpectSchema>;
 export type JourneyStep = z.infer<typeof JourneyStepSchema>;
 export type Journey = z.infer<typeof JourneySchema>;

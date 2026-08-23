@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  flowReplayFailureDetails,
   GenerationOperationError,
   GenerationStarter
 } from "../../../src/application/generation/generation-starter.js";
@@ -97,6 +98,34 @@ function starter(validationStatus: "valid" | "stale" | "invalid" = "valid"): {
 }
 
 describe("GenerationStarter", () => {
+  it("relates launch readiness failures to the first Flow step", () => {
+    expect(flowReplayFailureDetails({
+      flowName: "core/launch-home",
+      reportPath: "/reports/base/report.json",
+      journey: runtimeJourney,
+      report: validReport({
+        status: "failed",
+        primaryFailure: {
+          code: "APP_LAUNCH_FAILED",
+          message: "stable Activity was not reached",
+          phase: "readiness"
+        }
+      })
+    })).toMatchObject({
+      primaryFailure: {
+        code: "APP_LAUNCH_FAILED",
+        phase: "readiness",
+        stepIndex: null
+      },
+      failedStep: {
+        stepIndex: 0,
+        action: runtimeJourney.steps[0]?.action,
+        activity: runtimeJourney.steps[0]?.activity,
+        locator: { resourceId: "search" }
+      }
+    });
+  });
+
   it("creates distinct Core-owned generation and Journey bindings", async () => {
     const test = starter();
 
@@ -196,7 +225,8 @@ describe("GenerationStarter", () => {
         name: "core/home",
         resolutionSha256: "f".repeat(64),
         journey: runtimeJourney,
-        verificationReport
+        verificationReport,
+        verificationReportPath: "/reports/base/report.json"
       }
     });
 
@@ -231,6 +261,7 @@ describe("GenerationStarter", () => {
         name: "core/home",
         resolutionSha256: "f".repeat(64),
         journey: runtimeJourney,
+        verificationReportPath: "/reports/base/report.json",
         verificationReport: validReport({
           status: "failed",
           journey: {
@@ -241,7 +272,11 @@ describe("GenerationStarter", () => {
         })
       }
     })).rejects.toMatchObject({
-      code: "FLOW_REPLAY_FAILED"
+      code: "FLOW_REPLAY_FAILED",
+      details: {
+        flowName: "core/home",
+        reportPath: "/reports/base/report.json"
+      }
     });
     expect(test.created).toEqual([]);
     expect(test.prepare).not.toHaveBeenCalled();

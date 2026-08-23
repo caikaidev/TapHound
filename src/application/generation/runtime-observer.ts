@@ -25,9 +25,6 @@ import type {
   GenerationSessionStore
 } from "../../ports/generation-session-store.js";
 import { GenerationOperationError } from "./generation-starter.js";
-import {
-  GENERATIONS_DIR
-} from "../../domain/workspace.js";
 
 export type RuntimeObservationBinding = ProposalBinding;
 
@@ -61,7 +58,11 @@ export interface CollectedRuntimeObserveInput {
 export interface RuntimeObserverDependencies {
   store: Pick<
     GenerationSessionStore,
-    "read" | "writeEvidence" | "produceEvidence" | "commitSnapshot"
+    | "read"
+    | "writeEvidence"
+    | "produceEvidence"
+    | "commitSnapshot"
+    | "evidenceReference"
   >;
   adb: Pick<
     AdbPort,
@@ -258,7 +259,6 @@ export class RuntimeObserver {
     const evidenceDirectory = `${revisionPath(baseRevision)}/${attemptId}`;
     const screenshotPath = `${evidenceDirectory}/screen.png`;
     const snapshotPath = `${evidenceDirectory}/snapshot.json`;
-    const snapshotRef = `${GENERATIONS_DIR}/${current.id}/${snapshotPath}`;
     await this.dependencies.store.produceEvidence(
       current.id,
       screenshotPath,
@@ -333,6 +333,10 @@ export class RuntimeObserver {
       current.id,
       current.revision,
       next
+    );
+    const snapshotRef = await this.dependencies.store.evidenceReference(
+      current.id,
+      snapshotPath
     );
 
     return {

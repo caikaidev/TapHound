@@ -22,12 +22,20 @@ export const LayoutPointSchema = z.strictObject({
 
 export type LayoutPoint = z.infer<typeof LayoutPointSchema>;
 
+export const LocatorEvidenceSchema = z.strictObject({
+  version: z.literal(1),
+  semanticSha256: z.string().regex(/^[a-f\d]{64}$/)
+});
+
+export type LocatorEvidence = z.infer<typeof LocatorEvidenceSchema>;
+
 export interface Locator {
   resourceId?: string | undefined;
   text?: string | undefined;
   contentDescription?: string | undefined;
   index?: number | undefined;
   within?: Locator | undefined;
+  evidence?: LocatorEvidence | undefined;
 }
 
 export const LocatorSchema: z.ZodType<Locator> = z.lazy(
@@ -36,7 +44,8 @@ export const LocatorSchema: z.ZodType<Locator> = z.lazy(
     text: z.string().min(1).optional(),
     contentDescription: z.string().min(1).optional(),
     index: z.number().int().nonnegative().optional(),
-    within: LocatorSchema.optional()
+    within: LocatorSchema.optional(),
+    evidence: LocatorEvidenceSchema.optional()
   }).refine(
     ({ contentDescription, resourceId, text }) => (
       resourceId !== undefined
@@ -44,6 +53,12 @@ export const LocatorSchema: z.ZodType<Locator> = z.lazy(
       || contentDescription !== undefined
     ),
     { message: "Locator must contain a supported identity field" }
+  ).refine(
+    ({ evidence, index }) => evidence === undefined || index !== undefined,
+    {
+      message: "Locator evidence requires index disambiguation",
+      path: ["evidence"]
+    }
   )
 );
 

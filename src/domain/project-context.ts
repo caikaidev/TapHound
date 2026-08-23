@@ -12,7 +12,8 @@ const GenerationActionSchema = z.enum([
   "swipe",
   "scrollTo",
   "back",
-  "wait"
+  "wait",
+  "bridge"
 ]);
 
 export const ContextEvidenceConfidenceSchema = z.enum([

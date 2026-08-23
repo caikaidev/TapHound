@@ -42,9 +42,27 @@ describe("TapHound documentation examples", () => {
     expect(journey.steps[1]?.action).toBe("scrollTo");
   });
 
+  it.each([
+    ["bridge-camera", "photoCapture"],
+    ["bridge-pick-image", "pickImage"],
+    ["bridge-pick-file", "pickFile"]
+  ])("keeps the %s example journey schema-valid", async (file, scenario) => {
+    const journey = JourneySchema.parse(
+      await json(`examples/${file}.journey.json`)
+    );
+
+    const bridge = journey.steps.find((step) => step.action === "bridge");
+    expect(bridge).toBeDefined();
+    expect(bridge?.action).toBe("bridge");
+    expect(bridge?.scenario).toBe(scenario);
+    expect(bridge?.replayMode).toBe("manual");
+    expect(bridge?.triggerLocator).toBeDefined();
+    expect(bridge?.returnTimeoutMs).toBeGreaterThan(0);
+  });
+
   it("keeps reusable Flow composition examples schema-valid", async () => {
     const core = FlowSchema.parse(await json(
-      "examples/composition/.taphound/flows/core/authenticated-home.json"
+      "examples/composition/.taphound/flows/core/launch-home.json"
     ));
     const feature = FlowSchema.parse(await json(
       "examples/composition/.taphound/flows/chat/open-thread.json"
@@ -60,7 +78,19 @@ describe("TapHound documentation examples", () => {
     ));
 
     expect(core.includes).toEqual([]);
-    expect(feature.includes).toEqual(["core/authenticated-home"]);
+    expect(core.name).toBe("core/launch-home");
+    expect(core.steps[0]).toMatchObject({
+      action: "wait",
+      activity: {
+        before: "com.example.app.HomeActivity",
+        after: "com.example.app.HomeActivity"
+      },
+      expect: {
+        type: "element",
+        locator: { resourceId: "home_root" }
+      }
+    });
+    expect(feature.includes).toEqual(["core/launch-home"]);
     expect(source.includes).toEqual(["chat/open-thread"]);
     expect(skillFlow.kind).toBe("flow");
     expect(skillSource.kind).toBe("journeySource");
@@ -123,7 +153,8 @@ describe("TapHound documentation examples", () => {
       "swipe",
       "scrollTo",
       "back",
-      "wait"
+      "wait",
+      "bridge"
     ]) {
       expect(journey).toContain(`\`${action}\``);
     }
@@ -137,6 +168,12 @@ describe("TapHound documentation examples", () => {
     expect(journey).toContain("does not reuse");
     expect(journey).toContain("`within`");
     expect(journey).toContain("`index`");
+    expect(journey).toContain("bridge");
+    expect(journey).toContain("replayMode");
+    expect(journey).toContain("scenario");
+    expect(journey).toContain("triggerLocator");
+    expect(journey).toContain("BRIDGE_NO_ESCAPE");
+    expect(journey).toContain("BRIDGE_NOT_RETURNED");
   });
 
   it("documents the complete report failure and exit-code contract", async () => {
@@ -168,6 +205,8 @@ describe("TapHound documentation examples", () => {
     expect(agent).toContain("Project Context");
     expect(agent).toContain("generation observe");
     expect(agent).toContain("taphound init");
+    expect(agent).toContain("bridge");
+    expect(agent).toContain("PACKAGE_ESCAPE");
   });
 
   it("brands active schema documentation as TapHound", async () => {
@@ -202,7 +241,7 @@ describe("TapHound documentation examples", () => {
     expect(testing).toContain("npm test");
     expect(testing).toContain("npm run acceptance:device");
     expect(testing).toContain("npm run acceptance:generation");
-    expect(testing).toContain("taphound-0.2.0-dev.4.tgz");
+    expect(testing).toContain("taphound-0.2.0-dev.5.tgz");
     expect(testing).toContain("examples/taphound-android-demo");
     for (const command of [
       "doctor",

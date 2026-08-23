@@ -115,6 +115,41 @@ function validate(
 }
 
 describe("ProposedStepValidator", () => {
+  it("binds Core-owned semantic evidence to an indexed target", () => {
+    const runtime = snapshot([
+      element({
+        id: "first",
+        resourceId: "row",
+        text: "Same",
+        clickable: true,
+        children: [element({ id: "first-content", text: "First" })]
+      }),
+      element({
+        id: "second",
+        resourceId: "row",
+        text: "Same",
+        clickable: true,
+        children: [element({ id: "second-content", text: "Second" })]
+      })
+    ]);
+
+    const validated = validate(runtime, {
+      action: "click",
+      locator: { resourceId: "row", text: "Same", index: 1 }
+    });
+    expect(validated.action).toBe("click");
+    if (validated.action !== "click") {
+      throw new Error("Expected click proposal");
+    }
+    expect(validated.locator).toMatchObject({
+      resourceId: "row",
+      text: "Same",
+      index: 1
+    });
+    expect(validated.locator.evidence?.version).toBe(1);
+    expect(validated.locator.evidence?.semanticSha256).toMatch(/^[a-f\d]{64}$/);
+  });
+
   it.each([
     ["click", { clickable: true }, { action: "click", locator: { resourceId: "target" } }],
     ["longClick", { longClickable: true }, {

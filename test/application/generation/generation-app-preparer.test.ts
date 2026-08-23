@@ -54,12 +54,21 @@ function adb(overrides: Partial<AdbPort> = {}): AdbPort {
 }
 
 describe("GenerationAppPreparer", () => {
-  it("cold-launches the configured Activity and waits for readiness", async () => {
-    const device = adb();
+  it("accepts a cold launch that redirects from Splash to Home", async () => {
+    const currentActivity = vi.fn(() => Promise.resolve(
+      "com.example.app.HomeActivity"
+    ));
+    const device = adb({ currentActivity });
     const service = new GenerationAppPreparer(device, new FakeClock());
 
     await expect(service.prepare({
-      config,
+      config: {
+        ...config,
+        run: {
+          ...config.run,
+          activity: ".SplashActivity"
+        }
+      },
       deviceSerial: "emulator-5554"
     })).resolves.toBeUndefined();
 
@@ -68,10 +77,10 @@ describe("GenerationAppPreparer", () => {
       deviceSerial: "emulator-5554"
     }));
     expect(device.launchActivity).toHaveBeenCalledWith(expect.objectContaining({
-      activity: "com.example.app.MainActivity"
+      activity: "com.example.app.SplashActivity"
     }));
     expect(device.appProcesses).toHaveBeenCalled();
-    expect(device.currentActivity).toHaveBeenCalled();
+    expect(currentActivity).not.toHaveBeenCalled();
   });
 
   it("fails before launch when force-stop fails", async () => {
@@ -103,5 +112,21 @@ describe("GenerationAppPreparer", () => {
       config,
       deviceSerial: "emulator-5554"
     })).rejects.toThrow("activity missing");
+  });
+
+  it("fails closed when the App process does not become ready", async () => {
+    const currentActivity = vi.fn(() => Promise.resolve(
+      "com.example.app.HomeActivity"
+    ));
+    const service = new GenerationAppPreparer(adb({
+      appProcesses: vi.fn(() => Promise.resolve([])),
+      currentActivity
+    }), new FakeClock());
+
+    await expect(service.prepare({
+      config,
+      deviceSerial: "emulator-5554"
+    })).rejects.toThrow("App process readiness timed out");
+    expect(currentActivity).not.toHaveBeenCalled();
   });
 });

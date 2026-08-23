@@ -37,12 +37,14 @@ export interface StepRunnerOptions {
   idle: IdleConfig;
   requireFocusedInput?: boolean;
   generatedReplayPolicy?: boolean | undefined;
+  manualReplay?: boolean | undefined;
 }
 
 export type StepRunResult =
   | { status: "passed"; report: StepReport }
   | { status: "failed"; report: StepReport; failure: ReportFailure }
-  | { status: "cancelled"; report: StepReport };
+  | { status: "cancelled"; report: StepReport }
+  | { status: "manualRequired"; report: StepReport };
 
 function stepPath(index: number, suffix: string): string {
   return `steps/${String(index + 1).padStart(3, "0")}-${suffix}`;
@@ -291,7 +293,8 @@ export class StepRunner {
       finishedAtMs: startedAt,
       durationMs: 0,
       activity: activityReport,
-      logcatPath
+      logcatPath,
+      ...(step.replayMode !== undefined ? { replayMode: step.replayMode } : {})
     };
 
     const finish = async (
@@ -313,9 +316,13 @@ export class StepRunner {
       if (status === "failed" && failure !== undefined) {
         return { status, report, failure };
       }
-      return status === "cancelled"
-        ? { status, report }
-        : { status: "passed", report };
+      if (status === "cancelled") {
+        return { status, report };
+      }
+      if (status === "manualRequired") {
+        return { status, report };
+      }
+      return { status: "passed", report };
     };
 
     const fail = async (
@@ -408,6 +415,145 @@ export class StepRunner {
         }
         return fail(scroll.code, scroll.message);
       }
+    } else if (step.action === "bridge") {
+      if (this.options.manualReplay === false) {
+        report.locator = { status: "notRun", fallbackUsed: false };
+        return finish("manualRequired");
+      }
+      let layout: Awaited<ReturnType<AndroidCliPort["layout"]>>;
+      try {
+        layout = this.options.generatedReplayPolicy === true
+          ? await this.captureGeneratedLayout(signal)
+          : await this.options.androidCli.layout({
+              deviceSerial: this.options.deviceSerial,
+              ...(signal === undefined ? {} : { signal }),
+              timeoutMs: this.options.idle.timeoutMs
+            });
+      } catch (error) {
+        if (
+          error !== null
+          && typeof error === "object"
+          && "code" in error
+          && error.code === "ACTIVITY_BEFORE_MISMATCH"
+        ) {
+          return fail("ACTIVITY_BEFORE_MISMATCH", errorMessage(error));
+        }
+        throw error;
+      }
+      const triggerResolution = resolveLocator(layout, step.triggerLocator, {
+        requiredCapability: "clickable"
+      });
+      if (triggerResolution.status !== "found") {
+        report.locator = {
+          status: "failed",
+          fallbackUsed: false,
+          message: triggerResolution.message
+        };
+        return fail(triggerResolution.code, triggerResolution.message);
+      }
+      if (triggerResolution.element.clickable !== true) {
+        return fail("ACTION_FAILED", "bridge trigger target is not clickable");
+      }
+      const triggerTarget: ActionTarget = {
+        point: triggerResolution.point,
+        ...(triggerResolution.element.bounds === undefined
+          ? {}
+          : { bounds: triggerResolution.element.bounds })
+      };
+      report.locator = {
+        status: "found",
+        matchedBy: triggerResolution.matchedBy,
+        fallbackUsed: false
+      };
+      if (this.options.generatedReplayPolicy === true) {
+        try {
+          await this.assertGeneratedForeground(
+            step.activity.before,
+            "ACTIVITY_BEFORE_MISMATCH",
+            signal
+          );
+        } catch (error) {
+          return fail("ACTIVITY_BEFORE_MISMATCH", errorMessage(error));
+        }
+      }
+      const triggerClick = {
+        action: "click" as const,
+        locator: step.triggerLocator,
+        activity: {
+          before: step.activity.before,
+          after: step.activity.before
+        }
+      };
+      const triggerAction = await this.actionExecutor.execute(
+        triggerClick,
+        triggerTarget,
+        signal
+      );
+      if (triggerAction.status === "failed") {
+        return fail(triggerAction.code, triggerAction.message);
+      }
+      const escaped = await this.pollBridgeEscape(signal, 3000);
+      if (escaped === null) {
+        return fail(
+          "BRIDGE_NO_ESCAPE",
+          "Bridge trigger did not cause a package escape during replay"
+        );
+      }
+      try {
+        await this.pollBridgeReturn(signal, step.returnTimeoutMs);
+      } catch (error) {
+        if (
+          error !== null
+          && typeof error === "object"
+          && "code" in error
+          && error.code === "BRIDGE_NOT_RETURNED"
+        ) {
+          return fail(
+            "BRIDGE_NOT_RETURNED",
+            "Foreground did not return to target package within the timeout"
+          );
+        }
+        throw error;
+      }
+      const idle = await this.idleWaiter.waitUntilIdle(this.options.idle, signal);
+      report.idle = idle.status === "timeout"
+        ? {
+            status: "timeout",
+            polls: idle.polls,
+            durationMs: idle.durationMs,
+            samplingDurationMs: idle.samplingDurationMs,
+            strategy: idle.strategy,
+            ...(idle.backend === undefined ? {} : { backend: idle.backend }),
+            fallbackUsed: idle.fallbackUsed,
+            frameActivityDetected: idle.frameActivityDetected,
+            lastDiff: [...idle.lastDiff]
+          }
+        : {
+            status: idle.status,
+            polls: idle.polls,
+            durationMs: idle.durationMs,
+            ...(idle.status !== "stable"
+              ? {}
+              : {
+                  samplingDurationMs: idle.samplingDurationMs,
+                  ...(idle.backend === undefined
+                    ? {}
+                    : { backend: idle.backend }),
+                  strategy: idle.strategy,
+                  fallbackUsed: idle.fallbackUsed,
+                  frameActivityDetected: idle.frameActivityDetected
+                })
+          };
+      if (idle.status === "cancelled") {
+        return finish("cancelled");
+      }
+      if (idle.status === "timeout") {
+        await this.options.artifacts.writeJson(
+          stepPath(index, "layout-diff.json"),
+          idle.lastDiff
+        );
+        return fail(idle.code, "Layout did not become stable after bridge return");
+      }
     } else {
       let layout: Awaited<ReturnType<AndroidCliPort["layout"]>>;
       try {
@@ -448,6 +594,14 @@ export class StepRunner {
             fallbackUsed: false
           };
         } else {
+          if (resolution.evidenceMismatch === true) {
+            report.locator = {
+              status: "failed",
+              fallbackUsed: false,
+              message: resolution.message
+            };
+            return fail(resolution.code, resolution.message);
+          }
           const annotatedPath = stepPath(index, "fallback-annotated.png");
           const fallback = await this.fallbackResolver.resolve(
             step,
@@ -671,6 +825,59 @@ export class StepRunner {
     }
 
     return finish("passed");
+  }
+
+  private async pollBridgeEscape(
+    signal: AbortSignal | undefined,
+    timeoutMs: number
+  ): Promise<string | null> {
+    const deadline = this.options.clock.now() + timeoutMs;
+    while (this.options.clock.now() < deadline) {
+      if (signal?.aborted === true) return null;
+      const foreground = await this.options.adb.foregroundComponent(
+        this.identity(signal)
+      );
+      if (foreground.packageName !== this.options.packageName) {
+        return foreground.packageName;
+      }
+      await this.options.clock.sleep(
+        Math.min(
+          500,
+          Math.max(0, deadline - this.options.clock.now())
+        ),
+        signal
+      );
+    }
+    return null;
+  }
+
+  private async pollBridgeReturn(
+    signal: AbortSignal | undefined,
+    timeoutMs: number
+  ): Promise<void> {
+    const deadline = this.options.clock.now() + timeoutMs;
+    while (this.options.clock.now() < deadline) {
+      if (signal?.aborted === true) return;
+      const foreground = await this.options.adb.foregroundComponent(
+        this.identity(signal)
+      );
+      if (foreground.packageName === this.options.packageName) {
+        return;
+      }
+      await this.options.clock.sleep(
+        Math.min(
+          500,
+          Math.max(0, deadline - this.options.clock.now())
+        ),
+        signal
+      );
+    }
+    throw Object.assign(
+      new Error(
+        "Foreground did not return to target package within the timeout"
+      ),
+      { code: "BRIDGE_NOT_RETURNED" }
+    );
   }
 }
 

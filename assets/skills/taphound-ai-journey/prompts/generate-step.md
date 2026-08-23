@@ -15,6 +15,15 @@ You are generating the next proposed step in a TapHound journey. You have:
 - **Base Flow**: optional bound reusable prefix metadata. Its exit Activity is
   the generation starting checkpoint; its navigation is already complete.
 
+## Layout Structure
+
+`snapshot.layout` is an array of root `LayoutElement` objects, not a flat
+element list. Every element has recursive `children`; traverse the complete
+tree when finding a target. `LayoutElement.id` is an internal parser identity
+and is never a Locator field. Use only `resourceId`, `text`, and
+`contentDescription`, in that priority order, plus `within` and `index` when
+needed.
+
 ## Your Task
 
 Determine the next single action that advances the Goal. Output one proposed
@@ -49,6 +58,8 @@ the observe result).
    - If identity fields still match multiple live elements, first add `within`
      with a deterministic ancestor Locator when available. Add zero-based
      `index` only when identical candidates remain in that scope.
+   - Do not add Locator `evidence`. Core derives versioned semantic evidence
+     from the bound snapshot when it persists a resolvable indexed step.
    - The element must be `enabled: true`.
    - For `click`: prefer `clickable: true` elements.
    - For `inputText`: the target should be `focusable: true` (an EditText).
@@ -128,6 +139,14 @@ Example (inputText):
   Use the fully qualified class name from the manifest or source.
 - Do not include `binding` — the caller adds it from the observe result.
 - Do not include `fallback` — proposals do not support fallback.
+- **Cross-app flows**: If the next action would open an external app (system
+  camera, image/file picker, share sheet), do NOT propose a `click` step. That
+  will fail with `PACKAGE_ESCAPE`. Instead, return:
+  `{"bridge": true, "scenario": "photoCapture|pickImage|pickFile|custom",
+  "triggerLocator": {...}, "description": "..." (required for custom)}`
+  The caller will use `generation bridge` to execute it. Only return this when
+  the target element clearly initiates a cross-app transition (e.g., a camera
+  button, "choose from gallery", "attach file").
 - If no actionable element matches the Goal, return:
   `{"error": "no matching element", "reason": "..."}`
 - If the Goal appears complete, return `{"complete": true}` instead of a

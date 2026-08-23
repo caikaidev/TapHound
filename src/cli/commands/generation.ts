@@ -8,7 +8,8 @@ import {
   GenerationOutputPathSchema
 } from "../../application/generation/generation-finalizer.js";
 import {
-  GenerationOperationError
+  GenerationOperationError,
+  flowReplayFailureDetails
 } from "../../application/generation/generation-starter.js";
 import {
   ContextLoadError
@@ -24,8 +25,16 @@ import type {
 } from "../../application/generation/generation-recovery-service.js";
 import { TapHoundConfigSchema } from "../../domain/config.js";
 import type { TapHoundConfig } from "../../domain/config.js";
-import { GenerationSessionIdSchema } from "../../domain/generation.js";
+import {
+  GenerationSessionIdSchema,
+  type GenerationSession
+} from "../../domain/generation.js";
 import { ProposedStepSchema } from "../../domain/proposed-step.js";
+import {
+  BridgeScenarioSchema,
+  type BridgeScenario
+} from "../../domain/journey.js";
+import { LocatorSchema } from "../../domain/layout.js";
 import { RuntimeSnapshotSchema } from "../../domain/runtime-snapshot.js";
 import { JOBS_DIR } from "../../domain/workspace.js";
 import {
@@ -80,6 +89,13 @@ interface GenerationManualOptions extends GenerationObserveOptions {
   action: "click" | "longClick" | "inputText" | "swipe" | "scrollTo" | "back" | "wait";
 }
 
+interface GenerationBridgeOptions extends GenerationObserveOptions {
+  scenario: string;
+  triggerLocator: string;
+  description?: string | undefined;
+  returnTimeoutMs: string;
+}
+
 interface GenerationFinalizeOptions extends GenerationObserveOptions {
   context: string;
   output: string;
@@ -93,14 +109,22 @@ interface GenerationRecoverOptions extends GenerationObserveOptions {
   decision: string;
 }
 
+interface GenerationListOptions {
+  project: string;
+  config: string;
+  json?: boolean | undefined;
+}
+
 type GenerationOptions =
   | GenerationStartOptions
   | GenerationObserveOptions
   | GenerationStepOptions
   | GenerationConfirmOptions
   | GenerationManualOptions
+  | GenerationBridgeOptions
   | GenerationRecoverOptions
-  | GenerationFinalizeOptions;
+  | GenerationFinalizeOptions
+  | GenerationListOptions;
 
 const PlannerEnvelopeSchema = z.strictObject({
   version: z.literal(1),
@@ -127,6 +151,7 @@ function writeFailure(
   outputOptions: {
     status?: "error" | "recoveryRequired";
     details?: unknown;
+    hint?: string;
     generationId?: string;
     timing?: GenerationStepTiming | undefined;
   } = {}
@@ -148,7 +173,8 @@ function writeFailure(
         : error instanceof GenerationOperationError
           && error.details !== undefined
           ? { details: error.details }
-          : {})
+          : {}),
+      ...(outputOptions.hint === undefined ? {} : { hint: outputOptions.hint })
     }
   };
   if (options.json === true) {
@@ -206,6 +232,13 @@ function compactOutput(options: GenerationOptions): boolean {
   return "compact" in options && options.compact === true;
 }
 
+function envelopeHint(options: GenerationOptions): string {
+  if ("input" in options) {
+    return "Planner envelope must be a strict object with exactly three top-level fields: version (1), proposal (object), and snapshot (object). Unknown or missing fields are rejected. See docs/agent-integration.md and assets/skills/taphound-ai-journey/schemas/proposed-step-envelope.json.";
+  }
+  return "TapHound rejected the JSON input. See docs/agent-integration.md for the command contract.";
+}
+
 function generationStatusText(status: GenerationRecoveryStatus): string {
   const verificationAttempt = status.verification.status === "running"
     || status.verification.status === "passed"
@@ -260,7 +293,9 @@ function mappedFailure(
   error: unknown
 ): void {
   if (error instanceof z.ZodError || error instanceof SyntaxError) {
-    writeFailure(dependencies, options, 2, "CONTEXT_INVALID", error);
+    writeFailure(dependencies, options, 2, "CONTEXT_INVALID", error, {
+      hint: envelopeHint(options)
+    });
     return;
   }
   if (error instanceof ContextLoadError) {
@@ -516,14 +551,21 @@ function createStartCommand(dependencies: CliDependencies): Command {
                 throw new GenerationOperationError(
                   "FLOW_REPLAY_FAILED",
                   verification.report.primaryFailure?.message
-                    ?? `Base Flow ${options.baseFlow as string} did not replay cleanly`
+                    ?? `Base Flow ${options.baseFlow as string} did not replay cleanly`,
+                  flowReplayFailureDetails({
+                    flowName: options.baseFlow as string,
+                    reportPath: verification.reportPath,
+                    journey: resolution.journey,
+                    report: verification.report
+                  })
                 );
               }
               return {
                 name: options.baseFlow as string,
                 resolutionSha256: resolution.manifest.resolutionSha256,
                 journey: resolution.journey,
-                verificationReport: verification.report
+                verificationReport: verification.report,
+                verificationReportPath: verification.reportPath
               };
             })();
         const session = await dependencies.generationStarter.start({
@@ -683,17 +725,9 @@ function createStepCommand(dependencies: CliDependencies): Command {
       const config = await loadConfig(dependencies, options);
       const runtime = requireRuntime(dependencies, options.project, config);
       await assertRuntimeConfig(runtime, generationId);
-      let envelope: z.infer<typeof PlannerEnvelopeSchema>;
-      try {
-        envelope = PlannerEnvelopeSchema.parse(await dependencies.readJson(
-          resolve(options.project, options.input)
-        ));
-      } catch (error) {
-        throw new GenerationOperationError(
-          "CONTEXT_INVALID",
-          errorMessage(error)
-        );
-      }
+      const envelope: z.infer<typeof PlannerEnvelopeSchema> = PlannerEnvelopeSchema.parse(
+        await dependencies.readJson(resolve(options.project, options.input))
+      );
       const confirmation = await runtime.confirmation.request({
         generationId,
         proposal: envelope.proposal,
@@ -858,6 +892,125 @@ function createManualCommand(dependencies: CliDependencies): Command {
   });
 }
 
+function resolveBridgeDescription(
+  scenario: BridgeScenario,
+  description: string | undefined
+): string {
+  if (description !== undefined) {
+    return z.string().trim().min(1).parse(description);
+  }
+  switch (scenario) {
+    case "photoCapture":
+      return "Capture photo via system camera";
+    case "pickImage":
+      return "Pick image via system picker";
+    case "pickFile":
+      return "Pick file via system picker";
+    case "custom":
+      throw new GenerationOperationError(
+        "CONTEXT_INVALID",
+        "Bridge scenario 'custom' requires --description"
+      );
+  }
+}
+
+function createBridgeCommand(dependencies: CliDependencies): Command {
+  return addCommonOptions(
+    new Command("bridge")
+      .description("Execute a cross-application bridge step through Core controls")
+      .option(
+        "--compact",
+        "Return authoritative nextSnapshotRef instead of the full next snapshot"
+      )
+      .requiredOption(
+        "--scenario <scenario>",
+        "Bridge scenario: photoCapture, pickImage, pickFile, or custom"
+      )
+      .requiredOption(
+        "--trigger-locator <json>",
+        "JSON locator for the trigger element"
+      )
+      .option(
+        "--description <text>",
+        "Bridge description (required for custom scenario)"
+      )
+      .option(
+        "--return-timeout-ms <ms>",
+        "Maximum time to wait for return to the target app in milliseconds",
+        "60000"
+      ),
+    dependencies
+  ).action(async (options: GenerationBridgeOptions): Promise<void> => {
+    try {
+      const generationId = GenerationSessionIdSchema.parse(options.session);
+      const scenario = BridgeScenarioSchema.parse(options.scenario);
+      const triggerLocator = LocatorSchema.parse(
+        JSON.parse(options.triggerLocator)
+      );
+      const returnTimeoutMs = z.number().int().positive().parse(
+        Number(options.returnTimeoutMs)
+      );
+      const description = resolveBridgeDescription(
+        scenario,
+        options.description
+      );
+      const config = await loadConfig(dependencies, options);
+      const runtime = requireRuntime(dependencies, options.project, config);
+      await assertRuntimeConfig(runtime, generationId);
+      const session = await runtime.readSession(generationId);
+      if (session.pendingConfirmation?.status === "pending") {
+        writeSuccess(dependencies, options, {
+          status: "confirmationRequired",
+          exitCode: 0,
+          generationId,
+          revision: session.revision,
+          challenge: session.pendingConfirmation
+        }, `Confirmation required: ${session.pendingConfirmation.challengeId}`);
+        return;
+      }
+      const observation = await runtime.observer.observe({
+        generationId,
+        ...(dependencies.signal === undefined
+          ? {}
+          : { signal: dependencies.signal })
+      });
+      const proposal = {
+        action: "bridge" as const,
+        scenario,
+        description,
+        triggerLocator,
+        returnTimeoutMs,
+        binding: observation.binding,
+        activity: { before: observation.snapshot.activity }
+      };
+      const confirmation = await runtime.confirmation.request({
+        generationId,
+        proposal,
+        snapshot: observation.snapshot,
+        source: "manualOverride" as const
+      });
+      if (confirmation.status === "confirmationRequired") {
+        writeSuccess(dependencies, options, {
+          status: "confirmationRequired",
+          exitCode: 0,
+          generationId,
+          revision: confirmation.revision,
+          challenge: confirmation.challenge
+        }, `Confirmation required: ${confirmation.challenge.challengeId}`);
+        return;
+      }
+      await executeApproved(dependencies, options, runtime, {
+        generationId,
+        proposal: confirmation.proposal,
+        snapshot: observation.snapshot,
+        source: "manualOverride"
+      });
+    } catch (error) {
+      mappedFailure(dependencies, options, error);
+    }
+  });
+}
+
 function createFinalizeCommand(dependencies: CliDependencies): Command {
   return addCommonOptions(
     new Command("finalize")
@@ -997,6 +1150,7 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
         ...(options.allowEvidenceDrift === true
           ? { allowEvidenceDrift: true }
           : {}),
+        manualReplay: process.stdin.isTTY,
         toolVersions: tools(doctor.checks),
         ...(dependencies.signal === undefined
           ? {}
@@ -1128,6 +1282,70 @@ function createRecoverCommand(dependencies: CliDependencies): Command {
   });
 }
 
+function createArchiveCommand(dependencies: CliDependencies): Command {
+  return addCommonOptions(
+    new Command("archive")
+      .description("Mark an idle generation session as archived"),
+    dependencies
+  ).action(async (options: GenerationObserveOptions): Promise<void> => {
+    try {
+      const generationId = GenerationSessionIdSchema.parse(options.session);
+      const config = await loadConfig(dependencies, options);
+      const runtime = requireRuntime(dependencies, options.project, config);
+      await assertRuntimeConfig(runtime, generationId);
+      const session = await runtime.archive(generationId);
+      writeSuccess(dependencies, options, {
+        status: "archived",
+        exitCode: 0,
+        generationId,
+        revision: session.revision
+      }, `Generation ${generationId} archived`);
+    } catch (error) {
+      mappedFailure(dependencies, options, error);
+    }
+  });
+}
+
+function generationListText(sessions: readonly GenerationSession[]): string {
+  if (sessions.length === 0) {
+    return "No generation sessions found.";
+  }
+  const lines = sessions.map((session) => {
+    const verification = session.verification.status;
+    const publication = session.publication.status;
+    const steps = String(session.candidateSteps.length);
+    return `  ${session.id}  ${session.state.padEnd(14)} revision ${String(session.revision).padStart(3)}  steps ${steps.padStart(3)}  verification ${verification}  publication ${publication}`;
+  });
+  return `Generation sessions (${String(sessions.length)}):\n${lines.join("\n")}`;
+}
+
+function createListCommand(dependencies: CliDependencies): Command {
+  return new Command("list")
+    .description("List generation sessions in the project workspace")
+    .option("--project <path>", "Android project root", dependencies.cwd())
+    .option("--config <path>", "TapHound config path", "taphound.config.json")
+    .option("--json", "Emit one machine-readable JSON value")
+    .action(async (options: GenerationListOptions): Promise<void> => {
+      try {
+        const config = await loadConfig(dependencies, options);
+        const runtime = requireRuntime(dependencies, options.project, config);
+        const sessions = await runtime.list();
+        if (options.json === true) {
+          writeJson(dependencies.stdout, {
+            status: "listed",
+            exitCode: 0,
+            sessions
+          });
+        } else {
+          writeLine(dependencies.stdout, generationListText(sessions));
+        }
+        dependencies.setExitCode(0);
+      } catch (error) {
+        mappedFailure(dependencies, options, error);
+      }
+    });
+}
+
 export function createGenerationCommand(
   dependencies: CliDependencies
 ): Command {
@@ -1138,7 +1356,10 @@ export function createGenerationCommand(
     .addCommand(createStepCommand(dependencies))
     .addCommand(createConfirmCommand(dependencies))
     .addCommand(createManualCommand(dependencies))
+    .addCommand(createBridgeCommand(dependencies))
     .addCommand(createStatusCommand(dependencies))
     .addCommand(createRecoverCommand(dependencies))
+    .addCommand(createArchiveCommand(dependencies))
+    .addCommand(createListCommand(dependencies))
     .addCommand(createFinalizeCommand(dependencies));
 }

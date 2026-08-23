@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "name": "attach-image-from-gallery",
+  "steps": [
+    {
+      "action": "click",
+      "locator": { "resourceId": "attach_button" },
+      "activity": {
+        "before": "com.example.app.ChatActivity",
+        "after": "com.example.app.ChatActivity"
+      }
+    },
+    {
+      "action": "bridge",
+      "scenario": "pickImage",
+      "description": "Pick image via system picker",
+      "triggerLocator": { "text": "Choose from gallery" },
+      "returnTimeoutMs": 30000,
+      "replayMode": "manual",
+      "escapedPackageName": "com.google.android.providers.media.module",
+      "activity": {
+        "before": "com.example.app.ChatActivity",
+        "after": "com.example.app.ChatActivity"
+      }
+    },
+    {
+      "action": "wait",
+      "activity": {
+        "before": "com.example.app.ChatActivity",
+        "after": "com.example.app.ChatActivity"
+      }
+    }
+  ]
+}

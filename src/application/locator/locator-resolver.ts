@@ -7,6 +7,9 @@ import type {
   LayoutElement,
   Locator
 } from "../../domain/layout.js";
+import {
+  locatorEvidenceMatches
+} from "../../domain/locator-evidence.js";
 import type { Point } from "../../ports/android-cli.js";
 import {
   flattenLayout,
@@ -27,6 +30,7 @@ export interface LocatorFailure {
     "LOCATOR_NOT_FOUND" | "LOCATOR_AMBIGUOUS" | "ACTION_FAILED"
   >;
   message: string;
+  evidenceMismatch?: true | undefined;
 }
 
 export type LocatorResolution = LocatedTarget | LocatorFailure;
@@ -165,6 +169,17 @@ export function resolveLocator(
   const { entry, matchedBy } = resolution;
   let element = entry.element;
   if (
+    locator.evidence !== undefined
+    && !locatorEvidenceMatches(element, locator.evidence)
+  ) {
+    return {
+      status: "failed",
+      code: "LOCATOR_NOT_FOUND",
+      message: "Indexed Locator element evidence does not match the live Layout",
+      evidenceMismatch: true
+    };
+  }
+  if (
     options.requiredCapability !== undefined
     && element[options.requiredCapability] !== true
   ) {
@@ -189,7 +204,6 @@ export function resolveLocator(
       message: `Layout element ${element.id} is disabled`
     };
   }
-
   return {
     status: "found",
     element,

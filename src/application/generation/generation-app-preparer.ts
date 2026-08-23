@@ -2,7 +2,6 @@ import { normalizeActivity } from "../../domain/activity.js";
 import type { TapHoundConfig } from "../../domain/config.js";
 import type { AdbPort } from "../../ports/adb.js";
 import type { Clock } from "../../ports/clock.js";
-import { ActivityWaiter } from "../runtime/activity-waiter.js";
 import { launchFailure } from "../runtime/launch-failure.js";
 import { ProcessWaiter } from "../runtime/process-waiter.js";
 
@@ -77,24 +76,6 @@ export class GenerationAppPreparer {
         process.status === "cancelled"
           ? "App process readiness was cancelled"
           : "App process readiness timed out"
-      );
-    }
-
-    const foreground = await new ActivityWaiter(this.adb, this.clock).wait({
-      ...identity,
-      expectedActivity: activity,
-      pollIntervalMs: input.config.idle.pollIntervalMs
-    });
-    if (foreground.status !== "ready") {
-      const actual = foreground.actual === undefined
-        ? ""
-        : `; last Activity was ${foreground.actual}`;
-      throw new Error(
-        foreground.status === "cancelled"
-          ? `App Activity readiness was cancelled${actual}`
-          : foreground.status === "processMissing"
-            ? `App process exited before Activity readiness${actual}`
-            : `App Activity readiness timed out${actual}`
       );
     }
   }

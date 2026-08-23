@@ -1,7 +1,7 @@
 {
   "version": 1,
   "kind": "flow",
-  "name": "core/authenticated-home",
+  "name": "core/launch-home",
   "includes": [],
   "steps": [
     {

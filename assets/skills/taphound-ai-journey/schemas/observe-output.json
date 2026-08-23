@@ -17,8 +17,8 @@
     "snapshotHash": { "type": "string", "pattern": "^[a-f\\d]{64}$" },
     "snapshotRef": {
       "type": "string",
-      "pattern": "^\\.taphound/build/generations/[^/]+/evidence/snapshots/revision-\\d{6}/[^/]+/snapshot\\.json$",
-      "description": "Authoritative project-relative RuntimeSnapshot evidence path."
+      "pattern": "^\\.taphound/build/generations/(?:\\.[^/]+\\.work|[^/]+)/evidence/snapshots/revision-\\d{6}/[^/]+/snapshot\\.json$",
+      "description": "Authoritative project-relative RuntimeSnapshot evidence path. Active sessions use the Store-owned .<generationId>.work bundle; publication atomically moves the same evidence to the final <generationId> bundle."
     },
     "snapshot": {
       "type": "object",

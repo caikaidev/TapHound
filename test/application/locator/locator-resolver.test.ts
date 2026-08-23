@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import type { LayoutElement } from "../../../src/domain/layout.js";
+import {
+  locatorEvidenceForElement
+} from "../../../src/domain/locator-evidence.js";
 import { resolveLocator } from "../../../src/application/locator/locator-resolver.js";
 
 function element(
@@ -94,6 +97,44 @@ describe("resolveLocator", () => {
       status: "found",
       element: { id: "two" },
       matchedBy: "text"
+    });
+  });
+
+  it("rejects an indexed element whose semantic evidence changed", () => {
+    const original = element({
+      id: "one",
+      resourceId: "row",
+      text: "Same",
+      children: [element({ id: "content", text: "Original message" })]
+    });
+    const evidence = locatorEvidenceForElement(original);
+    const reordered = [
+      element({
+        id: "replacement",
+        resourceId: "row",
+        text: "Same",
+        children: [element({ id: "content", text: "Different message" })]
+      }),
+      original
+    ];
+
+    expect(resolveLocator(reordered, {
+      resourceId: "row",
+      text: "Same",
+      index: 0,
+      evidence
+    })).toMatchObject({
+      status: "failed",
+      code: "LOCATOR_NOT_FOUND",
+      evidenceMismatch: true
+    });
+    expect(resolveLocator(reordered, {
+      resourceId: "row",
+      text: "Same",
+      index: 0
+    })).toMatchObject({
+      status: "found",
+      element: { id: "replacement" }
     });
   });
 

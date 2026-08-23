@@ -24,7 +24,7 @@ describe("TapHound package metadata", () => {
     ) as PackageDocument;
 
     expect(document.name).toBe("taphound");
-    expect(document.version).toBe("0.2.0-dev.4");
+    expect(document.version).toBe("0.2.0-dev.5");
     expect(document.description)
       .toBe("Deterministic app journey recording and verification");
     expect(document.bin).toEqual({ taphound: "./dist/cli/main.js" });

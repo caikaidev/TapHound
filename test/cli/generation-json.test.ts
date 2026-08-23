@@ -86,6 +86,7 @@ interface Harness {
   retry: Mock;
   archive: Mock;
   list: Mock;
+  readSession: Mock;
   workspaceLayout: FakeWorkspaceLayout;
 }
 
@@ -279,6 +280,7 @@ function harness(signal?: AbortSignal): Harness {
     retry,
     archive,
     list,
+    readSession,
     workspaceLayout
   };
 }
@@ -1974,5 +1976,209 @@ describe("generation JSON process protocol", () => {
         activity: { before: "com.example.app.MainActivity" }
       }
     });
+  });
+
+  it("passes --flow into the proposal when the flow is bound to the session", async () => {
+    const test = harness();
+    test.readSession.mockResolvedValueOnce({
+      revision: 4,
+      candidateSteps: [{}],
+      contextSelection,
+      externalFlows: [
+        {
+          name: "camera/photo-capture",
+          flowSha256: "abc123def456",
+          escapedPackageName: "com.android.camera",
+          stepCount: 2
+        }
+      ]
+    });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "bridge",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--scenario", "photoCapture",
+      "--trigger-locator", '{"resourceId":"com.example.app:id/camera_button"}',
+      "--flow", "camera/photo-capture",
+      "--json"
+    ]);
+
+    expect(test.request).toHaveBeenCalledWith({
+      generationId: "generation-1",
+      snapshot,
+      source: "manualOverride",
+      proposal: {
+        action: "bridge",
+        scenario: "photoCapture",
+        description: "Capture photo via system camera",
+        triggerLocator: { resourceId: "com.example.app:id/camera_button" },
+        returnTimeoutMs: 60000,
+        flow: "camera/photo-capture",
+        binding: proposal.binding,
+        activity: { before: "com.example.app.MainActivity" }
+      }
+    });
+  });
+
+  it("passes --escape-timeout-ms into the proposal", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "bridge",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--scenario", "photoCapture",
+      "--trigger-locator", '{"resourceId":"com.example.app:id/camera_button"}',
+      "--escape-timeout-ms", "5000",
+      "--json"
+    ]);
+
+    expect(test.request).toHaveBeenCalledWith({
+      generationId: "generation-1",
+      snapshot,
+      source: "manualOverride",
+      proposal: {
+        action: "bridge",
+        scenario: "photoCapture",
+        description: "Capture photo via system camera",
+        triggerLocator: { resourceId: "com.example.app:id/camera_button" },
+        returnTimeoutMs: 60000,
+        escapeTimeoutMs: 5000,
+        binding: proposal.binding,
+        activity: { before: "com.example.app.MainActivity" }
+      }
+    });
+  });
+
+  it("passes both --flow and --escape-timeout-ms into the proposal", async () => {
+    const test = harness();
+    test.readSession.mockResolvedValueOnce({
+      revision: 4,
+      candidateSteps: [{}],
+      contextSelection,
+      externalFlows: [
+        {
+          name: "camera/photo-capture",
+          flowSha256: "abc123def456",
+          escapedPackageName: "com.android.camera",
+          stepCount: 2
+        }
+      ]
+    });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "bridge",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--scenario", "photoCapture",
+      "--trigger-locator", '{"resourceId":"com.example.app:id/camera_button"}',
+      "--flow", "camera/photo-capture",
+      "--escape-timeout-ms", "8000",
+      "--json"
+    ]);
+
+    expect(test.request).toHaveBeenCalledWith({
+      generationId: "generation-1",
+      snapshot,
+      source: "manualOverride",
+      proposal: {
+        action: "bridge",
+        scenario: "photoCapture",
+        description: "Capture photo via system camera",
+        triggerLocator: { resourceId: "com.example.app:id/camera_button" },
+        returnTimeoutMs: 60000,
+        flow: "camera/photo-capture",
+        escapeTimeoutMs: 8000,
+        binding: proposal.binding,
+        activity: { before: "com.example.app.MainActivity" }
+      }
+    });
+  });
+
+  it("fails with EXTERNAL_FLOW_NOT_FOUND when --flow is not bound to the session", async () => {
+    const test = harness();
+    test.readSession.mockResolvedValueOnce({
+      revision: 4,
+      candidateSteps: [{}],
+      contextSelection,
+      externalFlows: [
+        {
+          name: "camera/photo-capture",
+          flowSha256: "abc123def456",
+          escapedPackageName: "com.android.camera",
+          stepCount: 2
+        }
+      ]
+    });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "bridge",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--scenario", "photoCapture",
+      "--trigger-locator", '{"resourceId":"com.example.app:id/camera_button"}',
+      "--flow", "camera/unknown-flow",
+      "--json"
+    ]);
+
+    expect(test.observe).not.toHaveBeenCalled();
+    expect(test.request).not.toHaveBeenCalled();
+    const output = JSON.parse(test.stdout.value) as {
+      failure: { code: string };
+      exitCode: number;
+    };
+    expect(output.failure.code).toBe("EXTERNAL_FLOW_NOT_FOUND");
+    expect(output.exitCode).toBe(2);
+  });
+
+  it("fails with EXTERNAL_FLOW_NOT_FOUND when --flow is given but session has no external flows", async () => {
+    const test = harness();
+    test.readSession.mockResolvedValueOnce({
+      revision: 4,
+      candidateSteps: [{}],
+      contextSelection,
+      externalFlows: []
+    });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "bridge",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--scenario", "photoCapture",
+      "--trigger-locator", '{"resourceId":"com.example.app:id/camera_button"}',
+      "--flow", "camera/photo-capture",
+      "--json"
+    ]);
+
+    expect(test.observe).not.toHaveBeenCalled();
+    const output = JSON.parse(test.stdout.value) as {
+      failure: { code: string };
+      exitCode: number;
+    };
+    expect(output.failure.code).toBe("EXTERNAL_FLOW_NOT_FOUND");
+    expect(output.exitCode).toBe(2);
+  });
+
+  it("rejects non-positive escape-timeout-ms with exit code 2", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "bridge",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--scenario", "photoCapture",
+      "--trigger-locator", '{"resourceId":"com.example.app:id/camera_button"}',
+      "--escape-timeout-ms", "0",
+      "--json"
+    ]);
+
+    expect(test.observe).not.toHaveBeenCalled();
+    const output = JSON.parse(test.stdout.value) as {
+      failure: { code: string };
+      exitCode: number;
+    };
+    expect(output.failure.code).toBe("CONTEXT_INVALID");
+    expect(output.exitCode).toBe(2);
   });
 });

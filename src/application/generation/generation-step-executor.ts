@@ -37,6 +37,8 @@ import {
   isKnownSystemPackage,
   isSystemScenario
 } from "../../domain/system-app-profiles.js";
+import type { ExternalStep } from "../../domain/journey.js";
+import type { ExternalFlowResolution } from "../journey/external-flow-resolver.js";
 import {
   ExpectationEvaluator,
   type ExpectationObservationInput
@@ -131,6 +133,13 @@ export interface GenerationStepExecutorDependencies {
   idle: IdleConfig;
   now: () => Date;
   generateAttemptId: () => string;
+  projectRoot: string;
+  externalFlowResolver?: {
+    resolve: (input: {
+      projectRoot: string;
+      name: string;
+    }) => Promise<ExternalFlowResolution>;
+  } | undefined;
   clearApprovedConfirmation: (
     generationId: string,
     challenge: PendingConfirmation
@@ -340,7 +349,7 @@ function executableStep(
   const expanded = expandProposedStepVariables(proposal, variables);
   const action = Object.fromEntries(
     Object.entries(expanded).filter(
-      ([key]) => key !== "binding" && key !== "activity"
+      ([key]) => key !== "binding" && key !== "activity" && key !== "flow"
     )
   );
   return JourneyStepSchema.parse({
@@ -411,6 +420,63 @@ function requireBridgeTrigger(
   }
   if (resolution.element.clickable !== true) {
     fail("ACTION_FAILED", "bridge trigger target is not clickable");
+  }
+  return {
+    point: resolution.point,
+    ...(resolution.element.bounds === undefined
+      ? {}
+      : { bounds: resolution.element.bounds })
+  };
+}
+
+function externalStepToJourneyStep(step: ExternalStep): JourneyStep {
+  const { expectedActivity, ...rest } = step;
+  return JourneyStepSchema.parse({
+    ...rest,
+    activity: {
+      before: expectedActivity,
+      after: expectedActivity
+    }
+  });
+}
+
+function requireExternalTarget(
+  layout: readonly LayoutElement[],
+  step: ExternalStep
+): ActionTarget | undefined {
+  if (
+    step.action !== "click"
+    && step.action !== "longClick"
+    && step.action !== "swipe"
+  ) {
+    return undefined;
+  }
+  const resolution = resolveLocator(layout, step.locator, {
+    ...(step.action === "click" ? { requiredCapability: "clickable" } : {}),
+    ...(step.action === "longClick"
+      ? { requiredCapability: "longClickable" }
+      : {})
+  });
+  if (resolution.status !== "found") {
+    fail(resolution.code, resolution.message);
+  }
+  if (step.action === "click" && resolution.element.clickable !== true) {
+    fail("ACTION_FAILED", "external click target is not clickable");
+  }
+  if (
+    step.action === "longClick"
+    && resolution.element.longClickable !== true
+  ) {
+    fail("ACTION_FAILED", "external longClick target is not longClickable");
+  }
+  if (
+    step.action === "swipe"
+    && (
+      resolution.element.scrollable !== true
+      || resolution.element.bounds === undefined
+    )
+  ) {
+    fail("ACTION_FAILED", "external swipe target lacks scrollable bounds");
   }
   return {
     point: resolution.point,
@@ -639,6 +705,7 @@ export class GenerationStepExecutor {
     let stableLayout: readonly LayoutElement[] | undefined;
     let postActionRuntime: LiveRuntime | undefined;
     let bridgeEscapedPackageName: string | undefined;
+    let bridgeExternalSteps: readonly ExternalStep[] | undefined;
     const stepStartedAt = this.dependencies.clock.now();
     try {
       const logcatStartedAt = this.dependencies.clock.now();
@@ -664,6 +731,9 @@ export class GenerationStepExecutor {
       );
       logcat.scopeToPids(preAction.pids);
       throwIfCancelled(input.signal);
+      const proposedFlow = proposal.action === "bridge"
+        ? proposal.flow
+        : undefined;
       const provisional = executableStep(
         proposal,
         session.variables,
@@ -777,7 +847,7 @@ export class GenerationStepExecutor {
           const escapedPackageName = await this.detectBridgeEscape(
             session,
             input.signal,
-            3000
+            provisional.escapeTimeoutMs ?? 3000
           );
           timing.idleWaitMs = (
             this.dependencies.clock.now() - escapeStartedAt
@@ -798,6 +868,16 @@ export class GenerationStepExecutor {
             }
           }
           bridgeEscapedPackageName = escapedPackageName;
+        }
+        if (outcome === undefined && proposedFlow !== undefined) {
+          throwIfCancelled(input.signal);
+          const flowResult = await this.resolveAndExecuteExternalFlow(
+            session,
+            proposedFlow,
+            bridgeEscapedPackageName as string,
+            input.signal
+          );
+          bridgeExternalSteps = flowResult;
         }
         if (outcome === undefined) {
           throwIfCancelled(input.signal);
@@ -924,13 +1004,19 @@ export class GenerationStepExecutor {
         );
         postActionRuntime = after;
         logcat.scopeToPids(after.pids);
+        const bridgeExtra: Record<string, unknown> = {};
+        if (bridgeEscapedPackageName !== undefined) {
+          bridgeExtra.escapedPackageName = bridgeEscapedPackageName;
+        }
+        if (bridgeExternalSteps !== undefined) {
+          bridgeExtra.externalSteps = bridgeExternalSteps;
+          bridgeExtra.replayMode = "auto" as const;
+        }
         finalStep = executableStep(
           proposal,
           session.variables,
           after.activity,
-          bridgeEscapedPackageName === undefined
-            ? undefined
-            : { escapedPackageName: bridgeEscapedPackageName }
+          Object.keys(bridgeExtra).length === 0 ? undefined : bridgeExtra
         );
         if (finalStep.expect !== undefined) {
           const expectationStartedAt = this.dependencies.clock.now();
@@ -1447,5 +1533,348 @@ export class GenerationStepExecutor {
       "BRIDGE_NOT_RETURNED",
       "Foreground did not return to target package within the timeout"
     );
+  }
+
+  private async resolveAndExecuteExternalFlow(
+    session: GenerationSession,
+    flowName: string,
+    escapedPackageName: string,
+    signal: AbortSignal | undefined
+  ): Promise<readonly ExternalStep[]> {
+    if (this.dependencies.externalFlowResolver === undefined) {
+      fail(
+        "EXTERNAL_FLOW_NOT_FOUND",
+        "External Flow resolver is unavailable in this runtime"
+      );
+    }
+    const binding = session.externalFlows.find(
+      (entry) => entry.name === flowName
+    );
+    if (binding === undefined) {
+      fail(
+        "EXTERNAL_FLOW_NOT_FOUND",
+        `External Flow "${flowName}" is not bound to generation session ${
+          session.id
+        }`
+      );
+    }
+    const resolution = await this.dependencies.externalFlowResolver.resolve({
+      projectRoot: this.dependencies.projectRoot,
+      name: flowName
+    });
+    if (resolution.flowSha256 !== binding.flowSha256) {
+      fail(
+        "EXTERNAL_FLOW_STALE",
+        `External Flow "${flowName}" has changed since session start`
+      );
+    }
+    if (resolution.flow.escapedPackageName !== binding.escapedPackageName) {
+      fail(
+        "EXTERNAL_PACKAGE_MISMATCH",
+        `External Flow "${flowName}" escaped package does not match session binding`
+      );
+    }
+    if (resolution.flow.escapedPackageName !== escapedPackageName) {
+      fail(
+        "EXTERNAL_PACKAGE_MISMATCH",
+        `Escaped package "${escapedPackageName}" does not match Flow package "${
+          resolution.flow.escapedPackageName
+        }"`
+      );
+    }
+    if (resolution.flow.expectedEscapeActivity !== undefined) {
+      const foreground = await this.dependencies.adb.foregroundComponent({
+        packageName: escapedPackageName,
+        deviceSerial: session.target.deviceSerial,
+        ...(signal === undefined ? {} : { signal }),
+        timeoutMs: 5000
+      });
+      if (foreground.activity !== resolution.flow.expectedEscapeActivity) {
+        fail(
+          "EXTERNAL_ACTIVITY_MISMATCH",
+          `External escape Activity "${
+            foreground.activity
+          }" does not match expected "${
+            resolution.flow.expectedEscapeActivity
+          }"`
+        );
+      }
+    }
+    const actionExecutor = new ActionExecutor(
+      this.dependencies.adb,
+      session.target.deviceSerial
+    );
+    for (const externalStep of resolution.flow.steps) {
+      throwIfCancelled(signal);
+      await this.executeExternalStep(
+        session,
+        externalStep,
+        escapedPackageName,
+        actionExecutor,
+        signal
+      );
+    }
+    return resolution.flow.steps;
+  }
+
+  private async executeExternalStep(
+    session: GenerationSession,
+    step: ExternalStep,
+    escapedPackageName: string,
+    actionExecutor: ActionExecutor,
+    signal: AbortSignal | undefined
+  ): Promise<void> {
+    const identity = {
+      packageName: escapedPackageName,
+      deviceSerial: session.target.deviceSerial,
+      ...(signal === undefined ? {} : { signal }),
+      timeoutMs: 5000
+    };
+    const foreground = await this.dependencies.adb.foregroundComponent(
+      identity
+    );
+    throwIfCancelled(signal);
+    if (foreground.packageName !== escapedPackageName) {
+      fail(
+        "EXTERNAL_PACKAGE_MISMATCH",
+        "External app foreground package changed during step execution"
+      );
+    }
+    if (foreground.activity !== step.expectedActivity) {
+      fail(
+        "EXTERNAL_ACTIVITY_MISMATCH",
+        `External Activity mismatch: expected "${
+          step.expectedActivity
+        }", got "${foreground.activity}"`
+      );
+    }
+    const layout = await this.dependencies.androidCli.layout({
+      deviceSerial: session.target.deviceSerial,
+      ...(signal === undefined ? {} : { signal }),
+      timeoutMs: 5000
+    });
+    throwIfCancelled(signal);
+
+    if (step.action === "scrollTo") {
+      const journeyStep = externalStepToJourneyStep(step) as Extract<
+        JourneyStep,
+        { action: "scrollTo" }
+      >;
+      const externalIdleWaiter = new IdleWaiter(
+        this.dependencies.androidCli,
+        this.dependencies.clock,
+        session.target.deviceSerial,
+        escapedPackageName
+      );
+      const scroll = await new ScrollToExecutor({
+        androidCli: this.dependencies.androidCli,
+        actionExecutor,
+        idleWaiter: externalIdleWaiter,
+        deviceSerial: session.target.deviceSerial,
+        idle: this.dependencies.idle,
+        beforeSwipe: async (): Promise<readonly LayoutElement[]> => {
+          const guarded = await this.observeExternalLive(
+            session,
+            escapedPackageName,
+            step.expectedActivity,
+            signal
+          );
+          return guarded.layout;
+        },
+        beforeMutation: async (): Promise<void> => {
+          await this.assertExternalForeground(
+            session,
+            escapedPackageName,
+            step.expectedActivity,
+            signal
+          );
+        },
+        requireLiveContainerCapability: true
+      }).execute(journeyStep, signal, layout);
+      if (scroll.status === "cancelled") {
+        throw new StepCancelledError("External scrollTo was cancelled");
+      }
+      if (scroll.status === "failed") {
+        fail(
+          scroll.code,
+          scroll.message,
+          scroll.idle === undefined ? undefined : { idle: scroll.idle }
+        );
+      }
+    } else {
+      const journeyStep = externalStepToJourneyStep(step);
+      let target: ActionTarget | undefined;
+      if (
+        step.action === "click"
+        || step.action === "longClick"
+        || step.action === "swipe"
+      ) {
+        target = requireExternalTarget(layout, step);
+      }
+      const action = await actionExecutor.execute(
+        journeyStep,
+        target,
+        signal
+      );
+      if (action.status === "failed") {
+        fail(action.code, action.message);
+      }
+    }
+
+    const externalIdleWaiter = new IdleWaiter(
+      this.dependencies.androidCli,
+      this.dependencies.clock,
+      session.target.deviceSerial,
+      escapedPackageName
+    );
+    const idle = await externalIdleWaiter.waitUntilIdle(
+      this.dependencies.idle,
+      signal
+    );
+    throwIfCancelled(signal);
+    if (idle.status === "cancelled") {
+      throw new StepCancelledError("External step was cancelled");
+    }
+    if (idle.status === "timeout") {
+      fail(
+        idle.code,
+        "External app layout did not become stable after step",
+        idleTimeoutDetails(idle)
+      );
+    }
+
+    if (step.expect !== undefined) {
+      await this.evaluateExternalExpect(
+        session,
+        step,
+        escapedPackageName,
+        signal
+      );
+    }
+  }
+
+  private async observeExternalLive(
+    session: GenerationSession,
+    escapedPackageName: string,
+    expectedActivity: string,
+    signal: AbortSignal | undefined
+  ): Promise<{ layout: readonly LayoutElement[] }> {
+    const identity = {
+      packageName: escapedPackageName,
+      deviceSerial: session.target.deviceSerial,
+      ...(signal === undefined ? {} : { signal }),
+      timeoutMs: 5000
+    };
+    const foreground = await this.dependencies.adb.foregroundComponent(
+      identity
+    );
+    throwIfCancelled(signal);
+    if (foreground.packageName !== escapedPackageName) {
+      fail(
+        "EXTERNAL_PACKAGE_MISMATCH",
+        "External app foreground package changed during observation"
+      );
+    }
+    if (foreground.activity !== expectedActivity) {
+      fail(
+        "EXTERNAL_ACTIVITY_MISMATCH",
+        `External Activity mismatch: expected "${expectedActivity}", got "${
+          foreground.activity
+        }"`
+      );
+    }
+    const layout = await this.dependencies.androidCli.layout({
+      deviceSerial: session.target.deviceSerial,
+      ...(signal === undefined ? {} : { signal }),
+      timeoutMs: 5000
+    });
+    return { layout };
+  }
+
+  private async assertExternalForeground(
+    session: GenerationSession,
+    escapedPackageName: string,
+    expectedActivity: string,
+    signal: AbortSignal | undefined
+  ): Promise<void> {
+    const identity = {
+      packageName: escapedPackageName,
+      deviceSerial: session.target.deviceSerial,
+      ...(signal === undefined ? {} : { signal }),
+      timeoutMs: 5000
+    };
+    const foreground = await this.dependencies.adb.foregroundComponent(
+      identity
+    );
+    throwIfCancelled(signal);
+    if (foreground.packageName !== escapedPackageName) {
+      fail(
+        "EXTERNAL_PACKAGE_MISMATCH",
+        "External app foreground package changed before mutation"
+      );
+    }
+    if (foreground.activity !== expectedActivity) {
+      fail(
+        "EXTERNAL_ACTIVITY_MISMATCH",
+        `External Activity changed before mutation: expected "${
+          expectedActivity
+        }", got "${foreground.activity}"`
+      );
+    }
+  }
+
+  private async evaluateExternalExpect(
+    session: GenerationSession,
+    step: ExternalStep,
+    escapedPackageName: string,
+    signal: AbortSignal | undefined
+  ): Promise<void> {
+    const expect = step.expect;
+    if (expect === undefined) {
+      return;
+    }
+    const identity = {
+      packageName: escapedPackageName,
+      deviceSerial: session.target.deviceSerial,
+      ...(signal === undefined ? {} : { signal }),
+      timeoutMs: expect.timeoutMs
+    };
+    if (expect.type === "activity") {
+      const expectedPackage = expect.packageName ?? escapedPackageName;
+      const foreground = await this.dependencies.adb.foregroundComponent({
+        ...identity,
+        packageName: expectedPackage
+      });
+      throwIfCancelled(signal);
+      if (foreground.activity !== expect.value) {
+        fail(
+          "EXTERNAL_STEP_FAILED",
+          `External expect Activity mismatch: expected "${
+            expect.value
+          }", got "${foreground.activity}"`
+        );
+      }
+    } else if (expect.type === "element") {
+      const layout = await this.dependencies.androidCli.layout({
+        deviceSerial: session.target.deviceSerial,
+        ...(signal === undefined ? {} : { signal }),
+        timeoutMs: expect.timeoutMs
+      });
+      throwIfCancelled(signal);
+      const resolution = resolveLocator(layout, expect.locator, {
+        requireEnabled: false
+      });
+      if (resolution.status !== "found") {
+        fail(
+          "EXTERNAL_STEP_FAILED",
+          `External expect element not found: ${resolution.message}`
+        );
+      }
+    } else {
+      fail(
+        "EXTERNAL_STEP_FAILED",
+        "logcat expectations are not supported for external steps in v1"
+      );
+    }
   }
 }

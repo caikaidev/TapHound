@@ -397,6 +397,137 @@ describe("TapHound CLI commands", () => {
     expect(test.exitCodes).toEqual([0]);
   });
 
+  it("binds external flows to the session when --external-flow is given", async () => {
+    const test = dependencies();
+    vi.mocked(test.value.readJson).mockImplementation((path) => Promise.resolve(
+      path.includes("context") ? generationContext : runtimeConfig
+    ));
+    test.value.externalFlowResolver = {
+      resolve: vi.fn(() => Promise.resolve({
+        flow: {
+          version: 1 as const,
+          kind: "externalFlow" as const,
+          name: "camera/photo-capture",
+          description: "Camera photo capture",
+          escapedPackageName: "com.android.camera",
+          includes: [],
+          steps: [{
+            action: "click" as const,
+            locator: { resourceId: "shutter_button" },
+            expectedActivity: "com.android.camera.CameraActivity"
+          }]
+        },
+        flowSha256: "a".repeat(64),
+        stepCount: 1
+      })),
+      list: vi.fn()
+    };
+    vi.mocked(test.value.generationStarter.start).mockResolvedValueOnce({
+      version: 1 as const,
+      id: "generation-1",
+      revision: 0,
+      state: "active" as const,
+      bindings: {
+        projectHash: "d".repeat(64),
+        configHash: "e".repeat(64),
+        contextHash: "a".repeat(64),
+        snapshotHash: null
+      },
+      target: {
+        packageName: "com.example.app",
+        deviceSerial: "emulator-5554",
+        resetStrategy: "processOnly" as const,
+        interactionPolicy: {
+          allowedActions: ["click" as const],
+          confirmationRequiredActions: [],
+          forbiddenActions: ["back" as const]
+        }
+      },
+      contextSelection,
+      variables: {
+        runId: "journey-run-1",
+        timestamp: "2026-07-22T12:00:00.000Z",
+        randomHex: "00ff"
+      },
+      candidateSteps: [],
+      candidateSources: [],
+      inFlight: null,
+      pendingConfirmation: null,
+      verification: { status: "notRun" as const },
+      publication: { status: "notRun" as const },
+      externalFlows: [{
+        name: "camera/photo-capture",
+        flowSha256: "a".repeat(64),
+        escapedPackageName: "com.android.camera",
+        stepCount: 1
+      }]
+    });
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "generation", "start",
+      "--project", "/project",
+      "--config", "taphound.config.json",
+      "--context", "context.json",
+      "--module", ":feature:search",
+      "--device", "emulator-5554",
+      "--external-flow", "camera/photo-capture",
+      "--json"
+    ]);
+
+    const startInput = vi.mocked(
+      test.value.generationStarter.start
+    ).mock.calls[0]?.[0];
+    expect(startInput).toMatchObject({
+      externalFlows: [{
+        name: "camera/photo-capture",
+        flowSha256: "a".repeat(64),
+        escapedPackageName: "com.android.camera",
+        stepCount: 1
+      }]
+    });
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "started",
+      exitCode: 0,
+      externalFlows: [{
+        name: "camera/photo-capture",
+        flowSha256: "a".repeat(64),
+        escapedPackageName: "com.android.camera",
+        stepCount: 1
+      }]
+    });
+    expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("fails with FLOW_INVALID when an external flow cannot be resolved", async () => {
+    const test = dependencies();
+    vi.mocked(test.value.readJson).mockImplementation((path) => Promise.resolve(
+      path.includes("context") ? generationContext : runtimeConfig
+    ));
+    test.value.externalFlowResolver = {
+      resolve: vi.fn(() => Promise.reject(new Error("Flow not found"))),
+      list: vi.fn()
+    };
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "generation", "start",
+      "--project", "/project",
+      "--config", "taphound.config.json",
+      "--context", "context.json",
+      "--module", ":feature:search",
+      "--device", "emulator-5554",
+      "--external-flow", "camera/missing",
+      "--json"
+    ]);
+
+    expect(test.value.generationStarter.start).not.toHaveBeenCalled();
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "error",
+      exitCode: 2,
+      failure: { code: "FLOW_INVALID" }
+    });
+    expect(test.exitCodes).toEqual([2]);
+  });
+
   it("replays and binds a base Flow before generation starts", async () => {
     const test = dependencies();
     const journey = runtimeJourney;
@@ -732,10 +863,10 @@ describe("TapHound CLI commands", () => {
     expect(parsed.status).toBe("listed");
     expect(parsed.exitCode).toBe(0);
     expect(parsed.flows).toHaveLength(1);
-    expect(parsed.flows[0].name).toBe("core/home");
+    expect(parsed.flows[0]?.name).toBe("core/home");
     expect(parsed.externalFlows).toHaveLength(1);
-    expect(parsed.externalFlows[0].name).toBe("camera/photo-capture");
-    expect(parsed.externalFlows[0].source).toBe("builtin");
+    expect(parsed.externalFlows[0]?.name).toBe("camera/photo-capture");
+    expect(parsed.externalFlows[0]?.source).toBe("builtin");
     expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
     expect(test.exitCodes).toEqual([0]);
   });

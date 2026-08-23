@@ -22,6 +22,7 @@ import {
 } from "../../../src/domain/runtime-snapshot.js";
 import type { CommandResult, RunningCommand } from "../../../src/ports/process-runner.js";
 import { contextSelection } from "../../fixtures/project-context.js";
+import type { ExternalFlow } from "../../../src/domain/external-flow.js";
 
 const activity = "com.example.app.MainActivity";
 const afterActivity = "com.example.app.AfterActivity";
@@ -159,6 +160,7 @@ function harness(
   beginStep: ReturnType<typeof vi.fn>;
   completeStep: ReturnType<typeof vi.fn>;
   clearApproved: ReturnType<typeof vi.fn>;
+  externalFlowResolver: { resolve: ReturnType<typeof vi.fn>; list: ReturnType<typeof vi.fn> } | undefined;
   recover: () => void;
   replaceCurrent: (next: GenerationSession) => void;
   afterBegin: (callback: () => void) => void;
@@ -284,6 +286,10 @@ function harness(
       return Promise.resolve();
     })
   };
+  const externalFlowResolver = {
+    resolve: vi.fn(),
+    list: vi.fn()
+  };
   const executor = new GenerationStepExecutor({
     store,
     freshnessGuard: { assertFresh: guard },
@@ -299,7 +305,9 @@ function harness(
     idle: { pollIntervalMs: 1, stablePolls: 1, timeoutMs: 10 },
     now: (): Date => now,
     generateAttemptId,
-    clearApprovedConfirmation: clearApproved
+    projectRoot: "/project",
+    clearApprovedConfirmation: clearApproved,
+    externalFlowResolver
   });
   return {
     execute: executor.execute,
@@ -315,6 +323,7 @@ function harness(
     beginStep: store.beginStep,
     completeStep: store.completeStep,
     clearApproved,
+    externalFlowResolver,
     recover: (): void => {
       current = GenerationSessionSchema.parse({
         ...current,
@@ -2259,6 +2268,279 @@ describe("GenerationStepExecutor", () => {
       failure: { code: "ACTION_FAILED" }
     });
     expect(test.adb.tap).not.toHaveBeenCalled();
+    expect(test.current().state).toBe("recoveryRequired");
+  });
+
+  const flowSha = "a".repeat(64);
+  const cameraActivity = "com.android.camera.CameraActivity";
+  const externalTarget = {
+    id: "shutter_button",
+    resourceId: "shutter_button",
+    text: "Shutter",
+    enabled: true,
+    clickable: true,
+    bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+    children: []
+  };
+
+  function photoFlow(overrides: Partial<ExternalFlow> = {}): ExternalFlow {
+    return {
+      version: 1,
+      kind: "externalFlow",
+      name: "camera/photo-capture",
+      description: "Camera photo capture",
+      escapedPackageName: "com.android.camera",
+      includes: [],
+      steps: [{
+        action: "click",
+        locator: { resourceId: "shutter_button" },
+        expectedActivity: cameraActivity
+      }],
+      ...overrides
+    };
+  }
+
+  it("executes bridge with external flow and stamps externalSteps with replayMode auto", async () => {
+    const flow = photoFlow();
+    const runtime = snapshot();
+    const test = harness(bridgeSession(runtime, {
+      externalFlows: [{
+        name: "camera/photo-capture",
+        flowSha256: flowSha,
+        escapedPackageName: "com.android.camera",
+        stepCount: 1
+      }]
+    }));
+    test.guard.mockResolvedValueOnce(runtime);
+    test.externalFlowResolver?.resolve.mockResolvedValue({
+      flow,
+      flowSha256: flowSha,
+      stepCount: 1
+    });
+    foregroundSequence(test.adb.foregroundComponent, [
+      { packageName: "com.example.app", activity },
+      { packageName: "com.example.app", activity },
+      { packageName: "com.example.app", activity },
+      { packageName: "com.android.camera", activity: cameraActivity },
+      { packageName: "com.android.camera", activity: cameraActivity },
+      { packageName: "com.example.app", activity: afterActivity },
+      { packageName: "com.example.app", activity: afterActivity },
+      { packageName: "com.example.app", activity: afterActivity }
+    ]);
+    test.androidCli.layout
+      .mockResolvedValueOnce([target])
+      .mockResolvedValueOnce([externalTarget]);
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: bridgeProposal(runtime, { flow: "camera/photo-capture" }),
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(test.adb.tap).toHaveBeenCalledTimes(2);
+    expect(test.current().candidateSteps[0]).toMatchObject({
+      action: "bridge",
+      replayMode: "auto",
+      escapedPackageName: "com.android.camera",
+      externalSteps: [{
+        action: "click",
+        locator: { resourceId: "shutter_button" },
+        expectedActivity: cameraActivity
+      }]
+    });
+  });
+
+  it("fails with EXTERNAL_FLOW_NOT_FOUND when flow is not bound to the session", async () => {
+    const runtime = snapshot();
+    const test = harness(bridgeSession(runtime));
+    test.guard.mockResolvedValueOnce(runtime);
+    foregroundSequence(test.adb.foregroundComponent, [
+      { packageName: "com.example.app", activity },
+      { packageName: "com.example.app", activity },
+      { packageName: "com.example.app", activity },
+      { packageName: "com.android.camera", activity: cameraActivity }
+    ]);
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: bridgeProposal(runtime, { flow: "camera/photo-capture" }),
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { code: "EXTERNAL_FLOW_NOT_FOUND" }
+    });
+    expect(test.adb.tap).toHaveBeenCalledTimes(1);
+    expect(test.current().state).toBe("recoveryRequired");
+  });
+
+  it("fails with EXTERNAL_FLOW_STALE when flow hash differs from binding", async () => {
+    const runtime = snapshot();
+    const test = harness(bridgeSession(runtime, {
+      externalFlows: [{
+        name: "camera/photo-capture",
+        flowSha256: flowSha,
+        escapedPackageName: "com.android.camera",
+        stepCount: 1
+      }]
+    }));
+    test.guard.mockResolvedValueOnce(runtime);
+    test.externalFlowResolver?.resolve.mockResolvedValue({
+      flow: photoFlow(),
+      flowSha256: "b".repeat(64),
+      stepCount: 1
+    });
+    foregroundSequence(test.adb.foregroundComponent, [
+      { packageName: "com.example.app", activity },
+      { packageName: "com.example.app", activity },
+      { packageName: "com.example.app", activity },
+      { packageName: "com.android.camera", activity: cameraActivity }
+    ]);
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: bridgeProposal(runtime, { flow: "camera/photo-capture" }),
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { code: "EXTERNAL_FLOW_STALE" }
+    });
+    expect(test.current().state).toBe("recoveryRequired");
+  });
+
+  it("fails with EXTERNAL_PACKAGE_MISMATCH when flow package differs from binding", async () => {
+    const runtime = snapshot();
+    const test = harness(bridgeSession(runtime, {
+      externalFlows: [{
+        name: "camera/photo-capture",
+        flowSha256: flowSha,
+        escapedPackageName: "com.android.camera",
+        stepCount: 1
+      }]
+    }));
+    test.guard.mockResolvedValueOnce(runtime);
+    test.externalFlowResolver?.resolve.mockResolvedValue({
+      flow: photoFlow({ escapedPackageName: "com.other.camera" }),
+      flowSha256: flowSha,
+      stepCount: 1
+    });
+    foregroundSequence(test.adb.foregroundComponent, [
+      { packageName: "com.example.app", activity },
+      { packageName: "com.example.app", activity },
+      { packageName: "com.example.app", activity },
+      { packageName: "com.android.camera", activity: cameraActivity }
+    ]);
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: bridgeProposal(runtime, { flow: "camera/photo-capture" }),
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { code: "EXTERNAL_PACKAGE_MISMATCH" }
+    });
+    expect(test.current().state).toBe("recoveryRequired");
+  });
+
+  it("fails with EXTERNAL_ACTIVITY_MISMATCH when escape activity does not match expected", async () => {
+    const runtime = snapshot();
+    const test = harness(bridgeSession(runtime, {
+      externalFlows: [{
+        name: "camera/photo-capture",
+        flowSha256: flowSha,
+        escapedPackageName: "com.android.camera",
+        stepCount: 1
+      }]
+    }));
+    test.guard.mockResolvedValueOnce(runtime);
+    test.externalFlowResolver?.resolve.mockResolvedValue({
+      flow: photoFlow({ expectedEscapeActivity: "com.android.camera.CameraActivity" }),
+      flowSha256: flowSha,
+      stepCount: 1
+    });
+    foregroundSequence(test.adb.foregroundComponent, [
+      { packageName: "com.example.app", activity },
+      { packageName: "com.example.app", activity },
+      { packageName: "com.example.app", activity },
+      { packageName: "com.android.camera", activity: "com.android.camera.OtherActivity" },
+      { packageName: "com.android.camera", activity: "com.android.camera.OtherActivity" }
+    ]);
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: bridgeProposal(runtime, { flow: "camera/photo-capture" }),
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { code: "EXTERNAL_ACTIVITY_MISMATCH" }
+    });
+    expect(test.current().state).toBe("recoveryRequired");
+  });
+
+  it("fails with EXTERNAL_STEP_FAILED when external expect activity does not match", async () => {
+    const flow = photoFlow({
+      steps: [{
+        action: "click",
+        locator: { resourceId: "shutter_button" },
+        expectedActivity: cameraActivity,
+        expect: {
+          type: "activity" as const,
+          value: "com.android.camera.ReviewActivity",
+          timeoutMs: 5000
+        }
+      }]
+    });
+    const runtime = snapshot();
+    const test = harness(bridgeSession(runtime, {
+      externalFlows: [{
+        name: "camera/photo-capture",
+        flowSha256: flowSha,
+        escapedPackageName: "com.android.camera",
+        stepCount: 1
+      }]
+    }));
+    test.guard.mockResolvedValueOnce(runtime);
+    test.externalFlowResolver?.resolve.mockResolvedValue({
+      flow,
+      flowSha256: flowSha,
+      stepCount: 1
+    });
+    foregroundSequence(test.adb.foregroundComponent, [
+      { packageName: "com.example.app", activity },
+      { packageName: "com.example.app", activity },
+      { packageName: "com.example.app", activity },
+      { packageName: "com.android.camera", activity: cameraActivity },
+      { packageName: "com.android.camera", activity: cameraActivity },
+      { packageName: "com.android.camera", activity: cameraActivity }
+    ]);
+    test.androidCli.layout
+      .mockResolvedValueOnce([target])
+      .mockResolvedValueOnce([externalTarget]);
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: bridgeProposal(runtime, { flow: "camera/photo-capture" }),
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { code: "EXTERNAL_STEP_FAILED" }
+    });
     expect(test.current().state).toBe("recoveryRequired");
   });
 });

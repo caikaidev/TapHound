@@ -368,6 +368,8 @@ export function createProductionDependencies(
         idle: config.idle,
         now: (): Date => new Date(),
         generateAttemptId: randomUUID,
+        projectRoot,
+        externalFlowResolver,
         clearApprovedConfirmation: async (
           generationId,
           challenge

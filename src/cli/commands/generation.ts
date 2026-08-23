@@ -60,6 +60,7 @@ interface GenerationStartOptions {
   device?: string | undefined;
   allowEvidenceDrift?: boolean | undefined;
   baseFlow?: string | undefined;
+  externalFlow?: string[] | undefined;
   json?: boolean | undefined;
 }
 
@@ -94,6 +95,8 @@ interface GenerationBridgeOptions extends GenerationObserveOptions {
   triggerLocator: string;
   description?: string | undefined;
   returnTimeoutMs: string;
+  flow?: string | undefined;
+  escapeTimeoutMs?: string | undefined;
 }
 
 interface GenerationFinalizeOptions extends GenerationObserveOptions {
@@ -326,7 +329,14 @@ function mappedFailure(
     const exitCode = error.code === "CONFIG_INVALID"
       || error.code === "CONTEXT_INVALID"
       || error.code === "FLOW_INVALID"
+      || error.code === "EXTERNAL_FLOW_NOT_FOUND"
+      || error.code === "EXTERNAL_FLOW_STALE"
+      || error.code === "EXTERNAL_LOCATOR_STRICTNESS"
       ? 2
+      : error.code === "EXTERNAL_PACKAGE_MISMATCH"
+        || error.code === "EXTERNAL_ACTIVITY_MISMATCH"
+        || error.code === "EXTERNAL_STEP_FAILED"
+      ? 1
       : 1;
     writeFailure(dependencies, options, exitCode, error.code, error);
     return;
@@ -464,6 +474,10 @@ function createStartCommand(dependencies: CliDependencies): Command {
       "Replay a reusable Flow before AI step generation"
     )
     .option(
+      "--external-flow <name...>",
+      "Bind external app flow(s) for deterministic bridge replay"
+    )
+    .option(
       "--allow-evidence-drift",
       "Allow changed source evidence; replay remains mandatory"
     )
@@ -568,6 +582,37 @@ function createStartCommand(dependencies: CliDependencies): Command {
                 verificationReportPath: verification.reportPath
               };
             })();
+        const externalFlows = options.externalFlow === undefined
+          ? undefined
+          : await (async (): Promise<NonNullable<
+              Parameters<CliDependencies["generationStarter"]["start"]>[0]["externalFlows"]
+            >> => {
+            if (dependencies.externalFlowResolver === undefined) {
+              throw new GenerationOperationError(
+                "FLOW_INVALID",
+                "External Flow resolver is unavailable"
+              );
+            }
+            const flowNames = options.externalFlow as readonly string[];
+            const resolved = [];
+            for (const name of flowNames) {
+              const resolution = await dependencies.externalFlowResolver
+                .resolve({ projectRoot: options.project, name })
+                .catch((error: unknown) => {
+                  throw new GenerationOperationError(
+                    "FLOW_INVALID",
+                    `External Flow ${name}: ${errorMessage(error)}`
+                  );
+                });
+              resolved.push({
+                name,
+                flowSha256: resolution.flowSha256,
+                escapedPackageName: resolution.flow.escapedPackageName,
+                stepCount: resolution.stepCount
+              });
+            }
+            return resolved;
+          })();
         const session = await dependencies.generationStarter.start({
           projectRoot: options.project,
           config,
@@ -578,6 +623,7 @@ function createStartCommand(dependencies: CliDependencies): Command {
             ? {}
             : { signal: dependencies.signal }),
           ...(baseFlow === undefined ? {} : { baseFlow }),
+          ...(externalFlows === undefined ? {} : { externalFlows }),
           ...(options.allowEvidenceDrift === true
             ? { allowEvidenceDrift: true }
             : {})
@@ -596,7 +642,10 @@ function createStartCommand(dependencies: CliDependencies): Command {
           target: session.target,
           ...(session.baseFlow === undefined
             ? {}
-            : { baseFlow: session.baseFlow })
+            : { baseFlow: session.baseFlow }),
+          ...(session.externalFlows.length === 0
+            ? {}
+            : { externalFlows: session.externalFlows })
         };
         if (options.json === true) {
           writeJson(dependencies.stdout, output);
@@ -938,9 +987,17 @@ function createBridgeCommand(dependencies: CliDependencies): Command {
         "--return-timeout-ms <ms>",
         "Maximum time to wait for return to the target app in milliseconds",
         "60000"
+      )
+      .option(
+        "--flow <name>",
+        "External flow name for deterministic bridge replay (requires --external-flow at session start)"
+      )
+      .option(
+        "--escape-timeout-ms <ms>",
+        "Maximum time to wait for package escape after trigger click in milliseconds"
       ),
     dependencies
-  ).action(async (options: GenerationBridgeOptions): Promise<void> => {
+  )    .action(async (options: GenerationBridgeOptions): Promise<void> => {
     try {
       const generationId = GenerationSessionIdSchema.parse(options.session);
       const scenario = BridgeScenarioSchema.parse(options.scenario);
@@ -950,6 +1007,9 @@ function createBridgeCommand(dependencies: CliDependencies): Command {
       const returnTimeoutMs = z.number().int().positive().parse(
         Number(options.returnTimeoutMs)
       );
+      const escapeTimeoutMs = options.escapeTimeoutMs === undefined
+        ? undefined
+        : z.number().int().positive().parse(Number(options.escapeTimeoutMs));
       const description = resolveBridgeDescription(
         scenario,
         options.description
@@ -968,6 +1028,19 @@ function createBridgeCommand(dependencies: CliDependencies): Command {
         }, `Confirmation required: ${session.pendingConfirmation.challengeId}`);
         return;
       }
+      let flowName: string | undefined;
+      if (options.flow !== undefined) {
+        flowName = z.string().trim().min(1).parse(options.flow);
+        const binding = session.externalFlows.find(
+          (entry) => entry.name === flowName
+        );
+        if (binding === undefined) {
+          throw new GenerationOperationError(
+            "EXTERNAL_FLOW_NOT_FOUND",
+            `External Flow "${flowName}" is not bound to generation session ${generationId}`
+          );
+        }
+      }
       const observation = await runtime.observer.observe({
         generationId,
         ...(dependencies.signal === undefined
@@ -980,6 +1053,8 @@ function createBridgeCommand(dependencies: CliDependencies): Command {
         description,
         triggerLocator,
         returnTimeoutMs,
+        ...(flowName === undefined ? {} : { flow: flowName }),
+        ...(escapeTimeoutMs === undefined ? {} : { escapeTimeoutMs }),
         binding: observation.binding,
         activity: { before: observation.snapshot.activity }
       };

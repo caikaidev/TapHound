@@ -8,6 +8,7 @@ import type {
 } from "../project/project-describer.js";
 import {
   GenerationSessionSchema,
+  GenerationExternalFlowBindingSchema,
   type GenerationErrorCode,
   type GenerationSession
 } from "../../domain/generation.js";
@@ -58,6 +59,13 @@ export class GenerationOperationError extends Error {
   }
 }
 
+export interface GenerationExternalFlowInput {
+  name: string;
+  flowSha256: string;
+  escapedPackageName: string;
+  stepCount: number;
+}
+
 export interface GenerationStartInput {
   projectRoot: string;
   config: TapHoundConfig;
@@ -73,6 +81,7 @@ export interface GenerationStartInput {
     verificationReport: TapHoundReport;
     verificationReportPath: string;
   } | undefined;
+  externalFlows?: readonly GenerationExternalFlowInput[] | undefined;
 }
 
 export interface GenerationStarterDependencies {
@@ -322,6 +331,15 @@ export class GenerationStarter {
       }
     }
 
+    const externalFlowBindings = input.externalFlows === undefined
+      ? []
+      : input.externalFlows.map((entry) => GenerationExternalFlowBindingSchema.parse({
+        name: FlowNameSchema.parse(entry.name),
+        flowSha256: entry.flowSha256,
+        escapedPackageName: entry.escapedPackageName,
+        stepCount: entry.stepCount
+      }));
+
     const generationId = this.dependencies.generateId();
     const runId = distinctId(generationId, this.dependencies.generateId);
     const session = GenerationSessionSchema.parse({
@@ -348,6 +366,7 @@ export class GenerationStarter {
         randomHex: randomHex(this.dependencies.randomBytes(16))
       },
       ...(baseFlow === undefined ? {} : { baseFlow: baseFlow.binding }),
+      externalFlows: externalFlowBindings,
       candidateSteps: baseFlow?.journey.steps ?? [],
       candidateSources: baseFlow?.journey.steps.map(() => "flow") ?? [],
       inFlight: null,

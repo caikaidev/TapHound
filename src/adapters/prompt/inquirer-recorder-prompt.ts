@@ -5,7 +5,9 @@ import {
   select
 } from "@inquirer/prompts";
 
+import type { BridgeScenario } from "../../domain/journey.js";
 import type {
+  ExternalStepAction,
   RecorderAction,
   RecorderPromptPort,
   RecorderTargetChoice,
@@ -67,8 +69,27 @@ const ACTIONS: readonly RecorderAction[] = [
   "scrollTo",
   "back",
   "wait",
+  "bridgeTrigger",
   "finish",
   "cancel"
+];
+
+const EXTERNAL_STEP_ACTIONS: readonly ExternalStepAction[] = [
+  "click",
+  "longClick",
+  "inputText",
+  "swipe",
+  "scrollTo",
+  "back",
+  "wait",
+  "finishExternal"
+];
+
+const BRIDGE_SCENARIOS: readonly BridgeScenario[] = [
+  "photoCapture",
+  "pickImage",
+  "pickFile",
+  "custom"
 ];
 
 function selectedString(value: unknown, allowed?: readonly string[]): string {
@@ -228,5 +249,66 @@ export class InquirerRecorderPrompt implements RecorderPromptPort {
       return { kind: "cancel" };
     }
     return { kind: "select", id: selected };
+  }
+
+  public async selectBridgeScenario(): Promise<BridgeScenario> {
+    const value = await this.prompts.select({
+      message: "Bridge scenario",
+      choices: BRIDGE_SCENARIOS.map((scenario) => ({
+        name: scenario,
+        value: scenario
+      }))
+    });
+    return selectedString(value, BRIDGE_SCENARIOS) as BridgeScenario;
+  }
+
+  public async inputBridgeDescription(
+    scenario: BridgeScenario
+  ): Promise<string> {
+    const value = await this.prompts.input({
+      message: `Bridge description${
+        scenario === "custom" ? " (required)" : ""
+      }`,
+      validate: (answer) => answer.trim().length > 0 || "Description must not be empty"
+    });
+    return selectedString(value);
+  }
+
+  public async inputBridgeReturnTimeoutMs(): Promise<number> {
+    return selectedNumber(await this.prompts.number({
+      message: "Return timeout (ms)",
+      default: 30000,
+      min: 1
+    }), 1);
+  }
+
+  public async selectExternalStepAction(): Promise<ExternalStepAction> {
+    const value = await this.prompts.select({
+      message: "Choose an external App Action",
+      choices: EXTERNAL_STEP_ACTIONS.map((action) => ({
+        name: action,
+        value: action
+      }))
+    });
+    return selectedString(value, EXTERNAL_STEP_ACTIONS) as ExternalStepAction;
+  }
+
+  public notifyExternalEscape(escapedPackageName: string): Promise<void> {
+    this.diagnostics.write(
+      `TapHound: Package escape detected — ${escapedPackageName}\n`
+    );
+    return Promise.resolve();
+  }
+
+  public notifyExternalReturn(): Promise<void> {
+    this.diagnostics.write("TapHound: Returned to target package\n");
+    return Promise.resolve();
+  }
+
+  public notifyBridgeNoEscape(): Promise<void> {
+    this.diagnostics.write(
+      "TapHound: Trigger did not cause a package escape; bridge step was not recorded\n"
+    );
+    return Promise.resolve();
   }
 }

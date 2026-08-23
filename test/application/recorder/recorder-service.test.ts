@@ -7,7 +7,7 @@ import { parseLayout } from "../../../src/adapters/android-cli/layout-parser.js"
 import { RecorderService } from "../../../src/application/recorder/recorder-service.js";
 import type { Journey } from "../../../src/domain/journey.js";
 import type { RecorderPromptPort } from "../../../src/ports/recorder-prompt.js";
-import type { RecorderAction } from "../../../src/ports/recorder-prompt.js";
+import type { ExternalStepAction, RecorderAction } from "../../../src/ports/recorder-prompt.js";
 import type { JourneyWriterPort } from "../../../src/ports/journey-writer.js";
 import {
   runtimeConfig,
@@ -34,7 +34,16 @@ function prompt(actions: RecorderAction[]): RecorderPromptPort {
     selectFallbackLabel: vi.fn(() => Promise.resolve(undefined)),
     notifyFailure: vi.fn(() => Promise.resolve()),
     selectScrollContainer: vi.fn(() => Promise.resolve("scroll_container")),
-    scrollTargetDecision: vi.fn(() => Promise.resolve({ kind: "cancel" } as const))
+    scrollTargetDecision: vi.fn(() => Promise.resolve({ kind: "cancel" } as const)),
+    selectBridgeScenario: vi.fn(() => Promise.resolve("photoCapture" as const)),
+    inputBridgeDescription: vi.fn(() => Promise.resolve("Take a photo")),
+    inputBridgeReturnTimeoutMs: vi.fn(() => Promise.resolve(30000)),
+    selectExternalStepAction: vi.fn(() =>
+      Promise.resolve("finishExternal" as ExternalStepAction)
+    ),
+    notifyExternalEscape: vi.fn(() => Promise.resolve()),
+    notifyExternalReturn: vi.fn(() => Promise.resolve()),
+    notifyBridgeNoEscape: vi.fn(() => Promise.resolve())
   };
 }
 
@@ -645,5 +654,355 @@ describe("RecorderService", () => {
       "scrollTo reached the 30-swipe recording cap; the Journey would not replay"
     );
     expect(journeyWriter.write).not.toHaveBeenCalled();
+  });
+
+  it("records a bridge step with an external click step and auto replayMode", async () => {
+    const runtime = runtimeFixture();
+    vi.mocked(runtime.adb.foregroundComponent)
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: "com.example.app.MainActivity"
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.android.camera",
+        activity: "com.android.camera.CameraActivity"
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.android.camera",
+        activity: "com.android.camera.CameraActivity"
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.android.camera",
+        activity: "com.android.camera.CameraActivity"
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: "com.example.app.MainActivity"
+      });
+    vi.mocked(runtime.adb.currentActivity)
+      .mockResolvedValueOnce("com.example.app.MainActivity")
+      .mockResolvedValueOnce("com.example.app.SearchActivity");
+    const recorderPrompt = prompt(["bridgeTrigger", "finish"]);
+    vi.mocked(recorderPrompt.selectExternalStepAction)
+      .mockResolvedValueOnce("click")
+      .mockResolvedValueOnce("finishExternal");
+    vi.mocked(recorderPrompt.selectBridgeScenario).mockResolvedValue("photoCapture");
+    vi.mocked(recorderPrompt.inputBridgeDescription).mockResolvedValue("Take a photo");
+    vi.mocked(recorderPrompt.inputBridgeReturnTimeoutMs).mockResolvedValue(30000);
+    const journeyWriter = writer();
+    const service = new RecorderService({
+      androidCli: runtime.androidCli,
+      adb: runtime.adb,
+      clock: runtime.dependencies.clock,
+      prompt: recorderPrompt,
+      journeyWriter
+    });
+
+    const result = await service.record({
+      config: runtimeConfig,
+      projectRoot: "/project",
+      deviceSerial: "emulator-5554",
+      journeyName: "Photo capture",
+      outputPath: "/project/photo.json"
+    });
+
+    expect(result).toMatchObject({ status: "completed", stepsRecorded: 1 });
+    const step = journeyWriter.journeys[0]?.steps[0];
+    expect(step).toMatchObject({
+      action: "bridge",
+      scenario: "photoCapture",
+      description: "Take a photo",
+      replayMode: "auto",
+      escapedPackageName: "com.android.camera",
+      returnTimeoutMs: 30000,
+      triggerLocator: { resourceId: "search" },
+      activity: {
+        before: "com.example.app.MainActivity",
+        after: "com.example.app.SearchActivity"
+      },
+      externalSteps: [{
+        action: "click",
+        locator: { resourceId: "search" },
+        expectedActivity: "com.android.camera.CameraActivity"
+      }]
+    });
+    expect(recorderPrompt.notifyExternalEscape).toHaveBeenCalledWith(
+      "com.android.camera"
+    );
+    expect(recorderPrompt.notifyExternalReturn).toHaveBeenCalled();
+  });
+
+  it("skips the bridge step when the trigger does not cause a package escape", async () => {
+    const runtime = runtimeFixture();
+    vi.mocked(runtime.adb.foregroundComponent).mockResolvedValue({
+      packageName: "com.example.app",
+      activity: "com.example.app.MainActivity"
+    });
+    const recorderPrompt = prompt(["bridgeTrigger", "cancel"]);
+    vi.mocked(recorderPrompt.selectBridgeScenario).mockResolvedValue("custom");
+    vi.mocked(recorderPrompt.inputBridgeDescription).mockResolvedValue("No escape");
+    vi.mocked(recorderPrompt.inputBridgeReturnTimeoutMs).mockResolvedValue(30000);
+    const journeyWriter = writer();
+    const service = new RecorderService({
+      androidCli: runtime.androidCli,
+      adb: runtime.adb,
+      clock: runtime.dependencies.clock,
+      prompt: recorderPrompt,
+      journeyWriter
+    });
+
+    const result = await service.record({
+      config: runtimeConfig,
+      projectRoot: "/project",
+      deviceSerial: "emulator-5554",
+      journeyName: "No escape",
+      outputPath: "/project/no-escape.json"
+    });
+
+    expect(result).toEqual({ status: "cancelled", stepsRecorded: 0 });
+    expect(recorderPrompt.notifyBridgeNoEscape).toHaveBeenCalled();
+    expect(journeyWriter.write).not.toHaveBeenCalled();
+  });
+
+  it("records a bridge step with no external steps when finishExternal is immediate", async () => {
+    const runtime = runtimeFixture();
+    vi.mocked(runtime.adb.foregroundComponent)
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: "com.example.app.MainActivity"
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.android.camera",
+        activity: "com.android.camera.CameraActivity"
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: "com.example.app.MainActivity"
+      });
+    vi.mocked(runtime.adb.currentActivity)
+      .mockResolvedValueOnce("com.example.app.MainActivity")
+      .mockResolvedValueOnce("com.example.app.MainActivity");
+    const recorderPrompt = prompt(["bridgeTrigger", "finish"]);
+    vi.mocked(recorderPrompt.selectBridgeScenario).mockResolvedValue("photoCapture");
+    vi.mocked(recorderPrompt.inputBridgeDescription).mockResolvedValue("Auto-return camera");
+    vi.mocked(recorderPrompt.inputBridgeReturnTimeoutMs).mockResolvedValue(30000);
+    vi.mocked(recorderPrompt.selectExternalStepAction).mockResolvedValue("finishExternal");
+    const journeyWriter = writer();
+    const service = new RecorderService({
+      androidCli: runtime.androidCli,
+      adb: runtime.adb,
+      clock: runtime.dependencies.clock,
+      prompt: recorderPrompt,
+      journeyWriter
+    });
+
+    const result = await service.record({
+      config: runtimeConfig,
+      projectRoot: "/project",
+      deviceSerial: "emulator-5554",
+      journeyName: "Auto return",
+      outputPath: "/project/auto-return.json"
+    });
+
+    expect(result).toMatchObject({ status: "completed", stepsRecorded: 1 });
+    const step = journeyWriter.journeys[0]?.steps[0];
+    expect(step).toMatchObject({
+      action: "bridge",
+      replayMode: "auto",
+      escapedPackageName: "com.android.camera",
+      externalSteps: []
+    });
+  });
+
+  it("fails the recording when the foreground does not return within the timeout", async () => {
+    const runtime = runtimeFixture();
+    vi.mocked(runtime.adb.foregroundComponent)
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: "com.example.app.MainActivity"
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.android.camera",
+        activity: "com.android.camera.CameraActivity"
+      })
+      .mockResolvedValue({
+        packageName: "com.android.camera",
+        activity: "com.android.camera.CameraActivity"
+      });
+    vi.mocked(runtime.adb.currentActivity)
+      .mockResolvedValueOnce("com.example.app.MainActivity");
+    const recorderPrompt = prompt(["bridgeTrigger", "finish"]);
+    vi.mocked(recorderPrompt.selectBridgeScenario).mockResolvedValue("photoCapture");
+    vi.mocked(recorderPrompt.inputBridgeDescription).mockResolvedValue("Stuck camera");
+    vi.mocked(recorderPrompt.inputBridgeReturnTimeoutMs).mockResolvedValue(1000);
+    vi.mocked(recorderPrompt.selectExternalStepAction).mockResolvedValue("finishExternal");
+    const journeyWriter = writer();
+    const service = new RecorderService({
+      androidCli: runtime.androidCli,
+      adb: runtime.adb,
+      clock: runtime.dependencies.clock,
+      prompt: recorderPrompt,
+      journeyWriter
+    });
+
+    const result = await service.record({
+      config: runtimeConfig,
+      projectRoot: "/project",
+      deviceSerial: "emulator-5554",
+      journeyName: "Stuck",
+      outputPath: "/project/stuck.json"
+    });
+
+    expect(result).toEqual({
+      status: "failed",
+      stepsRecorded: 0,
+      message: "Foreground did not return to target package within the timeout"
+    });
+    expect(journeyWriter.write).not.toHaveBeenCalled();
+  });
+
+  it("filters external step targets to resourceId-only locators", async () => {
+    const runtime = runtimeFixture();
+    const layoutWithMixedLocators = [
+      {
+        id: "shutter",
+        resourceId: "com.android.camera:id/shutter",
+        clickable: true,
+        enabled: true,
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+        children: []
+      },
+      {
+        id: "label",
+        text: "Tap to capture",
+        clickable: true,
+        enabled: true,
+        bounds: { left: 0, top: 100, right: 100, bottom: 200 },
+        children: []
+      }
+    ];
+    vi.mocked(runtime.androidCli.layout).mockResolvedValue(layoutWithMixedLocators);
+    vi.mocked(runtime.adb.foregroundComponent)
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: "com.example.app.MainActivity"
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.android.camera",
+        activity: "com.android.camera.CameraActivity"
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.android.camera",
+        activity: "com.android.camera.CameraActivity"
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.android.camera",
+        activity: "com.android.camera.CameraActivity"
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: "com.example.app.MainActivity"
+      });
+    vi.mocked(runtime.adb.currentActivity)
+      .mockResolvedValueOnce("com.example.app.MainActivity")
+      .mockResolvedValueOnce("com.example.app.MainActivity");
+    const recorderPrompt = prompt(["bridgeTrigger", "finish"]);
+    vi.mocked(recorderPrompt.selectBridgeScenario).mockResolvedValue("photoCapture");
+    vi.mocked(recorderPrompt.inputBridgeDescription).mockResolvedValue("Photo");
+    vi.mocked(recorderPrompt.inputBridgeReturnTimeoutMs).mockResolvedValue(30000);
+    vi.mocked(recorderPrompt.selectExternalStepAction)
+      .mockResolvedValueOnce("click")
+      .mockResolvedValueOnce("finishExternal");
+    const offeredTargets: { id: string; label: string }[][] = [];
+    vi.mocked(recorderPrompt.selectTarget).mockImplementation((choices) => {
+      offeredTargets.push([...choices]);
+      return Promise.resolve(choices[0]?.id ?? "shutter");
+    });
+    const journeyWriter = writer();
+    const service = new RecorderService({
+      androidCli: runtime.androidCli,
+      adb: runtime.adb,
+      clock: runtime.dependencies.clock,
+      prompt: recorderPrompt,
+      journeyWriter
+    });
+
+    await service.record({
+      config: runtimeConfig,
+      projectRoot: "/project",
+      deviceSerial: "emulator-5554",
+      journeyName: "Resource filter",
+      outputPath: "/project/resource-filter.json"
+    });
+
+    // First selectTarget call is the trigger (both elements are clickable, so both offered)
+    // Second selectTarget call is the external step (only resourceId element offered)
+    expect(offeredTargets.length).toBeGreaterThanOrEqual(2);
+    const externalTargetChoices = offeredTargets[1];
+    expect(externalTargetChoices).toHaveLength(1);
+    expect(externalTargetChoices?.[0]?.id).toBe("shutter");
+  });
+
+  it("records an external back step that causes the app to return", async () => {
+    const runtime = runtimeFixture();
+    vi.mocked(runtime.adb.foregroundComponent)
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: "com.example.app.MainActivity"
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.android.camera",
+        activity: "com.android.camera.CameraActivity"
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.android.camera",
+        activity: "com.android.camera.CameraActivity"
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: "com.example.app.MainActivity"
+      })
+      .mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: "com.example.app.MainActivity"
+      });
+    vi.mocked(runtime.adb.currentActivity)
+      .mockResolvedValueOnce("com.example.app.MainActivity")
+      .mockResolvedValueOnce("com.example.app.MainActivity");
+    const recorderPrompt = prompt(["bridgeTrigger", "finish"]);
+    vi.mocked(recorderPrompt.selectBridgeScenario).mockResolvedValue("custom");
+    vi.mocked(recorderPrompt.inputBridgeDescription).mockResolvedValue("Back to app");
+    vi.mocked(recorderPrompt.inputBridgeReturnTimeoutMs).mockResolvedValue(30000);
+    vi.mocked(recorderPrompt.selectExternalStepAction)
+      .mockResolvedValueOnce("back")
+      .mockResolvedValueOnce("finishExternal");
+    const journeyWriter = writer();
+    const service = new RecorderService({
+      androidCli: runtime.androidCli,
+      adb: runtime.adb,
+      clock: runtime.dependencies.clock,
+      prompt: recorderPrompt,
+      journeyWriter
+    });
+
+    const result = await service.record({
+      config: runtimeConfig,
+      projectRoot: "/project",
+      deviceSerial: "emulator-5554",
+      journeyName: "Back return",
+      outputPath: "/project/back-return.json"
+    });
+
+    expect(result).toMatchObject({ status: "completed", stepsRecorded: 1 });
+    const step = journeyWriter.journeys[0]?.steps[0];
+    expect(step).toMatchObject({
+      action: "bridge",
+      replayMode: "auto",
+      externalSteps: [{
+        action: "back",
+        expectedActivity: "com.android.camera.CameraActivity"
+      }]
+    });
+    expect(runtime.adb.back).toHaveBeenCalledWith("emulator-5554", undefined);
   });
 });

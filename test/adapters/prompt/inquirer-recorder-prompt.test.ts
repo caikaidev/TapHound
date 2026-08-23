@@ -91,4 +91,66 @@ describe("InquirerRecorderPrompt", () => {
       }
     });
   });
+
+  describe("bridge prompts", () => {
+    it("selects a bridge scenario", async () => {
+      const prompt = new InquirerRecorderPrompt(
+        prompts(["photoCapture"]),
+        { write: vi.fn() }
+      );
+      await expect(prompt.selectBridgeScenario()).resolves.toBe("photoCapture");
+    });
+
+    it("inputs a bridge description", async () => {
+      const prompt = new InquirerRecorderPrompt(
+        prompts(["Take a photo"]),
+        { write: vi.fn() }
+      );
+      await expect(prompt.inputBridgeDescription("photoCapture"))
+        .resolves.toBe("Take a photo");
+    });
+
+    it("inputs a return timeout in milliseconds", async () => {
+      const prompt = new InquirerRecorderPrompt(
+        prompts([45000]),
+        { write: vi.fn() }
+      );
+      await expect(prompt.inputBridgeReturnTimeoutMs()).resolves.toBe(45000);
+    });
+
+    it("selects an external step action", async () => {
+      const prompt = new InquirerRecorderPrompt(
+        prompts(["click"]),
+        { write: vi.fn() }
+      );
+      await expect(prompt.selectExternalStepAction()).resolves.toBe("click");
+    });
+
+    it("writes escape notification to the diagnostic stream", async () => {
+      const output = { write: vi.fn(() => true) };
+      const prompt = new InquirerRecorderPrompt(prompts([]), output);
+      await prompt.notifyExternalEscape("com.android.camera");
+      expect(output.write).toHaveBeenCalledWith(
+        "TapHound: Package escape detected — com.android.camera\n"
+      );
+    });
+
+    it("writes return notification to the diagnostic stream", async () => {
+      const output = { write: vi.fn(() => true) };
+      const prompt = new InquirerRecorderPrompt(prompts([]), output);
+      await prompt.notifyExternalReturn();
+      expect(output.write).toHaveBeenCalledWith(
+        "TapHound: Returned to target package\n"
+      );
+    });
+
+    it("writes no-escape notification to the diagnostic stream", async () => {
+      const output = { write: vi.fn(() => true) };
+      const prompt = new InquirerRecorderPrompt(prompts([]), output);
+      await prompt.notifyBridgeNoEscape();
+      expect(output.write).toHaveBeenCalledWith(
+        "TapHound: Trigger did not cause a package escape; bridge step was not recorded\n"
+      );
+    });
+  });
 });

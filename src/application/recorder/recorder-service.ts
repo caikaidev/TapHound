@@ -4,17 +4,20 @@ import { normalizeActivity } from "../../domain/activity.js";
 import { primaryAppPid } from "../../domain/app-process.js";
 import type { TapHoundConfig } from "../../domain/config.js";
 import {
+  ExternalStepSchema,
   JourneySchema,
   JourneyStepSchema,
+  type ExternalStep,
   type Journey,
   type JourneyStep
 } from "../../domain/journey.js";
 import type { LayoutElement, Locator } from "../../domain/layout.js";
-import type { AdbPort } from "../../ports/adb.js";
+import type { AppIdentity, AdbPort } from "../../ports/adb.js";
 import type { AndroidCliPort } from "../../ports/android-cli.js";
 import type { Clock } from "../../ports/clock.js";
 import type { JourneyWriterPort } from "../../ports/journey-writer.js";
 import type {
+  ExternalStepAction,
   RecorderAction,
   RecorderPromptPort
 } from "../../ports/recorder-prompt.js";
@@ -73,6 +76,16 @@ type ActionDraft =
       distancePercent: number;
       durationMs: number;
     };
+
+type BridgeRecordResult =
+  | { status: "recorded"; step: JourneyStep }
+  | { status: "skipped" }
+  | { status: "failed"; message: string }
+  | { status: "cancelled" };
+
+type ExternalStepsResult =
+  | { status: "recorded"; steps: ExternalStep[] }
+  | { status: "cancelled" };
 
 function failedCommand(result: {
   exitCode: number | null;
@@ -243,6 +256,24 @@ export class RecorderService {
         return { status: "completed", stepsRecorded: steps.length, journey };
       }
 
+      if (action === "bridgeTrigger") {
+        const result = await this.recordBridgeStep(layout, input, identity);
+        if (result.status === "cancelled") {
+          return { status: "cancelled", stepsRecorded: steps.length };
+        }
+        if (result.status === "failed") {
+          return {
+            status: "failed",
+            stepsRecorded: steps.length,
+            message: result.message
+          };
+        }
+        if (result.status === "recorded") {
+          steps.push(result.step);
+        }
+        continue;
+      }
+
       const prepared = await this.prepareAction(action, layout, input);
       if (prepared === undefined) {
         continue;
@@ -294,7 +325,7 @@ export class RecorderService {
   }
 
   private async prepareAction(
-    action: Exclude<RecorderAction, "finish" | "cancel">,
+    action: Exclude<RecorderAction, "finish" | "cancel" | "bridgeTrigger">,
     layout: readonly LayoutElement[],
     input: RecordInput
   ): Promise<{ draft: ActionDraft; target?: RecorderTarget } | undefined> {
@@ -381,9 +412,13 @@ export class RecorderService {
 
   private async prepareScrollTo(
     layout: readonly LayoutElement[],
-    input: RecordInput
+    input: RecordInput,
+    packageName: string = input.config.run.packageName,
+    resourceIdOnly: boolean = false
   ): Promise<{ draft: ActionDraft; target?: RecorderTarget } | undefined> {
-    const containers = listRecorderTargets(layout, "swipe");
+    const containers = listRecorderTargets(layout, "swipe").filter(
+      (target) => !resourceIdOnly || target.locator.resourceId !== undefined
+    );
     if (containers.length === 0) {
       await this.dependencies.prompt.notifyFailure(
         "No scrollable element has a unique deterministic Locator"
@@ -406,12 +441,14 @@ export class RecorderService {
       this.dependencies.androidCli,
       this.dependencies.clock,
       input.deviceSerial,
-      input.config.run.packageName
+      packageName
     );
     let currentLayout = layout;
     let swipesUsed = 0;
     for (;;) {
-      const targets = listLocatableTargets(currentLayout);
+      const targets = listLocatableTargets(currentLayout).filter(
+        (target) => !resourceIdOnly || target.locator.resourceId !== undefined
+      );
       const decision = await this.dependencies.prompt.scrollTargetDecision(
         targets.map((t) => ({ id: t.element.id, label: t.label }))
       );
@@ -475,5 +512,360 @@ export class RecorderService {
         timeoutMs: input.config.idle.timeoutMs
       });
     }
+  }
+
+  private async recordBridgeStep(
+    layout: readonly LayoutElement[],
+    input: RecordInput,
+    identity: AppIdentity
+  ): Promise<BridgeRecordResult> {
+    try {
+      const scenario = await this.dependencies.prompt.selectBridgeScenario();
+      const description = await this.dependencies.prompt.inputBridgeDescription(scenario);
+      const returnTimeoutMs = await this.dependencies.prompt.inputBridgeReturnTimeoutMs();
+
+      const targets = listRecorderTargets(layout, "click");
+      if (targets.length === 0) {
+        await this.dependencies.prompt.notifyFailure(
+          "No clickable element has a unique deterministic Locator for the bridge trigger"
+        );
+        return { status: "skipped" };
+      }
+      const selectedId = await this.dependencies.prompt.selectTarget(
+        targets.map((target) => ({
+          id: target.element.id,
+          label: target.label
+        }))
+      );
+      const triggerTarget = targets.find(
+        (candidate) => candidate.element.id === selectedId
+      );
+      if (triggerTarget === undefined) {
+        await this.dependencies.prompt.notifyFailure(
+          "Selected trigger element is unavailable"
+        );
+        return { status: "skipped" };
+      }
+
+      const before = normalizeActivity(
+        input.config.run.packageName,
+        await this.dependencies.adb.currentActivity(identity)
+      );
+
+      const executor = new ActionExecutor(
+        this.dependencies.adb,
+        input.deviceSerial
+      );
+      const triggerClick: Extract<JourneyStep, { action: "click" }> = {
+        action: "click",
+        locator: triggerTarget.locator,
+        activity: { before, after: before }
+      };
+      const triggerExecution = await executor.execute(
+        triggerClick,
+        actionTarget(triggerTarget),
+        input.signal
+      );
+      if (triggerExecution.status === "failed") {
+        await this.dependencies.prompt.notifyFailure(triggerExecution.message);
+        return { status: "skipped" };
+      }
+
+      const escapedPackageName = await this.pollBridgeEscape(identity, input);
+      if (escapedPackageName === null) {
+        await this.dependencies.prompt.notifyBridgeNoEscape();
+        return { status: "skipped" };
+      }
+      await this.dependencies.prompt.notifyExternalEscape(escapedPackageName);
+
+      const externalResult = await this.recordExternalSteps(input, escapedPackageName);
+      if (externalResult.status === "cancelled") {
+        return { status: "cancelled" };
+      }
+      const externalSteps = externalResult.steps;
+
+      const returned = await this.pollBridgeReturn(identity, input, returnTimeoutMs);
+      if (!returned) {
+        return {
+          status: "failed",
+          message: "Foreground did not return to target package within the timeout"
+        };
+      }
+      await this.dependencies.prompt.notifyExternalReturn();
+
+      const idleWaiter = new IdleWaiter(
+        this.dependencies.androidCli,
+        this.dependencies.clock,
+        input.deviceSerial,
+        input.config.run.packageName
+      );
+      const idle = await idleWaiter.waitUntilIdle(input.config.idle, input.signal);
+      if (idle.status === "cancelled") {
+        return { status: "cancelled" };
+      }
+      if (idle.status === "timeout") {
+        return {
+          status: "failed",
+          message: "Layout did not become stable before timeout"
+        };
+      }
+
+      const processes = await this.dependencies.adb.appProcesses(identity);
+      if (primaryAppPid(processes, input.config.run.packageName) === null) {
+        return {
+          status: "failed",
+          message: "App process crashed after the recorded Action"
+        };
+      }
+
+      const after = normalizeActivity(
+        input.config.run.packageName,
+        await this.dependencies.adb.currentActivity(identity)
+      );
+
+      const bridgeStep = JourneyStepSchema.parse({
+        action: "bridge",
+        scenario,
+        description,
+        triggerLocator: triggerTarget.locator,
+        escapedPackageName,
+        returnTimeoutMs,
+        externalSteps,
+        replayMode: "auto",
+        activity: { before, after }
+      });
+      return { status: "recorded", step: bridgeStep };
+    } catch (error) {
+      if (input.signal?.aborted === true) {
+        return { status: "cancelled" };
+      }
+      throw error;
+    }
+  }
+
+  private async recordExternalSteps(
+    input: RecordInput,
+    escapedPackageName: string
+  ): Promise<ExternalStepsResult> {
+    const externalSteps: ExternalStep[] = [];
+    const externalIdentity: AppIdentity = {
+      packageName: escapedPackageName,
+      deviceSerial: input.deviceSerial,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      timeoutMs: input.config.idle.timeoutMs
+    };
+    const externalIdleWaiter = new IdleWaiter(
+      this.dependencies.androidCli,
+      this.dependencies.clock,
+      input.deviceSerial,
+      escapedPackageName
+    );
+    const executor = new ActionExecutor(
+      this.dependencies.adb,
+      input.deviceSerial
+    );
+
+    for (;;) {
+      const action = await this.dependencies.prompt.selectExternalStepAction();
+      if (action === "finishExternal") {
+        break;
+      }
+
+      const foreground = await this.dependencies.adb.foregroundComponent(
+        externalIdentity
+      );
+      if (foreground.packageName !== escapedPackageName) {
+        break;
+      }
+      const expectedActivity = foreground.activity;
+
+      const layout = await this.dependencies.androidCli.layout({
+        deviceSerial: input.deviceSerial,
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+        timeoutMs: input.config.idle.timeoutMs
+      });
+
+      const prepared = await this.prepareExternalStep(action, layout, input, escapedPackageName);
+      if (prepared === undefined) {
+        continue;
+      }
+
+      if (action !== "scrollTo") {
+        const execution = await executor.execute(
+          prepared.draft as JourneyStep,
+          actionTarget(prepared.target),
+          input.signal
+        );
+        if (execution.status === "failed") {
+          await this.dependencies.prompt.notifyFailure(execution.message);
+          continue;
+        }
+
+        const postForeground = await this.dependencies.adb.foregroundComponent(
+          externalIdentity
+        );
+        if (postForeground.packageName !== escapedPackageName) {
+          externalSteps.push(
+            this.buildExternalStep(prepared.draft, expectedActivity)
+          );
+          break;
+        }
+
+        const idle = await externalIdleWaiter.waitUntilIdle(
+          input.config.idle,
+          input.signal
+        );
+        if (idle.status === "cancelled") {
+          return { status: "cancelled" };
+        }
+        if (idle.status === "timeout") {
+          await this.dependencies.prompt.notifyFailure(
+            "External app layout did not become stable before timeout"
+          );
+          break;
+        }
+      }
+
+      externalSteps.push(
+        this.buildExternalStep(prepared.draft, expectedActivity)
+      );
+    }
+
+    return { status: "recorded", steps: externalSteps };
+  }
+
+  private async prepareExternalStep(
+    action: Exclude<ExternalStepAction, "finishExternal">,
+    layout: readonly LayoutElement[],
+    input: RecordInput,
+    packageName: string
+  ): Promise<{ draft: ActionDraft; target?: RecorderTarget } | undefined> {
+    if (action === "scrollTo") {
+      return this.prepareScrollTo(layout, input, packageName, true);
+    }
+    if (action === "inputText") {
+      return {
+        draft: { action, text: await this.dependencies.prompt.inputText() }
+      };
+    }
+    if (action === "back" || action === "wait") {
+      return { draft: { action } };
+    }
+
+    const targets = listRecorderTargets(layout, action).filter(
+      (target) => target.locator.resourceId !== undefined
+    );
+    if (targets.length === 0) {
+      await this.dependencies.prompt.notifyFailure(
+        "No enabled element has a unique resourceId Locator in the external app"
+      );
+      return undefined;
+    }
+    const selectedId = await this.dependencies.prompt.selectTarget(
+      targets.map((target) => ({
+        id: target.element.id,
+        label: target.label
+      }))
+    );
+    const target = targets.find(
+      (candidate) => candidate.element.id === selectedId
+    );
+    if (target === undefined) {
+      await this.dependencies.prompt.notifyFailure(
+        "Selected external element is unavailable"
+      );
+      return undefined;
+    }
+
+    if (action === "swipe") {
+      const options = await this.dependencies.prompt.swipeOptions();
+      return {
+        target,
+        draft: {
+          action,
+          locator: target.locator,
+          direction: await this.dependencies.prompt.selectSwipeDirection(),
+          ...options
+        }
+      };
+    }
+
+    if (action === "click") {
+      return {
+        target,
+        draft: {
+          action,
+          locator: target.locator
+        }
+      };
+    }
+
+    return {
+      target,
+      draft: {
+        action,
+        locator: target.locator,
+        durationMs: await this.dependencies.prompt.longClickDuration()
+      }
+    };
+  }
+
+  private buildExternalStep(
+    draft: ActionDraft,
+    expectedActivity: string
+  ): ExternalStep {
+    return ExternalStepSchema.parse({
+      ...draft,
+      expectedActivity
+    });
+  }
+
+  private async pollBridgeEscape(
+    identity: AppIdentity,
+    input: RecordInput
+  ): Promise<string | null> {
+    const deadline = this.dependencies.clock.now() + 3000;
+    while (this.dependencies.clock.now() < deadline) {
+      if (input.signal?.aborted === true) return null;
+      const foreground = await this.dependencies.adb.foregroundComponent(
+        identity
+      );
+      if (foreground.packageName !== input.config.run.packageName) {
+        return foreground.packageName;
+      }
+      await this.dependencies.clock.sleep(
+        Math.min(
+          500,
+          Math.max(0, deadline - this.dependencies.clock.now())
+        ),
+        input.signal
+      );
+    }
+    return null;
+  }
+
+  private async pollBridgeReturn(
+    identity: AppIdentity,
+    input: RecordInput,
+    timeoutMs: number
+  ): Promise<boolean> {
+    const deadline = this.dependencies.clock.now() + timeoutMs;
+    while (this.dependencies.clock.now() < deadline) {
+      if (input.signal?.aborted === true) return false;
+      const foreground = await this.dependencies.adb.foregroundComponent(
+        identity
+      );
+      if (foreground.packageName === input.config.run.packageName) {
+        return true;
+      }
+      await this.dependencies.clock.sleep(
+        Math.min(
+          500,
+          Math.max(0, deadline - this.dependencies.clock.now())
+        ),
+        input.signal
+      );
+    }
+    return false;
   }
 }

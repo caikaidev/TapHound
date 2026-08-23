@@ -688,6 +688,58 @@ describe("TapHound CLI commands", () => {
     expect(test.exitCodes).toEqual([0]);
   });
 
+  it("lists base and external Flows with --include-external", async () => {
+    const test = dependencies();
+    test.value.journeyResolver = {
+      resolve: vi.fn(),
+      resolveFlow: vi.fn(),
+      listFlows: vi.fn(() => Promise.resolve([{
+        name: "core/home",
+        path: ".taphound/flows/core/home.json",
+        status: "valid" as const,
+        entryActivity: "com.example.app.MainActivity",
+        exitActivity: "com.example.app.HomeActivity",
+        stepCount: 1,
+        resolutionSha256: "3".repeat(64)
+      }]))
+    };
+    test.value.journeyCompositionStore = { writeText: vi.fn() };
+    test.value.externalFlowResolver = {
+      resolve: vi.fn(),
+      list: vi.fn(() => Promise.resolve([{
+        name: "camera/photo-capture",
+        source: "builtin" as const,
+        path: "assets/external-flows/camera/photo-capture.json",
+        status: "valid" as const,
+        escapedPackageName: "com.android.camera2",
+        stepCount: 2
+      }]))
+    };
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "journey", "list-flows",
+      "--project", "/project",
+      "--include-external",
+      "--json"
+    ]);
+
+    const parsed = JSON.parse(test.stdout.value) as {
+      status: string;
+      exitCode: number;
+      flows: { name: string }[];
+      externalFlows: { name: string; source: string }[];
+    };
+    expect(parsed.status).toBe("listed");
+    expect(parsed.exitCode).toBe(0);
+    expect(parsed.flows).toHaveLength(1);
+    expect(parsed.flows[0].name).toBe("core/home");
+    expect(parsed.externalFlows).toHaveLength(1);
+    expect(parsed.externalFlows[0].name).toBe("camera/photo-capture");
+    expect(parsed.externalFlows[0].source).toBe("builtin");
+    expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
+    expect(test.exitCodes).toEqual([0]);
+  });
+
   it("observes a generation with one exact JSON result", async () => {
     const test = dependencies();
 

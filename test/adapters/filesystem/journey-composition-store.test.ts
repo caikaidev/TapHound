@@ -70,4 +70,25 @@ describe("FileSystemJourneyCompositionStore", () => {
       new FileSystemJourneyCompositionStore().listFlowPaths(projectRoot)
     ).rejects.toThrow(/escape|safe directory/i);
   });
+
+  it("skips the external subdirectory when listing base Flows", async () => {
+    const projectRoot = await root();
+    const flowsRoot = join(projectRoot, ".taphound/flows");
+    await mkdir(join(flowsRoot, "external"), { recursive: true });
+    await writeFile(
+      join(flowsRoot, "external", "camera.json"),
+      "{\"version\":1,\"kind\":\"externalFlow\"}\n"
+    );
+    await mkdir(join(flowsRoot, "core"), { recursive: true });
+    await writeFile(
+      join(flowsRoot, "core", "home.json"),
+      "{\"version\":1}\n"
+    );
+
+    const paths = await new FileSystemJourneyCompositionStore()
+      .listFlowPaths(projectRoot);
+
+    expect(paths).toEqual([".taphound/flows/core/home.json"]);
+    expect(paths.some((p) => p.includes("external"))).toBe(false);
+  });
 });

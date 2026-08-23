@@ -13,6 +13,7 @@ import {
 
 import {
   BUILD_DIR,
+  EXTERNAL_FLOWS_DIR,
   FLOWS_DIR
 } from "../../domain/workspace.js";
 import type {
@@ -84,6 +85,7 @@ implements JourneyCompositionStore {
     }
 
     const paths: string[] = [];
+    const externalDir = resolve(canonicalRoot, EXTERNAL_FLOWS_DIR);
     const visit = async (directory: string): Promise<void> => {
       const entries = await readdir(directory, { withFileTypes: true });
       for (const entry of entries) {
@@ -92,6 +94,9 @@ implements JourneyCompositionStore {
           throw new Error(`Flow catalog cannot contain symlinks: ${path}`);
         }
         if (entry.isDirectory()) {
+          if (path === externalDir) {
+            continue;
+          }
           await visit(path);
         } else if (entry.isFile() && entry.name.endsWith(".json")) {
           paths.push(relative(canonicalRoot, path).replaceAll("\\", "/"));

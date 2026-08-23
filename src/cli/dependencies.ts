@@ -5,7 +5,8 @@ import {
   rm
 } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve as resolvePath } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { AdbAdapter } from "../adapters/adb/adb-adapter.js";
 import { AndroidCliAdapter } from "../adapters/android-cli/android-cli-adapter.js";
@@ -18,6 +19,9 @@ import { FileSystemJourneyWriter } from "../adapters/filesystem/journey-writer.j
 import {
   FileSystemJourneyCompositionStore
 } from "../adapters/filesystem/journey-composition-store.js";
+import {
+  FileSystemExternalFlowRegistry
+} from "../adapters/filesystem/external-flow-registry.js";
 import { NodeProjectFileInspector } from "../adapters/filesystem/project-file-inspector.js";
 import { NodeProjectInventoryInspector } from "../adapters/filesystem/project-inventory-inspector.js";
 import { FileSystemSkillInstaller } from "../adapters/filesystem/skill-installer.js";
@@ -71,6 +75,7 @@ import {
 } from "../application/generation/runtime-observer.js";
 import { InitService, type InitInput } from "../application/init/init-service.js";
 import { JourneyResolver } from "../application/journey/journey-resolver.js";
+import { ExternalFlowResolver } from "../application/journey/external-flow-resolver.js";
 import { ProjectDescriber } from "../application/project/project-describer.js";
 import { RecorderService, type RecordInput, type RecordResult } from "../application/recorder/recorder-service.js";
 import { ReportWriter } from "../application/report/report-writer.js";
@@ -132,6 +137,10 @@ export interface CliDependencies {
   journeyCompositionStore?: Pick<
     JourneyCompositionStore,
     "writeText"
+  > | undefined;
+  externalFlowResolver?: Pick<
+    ExternalFlowResolver,
+    "resolve" | "list"
   > | undefined;
   generationStarter: {
     start: (input: GenerationStartInput) => Promise<
@@ -219,6 +228,20 @@ export function createProductionDependencies(
   });
   const journeyCompositionStore = new FileSystemJourneyCompositionStore();
   const journeyResolver = new JourneyResolver(journeyCompositionStore);
+  const builtinFlowsRoot = resolvePath(
+    dirname(fileURLToPath(import.meta.url)),
+    "..",
+    "..",
+    "..",
+    "assets",
+    "external-flows"
+  );
+  const externalFlowRegistry = new FileSystemExternalFlowRegistry(
+    builtinFlowsRoot
+  );
+  const externalFlowResolver = new ExternalFlowResolver({
+    registry: externalFlowRegistry
+  });
   return {
     ...(signal === undefined ? {} : { signal }),
     doctor: new DoctorService({
@@ -280,6 +303,7 @@ export function createProductionDependencies(
     contextRefresher,
     journeyResolver,
     journeyCompositionStore,
+    externalFlowResolver,
     init: new InitService({
       installer: new FileSystemSkillInstaller(),
       cwd: process.cwd(),

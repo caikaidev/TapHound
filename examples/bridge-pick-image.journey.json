@@ -13,11 +13,25 @@
     {
       "action": "bridge",
       "scenario": "pickImage",
-      "description": "Pick image via system picker",
+      "description": "Pick image via system photo picker",
       "triggerLocator": { "text": "Choose from gallery" },
       "returnTimeoutMs": 30000,
-      "replayMode": "manual",
+      "replayMode": "auto",
       "escapedPackageName": "com.google.android.providers.media.module",
+      "escapeTimeoutMs": 3000,
+      "externalSteps": [
+        {
+          "action": "wait",
+          "expectedActivity": "com.google.android.providers.media.module.picker.PickerActivity"
+        },
+        {
+          "action": "click",
+          "locator": {
+            "resourceId": "com.google.android.providers.media.module:id/picker_photo_grid_item_0"
+          },
+          "expectedActivity": "com.google.android.providers.media.module.picker.PickerActivity"
+        }
+      ],
       "activity": {
         "before": "com.example.app.ChatActivity",
         "after": "com.example.app.ChatActivity"

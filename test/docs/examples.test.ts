@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { createProgram } from "../../src/cli/program.js";
 import { TapHoundConfigSchema } from "../../src/domain/config.js";
+import { ExternalFlowSchema } from "../../src/domain/external-flow.js";
 import { FAILURE_CODES } from "../../src/domain/failure.js";
 import { JourneySchema } from "../../src/domain/journey.js";
 import {
@@ -44,9 +45,8 @@ describe("TapHound documentation examples", () => {
 
   it.each([
     ["bridge-camera", "photoCapture"],
-    ["bridge-pick-image", "pickImage"],
     ["bridge-pick-file", "pickFile"]
-  ])("keeps the %s example journey schema-valid", async (file, scenario) => {
+  ])("keeps the %s example journey schema-valid (manual replay)", async (file, scenario) => {
     const journey = JourneySchema.parse(
       await json(`examples/${file}.journey.json`)
     );
@@ -58,6 +58,42 @@ describe("TapHound documentation examples", () => {
     expect(bridge?.replayMode).toBe("manual");
     expect(bridge?.triggerLocator).toBeDefined();
     expect(bridge?.returnTimeoutMs).toBeGreaterThan(0);
+  });
+
+  it("keeps the bridge-pick-image example journey schema-valid (auto replay with external steps)", async () => {
+    const journey = JourneySchema.parse(
+      await json("examples/bridge-pick-image.journey.json")
+    );
+
+    const bridge = journey.steps.find((step) => step.action === "bridge");
+    expect(bridge).toBeDefined();
+    expect(bridge?.action).toBe("bridge");
+    expect(bridge?.scenario).toBe("pickImage");
+    expect(bridge?.replayMode).toBe("auto");
+    expect(bridge?.triggerLocator).toBeDefined();
+    expect(bridge?.returnTimeoutMs).toBeGreaterThan(0);
+    expect(bridge?.escapedPackageName).toBe(
+      "com.google.android.providers.media.module"
+    );
+    expect(bridge?.externalSteps).toBeDefined();
+    expect(bridge?.externalSteps).toHaveLength(2);
+    expect(bridge?.externalSteps?.[0]?.action).toBe("wait");
+    expect(bridge?.externalSteps?.[1]?.action).toBe("click");
+    expect(bridge?.escapeTimeoutMs).toBe(3000);
+  });
+
+  it("keeps the built-in camera/photo-capture External Flow schema-valid", async () => {
+    const flow = ExternalFlowSchema.parse(
+      await json("assets/external-flows/camera/photo-capture.json")
+    );
+
+    expect(flow.name).toBe("camera/photo-capture");
+    expect(flow.escapedPackageName).toBe("com.android.camera2");
+    expect(flow.expectedEscapeActivity).toBe(
+      "com.android.camera2.CameraActivity"
+    );
+    expect(flow.includes).toEqual([]);
+    expect(flow.steps.length).toBeGreaterThanOrEqual(1);
   });
 
   it("keeps reusable Flow composition examples schema-valid", async () => {

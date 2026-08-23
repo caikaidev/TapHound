@@ -9,6 +9,7 @@ export const TAPHOUND_DIR = ".taphound";
 export const CONTEXT_DIR = `${TAPHOUND_DIR}/context`;
 export const CONTEXT_INDEX_PATH = `${CONTEXT_DIR}/project-context.json`;
 export const FLOWS_DIR = `${TAPHOUND_DIR}/flows`;
+export const EXTERNAL_FLOWS_DIR = `${FLOWS_DIR}/external`;
 export const JOURNEY_SOURCES_DIR = `${TAPHOUND_DIR}/sources`;
 export const JOURNEYS_DIR = `${TAPHOUND_DIR}/journeys`;
 export const BUILD_DIR = `${TAPHOUND_DIR}/build`;

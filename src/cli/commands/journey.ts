@@ -29,6 +29,7 @@ interface JourneyResolveOptions {
 interface JourneyListOptions {
   project: string;
   json?: boolean | undefined;
+  includeExternal?: boolean | undefined;
 }
 
 function manifestPath(outputPath: string): string {
@@ -148,28 +149,60 @@ function createListFlowsCommand(dependencies: CliDependencies): Command {
     .description("List and validate reusable local Flows")
     .option("--project <path>", "Android project root", dependencies.cwd())
     .option("--json", "Emit one machine-readable JSON value")
+    .option("--include-external", "Also list External Flows")
     .action(async (options: JourneyListOptions): Promise<void> => {
       try {
         await assertNoLegacyWorkspace(dependencies, options.project);
         const entries = await requireComposition(
           dependencies
         ).resolver.listFlows(options.project);
-        const output = {
-          status: "listed" as const,
-          exitCode: 0 as const,
+        const output: {
+          status: "listed";
+          exitCode: 0;
+          flows: typeof entries;
+          externalFlows?: unknown[];
+        } = {
+          status: "listed",
+          exitCode: 0,
           flows: entries
         };
+        if (options.includeExternal === true) {
+          if (dependencies.externalFlowResolver === undefined) {
+            throw new Error("External Flow resolver is unavailable");
+          }
+          const externalEntries = await dependencies.externalFlowResolver.list(
+            options.project
+          );
+          output.externalFlows = [...externalEntries];
+        }
         if (options.json === true) {
           writeJson(dependencies.stdout, output);
-        } else if (entries.length === 0) {
+        } else if (
+          entries.length === 0
+          && output.externalFlows === undefined
+        ) {
           writeLine(dependencies.stdout, "No reusable Flows found");
         } else {
-          writeLine(
-            dependencies.stdout,
-            entries.map((entry) => (
-              `${entry.name}: ${entry.status}`
-            )).join("\n")
+          const lines: string[] = entries.map(
+            (entry) => `${entry.name}: ${entry.status}`
           );
+          if (output.externalFlows !== undefined) {
+            if (output.externalFlows.length === 0) {
+              lines.push("No External Flows found");
+            } else {
+              for (const entry of output.externalFlows) {
+                const external = entry as {
+                  name: string;
+                  source: string;
+                  status: string;
+                };
+                lines.push(
+                  `${external.name}: ${external.status} (external, ${external.source})`
+                );
+              }
+            }
+          }
+          writeLine(dependencies.stdout, lines.join("\n"));
         }
         dependencies.setExitCode(0);
       } catch (error) {

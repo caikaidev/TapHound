@@ -11,7 +11,7 @@ export type EffectiveRisk =
 export interface RiskEvaluation {
   effectiveRisk: EffectiveRisk;
   semanticSideEffect?: {
-    category: "externalCommit" | "destructive" | "account";
+    category: "hardCommit" | "destructive" | "account";
     matchedTerm: string;
   } | undefined;
 }
@@ -21,10 +21,19 @@ const SEMANTIC_TERMS = {
     "delete", "remove", "erase", "clear", "unsubscribe", "unfollow",
     "leave", "block", "report"
   ],
-  externalCommit: [
-    "send", "forward", "share", "publish", "post", "upload", "invite",
-    "pay", "purchase", "buy", "order", "transfer", "donate", "book",
-    "reserve", "subscribe", "save", "create", "submit", "confirm"
+  // hardCommit: irreversible or financial actions that still require
+  // confirmation even when the action is otherwise allowed.
+  hardCommit: [
+    "send", "pay", "purchase", "buy", "order", "transfer", "donate",
+    "book", "reserve", "subscribe", "submit", "confirm"
+  ],
+  // softCommit: reversible content or navigation actions (e.g. Create Group
+  // is navigation, Save Draft is reversible). These default to safe so that
+  // common UI flows are not blocked by semantic keyword matches. A project
+  // can still force confirmation via confirmationRequiredActions.
+  softCommit: [
+    "forward", "share", "publish", "post", "upload", "invite",
+    "save", "create"
   ],
   account: [
     "login", "logout", "signin", "signout", "register"
@@ -87,7 +96,7 @@ function semanticSideEffect(
       return { category, matchedTerm };
     }
   }
-  const matchedTerm = SEMANTIC_TERMS.externalCommit.find(
+  const matchedTerm = SEMANTIC_TERMS.hardCommit.find(
     (term) => allTokens.includes(term)
   );
   if (
@@ -97,7 +106,7 @@ function semanticSideEffect(
     return undefined;
   }
   if (matchedTerm !== undefined) {
-    return { category: "externalCommit", matchedTerm };
+    return { category: "hardCommit", matchedTerm };
   }
   return undefined;
 }

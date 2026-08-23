@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "name": "update-avatar-via-camera-auto",
+  "steps": [
+    {
+      "action": "click",
+      "locator": { "resourceId": "profile_avatar" },
+      "activity": {
+        "before": "com.example.app.HomeActivity",
+        "after": "com.example.app.ProfileActivity"
+      }
+    },
+    {
+      "action": "bridge",
+      "scenario": "photoCapture",
+      "description": "Capture photo via system camera (auto replay using camera/photo-capture flow)",
+      "triggerLocator": { "resourceId": "change_avatar_button" },
+      "returnTimeoutMs": 60000,
+      "replayMode": "auto",
+      "escapedPackageName": "com.android.camera2",
+      "escapeTimeoutMs": 3000,
+      "externalSteps": [
+        {
+          "action": "wait",
+          "expectedActivity": "com.android.camera2.CameraActivity"
+        },
+        {
+          "action": "click",
+          "locator": {
+            "resourceId": "com.android.camera2:id/shutter_button"
+          },
+          "expectedActivity": "com.android.camera2.CameraActivity"
+        }
+      ],
+      "activity": {
+        "before": "com.example.app.ProfileActivity",
+        "after": "com.example.app.ProfileActivity"
+      }
+    },
+    {
+      "action": "click",
+      "locator": { "resourceId": "save_profile_button" },
+      "activity": {
+        "before": "com.example.app.ProfileActivity",
+        "after": "com.example.app.HomeActivity"
+      }
+    }
+  ]
+}

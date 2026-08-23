@@ -82,6 +82,33 @@ describe("TapHound documentation examples", () => {
     expect(bridge?.escapeTimeoutMs).toBe(3000);
   });
 
+  it("keeps the bridge-camera-with-flow example journey schema-valid (auto replay with resolved external steps)", async () => {
+    const journey = JourneySchema.parse(
+      await json("examples/bridge-camera-with-flow.journey.json")
+    );
+
+    const bridge = journey.steps.find((step) => step.action === "bridge");
+    expect(bridge).toBeDefined();
+    expect(bridge?.action).toBe("bridge");
+    expect(bridge?.scenario).toBe("photoCapture");
+    expect(bridge?.replayMode).toBe("auto");
+    expect(bridge?.triggerLocator).toBeDefined();
+    expect(bridge?.returnTimeoutMs).toBeGreaterThan(0);
+    expect(bridge?.escapedPackageName).toBe("com.android.camera2");
+    expect(bridge?.externalSteps).toBeDefined();
+    expect(bridge?.externalSteps).toHaveLength(2);
+    expect(bridge?.externalSteps?.[0]?.action).toBe("wait");
+    expect(bridge?.externalSteps?.[1]?.action).toBe("click");
+    const shutterStep = bridge?.externalSteps?.[1];
+    expect(shutterStep).toBeDefined();
+    if (shutterStep && shutterStep.action === "click") {
+      expect(shutterStep.locator.resourceId).toBe(
+        "com.android.camera2:id/shutter_button"
+      );
+    }
+    expect(bridge?.escapeTimeoutMs).toBe(3000);
+  });
+
   it("keeps the built-in camera/photo-capture External Flow schema-valid", async () => {
     const flow = ExternalFlowSchema.parse(
       await json("assets/external-flows/camera/photo-capture.json")
@@ -112,6 +139,9 @@ describe("TapHound documentation examples", () => {
     const skillSource = JourneySourceSchema.parse(await json(
       "assets/skills/taphound-ai-journey/templates/journey-source.example.json"
     ));
+    const skillExternalFlow = ExternalFlowSchema.parse(await json(
+      "assets/skills/taphound-ai-journey/templates/external-flow.example.json"
+    ));
 
     expect(core.includes).toEqual([]);
     expect(core.name).toBe("core/launch-home");
@@ -130,6 +160,10 @@ describe("TapHound documentation examples", () => {
     expect(source.includes).toEqual(["chat/open-thread"]);
     expect(skillFlow.kind).toBe("flow");
     expect(skillSource.kind).toBe("journeySource");
+    expect(skillExternalFlow.kind).toBe("externalFlow");
+    expect(skillExternalFlow.name).toBe("camera/photo-capture");
+    expect(skillExternalFlow.escapedPackageName).toBe("com.android.camera2");
+    expect(skillExternalFlow.steps.length).toBeGreaterThanOrEqual(1);
   });
 
   it("documents every executable command and its primary workflow", async () => {

@@ -265,9 +265,32 @@ own.
 
 The `bridge` action lets Core own the trigger click and the return detection
 for cross-app flows within a single generation step. Core clicks the trigger,
-detects the package escape, waits for the foreground to return, and captures
-the post-return snapshot. During replay, `replayMode: "manual"` means a human
-operator completes the external portion.
+detects the package escape, optionally executes a bound External Flow's steps
+inside the escaped package, waits for the foreground to return, and captures
+the post-return snapshot.
+
+Bridge steps run in two replay modes:
+
+- **Auto** (`replayMode: "auto"`): `--flow <name>` resolves a bound External
+  Flow. Core stamps the flow's steps as `externalSteps` and replays them
+  deterministically during `finalize` with no human operator.
+- **Manual** (`replayMode: "manual"`): no `--flow`. A human operator completes
+  the external action during replay.
+
+Bind External Flows at session start:
+
+```bash
+taphound generation start \
+  --project . \
+  --external-flow camera/photo-capture \
+  ...
+```
+
+List available flows (built-in and project):
+
+```bash
+taphound journey list-flows --project . --include-external --json
+```
 
 Use `generation bridge` with one of the built-in scenarios:
 
@@ -278,6 +301,18 @@ Use `generation bridge` with one of the built-in scenarios:
   `--description`)
 
 ```bash
+# Auto bridge (deterministic, no operator)
+taphound generation bridge \
+  --project . \
+  --session <id> \
+  --scenario photoCapture \
+  --trigger-locator '{"resourceId":"com.example.app:id/camera_button"}' \
+  --flow camera/photo-capture \
+  --return-timeout-ms 60000 \
+  --escape-timeout-ms 3000 \
+  --json
+
+# Manual bridge (human operator completes external action)
 taphound generation bridge \
   --project . \
   --session <id> \
@@ -292,19 +327,26 @@ action is not auto-approved, the response carries `status:
 "confirmationRequired"` and the Agent calls `generation confirm` with the human
 decision.
 
-Bridge steps commit with `replayMode: "manual"`. During replay, `verify` clicks
-the trigger, then waits for the foreground to escape and return. The human
-operator must complete the external action (take photo, pick image, etc.)
-before the return timeout expires.
-
 ### Failure Codes
 
 - `BRIDGE_NO_ESCAPE` — the foreground did not leave the target package within
-  3 seconds of the trigger click.
+  `escapeTimeoutMs` (default 3 seconds) of the trigger click.
 - `SCENARIO_PACKAGE_MISMATCH` — the escaped package is not in the known system
   package list for the selected scenario. Use `custom` to bypass.
 - `BRIDGE_NOT_RETURNED` — the foreground did not return to the target package
   within `returnTimeoutMs`.
+- `EXTERNAL_FLOW_NOT_FOUND` — `--flow` names a flow not bound to this session.
+- `EXTERNAL_FLOW_STALE` — the bound flow file changed since `generation start`.
+- `EXTERNAL_PACKAGE_MISMATCH` — an external step ran in a different package
+  than `escapedPackageName`.
+- `EXTERNAL_ACTIVITY_MISMATCH` — an external step's `expectedActivity` did not
+  match.
+- `EXTERNAL_STEP_FAILED` — an external step's action failed (e.g., locator not
+  found).
+- `EXTERNAL_LOCATOR_STRICTNESS` — an external step locator lacks a `resourceId`
+  (v1 requires XML-only resource IDs for external steps).
+- `MANUAL_STEP_REQUIRED` — a non-interactive `finalize` encountered a
+  `replayMode: "manual"` step. Bind an External Flow or run finalize in a TTY.
 
 See [`docs/journey-schema.md`](./journey-schema.md) for the full bridge schema
 and [`examples/bridge-camera.journey.json`](../examples/bridge-camera.journey.json)

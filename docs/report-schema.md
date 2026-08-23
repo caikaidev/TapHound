@@ -89,3 +89,27 @@ result, and fixed failure code. A `scrollTo` step records a
 corresponding `steps/NNN-layout-diff.json` is written), while other scroll
 failures (such as `SCROLL_TARGET_NOT_FOUND`, `LOCATOR_AMBIGUOUS`, or a missing
 container) do not populate `idle`.
+
+### Bridge and External Step Evidence
+
+A `bridge` step records the trigger Locator, the escape detection
+(`escapeTimeoutMs`), and the return wait (`returnTimeoutMs`). When
+`externalSteps` is present (`replayMode: "auto"`), each external step's
+action, Locator, and `expectedActivity` checkpoint are evaluated independently
+against the escaped package. External-step failures use these codes:
+
+- `EXTERNAL_PACKAGE_MISMATCH` — the foreground left `escapedPackageName` during
+  an external step (exit code 1).
+- `EXTERNAL_ACTIVITY_MISMATCH` — an external step's `expectedActivity` did not
+  match the live foreground (exit code 1).
+- `EXTERNAL_STEP_FAILED` — an external step's action failed, e.g. locator not
+  found or action unsupported (exit code 1).
+- `EXTERNAL_LOCATOR_STRICTNESS` — an external step locator lacks a
+  `resourceId`; v1 requires XML-only resource IDs (exit code 2).
+- `EXTERNAL_FLOW_NOT_FOUND` — `--flow` names a flow not bound to the session
+  (exit code 2).
+- `EXTERNAL_FLOW_STALE` — the bound flow file changed since `generation start`
+  (exit code 2).
+- `MANUAL_STEP_REQUIRED` — a non-interactive `finalize` (no TTY) encountered a
+  `replayMode: "manual"` step. Bind an External Flow so the step commits with
+  `replayMode: "auto"`, or run finalize in a terminal (exit code 2).

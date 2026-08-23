@@ -629,7 +629,28 @@ incomplete.
 When the Goal requires a cross-app flow — for example tapping a button that
 opens the system camera, image picker, or file picker — a regular
 `generation step` proposal fails with `PACKAGE_ESCAPE` because the foreground
-leaves the target package. Use `generation bridge` instead:
+leaves the target package. Use `generation bridge` instead.
+
+**Auto bridge** (deterministic, no operator): if an External Flow was bound at
+`generation start --external-flow`, pass `--flow <name>` so Core resolves the
+flow, stamps its steps as `externalSteps`, and commits with
+`replayMode: "auto"`:
+
+```bash
+taphound generation bridge \
+  --project /path/to/android-project \
+  --session <generationId> \
+  --scenario photoCapture \
+  --trigger-locator '{"resourceId":"camera_button"}' \
+  --flow camera/photo-capture \
+  --return-timeout-ms 60000 \
+  --escape-timeout-ms 3000 \
+  --compact \
+  --json
+```
+
+**Manual bridge** (human operator completes the external action during replay):
+omit `--flow`. The step commits with `replayMode: "manual"`:
 
 ```bash
 taphound generation bridge \
@@ -642,9 +663,9 @@ taphound generation bridge \
   --json
 ```
 
-Core clicks the trigger, detects the package escape, waits for the foreground
-to return, and captures the post-return snapshot. The committed step carries
-`replayMode: "manual"`.
+Core clicks the trigger, detects the package escape, executes the External
+Flow's steps (when `--flow` is supplied) inside the escaped package, waits for
+the foreground to return, and captures the post-return snapshot.
 
 Scenarios:
 - `photoCapture` — system camera (validates escaped package)
@@ -660,9 +681,16 @@ response is `confirmationRequired`, present the challenge and call
 A successful bridge step returns `nextBinding` and `nextSnapshotRef` like any
 other step. Continue the generation loop from that post-return state.
 
-**Replay note**: During `finalize`, a human operator must complete the
+**Replay note**: In **auto mode** (`replayMode: "auto"`), Core replays the
+`externalSteps` deterministically during `finalize` with no operator. In
+**manual mode** (`replayMode: "manual"`), a human operator must complete the
 external action (take photo, pick image, etc.) before `returnTimeoutMs`
-expires, otherwise replay fails with `BRIDGE_NOT_RETURNED`.
+expires, otherwise replay fails with `BRIDGE_NOT_RETURNED`. A non-interactive
+finalize (no TTY) rejects manual bridge steps with `MANUAL_STEP_REQUIRED`.
+
+External Flow steps must use `resourceId`-only locators (v1 restricts external
+steps to XML-only resource IDs; Compose UI is not supported). List available
+flows with `taphound journey list-flows --include-external --json`.
 
 ### 3.8 Step 6 — Finalize and Verify
 
@@ -1066,10 +1094,17 @@ Each Goal is an independent generation session and does not affect others.
 | `LOCATOR_AMBIGUOUS` | Locator matches multiple elements | Narrow with identity fields or `within`, then use zero-based `index` only if duplicates remain |
 | `ACTION_UNSUPPORTED` | Element does not support the action | Check element clickable/scrollable properties |
 | `SNAPSHOT_STALE` | Device state has changed | Re-observe |
-| `PACKAGE_ESCAPE` | Foreground would switch to another app | Use `generation bridge` with the appropriate scenario instead of `generation step` |
-| `BRIDGE_NO_ESCAPE` | Trigger did not leave the target app within 3s | Check that the trigger actually opens an external app |
+| `PACKAGE_ESCAPE` | Foreground would switch to another app | Use `generation bridge` with `--flow` (auto) or without (manual) instead of `generation step` |
+| `BRIDGE_NO_ESCAPE` | Trigger did not leave the target app within `escapeTimeoutMs` (default 3s) | Check that the trigger actually opens an external app |
 | `SCENARIO_PACKAGE_MISMATCH` | Escaped package not in known system list for scenario | Use `--scenario custom` with `--description` |
 | `BRIDGE_NOT_RETURNED` | Foreground did not return within `returnTimeoutMs` | Increase timeout or check if external app hung |
+| `EXTERNAL_FLOW_NOT_FOUND` | `--flow` names a flow not bound to this session | Re-bind at `generation start --external-flow` or omit `--flow` |
+| `EXTERNAL_FLOW_STALE` | Bound flow file changed since `generation start` | Start a new session to rebind the flow |
+| `EXTERNAL_PACKAGE_MISMATCH` | External step ran in a different package than `escapedPackageName` | Check the flow's `escapedPackageName` |
+| `EXTERNAL_ACTIVITY_MISMATCH` | External step `expectedActivity` did not match | Check the flow's activity expectations |
+| `EXTERNAL_STEP_FAILED` | External step action failed (e.g., locator not found) | Check the flow's `resourceId` locators |
+| `EXTERNAL_LOCATOR_STRICTNESS` | External step locator lacks `resourceId` | External steps require XML-only `resourceId` locators |
+| `MANUAL_STEP_REQUIRED` | Non-interactive finalize encountered a `replayMode: "manual"` step | Bind an External Flow (`--flow`) or run finalize in a TTY |
 | `APP_CRASHED` | App process crashed | Check Logcat, restart app |
 | `IDLE_TIMEOUT` | Configured idle strategy did not stabilize | Inspect `failure.details.idle`; use a new session for config changes |
 | `RISK_CONFIRMATION_REQUIRED` | Action requires user confirmation or a pending challenge blocks progress | Inspect `generation status`, present the exact challenge, and apply only the user's explicit decision |

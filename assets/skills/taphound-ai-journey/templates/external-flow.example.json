@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "kind": "externalFlow",
+  "name": "camera/photo-capture",
+  "description": "Capture a photo using the AOSP Camera2 app: wait for readiness then tap the shutter button",
+  "escapedPackageName": "com.android.camera2",
+  "expectedEscapeActivity": "com.android.camera2.CameraActivity",
+  "includes": [],
+  "steps": [
+    {
+      "action": "wait",
+      "expectedActivity": "com.android.camera2.CameraActivity"
+    },
+    {
+      "action": "click",
+      "locator": {
+        "resourceId": "com.android.camera2:id/shutter_button"
+      },
+      "expectedActivity": "com.android.camera2.CameraActivity"
+    }
+  ]
+}

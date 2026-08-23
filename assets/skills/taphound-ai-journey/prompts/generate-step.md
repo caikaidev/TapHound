@@ -69,12 +69,21 @@ the observe result).
    - For `scrollTo`: specify both `locator` (target) and `container`
      (scrollable parent).
 
-5. **Determine activity.before**: This is `snapshot.activity` (the current
+5. **Detect cross-app transitions**: Before proposing a `click` on a trigger
+   that opens an external app, check whether the element clearly initiates a
+   cross-app transition (e.g., a camera button, "choose from gallery", "attach
+   file", share sheet). If so, return a `bridge` signal (see **Cross-app
+   flows** in Rules) instead of a `click`. If an External Flow was bound at
+   `generation start --external-flow` and its `escapedPackageName` matches the
+   scenario, include `"flow": "<name>"` in the bridge signal so the caller can
+   pass `--flow` to `generation bridge` for deterministic auto replay.
+
+6. **Determine activity.before**: This is `snapshot.activity` (the current
    Activity class). The proposed step only includes `activity.before` —
    never `activity.after`. The Core determines the after-Activity from
    live device observation after executing the action.
 
-6. **Add expect (optional)**: Only if there is a deterministic, verifiable
+7. **Add expect (optional)**: Only if there is a deterministic, verifiable
    outcome:
    - `element`: a specific element should appear after the action (e.g., a
      search input field appears after clicking "open search").
@@ -119,6 +128,33 @@ Example (inputText):
 }
 ```
 
+Example (bridge — auto replay with a bound External Flow):
+```json
+{
+  "bridge": true,
+  "scenario": "photoCapture",
+  "triggerLocator": { "resourceId": "camera_button" },
+  "flow": "camera/photo-capture",
+  "description": "Capture photo via system camera",
+  "activity": {
+    "before": "dev.taphound.demo.ProfileActivity"
+  }
+}
+```
+
+Example (bridge — manual replay, no flow):
+```json
+{
+  "bridge": true,
+  "scenario": "pickFile",
+  "triggerLocator": { "text": "Choose file" },
+  "description": "Pick a file via system file picker",
+  "activity": {
+    "before": "dev.taphound.demo.ChatActivity"
+  }
+}
+```
+
 ## Rules
 
 - Never use coordinates, visual guessing, or annotated-label fallback.
@@ -147,6 +183,16 @@ Example (inputText):
   The caller will use `generation bridge` to execute it. Only return this when
   the target element clearly initiates a cross-app transition (e.g., a camera
   button, "choose from gallery", "attach file").
+- When a bound External Flow matches the scenario, include `"flow": "<name>"`
+  in the bridge signal. The caller passes `--flow <name>` to
+  `generation bridge` so Core resolves the flow, stamps its steps as
+  `externalSteps`, and commits with `replayMode: "auto"` for deterministic
+  replay. If no flow is bound, omit `flow`; the step commits with
+  `replayMode: "manual"` and needs a human operator during finalize.
+- Do NOT include `externalSteps`, `escapedPackageName`, `replayMode`, or
+  `escapeTimeoutMs` in the bridge proposal. Core fills these from the resolved
+  flow and live device observation. The proposal only carries `flow` (the name)
+  and the standard bridge fields.
 - If no actionable element matches the Goal, return:
   `{"error": "no matching element", "reason": "..."}`
 - If the Goal appears complete, return `{"complete": true}` instead of a

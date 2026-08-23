@@ -74,11 +74,13 @@ themselves.
 - `back`: performs the ADB BACK keyevent.
 - `wait`: performs only Layout stability detection, with no fixed sleep.
 - `bridge`: executes a cross-application flow. Core clicks the `triggerLocator`,
-  detects that the foreground escaped the target package, waits for the foreground
-  to return, and captures the post-return snapshot. Requires `scenario`,
-  `description`, `triggerLocator`, and `returnTimeoutMs`. The committed step always
-  carries `replayMode: "manual"`. See [Cross-Application Bridge](#cross-application-bridge)
-  below.
+  detects that the foreground escaped the target package, optionally executes
+  deterministic `externalSteps` (or resolves a named `flow`) inside the escaped
+  package, waits for the foreground to return, and captures the post-return
+  snapshot. Requires `scenario`, `description`, `triggerLocator`, and
+  `returnTimeoutMs`. When `flow` or `externalSteps` is present the committed step
+  carries `replayMode: "auto"`; otherwise `replayMode: "manual"`. See
+  [Cross-Application Bridge](#cross-application-bridge) below.
 
 Example:
 
@@ -119,10 +121,13 @@ For a full example see [`examples/scroll-to.journey.json`](../examples/scroll-to
 Each step may carry an optional `replayMode` field:
 
 - `"auto"` (default when omitted): Core executes the action deterministically
-  during replay. All non-bridge steps use this mode.
+  during replay. All non-bridge steps use this mode, and bridge steps that carry
+  `flow` or `externalSteps` also use `"auto"` so the external portion is replayed
+  without a human operator.
 - `"manual"`: the step is committed with `replayMode: "manual"`. During replay,
   Core clicks the trigger, then a human operator completes the external-app
-  portion and the operator confirms return. Bridge steps always use this mode.
+  portion and the operator confirms return. Bridge steps without `flow` or
+  `externalSteps` use this mode.
 
 Older Journey v1 files without `replayMode` are treated as `"auto"` for every
 step. The field is optional to preserve backward compatibility.
@@ -131,7 +136,13 @@ step. The field is optional to preserve backward compatibility.
 
 The `bridge` action lets Core own the trigger click and the return detection for
 flows that leave the target package — for example opening the system camera,
-image picker, or file picker.
+image picker, or file picker. A bridge step can run in two replay modes:
+
+- **Manual** (`replayMode: "manual"`): no `flow` or `externalSteps`. A human
+  operator completes the external action during replay.
+- **Auto** (`replayMode: "auto"`): carries `flow` (a named External Flow bound
+  at `generation start`) or inline `externalSteps`. Core replays the external
+  steps deterministically inside the escaped package with no operator.
 
 ### Scenario
 
@@ -159,13 +170,70 @@ image picker, or file picker.
 - `triggerLocator`: a standard Locator for the element that initiates the
   cross-app transition (e.g., a camera button). Must resolve to a clickable
   element.
-- `returnTimeoutMs`: positive integer. Maximum time Core waits for the
-  foreground to return to the target package after the trigger click.
-- `replayMode`: always `"manual"` for bridge steps. Committed automatically by
-  Core; Agents should not set it manually.
+- `returnTimeoutMs`: positive integer. Total budget Core waits for the
+  foreground to return to the target package after the trigger click. When
+  `externalSteps` or `flow` is present, this budget covers escape detection,
+  external-step execution, and return wait combined.
+- `escapeTimeoutMs`: optional positive integer (default `3000`). Maximum time
+  Core waits for the foreground to leave the target package after the trigger
+  click before failing with `BRIDGE_NO_ESCAPE`.
+- `flow`: optional name of a bound External Flow (e.g.,
+  `camera/photo-capture`). When present, Core resolves the flow's steps from
+  the session binding and stamps them into the committed step's
+  `externalSteps`. Mutually exclusive with `externalSteps`.
+- `externalSteps`: optional array of deterministic steps to execute inside the
+  escaped package. Populated by Core from the resolved `flow`, or written
+  inline by the Recorder. Mutually exclusive with `flow`. See
+  [External Steps](#external-steps) below.
+- `replayMode`: `"auto"` when `flow` or `externalSteps` is present, otherwise
+  `"manual"`. Committed automatically by Core; Agents should not set it
+  manually.
 - `escapedPackageName`: filled by Core during generation. Records the package
-  that the foreground escaped to. Present in committed Journey steps but not in
-  proposals.
+  that the foreground escaped to. Required when `flow` or `externalSteps` is
+  present. Present in committed Journey steps but not in proposals.
+
+### External Steps
+
+An `externalSteps` entry is a deterministic step executed inside the escaped
+package. Each entry supports the same action set as a regular Journey step
+(`click`, `longClick`, `inputText`, `swipe`, `scrollTo`, `back`, `wait`) plus
+an optional `expectedActivity` checkpoint:
+
+```json
+{
+  "action": "click",
+  "locator": { "resourceId": "com.android.camera2:id/shutter_button" },
+  "expectedActivity": "com.android.camera2.CameraActivity"
+}
+```
+
+External-step locators must use `resourceId` (v1 restricts external steps to
+XML-only resource IDs for deterministic replay; Compose UI is not supported).
+Annotated fallback is not available for external steps. A locator that does not
+resolve uniquely fails with `EXTERNAL_LOCATOR_STRICTNESS`.
+
+### External Flows
+
+An External Flow is a reusable, named sequence of `externalSteps` stored as a
+JSON document. Built-in flows ship under `assets/external-flows/`; project
+flows live under `.taphound/flows/external/`. List them with:
+
+```bash
+taphound journey list-flows --project . --include-external --json
+```
+
+Bind one or more flows to a generation session at start time:
+
+```bash
+taphound generation start --external-flow camera/photo-capture ...
+```
+
+Core hashes each bound flow into the session. When `generation bridge --flow
+<name>` is called, Core resolves the flow by name and session hash, stamps its
+steps into the committed Journey step as `externalSteps`, and commits with
+`replayMode: "auto"`. If the flow file changed since binding, the step fails
+with `EXTERNAL_FLOW_STALE`. If the flow name is not bound to the session, the
+step fails with `EXTERNAL_FLOW_NOT_FOUND`.
 
 ### Generation Flow
 
@@ -173,17 +241,24 @@ image picker, or file picker.
    session revision and snapshot.
 2. Risk confirmation is required (like `generation manual`). The Agent calls
    `generation bridge` and a human approves the challenge.
-3. Core clicks the `triggerLocator`, then polls the foreground for up to 3
-   seconds. If the foreground does not leave the target package, the step fails
-   with `BRIDGE_NO_ESCAPE`.
+3. Core clicks the `triggerLocator`, then polls the foreground for up to
+   `escapeTimeoutMs` (default 3 seconds). If the foreground does not leave the
+   target package, the step fails with `BRIDGE_NO_ESCAPE`.
 4. For built-in scenarios, Core validates the escaped package against the known
    system package list. A mismatch fails with `SCENARIO_PACKAGE_MISMATCH`.
    `custom` scenarios skip this check.
-5. Core polls the foreground for up to `returnTimeoutMs`. If the foreground does
+5. If `--flow` was supplied, Core resolves the External Flow from the session
+   binding. If `externalSteps` would be empty (e.g., the flow has no steps),
+   Core still proceeds to return detection. Each external step is executed
+   deterministically inside the escaped package; a failure fails with
+   `EXTERNAL_STEP_FAILED`, `EXTERNAL_PACKAGE_MISMATCH`,
+   `EXTERNAL_ACTIVITY_MISMATCH`, or `EXTERNAL_LOCATOR_STRICTNESS`.
+6. Core polls the foreground for up to `returnTimeoutMs`. If the foreground does
    not return to the target package, the step fails with `BRIDGE_NOT_RETURNED`.
-6. After return, Core waits for layout stability and captures the post-return
-   snapshot. The committed step carries `replayMode: "manual"` and
-   `escapedPackageName`.
+7. After return, Core waits for layout stability and captures the post-return
+   snapshot. The committed step carries `replayMode` (`"auto"` when
+   `externalSteps` is non-empty, else `"manual"`), `escapedPackageName`, and the
+   stamped `externalSteps`.
 
 ### Replay Flow
 
@@ -191,17 +266,27 @@ During replay, `StepRunner` executes the bridge step:
 
 1. Resolves `triggerLocator` (must be clickable).
 2. Clicks the trigger via `actionExecutor.execute`.
-3. Polls for foreground escape (3 seconds). No escape → `BRIDGE_NO_ESCAPE`.
-4. Polls for foreground return (`returnTimeoutMs`). Timeout →
+3. Polls for foreground escape (`escapeTimeoutMs` or 3 seconds). No escape →
+   `BRIDGE_NO_ESCAPE`.
+4. **Auto mode only**: executes each `externalSteps` entry in order against the
+   escaped package. Locator resolution uses `resourceId` only (no annotated
+   fallback); a mismatch fails with `LOCATOR_NOT_FOUND`. An `expectedActivity`
+   checkpoint that does not match fails with `EXTERNAL_ACTIVITY_MISMATCH`.
+5. Polls for foreground return (`returnTimeoutMs`). Timeout →
    `BRIDGE_NOT_RETURNED`.
-5. Waits for layout stability and continues to the next step.
+6. Waits for layout stability and continues to the next step.
 
-The human operator is responsible for completing the external-app action (taking
-a photo, picking an image, etc.) before the foreground returns.
+In **manual mode** (no `externalSteps`), the human operator is responsible for
+completing the external-app action (taking a photo, picking an image, etc.)
+before the foreground returns. In **auto mode**, no operator is needed; Core
+replays the external steps deterministically. A non-interactive `finalize`
+(meaning no TTY) rejects any Journey containing a `replayMode: "manual"` step
+with `MANUAL_STEP_REQUIRED`; auto-mode bridge steps do not trigger this guard.
 
 ### CLI
 
 ```bash
+# Manual bridge (human completes external action during replay)
 taphound generation bridge \
   --project . \
   --session <id> \
@@ -209,12 +294,24 @@ taphound generation bridge \
   --trigger-locator '{"resourceId":"com.example.app:id/camera_button"}' \
   --return-timeout-ms 60000 \
   --json
+
+# Auto bridge (Core replays a bound External Flow deterministically)
+taphound generation bridge \
+  --project . \
+  --session <id> \
+  --scenario photoCapture \
+  --trigger-locator '{"resourceId":"com.example.app:id/camera_button"}' \
+  --flow camera/photo-capture \
+  --return-timeout-ms 60000 \
+  --escape-timeout-ms 3000 \
+  --json
 ```
 
 For full examples see:
-- [`examples/bridge-camera.journey.json`](../examples/bridge-camera.journey.json)
-- [`examples/bridge-pick-image.journey.json`](../examples/bridge-pick-image.journey.json)
-- [`examples/bridge-pick-file.journey.json`](../examples/bridge-pick-file.journey.json)
+- [`examples/bridge-camera.journey.json`](../examples/bridge-camera.journey.json) (manual)
+- [`examples/bridge-camera-with-flow.journey.json`](../examples/bridge-camera-with-flow.journey.json) (auto, named flow)
+- [`examples/bridge-pick-image.journey.json`](../examples/bridge-pick-image.journey.json) (auto, inline externalSteps)
+- [`examples/bridge-pick-file.journey.json`](../examples/bridge-pick-file.journey.json) (manual)
 
 ## Explicit Annotated Fallback
 

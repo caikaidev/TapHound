@@ -371,4 +371,29 @@ describe("CameraProbeAdapter", () => {
     await probe.probe({ deviceSerial: "DEVICE1" });
     expect(fake.forceStopCalls[0]).toBe("com.android.camera");
   });
+
+  it("throws ALIGN_CAMERA_INTENT_FAILED when IMAGE_CAPTURE lands on a resolver/chooser", async () => {
+    const resolverForeground: ForegroundComponent = {
+      packageName: "com.android.internal.app.ResolverActivity",
+      activity: "com.android.internal.app.ResolverActivity"
+    };
+    const fake: FakeAdb = {
+      foregroundSequence: [
+        hostForeground,
+        resolverForeground,
+        resolverForeground
+      ],
+      startActivityResult: commandResult({ stdout: "Starting: Intent\n" }),
+      tapCalls: [],
+      forceStopCalls: []
+    };
+    const adb = makeAdb(fake);
+    const androidCli = makeAndroidCli([shutterLayout]);
+    const clock = makeFakeClock();
+
+    const probe = new CameraProbeAdapter({ adb, androidCli, now: clock.now, sleep: clock.sleep });
+    await expect(probe.probe({ deviceSerial: "DEVICE1" })).rejects.toThrow(
+      /ALIGN_CAMERA_INTENT_FAILED: IMAGE_CAPTURE landed on system resolver\/chooser/
+    );
+  });
 });

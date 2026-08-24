@@ -151,4 +151,65 @@ describe("taphound align camera command", () => {
     expect(output.failure.code).toBe("CONFIG_INVALID");
     expect(test.exitCodes).toEqual([2]);
   });
+
+  it("emits CONFIG_INVALID with exit code 2 when artifactsDir is outside build subtree", async () => {
+    const test = harness(writtenResult);
+    (test.dependencies.readJson as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      version: 1,
+      run: { packageName: "com.example.app", activity: ".MainActivity" },
+      idle: { pollIntervalMs: 200, stablePolls: 2, timeoutMs: 5000 },
+      artifactsDir: ".taphound/foo"
+    });
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "align", "camera", "--json"
+    ]);
+    const output = JSON.parse(test.stdout.value) as {
+      status: string; exitCode: number; failure: { code: string };
+    };
+    expect(output.status).toBe("error");
+    expect(output.failure.code).toBe("CONFIG_INVALID");
+    expect(test.exitCodes).toEqual([2]);
+  });
+
+  it("emits cancelled JSON with exit code 2 when prompt is cancelled (Ctrl-C)", async () => {
+    const test = harness(writtenResult);
+    const { AlignPromptCancelledError } = await import("../../src/ports/align-prompt.js");
+    test.alignCameraMock.mockRejectedValueOnce(new AlignPromptCancelledError());
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "align", "camera", "--json"
+    ]);
+    const output = JSON.parse(test.stdout.value) as {
+      status: string; exitCode: number;
+    };
+    expect(output.status).toBe("cancelled");
+    expect(output.exitCode).toBe(2);
+    expect(test.exitCodes).toEqual([2]);
+  });
+
+  it("emits cancelled text to stdout with exit code 2 when prompt is cancelled without --json", async () => {
+    const test = harness(writtenResult);
+    const { AlignPromptCancelledError } = await import("../../src/ports/align-prompt.js");
+    test.alignCameraMock.mockRejectedValueOnce(new AlignPromptCancelledError());
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "align", "camera"
+    ]);
+    expect(test.stdout.value).toContain("Cancelled");
+    expect(test.exitCodes).toEqual([2]);
+  });
+
+  it("emits INTERNAL_ERROR with exit code 4 when an unexpected error is thrown", async () => {
+    const test = harness(writtenResult);
+    test.alignCameraMock.mockRejectedValueOnce(new Error("boom"));
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "align", "camera", "--json"
+    ]);
+    const output = JSON.parse(test.stdout.value) as {
+      status: string; exitCode: number; failure: { code: string; message: string };
+    };
+    expect(output.status).toBe("error");
+    expect(output.exitCode).toBe(4);
+    expect(output.failure.code).toBe("INTERNAL_ERROR");
+    expect(output.failure.message).toBe("boom");
+    expect(test.exitCodes).toEqual([4]);
+  });
 });

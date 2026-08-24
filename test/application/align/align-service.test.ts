@@ -218,6 +218,22 @@ describe("AlignService.alignCamera", () => {
     })).rejects.toMatchObject({ code: "ALIGN_DEVICE_UNAVAILABLE" });
   });
 
+  it("throws AlignError ALIGN_DEVICE_UNAVAILABLE when 2+ devices online and no --device", async () => {
+    const probe = makeProbe();
+    const prompt = makePrompt(true);
+    const { registry } = makeRegistry();
+    const adb = makeAdb([
+      { serial: "DEVICE1", status: "device" },
+      { serial: "DEVICE2", status: "device" }
+    ]);
+    const service = new AlignService({ adb, probe, prompt, registry });
+
+    await expect(service.alignCamera({
+      projectRoot: "/project",
+      json: false
+    })).rejects.toMatchObject({ code: "ALIGN_DEVICE_UNAVAILABLE" });
+  });
+
   it("uses --device serial when provided", async () => {
     const probe = makeProbe();
     const prompt = makePrompt(true);

@@ -3,10 +3,12 @@ import { resolve } from "node:path";
 import { Command } from "commander";
 
 import { TapHoundConfigSchema } from "../../domain/config.js";
+import { assertArtifactDirectory } from "../../domain/workspace.js";
 import {
   AlignError,
   type AlignCameraResult
 } from "../../application/align/align-service.js";
+import { AlignPromptCancelledError } from "../../ports/align-prompt.js";
 import type { CliDependencies } from "../dependencies.js";
 import {
   errorMessage,
@@ -59,9 +61,10 @@ export function createAlignCommand(dependencies: CliDependencies): Command {
     .action(async (options: AlignCameraOptions): Promise<void> => {
       try {
         try {
-          await TapHoundConfigSchema.parseAsync(
+          const config = await TapHoundConfigSchema.parseAsync(
             await dependencies.readJson(resolve(options.project, options.config))
           );
+          assertArtifactDirectory(options.project, config.artifactsDir);
           await assertNoLegacyWorkspace(dependencies, options.project);
         } catch (error) {
           const output = failureOutput(2, "CONFIG_INVALID", errorMessage(error));
@@ -89,6 +92,16 @@ export function createAlignCommand(dependencies: CliDependencies): Command {
         }
         dependencies.setExitCode(result.exitCode);
       } catch (error) {
+        if (error instanceof AlignPromptCancelledError) {
+          const cancelled: AlignCameraResult = { status: "cancelled", exitCode: 2 };
+          if (options.json === true) {
+            writeJson(dependencies.stdout, cancelled);
+          } else {
+            writeLine(dependencies.stdout, alignCameraText(cancelled));
+          }
+          dependencies.setExitCode(2);
+          return;
+        }
         if (error instanceof AlignError) {
           const output = failureOutput(2, error.code, error.message);
           if (options.json === true) {

@@ -1,9 +1,12 @@
 import type { Stats } from "node:fs";
 import {
   lstat,
+  mkdir,
   readdir,
   readFile,
-  realpath
+  realpath,
+  rename,
+  writeFile
 } from "node:fs/promises";
 import {
   isAbsolute,
@@ -18,7 +21,9 @@ import { EXTERNAL_FLOWS_DIR } from "../../domain/workspace.js";
 import type {
   ExternalFlowCatalogEntry,
   ExternalFlowRecord,
-  ExternalFlowRegistry
+  ExternalFlowRegistry,
+  WriteExternalFlowInput,
+  WriteExternalFlowResult
 } from "../../ports/external-flow-registry.js";
 
 const MAX_EXTERNAL_FLOW_BYTES = 1024 * 1024;
@@ -87,6 +92,88 @@ implements ExternalFlowRegistry {
       ...builtinEntries.filter((entry) => !projectNames.has(entry.name))
     ];
     return entries.sort((left, right) => left.name.localeCompare(right.name));
+  };
+
+  public readonly write = async (
+    input: WriteExternalFlowInput
+  ): Promise<WriteExternalFlowResult> => {
+    const { projectRoot, name, flow, force } = input;
+    const canonicalRoot = await realpath(projectRoot);
+    const externalRoot = resolve(canonicalRoot, EXTERNAL_FLOWS_DIR);
+    const targetPath = join(externalRoot, flowFileName(name));
+    const canonicalExternalRoot = await realpath(externalRoot).catch(
+      (error: unknown) => {
+        if (
+          error instanceof Error
+          && "code" in error
+          && (error as NodeJS.ErrnoException).code === "ENOENT"
+        ) {
+          return undefined;
+        }
+        throw error;
+      }
+    );
+    if (
+      canonicalExternalRoot !== undefined
+      && !contained(canonicalRoot, canonicalExternalRoot)
+    ) {
+      throw new Error("External Flow directory escapes the project root");
+    }
+    const rootStats = await lstat(externalRoot).catch((error: unknown) => {
+      if (
+        error instanceof Error
+        && "code" in error
+        && (error as NodeJS.ErrnoException).code === "ENOENT"
+      ) {
+        return undefined;
+      }
+      throw error;
+    });
+    if (rootStats !== undefined && rootStats.isSymbolicLink()) {
+      throw new Error("External Flow directory is a symlink");
+    }
+
+    const validated = ExternalFlowSchema.parse(flow);
+    if (validated.name !== name) {
+      throw new Error(
+        `External Flow declares name "${validated.name}", expected "${name}"`
+      );
+    }
+
+    let overwritten = false;
+    const existingStats = await lstat(targetPath).catch((error: unknown) => {
+      if (
+        error instanceof Error
+        && "code" in error
+        && (error as NodeJS.ErrnoException).code === "ENOENT"
+      ) {
+        return undefined;
+      }
+      throw error;
+    });
+    if (existingStats !== undefined) {
+      if (existingStats.isSymbolicLink()) {
+        throw new Error(`External Flow target is a symlink: ${targetPath}`);
+      }
+      if (!force) {
+        throw new Error(`External Flow already exists: ${name}`);
+      }
+      overwritten = true;
+    }
+
+    const parentDir = name.includes("/")
+      ? join(externalRoot, name.split("/").slice(0, -1).join("/"))
+      : externalRoot;
+    await mkdir(parentDir, { recursive: true });
+    const tempPath = `${targetPath}.tmp`;
+    await writeFile(tempPath, `${JSON.stringify(validated, null, 2)}\n`);
+    await rename(tempPath, targetPath);
+
+    const relativePath = relative(canonicalRoot, targetPath).replaceAll(
+      "\\",
+      "/"
+    );
+    return { path: relativePath, overwritten };
   };
 
   private readonly loadFlow = async (

@@ -235,6 +235,12 @@ steps into the committed Journey step as `externalSteps`, and commits with
 with `EXTERNAL_FLOW_STALE`. If the flow name is not bound to the session, the
 step fails with `EXTERNAL_FLOW_NOT_FOUND`.
 
+To generate a project-level camera flow that matches your connected device,
+run `taphound align camera`. It probes the device's default camera app and
+writes `.taphound/flows/external/camera/photo-capture.json` with the correct
+package, activity, shutter button resourceId, and (if present) confirm button
+resourceId. See `taphound align camera --help` for options.
+
 ### Generation Flow
 
 1. Core observes the current layout and builds a bridge proposal bound to the

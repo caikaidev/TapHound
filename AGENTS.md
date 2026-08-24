@@ -148,6 +148,33 @@ the captured `externalSteps` so replay and finalize can verify them
 deterministically. If the trigger does not cause an escape, the recorder aborts
 the bridge step.
 
+### Alignment Flow
+
+`align camera` is the device-aware companion to `init`. It probes the
+connected device's default camera app by sending
+`am start -W -a android.intent.action.IMAGE_CAPTURE`, waits for the camera
+package to become foreground, dumps the layout, finds the shutter button by
+scanning enabled clickable elements whose `contentDescription` matches
+shutter keywords (shutter, 快门, capture, 拍照), taps the shutter to trigger
+the review state, then adaptively finds a confirm/done button using the same
+keyword-scan approach (done, confirm, accept, ok, save, checkmark, 完成,
+确认, 接受, 确定, 保存). If a confirm button is found, the generated flow has
+three steps (wait, shutter, confirm); otherwise it has two (wait, shutter),
+matching the auto-accept behavior of the built-in flow.
+
+The probe writes a project-level External Flow to
+`.taphound/flows/external/camera/photo-capture.json` through the registry's
+atomic `write` method. `--force` is required to overwrite an existing flow.
+`--json` skips the interactive confirm prompt and emits a single JSON value.
+The probe always `forceStop`s the camera app in a `finally` block, even on
+failure, so no camera instance is left open after alignment.
+
+`align camera` requires a valid `taphound.config.json` and rejects legacy
+workspace layouts with `CONFIG_INVALID`, the same guard as `record`, `verify`,
+and `generation`. Device selection mirrors `doctor`: auto-select when exactly
+one device is online, otherwise require `--device`. Missing or offline devices
+yield `ALIGN_DEVICE_UNAVAILABLE` (exit code 2).
+
 ### Project Context and Generation Flow
 
 `ProjectDescriber` emits stable package and launch facts. Project Context is a

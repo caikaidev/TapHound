@@ -37,6 +37,7 @@ function adbPort(): AdbPort {
       .mockResolvedValueOnce(checkpoint.after),
     isInstalled: vi.fn(() => Promise.resolve(true)),
     launchActivity: vi.fn(() => Promise.resolve(commandResult())),
+    startActivityByIntent: vi.fn(),
     forceStop: vi.fn(),
     appProcesses: vi.fn(() => Promise.resolve(alive)),
     windowTopology: vi.fn(),

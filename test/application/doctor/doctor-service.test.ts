@@ -43,6 +43,7 @@ function fixture(overrides: {
     currentActivity: vi.fn(),
     isInstalled: vi.fn(() => Promise.resolve(overrides.installed ?? true)),
     launchActivity: vi.fn(() => Promise.resolve(commandResult())),
+    startActivityByIntent: vi.fn(),
     forceStop: vi.fn(),
     appProcesses: vi.fn(() => Promise.resolve([
       { pid: 42, name: "com.example.app" }

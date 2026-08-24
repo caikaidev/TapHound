@@ -27,6 +27,13 @@ export interface LaunchActivityOptions {
   timeoutMs?: number | undefined;
 }
 
+export interface StartActivityByIntentOptions {
+  action: string;
+  deviceSerial: string;
+  signal?: AbortSignal | undefined;
+  timeoutMs?: number | undefined;
+}
+
 export interface LogcatOptions {
   deviceSerial: string;
   onStdoutLine: (line: string) => void;
@@ -42,6 +49,9 @@ export interface AdbPort {
   currentActivity: (identity: AppIdentity) => Promise<string>;
   isInstalled: (identity: AppIdentity) => Promise<boolean>;
   launchActivity: (options: LaunchActivityOptions) => Promise<CommandResult>;
+  startActivityByIntent: (
+    options: StartActivityByIntentOptions
+  ) => Promise<CommandResult>;
   forceStop: (identity: AppIdentity) => Promise<CommandResult>;
   appProcesses: (identity: AppIdentity) => Promise<readonly AppProcess[]>;
   windowTopology: (identity: AppIdentity) => Promise<WindowTopology>;

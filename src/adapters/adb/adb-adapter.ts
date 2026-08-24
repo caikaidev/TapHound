@@ -11,7 +11,8 @@ import type {
   AppIdentity,
   DeviceInfo,
   LaunchActivityOptions,
-  LogcatOptions
+  LogcatOptions,
+  StartActivityByIntentOptions
 } from "../../ports/adb.js";
 import type { Point } from "../../ports/android-cli.js";
 import type {
@@ -148,6 +149,24 @@ export class AdbAdapter implements AdbPort {
       "-n",
       `${options.packageName}/${options.activity}`
     ], options.signal, options.timeoutMs);
+  }
+
+  public async startActivityByIntent(
+    options: StartActivityByIntentOptions
+  ): Promise<CommandResult> {
+    const result = await this.run([
+      ...deviceArgs(options.deviceSerial),
+      "shell",
+      "am",
+      "start",
+      "-W",
+      "-a",
+      options.action
+    ], options.signal, options.timeoutMs);
+    if (result.exitCode === 0 && /^Error(:| type)/m.test(result.stdout)) {
+      return { ...result, exitCode: 1 };
+    }
+    return result;
   }
 
   public forceStop(identity: AppIdentity): Promise<CommandResult> {

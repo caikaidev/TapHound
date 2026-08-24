@@ -237,6 +237,46 @@ describe("AdbAdapter", () => {
     });
   });
 
+  it("startActivityByIntent runs am start -W -a with the device serial", async () => {
+    const runner = processRunner(commandResult({
+      stdout: "Starting: Intent { act=android.intent.action.IMAGE_CAPTURE }\n"
+    }));
+    const adapter = new AdbAdapter(runner);
+
+    await adapter.startActivityByIntent({
+      action: "android.intent.action.IMAGE_CAPTURE",
+      deviceSerial: "DEVICE1"
+    });
+
+    expect(vi.mocked(runner.run)).toHaveBeenCalledWith({
+      executable: "adb",
+      args: [
+        "-s",
+        "DEVICE1",
+        "shell",
+        "am",
+        "start",
+        "-W",
+        "-a",
+        "android.intent.action.IMAGE_CAPTURE"
+      ]
+    });
+  });
+
+  it("startActivityByIntent normalizes am start Error stdout to non-zero exit", async () => {
+    const runner = processRunner(commandResult({
+      stdout: "Error: Activity not started\n"
+    }));
+    const adapter = new AdbAdapter(runner);
+
+    const result = await adapter.startActivityByIntent({
+      action: "android.intent.action.IMAGE_CAPTURE",
+      deviceSerial: "DEVICE1"
+    });
+
+    expect(result.exitCode).not.toBe(0);
+  });
+
   it("force-stops the exact Package on the selected device", async () => {
     const expected = commandResult({ exitCode: 1, stderr: "failure" });
     const runner = processRunner(expected);

@@ -72,8 +72,8 @@ The code follows ports and adapters:
   `src/cli/main.ts` is the executable entry point.
 
 The CLI exposes `doctor`, `record`, `verify`, `project`, `context`, `journey`,
-`generation`, and `init`. Keep external tools and filesystem effects behind
-ports so application tests can inject fakes.
+`generation`, `init`, and `align`. Keep external tools and filesystem effects
+behind ports so application tests can inject fakes.
 
 ### Host Project Workspace
 

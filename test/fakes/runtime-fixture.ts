@@ -105,6 +105,7 @@ export function runtimeFixture(): RuntimeFixture {
       return Promise.resolve(commandResult());
     }),
     startActivityByIntent: vi.fn(() => Promise.resolve(commandResult())),
+    resolveLauncherActivity: vi.fn(() => Promise.resolve(undefined)),
     forceStop: vi.fn(() => {
       order.push("force-stop");
       return Promise.resolve(commandResult());

@@ -12,6 +12,8 @@ import type {
   DeviceInfo,
   LaunchActivityOptions,
   LogcatOptions,
+  ResolveLauncherActivityOptions,
+  ResolvedActivity,
   StartActivityByIntentOptions
 } from "../../ports/adb.js";
 import type { Point } from "../../ports/android-cli.js";
@@ -167,6 +169,31 @@ export class AdbAdapter implements AdbPort {
       return { ...result, exitCode: 1 };
     }
     return result;
+  }
+
+  public async resolveLauncherActivity(
+    options: ResolveLauncherActivityOptions
+  ): Promise<ResolvedActivity | undefined> {
+    const result = await this.run([
+      ...deviceArgs(options.deviceSerial),
+      "shell",
+      "cmd",
+      "package",
+      "resolve-activity",
+      "--brief",
+      options.packageName
+    ], options.signal, options.timeoutMs);
+    assertCommandUsable(result, "cmd package resolve-activity");
+    const match = /^(\S+)\/(\S+)$/m.exec(result.stdout);
+    if (match === null) {
+      return undefined;
+    }
+    const packageName = match[1];
+    const activity = match[2];
+    if (packageName === undefined || activity === undefined) {
+      return undefined;
+    }
+    return { packageName, activity };
   }
 
   public forceStop(identity: AppIdentity): Promise<CommandResult> {

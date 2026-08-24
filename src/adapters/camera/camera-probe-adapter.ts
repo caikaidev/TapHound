@@ -29,6 +29,17 @@ const CAMERA_FOREGROUND_POLL_INTERVAL_MS = 500;
 const LAYOUT_SETTLE_MS = 1500;
 const RESOLVER_KEYWORDS = ["resolver", "chooser"];
 const AOSP_CAMERA_PACKAGES = ["com.android.camera", "com.android.camera2"];
+const KNOWN_CAMERA_PACKAGES = [
+  "com.android.camera",
+  "com.android.camera2",
+  "com.google.android.GoogleCamera",
+  "com.sec.android.app.camera",
+  "com.huawei.camera",
+  "com.miui.camera",
+  "com.oppo.camera",
+  "com.coloros.camera",
+  "org.lineageos.snap"
+];
 
 export interface CameraProbeAdapterDeps {
   adb: AdbPort;
@@ -174,10 +185,15 @@ export class CameraProbeAdapter implements CameraProbePort {
         deviceSerial,
         ...(signal === undefined ? {} : { signal })
       });
+
+      let fallbackExpectedPackage: string | undefined;
       if (startResult.exitCode !== 0) {
-        throw new Error(
-          `ALIGN_CAMERA_INTENT_FAILED: am start exited with code ${String(startResult.exitCode)}: ${startResult.stderr || startResult.stdout}`
-        );
+        fallbackExpectedPackage = await this.tryFallbackLaunch(deviceSerial, signal);
+        if (fallbackExpectedPackage === undefined) {
+          throw new Error(
+            `ALIGN_CAMERA_INTENT_FAILED: am start exited with code ${String(startResult.exitCode)}: ${startResult.stderr || startResult.stdout}`
+          );
+        }
       }
 
       const deadline = this.deps.now() + CAMERA_FOREGROUND_TIMEOUT_MS;
@@ -186,14 +202,21 @@ export class CameraProbeAdapter implements CameraProbePort {
         current = await this.deps.adb.foregroundComponent(
           deviceIdentity(deviceSerial, signal)
         );
-        if (isResolverOrChooser(current.packageName)) {
-          throw new Error(
-            `ALIGN_CAMERA_INTENT_FAILED: IMAGE_CAPTURE landed on system resolver/chooser (${current.packageName}); set a default camera app`
-          );
-        }
-        if (current.packageName !== preForeground.packageName) {
-          cameraPackage = current.packageName;
-          break;
+        if (fallbackExpectedPackage === undefined) {
+          if (isResolverOrChooser(current.packageName)) {
+            throw new Error(
+              `ALIGN_CAMERA_INTENT_FAILED: IMAGE_CAPTURE landed on system resolver/chooser (${current.packageName}); set a default camera app`
+            );
+          }
+          if (current.packageName !== preForeground.packageName) {
+            cameraPackage = current.packageName;
+            break;
+          }
+        } else {
+          if (current.packageName === fallbackExpectedPackage) {
+            cameraPackage = current.packageName;
+            break;
+          }
         }
         await this.deps.sleep(CAMERA_FOREGROUND_POLL_INTERVAL_MS);
       }
@@ -305,5 +328,32 @@ export class CameraProbeAdapter implements CameraProbePort {
         }
       }
     }
+  }
+
+  private async tryFallbackLaunch(
+    deviceSerial: string,
+    signal?: AbortSignal
+  ): Promise<string | undefined> {
+    for (const pkg of KNOWN_CAMERA_PACKAGES) {
+      try {
+        const resolved = await this.deps.adb.resolveLauncherActivity({
+          packageName: pkg,
+          deviceSerial,
+          ...(signal === undefined ? {} : { signal })
+        });
+        if (resolved !== undefined) {
+          await this.deps.adb.launchActivity({
+            packageName: resolved.packageName,
+            activity: resolved.activity,
+            deviceSerial,
+            ...(signal === undefined ? {} : { signal })
+          });
+          return resolved.packageName;
+        }
+      } catch {
+        // Package not installed or cannot launch — try next known package
+      }
+    }
+    return undefined;
   }
 }

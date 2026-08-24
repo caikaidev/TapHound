@@ -60,6 +60,7 @@ function makeAdb(devices: DeviceInfo[]): AdbPort {
     isInstalled: vi.fn(),
     launchActivity: vi.fn(),
     startActivityByIntent: vi.fn(),
+    resolveLauncherActivity: vi.fn(() => Promise.resolve(undefined)),
     forceStop: vi.fn(),
     appProcesses: vi.fn(),
     windowTopology: vi.fn(),

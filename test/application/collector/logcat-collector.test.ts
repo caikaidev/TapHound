@@ -14,6 +14,7 @@ function adbPort(): AdbPort {
     isInstalled: vi.fn(),
     launchActivity: vi.fn(),
     startActivityByIntent: vi.fn(),
+    resolveLauncherActivity: vi.fn(() => Promise.resolve(undefined)),
     forceStop: vi.fn(),
     appProcesses: vi.fn(() => Promise.resolve([
       { pid: 42, name: "com.example.app" }

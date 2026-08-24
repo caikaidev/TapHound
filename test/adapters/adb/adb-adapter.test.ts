@@ -277,6 +277,48 @@ describe("AdbAdapter", () => {
     expect(result.exitCode).not.toBe(0);
   });
 
+  it("resolveLauncherActivity runs cmd package resolve-activity --brief", async () => {
+    const runner = processRunner(commandResult({
+      stdout: [
+        "priority=0 preferredOrder=0 match=0x108000 specificIndex=-1 isDefault=true",
+        "com.android.camera/.Camera"
+      ].join("\n")
+    }));
+    const adapter = new AdbAdapter(runner);
+
+    const result = await adapter.resolveLauncherActivity({
+      packageName: "com.android.camera",
+      deviceSerial: "DEVICE1"
+    });
+
+    expect(vi.mocked(runner.run)).toHaveBeenCalledWith({
+      executable: "adb",
+      args: [
+        "-s", "DEVICE1",
+        "shell", "cmd", "package", "resolve-activity", "--brief",
+        "com.android.camera"
+      ]
+    });
+    expect(result).toEqual({
+      packageName: "com.android.camera",
+      activity: ".Camera"
+    });
+  });
+
+  it("resolveLauncherActivity returns undefined when no activity found", async () => {
+    const runner = processRunner(commandResult({
+      stdout: "No activity found\n"
+    }));
+    const adapter = new AdbAdapter(runner);
+
+    const result = await adapter.resolveLauncherActivity({
+      packageName: "com.nonexistent.fake",
+      deviceSerial: "DEVICE1"
+    });
+
+    expect(result).toBeUndefined();
+  });
+
   it("force-stops the exact Package on the selected device", async () => {
     const expected = commandResult({ exitCode: 1, stderr: "failure" });
     const runner = processRunner(expected);

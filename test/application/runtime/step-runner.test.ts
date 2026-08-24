@@ -38,6 +38,7 @@ function adbPort(): AdbPort {
     isInstalled: vi.fn(() => Promise.resolve(true)),
     launchActivity: vi.fn(() => Promise.resolve(commandResult())),
     startActivityByIntent: vi.fn(),
+    resolveLauncherActivity: vi.fn(() => Promise.resolve(undefined)),
     forceStop: vi.fn(),
     appProcesses: vi.fn(() => Promise.resolve(alive)),
     windowTopology: vi.fn(),

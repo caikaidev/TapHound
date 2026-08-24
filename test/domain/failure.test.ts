@@ -43,7 +43,7 @@ describe("exitCodeForFailure", () => {
   });
 
   it("defines exactly the approved failure vocabulary", () => {
-    expect(FAILURE_CODES).toHaveLength(27);
+    expect(FAILURE_CODES).toHaveLength(35);
   });
 
   it.each([
@@ -60,6 +60,22 @@ describe("exitCodeForFailure", () => {
     "EXTERNAL_LOCATOR_STRICTNESS"
   ] as const)("maps %s to config exit code 2", (failure) => {
     expect(exitCodeForFailure(failure)).toBe(2);
+  });
+
+  it("maps ALIGN_* codes to exit code 2", () => {
+    const codes = [
+      "ALIGN_DEVICE_UNAVAILABLE",
+      "ALIGN_CAMERA_INTENT_FAILED",
+      "ALIGN_CAMERA_NOT_LAUNCHED",
+      "ALIGN_SHUTTER_NOT_FOUND",
+      "ALIGN_SHUTTER_AMBIGUOUS",
+      "ALIGN_SHUTTER_NO_RESOURCE_ID",
+      "ALIGN_CONFIRM_AMBIGUOUS",
+      "ALIGN_FLOW_EXISTS"
+    ] as const;
+    for (const code of codes) {
+      expect(exitCodeForFailure(code)).toBe(2);
+    }
   });
 });
 

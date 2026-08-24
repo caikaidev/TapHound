@@ -12,6 +12,7 @@ import { createJourneyCommand } from "./commands/journey.js";
 import { createProjectCommand } from "./commands/project.js";
 import { createRecordCommand } from "./commands/record.js";
 import { createVerifyCommand } from "./commands/verify.js";
+import { createAlignCommand } from "./commands/align.js";
 import {
   createProductionDependencies,
   type CliDependencies
@@ -66,5 +67,6 @@ export function createProgram(
     .addCommand(configureOutput(createContextCommand(dependencies)))
     .addCommand(configureOutput(createJourneyCommand(dependencies)))
     .addCommand(configureOutput(createGenerationCommand(dependencies)))
-    .addCommand(configureOutput(createInitCommand(dependencies)));
+    .addCommand(configureOutput(createInitCommand(dependencies)))
+    .addCommand(configureOutput(createAlignCommand(dependencies)));
 }

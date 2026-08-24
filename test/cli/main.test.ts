@@ -41,6 +41,9 @@ function dependencies(exitCodes: number[]): CliDependencies {
     initPrompt: {
       selectAgents: () => Promise.reject(new Error("unused"))
     },
+    align: {
+      alignCamera: () => Promise.reject(new Error("unused"))
+    },
     generationStarter: {
       start: () => Promise.reject(new Error("unused"))
     },

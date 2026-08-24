@@ -55,6 +55,9 @@ function baseDependencies(exitCodes: number[]): CliDependencies {
     initPrompt: {
       selectAgents: vi.fn(() => Promise.reject(new Error("unused")))
     },
+    align: {
+      alignCamera: vi.fn(() => Promise.reject(new Error("unused")))
+    },
     generationStarter: {
       start: vi.fn(() => Promise.reject(new Error("unused")))
     },

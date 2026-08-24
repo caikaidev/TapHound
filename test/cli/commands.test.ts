@@ -130,6 +130,9 @@ function dependencies(): {
       initPrompt: {
         selectAgents: vi.fn(() => Promise.resolve(["droid" as const]))
       },
+      align: {
+        alignCamera: vi.fn(() => Promise.reject(new Error("unused")))
+      },
       generationStarter: {
         start: vi.fn(() => Promise.resolve({
           version: 1 as const,

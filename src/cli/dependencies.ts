@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 
 import { AdbAdapter } from "../adapters/adb/adb-adapter.js";
 import { AndroidCliAdapter } from "../adapters/android-cli/android-cli-adapter.js";
+import { CameraProbeAdapter } from "../adapters/camera/camera-probe-adapter.js";
 import { SystemClock } from "../adapters/clock/system-clock.js";
 import { FileSystemArtifactStore } from "../adapters/filesystem/artifact-store.js";
 import { FileSystemContextDocumentWriter } from "../adapters/filesystem/context-document-writer.js";
@@ -35,6 +36,8 @@ import {
 import { InquirerRecorderPrompt } from "../adapters/prompt/inquirer-recorder-prompt.js";
 import { InquirerGenerationPrompt } from "../adapters/prompt/inquirer-generation-prompt.js";
 import { InquirerInitPrompt } from "../adapters/prompt/inquirer-init-prompt.js";
+import { InquirerAlignPrompt } from "../adapters/prompt/inquirer-align-prompt.js";
+import { AlignService, type AlignCameraResult } from "../application/align/align-service.js";
 import { ContextValidator } from "../application/context/context-validator.js";
 import { ContextLoader } from "../application/context/context-loader.js";
 import { ContextRefresher } from "../application/context/context-refresher.js";
@@ -163,6 +166,15 @@ export interface CliDependencies {
     install: (input: InitInput) => Promise<InitResult>;
   };
   initPrompt: Pick<InitPromptPort, "selectAgents">;
+  align: {
+    alignCamera: (input: {
+      projectRoot: string;
+      deviceSerial?: string | undefined;
+      force?: boolean | undefined;
+      json: boolean;
+      signal?: AbortSignal | undefined;
+    }) => Promise<AlignCameraResult>;
+  };
   workspaceLayout: WorkspaceLayoutPort;
   readJson: (path: string) => Promise<unknown>;
   cwd: () => string;
@@ -310,6 +322,19 @@ export function createProductionDependencies(
       homedir: homedir()
     }),
     initPrompt: new InquirerInitPrompt(),
+    align: new AlignService({
+      adb,
+      probe: new CameraProbeAdapter({
+        adb,
+        androidCli,
+        now: () => Date.now(),
+        sleep: async (ms: number): Promise<void> => {
+          await new Promise((resolve) => setTimeout(resolve, ms));
+        }
+      }),
+      prompt: new InquirerAlignPrompt(),
+      registry: externalFlowRegistry
+    }),
     workspaceLayout: new FileSystemWorkspaceLayout(),
     generationStarter: {
       start: async (input): Promise<

@@ -73,10 +73,16 @@ See the [local testing guide](docs/local-testing.md) for source, npm tarball, an
 - `context list` / `validate` / `status`: inspect or validate a v2 Project Context index and module shards.
 - `context refresh`: recompute Context evidence hashes, including semantic hashes, without re-analyzing source.
 - `journey list-flows` / `journey resolve`: validate reusable Flows and resolve
-  composed Journey Sources into flat Journey v1 files.
-- `generation start` / `observe` / `step` / `confirm` / `manual` / `status` /
-  `recover` / `finalize`: manage deterministic Journey generation sessions.
+  composed Journey Sources into flat Journey v1 files. `list-flows --include-external`
+  also lists External Flows used by `generation bridge --flow`.
+- `generation start` / `observe` / `step` / `confirm` / `manual` / `bridge` /
+  `status` / `recover` / `archive` / `list` / `finalize`: manage deterministic
+  Journey generation sessions. `bridge` records cross-app flows (e.g. camera,
+  picker, share) through a bound External Flow.
 - `init`: install the TapHound AI Journey Skill for AI agents.
+- `align camera`: probe the device's default camera app and write a deterministic
+  `flows/external/camera/photo-capture.json` External Flow. Requires
+  `--force` to overwrite an existing flow.
 
 ## Configuration
 
@@ -179,7 +185,7 @@ hints, constraints, and evidence references. It is a Skill-level static hint,
 not a Core CLI input; validated Project Context, live Snapshots, and final
 Replay remain authoritative.
 
-The Journey Skill guides agents such as Droid, Claude Code, Copilot, and Cursor:
+The Journey Skill guides agents such as Droid, Claude Code, Codex, and Cursor:
 
 1. Discover Gradle modules and generate a compact Project Context v2 index plus one semantic/evidence shard per module.
 2. Use `context list` to choose Goal-relevant modules and `context validate` / `context status` to check shard, evidence, and inventory freshness.
@@ -215,7 +221,11 @@ taphound generation start \
   --json
 ```
 
-The device is bound at `generation start`; subsequent `observe`, `step`, `confirm`, and `manual` commands use that binding via the session. See the Skill's [`GUIDE.md`](assets/skills/taphound-ai-journey/GUIDE.md) for the full workflow.
+The device is bound at `generation start`; subsequent `observe`, `step`,
+`confirm`, `manual`, `bridge`, `status`, `recover`, and `archive` commands use
+that binding via the session. `generation start --external-flow <name...>` binds
+named External Flows by content hash so `generation bridge --flow <name>` can
+resolve them deterministically later. See the Skill's [`GUIDE.md`](assets/skills/taphound-ai-journey/GUIDE.md) for the full workflow.
 
 If Base Flow replay fails, `generation start --json` reports
 `FLOW_REPLAY_FAILED` with the Flow name, Verify report path, primary failure,
@@ -226,8 +236,8 @@ explicitly chooses to bypass reuse.
 
 `generation manual` interactively builds, executes, and records a deterministic
 Journey step. Generation step JSON includes phase timing for freshness,
-observation, action, idle waiting, expectations, Logcat collection, and the
-optional next observation.
+evidence setup, observation, action, idle waiting, expectations, Logcat
+collection, and the optional next observation.
 
 ### Installing the Skill for Other AI Agents
 
@@ -262,7 +272,8 @@ Supported agents and paths:
 
 The Skill is published with the npm package; `taphound init` copies it from the
 package to the target directory. Re-running `init` overwrites existing files
-in the installed Skill directory.
+that exist in the payload, but does not remove stale files left in the target
+directory from a previous install.
 
 ## Deterministic Verification
 
@@ -295,7 +306,7 @@ taphound verify --project . --journey .taphound/journeys/search.json --json
 
 ## Reports
 
-Each verification writes to an independent directory, always containing `report.json` and `summary.txt`, with step logs provided based on actual execution. A final screenshot and full Logcat are collected on a best-effort basis. The original verification failure is preserved in `primaryFailure`; screenshot or logcat collection issues go into `secondaryErrors` and never overwrite the original failure; corresponding optional artifacts may be missing.
+Each verification writes to an independent directory, always containing `report.json` and `summary.txt`, with step logs provided based on actual execution. A final screenshot and full Logcat are collected on a best-effort basis. The original verification failure is preserved in `primaryFailure`; screenshot or logcat collection issues go into `secondaryErrors` and never overwrite an existing original failure. When verification itself passes but collection fails, the first collection error becomes `primaryFailure` (with code `COLLECTION_FAILED`) and the rest enter `secondaryErrors`; corresponding optional artifacts may be missing.
 
 ## Current Limitations
 
@@ -305,5 +316,5 @@ Each verification writes to an independent directory, always containing `report.
 - The Recorder only provides swipe for scrollable elements that have bounds from the Android CLI; Replay does not guess swipe regions for elements missing bounds.
 - Annotated screenshot fallback applies only to `click` and `longClick`, and requires an explicitly saved `#label`.
 - Replay, device operations, and assertions are fully deterministic, with no AI or visual inference.
-- The repository provides two Agent Skills installable via `taphound init`, but there is no dedicated SubAgent wrapper yet.
+- The repository provides one Agent Skill installable via `taphound init`, but there is no dedicated SubAgent wrapper yet.
 - Regular tests do not require a real device; Replay and Generation device acceptance requires explicitly setting `TAPHOUND_ACCEPTANCE_DEVICE=1` and meeting external Android prerequisites.

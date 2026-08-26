@@ -73,10 +73,15 @@ git diff --exit-code -- assets/brand/png
 - `context list` / `validate` / `status`：查看或校验 v2 Project Context 索引及模块分片。
 - `context refresh`：在不重新分析源码的前提下，重算 Context 证据哈希（含语义哈希）。
 - `journey list-flows` / `journey resolve`：校验可复用 Flow，并将组合式 Journey
-  Source 解析为扁平 Journey v1。
-- `generation start` / `observe` / `step` / `confirm` / `manual` / `status` /
-  `recover` / `finalize`：管理确定性 Journey 生成会话。
+  Source 解析为扁平 Journey v1。`list-flows --include-external` 还会列出供
+  `generation bridge --flow` 使用的 External Flow。
+- `generation start` / `observe` / `step` / `confirm` / `manual` / `bridge` /
+  `status` / `recover` / `archive` / `list` / `finalize`：管理确定性 Journey 生成会话。
+  `bridge` 通过已绑定的 External Flow 记录跨应用流程（如相机、选择器、分享）。
 - `init`：为 AI Agent 安装 TapHound AI Journey Skill。
+- `align camera`：探测设备默认相机应用并写入确定性
+  `flows/external/camera/photo-capture.json` External Flow。覆盖已存在的 flow 需要
+  `--force`。
 
 ## 配置
 
@@ -171,7 +176,7 @@ TapHound 不规定、也不打包完整开发 Workflow。
 Journey、断言、实现提示、约束和证据引用。它属于 Skill 层静态提示，不是 Core
 CLI 输入；经过校验的 Project Context、实时 Snapshot 和最终 Replay 仍然权威。
 
-Journey Skill 会指导 Droid、Claude Code、Copilot、Cursor 等 Agent：
+Journey Skill 会指导 Droid、Claude Code、Codex、Cursor 等 Agent：
 
 1. 发现 Gradle 模块，生成精简的 Project Context v2 根索引以及每个模块独立的语义/证据分片。
 2. 使用 `context list` 选择 Goal 相关模块，并通过 `context validate` / `context status` 检查分片、证据与文件清单时效性。
@@ -201,7 +206,9 @@ taphound generation start \
 ```
 
 设备在 `generation start` 时绑定，后续 `observe`、`step`、`confirm`、`manual`、
-`status` 和 `recover` 命令通过 session 使用该绑定。完整流程见 Skill 的
+`bridge`、`status`、`recover` 和 `archive` 命令通过 session 使用该绑定。
+`generation start --external-flow <name...>` 按内容哈希绑定具名 External Flow，
+供后续 `generation bridge --flow <name>` 确定性解析。完整流程见 Skill 的
 [`GUIDE.md`](assets/skills/taphound-ai-journey/GUIDE.md)。
 
 Base Flow 重放失败时，`generation start --json` 会返回
@@ -211,8 +218,8 @@ Base Flow 重放失败时，`generation start --json` 会返回
 显式决定绕过复用时，才可省略 `--base-flow` 重新开始。
 
 `generation manual` 会交互式构建、执行并记录一个确定性 Journey step。Generation
-step JSON 会分别报告 freshness、观察、action、idle 等待、expect、Logcat 收集及
-可选后续观察的耗时。
+step JSON 会分别报告 freshness、证据准备、观察、action、idle 等待、expect、Logcat
+收集及可选后续观察的耗时。
 
 ### 为其他 AI Agent 安装 Skill
 
@@ -244,8 +251,8 @@ taphound init --agent claude --global
 | Droid | `.factory/skills/` | `~/.factory/skills/` |
 | Other | `.agents/skills/` | `~/.agents/skills/` |
 
-该 Skill 随 npm 包发布，`taphound init` 从包内复制到目标目录。重新运行
-`init` 会覆盖已安装 Skill 目录中的已有文件。
+该 Skill 随 npm 包发布，`taphound init` 从包内复制到目标目录。重新运行 `init`
+会覆盖 payload 中存在的同名文件，但不会删除目标目录中上一次安装遗留的陈旧文件。
 
 ## 确定性验证
 
@@ -278,7 +285,7 @@ taphound verify --project . --journey .taphound/journeys/search.json --json
 
 ## 报告
 
-每次验证写入独立目录，固定包含 `report.json` 与 `summary.txt`，按实际执行结果提供步骤日志，并尽力采集最终截图和完整 Logcat。原始验证失败保存在 `primaryFailure`；截图或日志采集问题进入 `secondaryErrors`，不会覆盖原始失败，对应可选产物也可能缺失。
+每次验证写入独立目录，固定包含 `report.json` 与 `summary.txt`，按实际执行结果提供步骤日志，并尽力采集最终截图和完整 Logcat。原始验证失败保存在 `primaryFailure`；截图或日志采集问题进入 `secondaryErrors`，不会覆盖已存在的原始失败。当验证本身通过但采集失败时，首个采集错误会成为 `primaryFailure`（错误码 `COLLECTION_FAILED`），其余进入 `secondaryErrors`；对应可选产物也可能缺失。
 
 ## 当前限制
 
@@ -288,5 +295,5 @@ taphound verify --project . --journey .taphound/journeys/search.json --json
 - Recorder 只为 Android CLI 返回了 bounds 的 scrollable 元素提供 swipe；Replay 不会为缺失 bounds 的元素猜测滑动区域。
 - 标注截图回退只适用于 click 与 longClick，且必须显式保存 `#编号`。
 - Replay、设备操作和断言完全确定性，不包含 AI 或视觉推理。
-- 源码仓库提供两个 Agent Skills，也可通过 `taphound init` 为其他 Agent 安装，但尚无专用 SubAgent 封装。
+- 源码仓库提供一个 Agent Skill，可通过 `taphound init` 为其他 Agent 安装，但尚无专用 SubAgent 封装。
 - 普通测试不要求真实设备；Replay 与 Generation 真机验收需要显式设置 `TAPHOUND_ACCEPTANCE_DEVICE=1` 并满足外部 Android 前提。

@@ -33,6 +33,9 @@ function formatValues(values: CameraProbeResult): string {
   const lines: string[] = [
     `  Camera package:    ${values.packageName}`,
     `  Camera activity:   ${values.activityName}`,
+    ...(values.confirmActivityName === undefined
+      ? []
+      : [`  Review activity:   ${values.confirmActivityName}`]),
     `  Shutter button:    ${values.shutterResourceId}${
       values.shutterContentDescription !== undefined
         ? `  (${values.shutterContentDescription})`

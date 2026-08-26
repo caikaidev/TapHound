@@ -11,6 +11,19 @@ deterministically.
 TapHound does not build or install APKs. The target package must already be
 installed before recording, generation, or verification.
 
+`taphound init` installs only `taphound-ai-journey`, which drives one
+deterministic Journey generation session. Requirement analysis, planning,
+coding, build/install, multi-Case orchestration, completion gates, diagnosis,
+and IM-Log belong to external Workflow Skills. They may consume TapHound's
+public CLI JSON and evidence, but TapHound does not package or own those
+workflows.
+
+The Journey Skill may consume one optional project-relative
+`taphound-journey-brief.md` through a `journeyBrief: {path, sha256}` binding.
+This is a Skill convention, not a Core CLI input. The Brief is untrusted static
+Case context; Project Context, live Runtime Snapshots, risk policy, execution,
+and final Replay remain authoritative.
+
 ## Toolchain and Commands
 
 - Use Node.js 22 or newer. The current ESLint toolchain requires Node 22.13+ or
@@ -82,8 +95,8 @@ layout; derive every path from it instead of writing `.taphound` literals:
 
 ```text
 <project>/
-  taphound.config.json
   .taphound/
+    config.json           # committed TapHound configuration
     .gitignore            # generated once with "build/"; never overwritten
     context/              # committed Project Context Bundle
     flows/                # committed reusable Flow prefixes
@@ -152,15 +165,18 @@ the bridge step.
 
 `align camera` is the device-aware companion to `init`. It probes the
 connected device's default camera app by sending
-`am start -W -a android.intent.action.IMAGE_CAPTURE`, waits for the camera
-package to become foreground, dumps the layout, finds the shutter button by
-scanning enabled clickable elements whose `contentDescription` matches
-shutter keywords (shutter, 快门, capture, 拍照), taps the shutter to trigger
-the review state, then adaptively finds a confirm/done button using the same
-keyword-scan approach (done, confirm, accept, ok, save, checkmark, 完成,
-确认, 接受, 确定, 保存). If a confirm button is found, the generated flow has
-three steps (wait, shutter, confirm); otherwise it has two (wait, shutter),
-matching the auto-accept behavior of the built-in flow.
+`am start -W -a android.media.action.IMAGE_CAPTURE`, waits for the camera
+package and Activity to stabilize, dumps the layout, and finds the shutter
+button from an enabled clickable element using `contentDescription` keywords
+or deterministic `resourceId` tokens. After tapping the shutter it captures
+the stable review Activity and finds the confirm/done button using the same
+two-stage lookup. ResourceId tokens are ordered by semantic specificity, so
+an explicit `done_button` wins over a clickable container whose ID merely
+contains a lower-priority `save` token. If the camera leaves the foreground without a confirm
+button, the generated flow has two steps (wait, shutter). If it remains
+foreground, a unique resourceId-backed confirm button is required and the
+flow has three steps (wait, shutter, confirm); missing or non-resourceId
+confirm controls fail closed instead of generating a shutter-only flow.
 
 The probe writes a project-level External Flow to
 `.taphound/flows/external/camera/photo-capture.json` through the registry's
@@ -169,7 +185,7 @@ atomic `write` method. `--force` is required to overwrite an existing flow.
 The probe always `forceStop`s the camera app in a `finally` block, even on
 failure, so no camera instance is left open after alignment.
 
-`align camera` requires a valid `taphound.config.json` and rejects legacy
+`align camera` requires a valid `.taphound/config.json` and rejects legacy
 workspace layouts with `CONFIG_INVALID`, the same guard as `record`, `verify`,
 and `generation`. Device selection mirrors `doctor`: auto-select when exactly
 one device is online, otherwise require `--device`. Missing or offline devices

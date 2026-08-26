@@ -74,7 +74,8 @@ describe("InquirerAlignPrompt.confirmWrite", () => {
     const withConfirm: CameraProbeResult = {
       ...values,
       confirmResourceId: "confirm_button",
-      confirmContentDescription: "Confirm"
+      confirmContentDescription: "Confirm",
+      confirmActivityName: "com.android.camera.ReviewActivity"
     };
 
     await prompt.confirmWrite({ values: withConfirm, targetPath: "camera.json" });
@@ -82,6 +83,7 @@ describe("InquirerAlignPrompt.confirmWrite", () => {
     const message = vi.mocked(prompts.confirm).mock.calls[0]?.[0].message ?? "";
     expect(message).toContain("com.android.camera");
     expect(message).toContain("com.android.camera.CameraActivity");
+    expect(message).toContain("com.android.camera.ReviewActivity");
     expect(message).toContain("shutter_button");
     expect(message).toContain("(Shutter)");
     expect(message).toContain("confirm_button");

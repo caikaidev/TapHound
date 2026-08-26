@@ -46,7 +46,7 @@ when the command fails or stdout matches `/^Error(:| type)/m`.
 
 ## Configuration
 
-`build` and `artifact` are removed from `taphound.config.json`. The schema stays
+`build` and `artifact` are removed from `.taphound/config.json`. The schema stays
 at `version: 1`; because it is strict, stale configs fail loudly with an
 unknown-key error rather than silently ignoring dead fields.
 

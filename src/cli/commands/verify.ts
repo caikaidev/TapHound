@@ -4,7 +4,10 @@ import { Command } from "commander";
 
 import { TapHoundConfigSchema } from "../../domain/config.js";
 import { JourneySchema } from "../../domain/journey.js";
-import { assertArtifactDirectory } from "../../domain/workspace.js";
+import {
+  assertArtifactDirectory,
+  CONFIG_PATH
+} from "../../domain/workspace.js";
 import type { CliDependencies } from "../dependencies.js";
 import {
   errorMessage,
@@ -38,7 +41,7 @@ export function createVerifyCommand(dependencies: CliDependencies): Command {
   return new Command("verify")
     .description("Deterministically verify a TapHound Journey")
     .option("--project <path>", "Android project root", dependencies.cwd())
-    .option("--config <path>", "TapHound config path", "taphound.config.json")
+    .option("--config <path>", "TapHound config path", CONFIG_PATH)
     .requiredOption("--journey <path>", "TapHound Journey path")
     .option("--device <serial>", "Select an online Android device")
     .option("--package <name>", "Override run.packageName")

@@ -3,7 +3,10 @@ import { resolve } from "node:path";
 import { Command } from "commander";
 
 import { TapHoundConfigSchema } from "../../domain/config.js";
-import { assertArtifactDirectory } from "../../domain/workspace.js";
+import {
+  assertArtifactDirectory,
+  CONFIG_PATH
+} from "../../domain/workspace.js";
 import {
   AlignError,
   type AlignCameraResult
@@ -34,10 +37,14 @@ function alignCameraText(result: AlignCameraResult): string {
   const confirmLine = probe.confirmResourceId !== undefined
     ? `  Confirm button:    ${probe.confirmResourceId}`
     : "  Confirm button:    (none — camera auto-accepts)";
+  const reviewActivityLine = probe.confirmActivityName === undefined
+    ? []
+    : [`  Review activity:   ${probe.confirmActivityName}`];
   return [
     "Probing camera...",
     `  Camera package:    ${probe.packageName}`,
     `  Camera activity:   ${probe.activityName}`,
+    ...reviewActivityLine,
     `  Shutter button:    ${probe.shutterResourceId}`,
     confirmLine,
     "",
@@ -54,7 +61,7 @@ export function createAlignCommand(dependencies: CliDependencies): Command {
     .command("camera")
     .description("Probe the device camera and write a project External Flow")
     .option("--project <path>", "Android project root", dependencies.cwd())
-    .option("--config <path>", "TapHound config path", "taphound.config.json")
+    .option("--config <path>", "TapHound config path", CONFIG_PATH)
     .option("--device <serial>", "Select an online Android device")
     .option("--force", "Overwrite an existing project flow")
     .option("--json", "Emit machine-readable JSON")

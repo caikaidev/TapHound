@@ -22,6 +22,7 @@ import type { LayoutElement } from "../../../src/domain/layout.js";
 interface FakeAdb {
   foregroundSequence: ForegroundComponent[];
   startActivityResult: CommandResult;
+  startActivityActions?: string[];
   tapCalls: Point[];
   forceStopCalls: string[];
   resolvedActivities: Map<string, { packageName: string; activity: string }>;
@@ -50,7 +51,10 @@ function makeAdb(fake: FakeAdb): AdbPort {
       fake.launchActivityCalls.push({ packageName: options.packageName, activity: options.activity });
       return Promise.resolve(fake.startActivityResult);
     },
-    startActivityByIntent: (): Promise<CommandResult> => Promise.resolve(fake.startActivityResult),
+    startActivityByIntent: (options): Promise<CommandResult> => {
+      fake.startActivityActions?.push(options.action);
+      return Promise.resolve(fake.startActivityResult);
+    },
     resolveLauncherActivity: (options): Promise<{ packageName: string; activity: string } | undefined> => {
       const resolved = fake.resolvedActivities.get(options.packageName);
       return Promise.resolve(resolved);
@@ -161,7 +165,12 @@ describe("CameraProbeAdapter", () => {
       element({ resourceId: "com.android.camera:id/shutter_button", contentDescription: "快门按钮" }),
       element({ resourceId: "com.android.camera:id/btn_done", contentDescription: "完成" })
     ];
-    const androidCli = makeAndroidCli([shutterLayout, confirmLayout, confirmLayout]);
+    const androidCli = makeAndroidCli([
+      shutterLayout,
+      shutterLayout,
+      confirmLayout,
+      confirmLayout
+    ]);
     const clock = makeFakeClock();
 
     const probe = new CameraProbeAdapter({ adb, androidCli, now: clock.now, sleep: clock.sleep });
@@ -182,7 +191,8 @@ describe("CameraProbeAdapter", () => {
         cameraForeground,
         cameraForeground,
         cameraForeground,
-        cameraForeground
+        hostForeground,
+        hostForeground
       ],
       startActivityResult: commandResult({ stdout: "Starting: Intent\n" }),
       tapCalls: [],
@@ -199,6 +209,167 @@ describe("CameraProbeAdapter", () => {
 
     expect(result.shutterResourceId).toBe("com.android.camera:id/shutter_button");
     expect(result.confirmResourceId).toBeUndefined();
+  });
+
+  it("discovers confirm by resourceId when contentDescription is empty", async () => {
+    const fake: FakeAdb = {
+      foregroundSequence: [
+        hostForeground,
+        cameraForeground,
+        cameraForeground,
+        cameraForeground,
+        cameraForeground,
+        cameraForeground
+      ],
+      startActivityResult: commandResult({ stdout: "Starting: Intent\n" }),
+      tapCalls: [],
+      forceStopCalls: [],
+      resolvedActivities: new Map(),
+      launchActivityCalls: []
+    };
+    const adb = makeAdb(fake);
+    const confirmLayout: LayoutElement[] = [
+      element({
+        resourceId: "shutter_button",
+        contentDescription: "快门按钮",
+        clickable: false,
+        enabled: false
+      }),
+      element({ resourceId: "done_button" }),
+      element({ resourceId: "cancel_btn" })
+    ];
+    const androidCli = makeAndroidCli([
+      shutterLayout,
+      shutterLayout,
+      confirmLayout,
+      confirmLayout
+    ]);
+    const clock = makeFakeClock();
+
+    const probe = new CameraProbeAdapter({ adb, androidCli, now: clock.now, sleep: clock.sleep });
+    const result = await probe.probe({ deviceSerial: "DEVICE1" });
+
+    expect(result.confirmResourceId).toBe("done_button");
+    expect(result.confirmContentDescription).toBeUndefined();
+  });
+
+  it("prefers done_button over a clickable save container", async () => {
+    const fake: FakeAdb = {
+      foregroundSequence: [
+        hostForeground,
+        cameraForeground,
+        cameraForeground,
+        cameraForeground,
+        cameraForeground,
+        cameraForeground
+      ],
+      startActivityResult: commandResult({ stdout: "Starting: Intent\n" }),
+      tapCalls: [],
+      forceStopCalls: [],
+      resolvedActivities: new Map(),
+      launchActivityCalls: []
+    };
+    const adb = makeAdb(fake);
+    const seekerReviewLayout: LayoutElement[] = [
+      element({ resourceId: "camera_bottom_save_cancel_container" }),
+      element({ resourceId: "cancel_btn" }),
+      element({ resourceId: "done_button" })
+    ];
+    const androidCli = makeAndroidCli([
+      shutterLayout,
+      shutterLayout,
+      seekerReviewLayout,
+      seekerReviewLayout
+    ]);
+    const clock = makeFakeClock();
+
+    const probe = new CameraProbeAdapter({ adb, androidCli, now: clock.now, sleep: clock.sleep });
+    const result = await probe.probe({ deviceSerial: "DEVICE1" });
+
+    expect(result.confirmResourceId).toBe("done_button");
+  });
+
+  it("fails closed when camera remains foreground without a confirm locator", async () => {
+    const fake: FakeAdb = {
+      foregroundSequence: [
+        hostForeground,
+        cameraForeground,
+        cameraForeground,
+        cameraForeground,
+        cameraForeground,
+        cameraForeground
+      ],
+      startActivityResult: commandResult({ stdout: "Starting: Intent\n" }),
+      tapCalls: [],
+      forceStopCalls: [],
+      resolvedActivities: new Map(),
+      launchActivityCalls: []
+    };
+    const adb = makeAdb(fake);
+    const unknownReviewLayout: LayoutElement[] = [
+      element({
+        resourceId: "shutter_button",
+        contentDescription: "快门按钮",
+        clickable: false,
+        enabled: false
+      }),
+      element({ resourceId: "mystery_button" })
+    ];
+    const androidCli = makeAndroidCli([
+      shutterLayout,
+      shutterLayout,
+      unknownReviewLayout,
+      unknownReviewLayout
+    ]);
+    const clock = makeFakeClock();
+
+    const probe = new CameraProbeAdapter({ adb, androidCli, now: clock.now, sleep: clock.sleep });
+    await expect(probe.probe({ deviceSerial: "DEVICE1" })).rejects.toMatchObject({
+      code: "ALIGN_CONFIRM_NOT_FOUND"
+    });
+  });
+
+  it("records stable capture and review Activities separately", async () => {
+    const launchForeground: ForegroundComponent = {
+      packageName: "com.android.camera",
+      activity: "com.android.camera.Camera"
+    };
+    const reviewForeground: ForegroundComponent = {
+      packageName: "com.android.camera",
+      activity: "com.android.camera.ReviewActivity"
+    };
+    const fake: FakeAdb = {
+      foregroundSequence: [
+        hostForeground,
+        launchForeground,
+        cameraForeground,
+        cameraForeground,
+        reviewForeground,
+        reviewForeground
+      ],
+      startActivityResult: commandResult({ stdout: "Starting: Intent\n" }),
+      tapCalls: [],
+      forceStopCalls: [],
+      resolvedActivities: new Map(),
+      launchActivityCalls: []
+    };
+    const adb = makeAdb(fake);
+    const confirmLayout: LayoutElement[] = [
+      element({ resourceId: "done_button" })
+    ];
+    const androidCli = makeAndroidCli([
+      shutterLayout,
+      shutterLayout,
+      confirmLayout,
+      confirmLayout
+    ]);
+    const clock = makeFakeClock();
+
+    const probe = new CameraProbeAdapter({ adb, androidCli, now: clock.now, sleep: clock.sleep });
+    const result = await probe.probe({ deviceSerial: "DEVICE1" });
+
+    expect(result.activityName).toBe("com.android.camera.CameraActivity");
+    expect(result.confirmActivityName).toBe("com.android.camera.ReviewActivity");
   });
 
   it("throws ALIGN_CAMERA_NOT_LAUNCHED when foreground never changes", async () => {
@@ -384,7 +555,9 @@ describe("CameraProbeAdapter", () => {
         hostForeground,
         cameraForeground,
         cameraForeground,
-        cameraForeground
+        cameraForeground,
+        hostForeground,
+        hostForeground
       ],
       startActivityResult: commandResult({ stdout: "Starting: Intent\n" }),
       tapCalls: [],
@@ -428,10 +601,8 @@ describe("CameraProbeAdapter", () => {
     );
   });
 
-  it("falls back to direct package launch when IMAGE_CAPTURE intent cannot resolve", async () => {
-    const resolvedActivities = new Map<string, { packageName: string; activity: string }>([
-      ["com.android.camera", { packageName: "com.android.camera", activity: ".Camera" }]
-    ]);
+  it("launches the canonical MediaStore IMAGE_CAPTURE action", async () => {
+    const startActivityActions: string[] = [];
     const fake: FakeAdb = {
       foregroundSequence: [
         hostForeground,
@@ -440,13 +611,11 @@ describe("CameraProbeAdapter", () => {
         cameraForeground,
         cameraForeground
       ],
-      startActivityResult: commandResult({
-        stdout: "Error: Activity not started, unable to resolve Intent\n",
-        exitCode: 1
-      }),
+      startActivityResult: commandResult({ stdout: "Starting: Intent\n" }),
+      startActivityActions,
       tapCalls: [],
       forceStopCalls: [],
-      resolvedActivities,
+      resolvedActivities: new Map(),
       launchActivityCalls: []
     };
     const adb = makeAdb(fake);
@@ -460,9 +629,8 @@ describe("CameraProbeAdapter", () => {
     const probe = new CameraProbeAdapter({ adb, androidCli, now: clock.now, sleep: clock.sleep });
     const result = await probe.probe({ deviceSerial: "DEVICE1" });
 
-    expect(fake.launchActivityCalls).toEqual([
-      { packageName: "com.android.camera", activity: ".Camera" }
-    ]);
+    expect(startActivityActions).toEqual(["android.media.action.IMAGE_CAPTURE"]);
+    expect(fake.launchActivityCalls).toEqual([]);
     expect(result.packageName).toBe("com.android.camera");
     expect(result.activityName).toBe("com.android.camera.CameraActivity");
     expect(result.shutterResourceId).toBe("com.android.camera:id/shutter_button");
@@ -470,7 +638,7 @@ describe("CameraProbeAdapter", () => {
     expect(fake.forceStopCalls).toEqual(["com.android.camera"]);
   });
 
-  it("throws ALIGN_CAMERA_INTENT_FAILED when intent fails and no known camera package is installed", async () => {
+  it("does not fall back to a launcher Activity when IMAGE_CAPTURE is unsupported", async () => {
     const fake: FakeAdb = {
       foregroundSequence: [hostForeground],
       startActivityResult: commandResult({

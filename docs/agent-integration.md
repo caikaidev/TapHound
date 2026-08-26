@@ -7,6 +7,29 @@ TapHound provides two integration surfaces for Agents:
 
 An external Agent may analyze source code, judge whether a goal is complete, and propose the next step, but TapHound Core never invokes a model. Project Context validation, device-state binding, proposal validation, risk confirmation, ADB execution, final Replay, and assertions are all handled by deterministic code.
 
+TapHound intentionally stops at the Journey boundary. External Workflow Skills
+own requirement analysis, planning, coding, build/install, multi-Case
+orchestration, completion gates, and diagnosis. An orchestrator can invoke
+TapHound once per independent Case and adapt the public JSON, Report, and
+evidence paths into its own Task/Result protocol. Workflow correlation and
+Requirement/Plan identities remain outside TapHound.
+
+For one Case, an external orchestrator may supply the optional Skill-level
+`journeyBrief` binding:
+
+```json
+{
+  "path": ".android-agent-workflow/req-search-001/cases/CASE-002/taphound-journey-brief.md",
+  "sha256": "<SHA-256 of the exact file bytes>"
+}
+```
+
+The Markdown format is defined by
+[`taphound-journey-brief.example.md`](../assets/skills/taphound-ai-journey/templates/taphound-journey-brief.example.md).
+This is not a Core CLI argument. It provides static Case hints to the Journey
+Skill; Project Context, live Snapshot binding, risk policy, and final Replay
+remain authoritative.
+
 ## Verifying an Existing Journey
 
 A typical flow: a developer uses Claude Code or another Agent CLI to implement a requirement, then has the Agent call TapHound Journey to verify whether the code meets expectations.
@@ -14,7 +37,7 @@ A typical flow: a developer uses Claude Code or another Agent CLI to implement a
 ```bash
 taphound verify \
   --project /workspace/android-app \
-  --config /workspace/android-app/taphound.config.json \
+  --config /workspace/android-app/.taphound/config.json \
   --journey /workspace/android-app/.taphound/journeys/search.json \
   --device emulator-5554 \
   --json
@@ -204,7 +227,9 @@ audit.
 
 ## Installing the Skill for AI Agents
 
-`taphound init` copies the TapHound AI Journey Skill from the npm package into each Agent's Skill directory. The interactive multi-select requires choosing at least one Agent; you can also specify non-interactively with `--agent`:
+`taphound init` copies the TapHound AI Journey Skill from the npm package into
+each Agent's Skill directory. The interactive multi-select requires choosing
+at least one Agent; you can also specify non-interactively with `--agent`:
 
 ```bash
 taphound init --agent claude,codex,cursor,droid --json
@@ -226,7 +251,9 @@ Supported Agents and paths:
 | Droid | `.factory/skills/` | `~/.factory/skills/` |
 | Other | `.agents/skills/` | `~/.agents/skills/` |
 
-The Skill ships with the npm package (`assets/skills/`), and `taphound init` copies it from the package into the target directory. Re-running `init` overwrites existing Skill files.
+The Skill ships with the npm package (`assets/skills/`), and `taphound init`
+copies it into the target Skill root. Re-running `init` overwrites existing
+files in the installed Skill directory.
 
 ## Minimal Instructions for Claude Code
 

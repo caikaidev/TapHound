@@ -26,6 +26,7 @@ import {
 } from "../fixtures/project-context.js";
 import type { Journey } from "../../src/domain/journey.js";
 import { hashJourney } from "../../src/domain/report.js";
+import { CONFIG_PATH } from "../../src/domain/workspace.js";
 
 const generationContext = resolvedProjectContext;
 
@@ -216,19 +217,21 @@ function dependencies(): {
 describe("TapHound CLI commands", () => {
   it("uses TapHound config defaults", () => {
     const program = createProgram(dependencies().value);
-    const recordCommand = program.commands.find(
-      (command) => command.name() === "record"
-    );
-    const verifyCommand = program.commands.find(
-      (command) => command.name() === "verify"
+    const commands = [
+      program,
+      ...program.commands,
+      ...program.commands.flatMap((command) => command.commands)
+    ];
+    const configOptions = commands.flatMap(
+      (command) => command.options.filter(
+        (option) => option.long === "--config"
+      )
     );
 
-    expect(recordCommand?.options.find(
-      (option) => option.long === "--config"
-    )?.defaultValue).toBe("taphound.config.json");
-    expect(verifyCommand?.options.find(
-      (option) => option.long === "--config"
-    )?.defaultValue).toBe("taphound.config.json");
+    expect(configOptions).toHaveLength(18);
+    expect(configOptions.every(
+      (option) => option.defaultValue === CONFIG_PATH
+    )).toBe(true);
   });
 
   it("prints a machine-readable doctor result", async () => {
@@ -249,7 +252,7 @@ describe("TapHound CLI commands", () => {
     await createProgram(test.value).parseAsync([
       "node", "taphound", "record",
       "--project", "/project",
-      "--config", "/project/taphound.config.json",
+      "--config", "/project/.taphound/config.json",
       "--name", "Recorded",
       "--output", "/project/.taphound/journeys/recorded.json"
     ]);
@@ -273,7 +276,7 @@ describe("TapHound CLI commands", () => {
     await createProgram(test.value).parseAsync([
       "node", "taphound", "verify",
       "--project", "/project",
-      "--config", "/project/taphound.config.json",
+      "--config", "/project/.taphound/config.json",
       "--journey", "/project/search.journey.json",
       "--device", "pixel-1",
       "--package", "com.override.app",
@@ -309,7 +312,6 @@ describe("TapHound CLI commands", () => {
     await createProgram(test.value).parseAsync([
       "node", "taphound", "project", "describe",
       "--project", "/project",
-      "--config", "taphound.config.json",
       "--json"
     ]);
 
@@ -323,7 +325,7 @@ describe("TapHound CLI commands", () => {
     expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
     expect(test.stderr.value).toBe("");
     expect(test.value.readJson).toHaveBeenCalledWith(
-      "/project/taphound.config.json"
+      "/project/.taphound/config.json"
     );
     expect(test.value.projectDescriber.describe).toHaveBeenCalledWith({
       projectRoot: "/project",
@@ -341,7 +343,7 @@ describe("TapHound CLI commands", () => {
     await createProgram(test.value).parseAsync([
       "node", "taphound", "generation", "start",
       "--project", "/project",
-      "--config", "taphound.config.json",
+      "--config", ".taphound/config.json",
       "--context", "context.json",
       "--module", ":feature:search",
       "--device", "emulator-5554",
@@ -469,7 +471,7 @@ describe("TapHound CLI commands", () => {
     await createProgram(test.value).parseAsync([
       "node", "taphound", "generation", "start",
       "--project", "/project",
-      "--config", "taphound.config.json",
+      "--config", ".taphound/config.json",
       "--context", "context.json",
       "--module", ":feature:search",
       "--device", "emulator-5554",
@@ -514,7 +516,7 @@ describe("TapHound CLI commands", () => {
     await createProgram(test.value).parseAsync([
       "node", "taphound", "generation", "start",
       "--project", "/project",
-      "--config", "taphound.config.json",
+      "--config", ".taphound/config.json",
       "--context", "context.json",
       "--module", ":feature:search",
       "--device", "emulator-5554",
@@ -1168,7 +1170,7 @@ describe("TapHound CLI commands", () => {
       await createProgram(test.value).parseAsync([
         "node", "taphound", "context", command,
         "--project", "/project",
-        "--config", "taphound.config.json",
+        "--config", ".taphound/config.json",
         "--context", "project.context.json",
         "--json"
       ]);
@@ -1314,7 +1316,7 @@ describe("TapHound CLI commands", () => {
     const test = dependencies();
     if (failureCase === "config read") {
       vi.mocked(test.value.readJson).mockRejectedValueOnce(
-        new Error("taphound.config.json unreadable")
+        new Error(".taphound/config.json unreadable")
       );
     } else {
       vi.mocked(test.value.contextLoader.load).mockRejectedValueOnce(
@@ -1328,7 +1330,7 @@ describe("TapHound CLI commands", () => {
     await createProgram(test.value).parseAsync([
       "node", "taphound", "context", "validate",
       "--project", "/project",
-      "--config", "taphound.config.json",
+      "--config", ".taphound/config.json",
       "--context", "project.context.json",
       "--json"
     ]);
@@ -1392,7 +1394,7 @@ describe("TapHound CLI commands", () => {
     await createProgram(test.value).parseAsync([
       "node", "taphound", "context", "status",
       "--project", "/project",
-      "--config", "taphound.config.json",
+      "--config", ".taphound/config.json",
       "--context", "project.context.json",
       "--json"
     ]);
@@ -1413,7 +1415,7 @@ describe("TapHound CLI commands", () => {
     await createProgram(test.value).parseAsync([
       "node", "taphound", "context", "status",
       "--project", "/project",
-      "--config", "taphound.config.json",
+      "--config", ".taphound/config.json",
       "--json"
     ]);
 

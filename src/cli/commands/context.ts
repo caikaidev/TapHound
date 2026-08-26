@@ -13,6 +13,7 @@ import type {
   ContextValidationResult
 } from "../../application/context/context-validator.js";
 import { TapHoundConfigSchema } from "../../domain/config.js";
+import { CONFIG_PATH } from "../../domain/workspace.js";
 import type { CliDependencies } from "../dependencies.js";
 import {
   errorMessage,
@@ -92,7 +93,7 @@ function createContextOperation(
         : "Observe deterministic Project Context status"
     )
     .option("--project <path>", "Android project root", dependencies.cwd())
-    .option("--config <path>", "TapHound config path", "taphound.config.json")
+    .option("--config <path>", "TapHound config path", CONFIG_PATH)
     .option(
       "--context <path>",
       "Project Context index path",

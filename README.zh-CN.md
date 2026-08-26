@@ -80,7 +80,7 @@ git diff --exit-code -- assets/brand/png
 
 ## 配置
 
-在 Android 项目中创建 `taphound.config.json`。`run.packageName` 必填，不会从 APK 文件名或 Activity 猜测；完整示例见 [`examples/taphound.config.json`](examples/taphound.config.json)。
+在 Android 项目中创建 `.taphound/config.json`。`run.packageName` 必填，不会从 APK 文件名或 Activity 猜测；完整示例见 [`examples/.taphound/config.json`](examples/.taphound/config.json)。
 
 ```json
 {
@@ -116,8 +116,8 @@ TapHound 在 Android 项目中只留下一份可预测的目录结构：需要�
 
 ```text
 <project>/
-  taphound.config.json
   .taphound/
+    config.json           # 需提交的 TapHound 配置
     .gitignore            # 首次生成，内容为 "build/"；不会被覆盖
     context/              # 需提交的 Project Context bundle
       project-context.json
@@ -146,7 +146,7 @@ TapHound Recorder 展示当前 Layout，让用户选择 Action 和目标，然�
 ```bash
 taphound record \
   --project /path/to/android-project \
-  --config taphound.config.json \
+  --config .taphound/config.json \
   --name "Search flow" \
   --output .taphound/journeys/search.json
 ```
@@ -157,7 +157,21 @@ Recorder 不自动生成业务 `expect`。Activity、Element 或 Logcat 断言�
 
 ## Agent 驱动的 Journey 生成
 
-源码仓库提供 [`taphound-ai-journey` Skill](assets/skills/taphound-ai-journey/SKILL.md)，指导 Droid、Claude Code、Copilot、Cursor 等 Agent：
+源码仓库提供
+[`taphound-ai-journey`](assets/skills/taphound-ai-journey/SKILL.md) Skill，
+负责单个 Journey 场景，从 Context 与实时设备状态一直执行到最终 Replay。
+
+Requirement Analysis、Planning、Coding、Build/Install、多 Case 调度、完成 Gate
+和 Diagnosis 属于外部 Workflow Skills。外部编排器可以针对每个独立 Case 调用
+一次 TapHound，并把公开 CLI JSON、Report 和 Evidence 转换为自己的协议。
+TapHound 不规定、也不打包完整开发 Workflow。
+
+外部编排器可以把项目内的 `taphound-journey-brief.md` 通过
+`journeyBrief: {path, sha256}` 绑定到一个 Case。Brief 提供前置条件、预期
+Journey、断言、实现提示、约束和证据引用。它属于 Skill 层静态提示，不是 Core
+CLI 输入；经过校验的 Project Context、实时 Snapshot 和最终 Replay 仍然权威。
+
+Journey Skill 会指导 Droid、Claude Code、Copilot、Cursor 等 Agent：
 
 1. 发现 Gradle 模块，生成精简的 Project Context v2 根索引以及每个模块独立的语义/证据分片。
 2. 使用 `context list` 选择 Goal 相关模块，并通过 `context validate` / `context status` 检查分片、证据与文件清单时效性。
@@ -230,14 +244,15 @@ taphound init --agent claude --global
 | Droid | `.factory/skills/` | `~/.factory/skills/` |
 | Other | `.agents/skills/` | `~/.agents/skills/` |
 
-Skill 随 npm 包发布，`taphound init` 从包内复制到目标目录。重新运行 `init` 会覆盖已有 Skill 文件。
+该 Skill 随 npm 包发布，`taphound init` 从包内复制到目标目录。重新运行
+`init` 会覆盖已安装 Skill 目录中的已有文件。
 
 ## 确定性验证
 
 ```bash
 taphound verify \
   --project /path/to/android-project \
-  --config taphound.config.json \
+  --config .taphound/config.json \
   --journey .taphound/journeys/search.json
 ```
 
@@ -273,5 +288,5 @@ taphound verify --project . --journey .taphound/journeys/search.json --json
 - Recorder 只为 Android CLI 返回了 bounds 的 scrollable 元素提供 swipe；Replay 不会为缺失 bounds 的元素猜测滑动区域。
 - 标注截图回退只适用于 click 与 longClick，且必须显式保存 `#编号`。
 - Replay、设备操作和断言完全确定性，不包含 AI 或视觉推理。
-- 源码仓库提供 Agent Skill，也可通过 `taphound init` 为其他 Agent 安装，但尚无专用 SubAgent 封装。
+- 源码仓库提供两个 Agent Skills，也可通过 `taphound init` 为其他 Agent 安装，但尚无专用 SubAgent 封装。
 - 普通测试不要求真实设备；Replay 与 Generation 真机验收需要显式设置 `TAPHOUND_ACCEPTANCE_DEVICE=1` 并满足外部 Android 前提。

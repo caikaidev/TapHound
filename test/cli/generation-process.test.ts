@@ -3,6 +3,7 @@ import {
   type SpawnSyncReturns
 } from "node:child_process";
 import {
+  mkdir,
   mkdtemp,
   rm,
   writeFile
@@ -18,7 +19,9 @@ let projectRoot = "";
 
 beforeAll(async () => {
   projectRoot = await mkdtemp(join(tmpdir(), "taphound-generation-process-"));
-  await writeFile(join(projectRoot, "taphound.config.json"), JSON.stringify({
+  const workspace = join(projectRoot, ".taphound");
+  await mkdir(workspace);
+  await writeFile(join(workspace, "config.json"), JSON.stringify({
     version: 1,
     run: {
       packageName: "com.example.app",

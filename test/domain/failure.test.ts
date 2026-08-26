@@ -43,7 +43,7 @@ describe("exitCodeForFailure", () => {
   });
 
   it("defines exactly the approved failure vocabulary", () => {
-    expect(FAILURE_CODES).toHaveLength(35);
+    expect(FAILURE_CODES).toHaveLength(37);
   });
 
   it.each([
@@ -70,7 +70,9 @@ describe("exitCodeForFailure", () => {
       "ALIGN_SHUTTER_NOT_FOUND",
       "ALIGN_SHUTTER_AMBIGUOUS",
       "ALIGN_SHUTTER_NO_RESOURCE_ID",
+      "ALIGN_CONFIRM_NOT_FOUND",
       "ALIGN_CONFIRM_AMBIGUOUS",
+      "ALIGN_CONFIRM_NO_RESOURCE_ID",
       "ALIGN_FLOW_EXISTS"
     ] as const;
     for (const code of codes) {

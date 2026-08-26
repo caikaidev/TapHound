@@ -6,6 +6,7 @@ import {
 import { posix } from "node:path";
 
 export const TAPHOUND_DIR = ".taphound";
+export const CONFIG_PATH = `${TAPHOUND_DIR}/config.json`;
 export const CONTEXT_DIR = `${TAPHOUND_DIR}/context`;
 export const CONTEXT_INDEX_PATH = `${CONTEXT_DIR}/project-context.json`;
 export const FLOWS_DIR = `${TAPHOUND_DIR}/flows`;

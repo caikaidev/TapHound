@@ -80,7 +80,7 @@ See the [local testing guide](docs/local-testing.md) for source, npm tarball, an
 
 ## Configuration
 
-Create a `taphound.config.json` in the Android project. `run.packageName` is required and never guessed from APK filenames or activities; see [`examples/taphound.config.json`](examples/taphound.config.json) for a complete example.
+Create `.taphound/config.json` in the Android project. `run.packageName` is required and never guessed from APK filenames or activities; see [`examples/.taphound/config.json`](examples/.taphound/config.json) for a complete example.
 
 ```json
 {
@@ -119,8 +119,8 @@ under `.taphound/build/`, so a single ignore line covers all generated data.
 
 ```text
 <project>/
-  taphound.config.json
   .taphound/
+    config.json           # committed TapHound configuration
     .gitignore            # generated once with "build/"; never overwritten
     context/              # committed Project Context bundle
       project-context.json
@@ -150,7 +150,7 @@ The TapHound Recorder displays the current layout, lets you choose an action and
 ```bash
 taphound record \
   --project /path/to/android-project \
-  --config taphound.config.json \
+  --config .taphound/config.json \
   --name "Search flow" \
   --output .taphound/journeys/search.json
 ```
@@ -161,7 +161,25 @@ Supported actions include `click`, `longClick`, `inputText`, `swipe`, `scrollTo`
 
 ## Agent-Driven Journey Generation
 
-The repository ships a [`taphound-ai-journey` Skill](assets/skills/taphound-ai-journey/SKILL.md) that guides agents such as Droid, Claude Code, Copilot, and Cursor:
+The repository ships the
+[`taphound-ai-journey`](assets/skills/taphound-ai-journey/SKILL.md) Skill. It
+drives one deterministic Journey scenario from Context and live device state
+through final Replay.
+
+Requirement analysis, planning, coding, build/install, multi-Case scheduling,
+completion gates, and diagnosis belong to external Workflow Skills. Those
+orchestrators may invoke TapHound once per independent Case and adapt its
+public CLI JSON, Report, and evidence into their own protocols. TapHound does
+not prescribe or package a development workflow.
+
+An orchestrator can bind an optional project-relative
+`taphound-journey-brief.md` as `journeyBrief: {path, sha256}`. The Brief
+provides one Case's preconditions, expected Journey, assertions, implementation
+hints, constraints, and evidence references. It is a Skill-level static hint,
+not a Core CLI input; validated Project Context, live Snapshots, and final
+Replay remain authoritative.
+
+The Journey Skill guides agents such as Droid, Claude Code, Copilot, and Cursor:
 
 1. Discover Gradle modules and generate a compact Project Context v2 index plus one semantic/evidence shard per module.
 2. Use `context list` to choose Goal-relevant modules and `context validate` / `context status` to check shard, evidence, and inventory freshness.
@@ -213,7 +231,8 @@ optional next observation.
 
 ### Installing the Skill for Other AI Agents
 
-`taphound init` copies the TapHound AI Journey Skill into each agent's Skill directory. Interactively select at least one agent:
+`taphound init` copies the TapHound AI Journey Skill into each agent's Skill directory.
+Interactively select at least one agent:
 
 ```bash
 taphound init
@@ -241,14 +260,16 @@ Supported agents and paths:
 | Droid | `.factory/skills/` | `~/.factory/skills/` |
 | Other | `.agents/skills/` | `~/.agents/skills/` |
 
-The Skill is published with the npm package; `taphound init` copies it from the package to the target directory. Re-running `init` overwrites existing Skill files.
+The Skill is published with the npm package; `taphound init` copies it from the
+package to the target directory. Re-running `init` overwrites existing files
+in the installed Skill directory.
 
 ## Deterministic Verification
 
 ```bash
 taphound verify \
   --project /path/to/android-project \
-  --config taphound.config.json \
+  --config .taphound/config.json \
   --journey .taphound/journeys/search.json
 ```
 
@@ -284,5 +305,5 @@ Each verification writes to an independent directory, always containing `report.
 - The Recorder only provides swipe for scrollable elements that have bounds from the Android CLI; Replay does not guess swipe regions for elements missing bounds.
 - Annotated screenshot fallback applies only to `click` and `longClick`, and requires an explicitly saved `#label`.
 - Replay, device operations, and assertions are fully deterministic, with no AI or visual inference.
-- The repository provides an Agent Skill installable via `taphound init` for other agents, but there is no dedicated SubAgent wrapper yet.
+- The repository provides two Agent Skills installable via `taphound init`, but there is no dedicated SubAgent wrapper yet.
 - Regular tests do not require a real device; Replay and Generation device acceptance requires explicitly setting `TAPHOUND_ACCEPTANCE_DEVICE=1` and meeting external Android prerequisites.

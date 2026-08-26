@@ -29,7 +29,7 @@
 - Modify: `package.json` (add `acceptance:generation` script)
 
 **Interfaces:**
-- Consumes: built `dist/cli/main.js` with `generation start/observe/step/finalize` commands; `examples/taphound-android-demo` with `taphound.config.json` and `gradlew`.
+- Consumes: built `dist/cli/main.js` with `generation start/observe/step/finalize` commands; `examples/taphound-android-demo` with `.taphound/config.json` and `gradlew`.
 - Produces: `examples/taphound-android-demo/.taphound/context/project-context.json` (runtime-generated), `examples/taphound-android-demo/journeys/generated-search.json` + sidecar meta (on successful finalize), `.taphound/generations/<id>/` authoritative bundle.
 
 **CLI JSON output shapes (parsed by the script):**
@@ -79,7 +79,7 @@ if (process.env.TAPHOUND_ACCEPTANCE_DEVICE !== "1") {
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const demoRoot = resolve(repositoryRoot, "examples", "taphound-android-demo");
 const cli = resolve(repositoryRoot, "dist", "cli", "main.js");
-const configPath = resolve(demoRoot, "taphound.config.json");
+const configPath = resolve(demoRoot, ".taphound", "config.json");
 const contextDir = resolve(demoRoot, ".taphound", "context");
 const contextPath = resolve(contextDir, "project-context.json");
 const gradleWrapper = resolve(demoRoot, "gradlew");

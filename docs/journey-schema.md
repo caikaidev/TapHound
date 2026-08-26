@@ -1,6 +1,6 @@
 # TapHound Journey Schema v1
 
-TapHound Journey is an independent, self-developed, strictly validated JSON protocol. The default config file is `taphound.config.json`. It does not reuse, invoke, or stay compatible with the official Android CLI Journey. Unknown fields, empty step lists, non-v1 documents, and natural-language steps are all rejected.
+TapHound Journey is an independent, self-developed, strictly validated JSON protocol. The default config file is `.taphound/config.json`. It does not reuse, invoke, or stay compatible with the official Android CLI Journey. Unknown fields, empty step lists, non-v1 documents, and natural-language steps are all rejected.
 
 ## Top-Level Structure
 
@@ -238,8 +238,12 @@ step fails with `EXTERNAL_FLOW_NOT_FOUND`.
 To generate a project-level camera flow that matches your connected device,
 run `taphound align camera`. It probes the device's default camera app and
 writes `.taphound/flows/external/camera/photo-capture.json` with the correct
-package, activity, shutter button resourceId, and (if present) confirm button
-resourceId. See `taphound align camera --help` for options.
+package, stable capture/review Activities, shutter button resourceId, and
+confirm button resourceId. It generates a shutter-only flow only when the
+camera demonstrably leaves the foreground after capture; if the camera remains
+foreground without a deterministic confirm locator, alignment fails instead
+of publishing an incomplete flow. See `taphound align camera --help` for
+options.
 
 ### Generation Flow
 

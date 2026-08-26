@@ -226,16 +226,16 @@ First read `test/adapters/adb/adb-adapter.test.ts` to learn how it fakes `Proces
 ```typescript
 it("startActivityByIntent runs am start -W -a with the device serial", async () => {
   const { runner, runMock } = makeRunner([
-    { stdout: "Starting: Intent { act=android.intent.action.IMAGE_CAPTURE }\n", stderr: "", exitCode: 0, timedOut: false, cancelled: false, spawnError: undefined }
+    { stdout: "Starting: Intent { act=android.media.action.IMAGE_CAPTURE }\n", stderr: "", exitCode: 0, timedOut: false, cancelled: false, spawnError: undefined }
   ]);
   const adb = new AdbAdapter(runner);
   await adb.startActivityByIntent({
-    action: "android.intent.action.IMAGE_CAPTURE",
+    action: "android.media.action.IMAGE_CAPTURE",
     deviceSerial: "DEVICE1"
   });
   expect(runMock).toHaveBeenCalledWith(expect.objectContaining({
     executable: "adb",
-    args: ["-s", "DEVICE1", "shell", "am", "start", "-W", "-a", "android.intent.action.IMAGE_CAPTURE"]
+    args: ["-s", "DEVICE1", "shell", "am", "start", "-W", "-a", "android.media.action.IMAGE_CAPTURE"]
   }));
 });
 
@@ -245,7 +245,7 @@ it("startActivityByIntent normalizes am start Error stdout to non-zero exit", as
   ]);
   const adb = new AdbAdapter(runner);
   const result = await adb.startActivityByIntent({
-    action: "android.intent.action.IMAGE_CAPTURE",
+    action: "android.media.action.IMAGE_CAPTURE",
     deviceSerial: "DEVICE1"
   });
   expect(result.exitCode).not.toBe(0);
@@ -1144,7 +1144,7 @@ export class CameraProbeAdapter implements CameraProbePort {
       }
 
       const startResult = await this.deps.adb.startActivityByIntent({
-        action: "android.intent.action.IMAGE_CAPTURE",
+        action: "android.media.action.IMAGE_CAPTURE",
         deviceSerial,
         ...(signal === undefined ? {} : { signal })
       });
@@ -2185,7 +2185,7 @@ export function createAlignCommand(dependencies: CliDependencies): Command {
     .command("camera")
     .description("Probe the device camera and write a project External Flow")
     .option("--project <path>", "Android project root", dependencies.cwd())
-    .option("--config <path>", "TapHound config path", "taphound.config.json")
+    .option("--config <path>", "TapHound config path", ".taphound/config.json")
     .option("--device <serial>", "Select an online Android device")
     .option("--force", "Overwrite an existing project flow")
     .option("--json", "Emit machine-readable JSON")
@@ -2313,7 +2313,7 @@ Add a section after the "Recorder Flow" section (or wherever External Flows are 
 
 `align camera` is the device-aware companion to `init`. It probes the
 connected device's default camera app by sending
-`am start -W -a android.intent.action.IMAGE_CAPTURE`, waits for the camera
+`am start -W -a android.media.action.IMAGE_CAPTURE`, waits for the camera
 package to become foreground, dumps the layout, finds the shutter button by
 scanning enabled clickable elements whose `contentDescription` matches
 shutter keywords (shutter, 快门, capture, 拍照), taps the shutter to trigger
@@ -2330,7 +2330,7 @@ atomic `write` method. `--force` is required to overwrite an existing flow.
 The probe always `forceStop`s the camera app in a `finally` block, even on
 failure, so no camera instance is left open after alignment.
 
-`align camera` requires a valid `taphound.config.json` and rejects legacy
+`align camera` requires a valid `.taphound/config.json` and rejects legacy
 workspace layouts with `CONFIG_INVALID`, the same guard as `record`, `verify`,
 and `generation`. Device selection mirrors `doctor`: auto-select when exactly
 one device is online, otherwise require `--device`. Missing or offline devices

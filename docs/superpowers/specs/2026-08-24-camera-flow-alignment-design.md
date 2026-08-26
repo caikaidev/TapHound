@@ -128,8 +128,8 @@ export interface CameraProbePort {
    foreground is already a camera app, `forceStop` it first so the intent
    launches a fresh instance.
 2. **Launch IMAGE_CAPTURE intent** via `adb.startActivityByIntent({ action:
-   "android.intent.action.IMAGE_CAPTURE", deviceSerial })`. `am start -W -a
-   android.intent.action.IMAGE_CAPTURE` lets the system pick the default
+   "android.media.action.IMAGE_CAPTURE", deviceSerial })`. `am start -W -a
+   android.media.action.IMAGE_CAPTURE` lets the system pick the default
    camera app. If `startActivityByIntent` returns a non-zero exit code, fail
    with `ALIGN_CAMERA_INTENT_FAILED`. If the foreground package afterwards
    contains `resolver` or `chooser` (the system disambiguation UI), also fail
@@ -142,33 +142,34 @@ export interface CameraProbePort {
    packageName: cameraPackage })`, wait 1.5 seconds for the camera UI to
    render, then dump layout again. Camera apps render slowly.
 5. **Find shutter.** In the initial layout, flatten the tree and filter to
-   nodes with `enabled === true && clickable === true` whose
-   `contentDescription` (case-insensitive) matches any keyword in
-   `["shutter", "快门", "capture", "拍照"]`. Disambiguate multiple matches by
-   preferring one whose `resourceId` contains the substring `shutter`. If
-   zero matches: `ALIGN_SHUTTER_NOT_FOUND`. If still multiple after
-   disambiguation: `ALIGN_SHUTTER_AMBIGUOUS`. If the matched node has no
-   `resourceId`: `ALIGN_SHUTTER_NO_RESOURCE_ID` (v1 XML-only restriction).
+   nodes with `enabled === true && clickable === true`. Prefer
+   `contentDescription` keyword matches (`shutter`, `快门`, `capture`, `拍照`);
+   when none exist, fall back to deterministic resource entry-name tokens.
+   Disambiguate multiple accessibility matches with the same resource token
+   rule. If zero matches: `ALIGN_SHUTTER_NOT_FOUND`. If still multiple:
+   `ALIGN_SHUTTER_AMBIGUOUS`. If the matched node has no `resourceId`:
+   `ALIGN_SHUTTER_NO_RESOURCE_ID` (v1 XML-only restriction).
 6. **Tap the shutter** via `adb.tap(center)` using the element's `bounds`
    center. This captures a real photo and triggers the review/confirm state
    on cameras that have one.
 7. **Wait for review UI.** Dump layout, wait 1.5 seconds, dump again. Cameras
    take time to transition from capture to review.
-8. **Find confirm (adaptive).** In the post-shutter layout, filter to
-   `enabled === true && clickable === true` nodes whose `contentDescription`
-   (case-insensitive) matches any keyword in
+8. **Find confirm (adaptive).** In the post-shutter layout, use the same
+   two-stage content-description then resource-entry-token lookup with
    `["done", "confirm", "accept", "ok", "save", "checkmark", "完成", "确认",
-     "接受", "确定", "保存"]`. Disambiguate by preferring a node whose
-   `resourceId` contains one of `done`, `confirm`, `accept`, `ok`, `save`.
+     "接受", "确定", "保存"]`. ResourceId fallback checks token priorities in
+   `done`, `confirm`, `accept`, `save`, `ok` order and stops at the first
+   non-empty tier. This lets a unique `done_button` win over structural
+   containers such as `camera_bottom_save_cancel_container`.
    - **Found exactly one (after disambiguation)** → record `resourceId` and
      `contentDescription`. The generated flow will have 3 steps.
-   - **Zero matches** → camera auto-accepts. The generated flow will have 2
-     steps (matches the current built-in behavior). Not an error.
+   - **Zero matches and camera left foreground** → camera auto-accepts. The
+     generated flow will have 2 steps.
+   - **Zero matches while camera remains foreground** →
+     `ALIGN_CONFIRM_NOT_FOUND`; no incomplete flow is written.
    - **Still multiple after disambiguation** → `ALIGN_CONFIRM_AMBIGUOUS`.
-   - **Confirm button has no resourceId** → not fatal. The probe result
-     omits `confirmResourceId` and the generated flow falls back to 2 steps
-     (shutter only). This is a known limitation: v1 flows cannot reference a
-     confirm button without a resourceId, so auto-accept is the safe default.
+   - **Confirm button has no resourceId** →
+     `ALIGN_CONFIRM_NO_RESOURCE_ID`; v1 cannot replay it deterministically.
 9. **Cleanup.** `adb.forceStop(cameraPackage)` in a `finally` block. The
    probe never taps the confirm button (no caller app is waiting for a
    result; forceStop discards any unsaved photo). If the camera auto-accepts,
@@ -237,13 +238,11 @@ device produced it.
 
 ### Expected Activity
 
-Every step sets `expectedActivity` to the camera's launch activity. This
-matches the built-in flow's shape and gives replay a deterministic checkpoint
-that the camera is still in the expected Activity between steps. If a camera
-app rotates through multiple Activities (e.g. capture Activity → review
-Activity), the probe records the foreground Activity at probe time as the
-`expectedEscapeActivity` and uses it for all step expectations. Per-step
-Activity mismatch is a replay failure, not a probe failure.
+The probe requires two consecutive foreground samples for a stable capture
+Activity and repeats that sampling after shutter capture. `expectedEscapeActivity`,
+wait, and shutter use the stable capture Activity. When a confirm step exists,
+it uses the stable review Activity, allowing camera apps that transition from
+a launcher/capture Activity into a separate review Activity.
 
 ## ExternalFlowRegistry.write
 
@@ -287,7 +286,7 @@ New method on the existing port:
 
 ```ts
 export interface StartActivityByIntentOptions {
-  action: string;         // e.g. "android.intent.action.IMAGE_CAPTURE"
+  action: string;         // e.g. "android.media.action.IMAGE_CAPTURE"
   deviceSerial: string;
   signal?: AbortSignal | undefined;
   timeoutMs?: number | undefined;
@@ -316,7 +315,9 @@ New codes in `src/domain/failure.ts`:
 | `ALIGN_SHUTTER_NOT_FOUND` | 2 | No element matches shutter keywords in initial layout |
 | `ALIGN_SHUTTER_AMBIGUOUS` | 2 | Multiple shutter candidates, cannot disambiguate by resourceId |
 | `ALIGN_SHUTTER_NO_RESOURCE_ID` | 2 | Shutter element found but has no resourceId (Compose UI) |
+| `ALIGN_CONFIRM_NOT_FOUND` | 2 | Camera remains foreground but no deterministic confirm locator exists |
 | `ALIGN_CONFIRM_AMBIGUOUS` | 2 | Multiple confirm candidates after shutter, cannot disambiguate |
+| `ALIGN_CONFIRM_NO_RESOURCE_ID` | 2 | Confirm element exists but cannot be replayed by resourceId |
 | `ALIGN_FLOW_EXISTS` | 2 | Flow file exists and `--force` not given |
 
 All `ALIGN_*` codes use exit code 2 (config/environment). Internal errors use
@@ -324,7 +325,7 @@ exit code 4. Exit code 0 means the flow was written.
 
 ### Config Validation
 
-`align camera` requires a valid `taphound.config.json` in the project before
+`align camera` requires a valid `.taphound/config.json` in the project before
 probing, validated through the existing `ConfigLoader` and `WorkspaceLayout`
 guard. If config is invalid, exit with `CONFIG_INVALID` (exit code 2). This
 keeps `align` consistent with `record`, `verify`, and `generation`, which all
@@ -418,16 +419,18 @@ needed for the port.
 
 ### CameraProbeAdapter Key Cases
 
-1. 2-step camera (auto-accept): post-shutter layout has no confirm candidate → 2-step flow
+1. 2-step camera (auto-accept): camera leaves foreground after shutter → 2-step flow
 2. 3-step camera (with confirm): post-shutter layout has one confirm → 3-step flow
 3. Shutter ambiguous → `ALIGN_SHUTTER_AMBIGUOUS`
 4. Shutter no resourceId → `ALIGN_SHUTTER_NO_RESOURCE_ID`
 5. Camera not launched → `ALIGN_CAMERA_NOT_LAUNCHED`, cleanup runs
 6. Interrupted → cleanup runs and signal propagates
 7. Confirm ambiguous → `ALIGN_CONFIRM_AMBIGUOUS`
-8. Confirm found but no resourceId → omitted from result, 2-step flow
+8. Confirm found but no resourceId → `ALIGN_CONFIRM_NO_RESOURCE_ID`
 9. IMAGE_CAPTURE lands on resolver/chooser → `ALIGN_CAMERA_INTENT_FAILED`
 10. Pre-probe foreground already a camera app → forceStop before intent
+11. Camera remains foreground without confirm locator → `ALIGN_CONFIRM_NOT_FOUND`
+12. Capture and review use different Activities → each step records its stable Activity
 
 ### AlignService Key Cases
 

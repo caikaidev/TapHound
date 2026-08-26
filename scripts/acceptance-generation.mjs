@@ -17,7 +17,7 @@ if (process.env.TAPHOUND_ACCEPTANCE_DEVICE !== "1") {
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const demoRoot = resolve(repositoryRoot, "examples", "taphound-android-demo");
 const cli = resolve(repositoryRoot, "dist", "cli", "main.js");
-const configPath = resolve(demoRoot, "taphound.config.json");
+const configPath = resolve(demoRoot, ".taphound", "config.json");
 const contextDir = resolve(demoRoot, ".taphound", "context");
 const contextPath = resolve(contextDir, "project-context.json");
 const moduleDir = resolve(contextDir, "modules");

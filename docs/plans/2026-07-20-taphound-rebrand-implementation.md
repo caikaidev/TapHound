@@ -271,16 +271,16 @@ git commit -m "refactor: rename public domain types to TapHound"
 
 **Step 1: Change tests to express the new visible contract**
 
-Update CLI argv values from `apr` to `taphound`, config paths to `taphound.config.json`, report paths to `taphound-*`, and diagnostics to `TapHound:`. Add these assertions to `test/cli/commands.test.ts`:
+Update CLI argv values from `apr` to `taphound`, config paths to `.taphound/config.json`, report paths to `taphound-*`, and diagnostics to `TapHound:`. Add these assertions to `test/cli/commands.test.ts`:
 
 ```ts
 expect(recordCommand.options.find(
   (option) => option.long === "--config"
-)?.defaultValue).toBe("taphound.config.json");
+)?.defaultValue).toBe(".taphound/config.json");
 
 expect(verifyCommand.options.find(
   (option) => option.long === "--config"
-)?.defaultValue).toBe("taphound.config.json");
+)?.defaultValue).toBe(".taphound/config.json");
 ```
 
 Update `test/application/report/report-writer.test.ts` to expect:
@@ -309,11 +309,11 @@ Apply these exact contracts:
 ```ts
 // record.ts
 .description("Interactively record a TapHound Journey")
-.option("--config <path>", "TapHound config path", "taphound.config.json")
+.option("--config <path>", "TapHound config path", ".taphound/config.json")
 
 // verify.ts
 .description("Deterministically verify a TapHound Journey")
-.option("--config <path>", "TapHound config path", "taphound.config.json")
+.option("--config <path>", "TapHound config path", ".taphound/config.json")
 .requiredOption("--journey <path>", "TapHound Journey path")
 writeLine(dependencies.stderr, `TapHound: verifying ${journey.name}`);
 
@@ -375,7 +375,7 @@ describe("built taphound verify --json process contract", () => {
 });
 ```
 
-Rename all fake controls to `TAPHOUND_FAKE_ROOT`, `TAPHOUND_FAKE_GRADLE_EXIT`, and `TAPHOUND_FAKE_DEVICE`; rename generic test forwarding to `TAPHOUND_TEST_VALUE`. Change temporary prefixes to `taphound-process-test-` and the config filename to `taphound.config.json`.
+Rename all fake controls to `TAPHOUND_FAKE_ROOT`, `TAPHOUND_FAKE_GRADLE_EXIT`, and `TAPHOUND_FAKE_DEVICE`; rename generic test forwarding to `TAPHOUND_TEST_VALUE`. Change temporary prefixes to `taphound-process-test-` and the config path to `.taphound/config.json`.
 
 **Step 2: Run tests to verify the fixture contract is red**
 
@@ -429,24 +429,24 @@ git commit -m "test: rename TapHound process fixtures"
 
 **Files:**
 - Rename: `examples/apr-demo/` → `examples/taphound-android-demo/`
-- Rename: `examples/taphound-android-demo/apr.config.json` → `examples/taphound-android-demo/taphound.config.json`
+- Rename: `examples/taphound-android-demo/apr.config.json` → `examples/taphound-android-demo/.taphound/config.json`
 - Rename: `examples/taphound-android-demo/app/src/main/java/dev/apr/demo/` → `examples/taphound-android-demo/app/src/main/java/dev/taphound/demo/`
-- Rename: `examples/apr.config.json` → `examples/taphound.config.json`
+- Rename: `examples/apr.config.json` → `examples/.taphound/config.json`
 - Modify: `examples/taphound-android-demo/app/build.gradle.kts`
 - Modify: `examples/taphound-android-demo/app/src/main/AndroidManifest.xml`
 - Modify: `examples/taphound-android-demo/app/src/main/java/dev/taphound/demo/MainActivity.kt`
 - Modify: `examples/taphound-android-demo/app/src/main/java/dev/taphound/demo/SearchActivity.kt`
 - Modify: `examples/taphound-android-demo/journeys/search.json`
 - Modify: `examples/taphound-android-demo/settings.gradle.kts`
-- Modify: `examples/taphound-android-demo/taphound.config.json`
-- Modify: `examples/taphound.config.json`
+- Modify: `examples/taphound-android-demo/.taphound/config.json`
+- Modify: `examples/.taphound/config.json`
 - Modify: `scripts/acceptance-device.mjs`
 - Modify: `test/acceptance/fixture-contract.test.ts`
 - Modify: `test/docs/examples.test.ts`
 
 **Step 1: Update acceptance expectations first**
 
-Make `test/acceptance/fixture-contract.test.ts` use root `examples/taphound-android-demo`, config `taphound.config.json`, Java path `dev/taphound/demo`, and identity:
+Make `test/acceptance/fixture-contract.test.ts` use root `examples/taphound-android-demo`, config `.taphound/config.json`, Java path `dev/taphound/demo`, and identity:
 
 ```ts
 expect(config.run).toEqual({
@@ -457,7 +457,7 @@ expect(appBuild).toContain('namespace = "dev.taphound.demo"');
 expect(appBuild).toContain('applicationId = "dev.taphound.demo"');
 ```
 
-Expect `TAPHOUND_ACCEPTANCE_DEVICE` in the runner. Update `test/docs/examples.test.ts` to read `examples/taphound.config.json` and expect `.taphound/`.
+Expect `TAPHOUND_ACCEPTANCE_DEVICE` in the runner. Update `test/docs/examples.test.ts` to read `examples/.taphound/config.json` and expect `.taphound/`.
 
 **Step 2: Run contract tests to verify old paths fail**
 
@@ -475,10 +475,11 @@ Run:
 
 ```bash
 git mv examples/apr-demo examples/taphound-android-demo
-git mv examples/taphound-android-demo/apr.config.json examples/taphound-android-demo/taphound.config.json
+mkdir -p examples/taphound-android-demo/.taphound examples/.taphound
+git mv examples/taphound-android-demo/apr.config.json examples/taphound-android-demo/.taphound/config.json
 mkdir -p examples/taphound-android-demo/app/src/main/java/dev/taphound
 git mv examples/taphound-android-demo/app/src/main/java/dev/apr/demo examples/taphound-android-demo/app/src/main/java/dev/taphound/demo
-git mv examples/apr.config.json examples/taphound.config.json
+git mv examples/apr.config.json examples/.taphound/config.json
 ```
 
 Remove now-empty directories only after `find examples/taphound-android-demo/app/src/main/java -type f` confirms both Kotlin files exist at the new path.
@@ -514,7 +515,7 @@ const projectRoot = resolve(
 );
 ```
 
-Use `taphound.config.json` and TapHound error messages throughout the runner.
+Use `.taphound/config.json` and TapHound error messages throughout the runner.
 
 **Step 5: Verify examples and Gradle fixture structure**
 
@@ -621,7 +622,7 @@ records and replays native Android workflows.
 Translate the remaining active documentation consistently:
 
 - CLI: `taphound doctor|record|verify`
-- config: `taphound.config.json`
+- config: `.taphound/config.json`
 - artifacts: `.taphound/runs`
 - protocol names: TapHound Journey and TapHound Report
 - first platform: native Android; future platform support is directional, not promised functionality
@@ -1317,7 +1318,7 @@ Expected: all gates PASS, local `main` is clean and synchronized, GitHub contain
 ## Done criteria
 
 - `taphound doctor`, `taphound record`, and `taphound verify` are the only CLI spellings.
-- Default config is `taphound.config.json`; default example artifacts use `.taphound/runs`.
+- Default config is `.taphound/config.json`; default example artifacts use `.taphound/runs`.
 - All active source/test/example identifiers use `TapHound*` or `TAPHOUND_*`; no compatibility aliases remain.
 - TapHound Journey and Report retain schema version `1` and unchanged machine semantics.
 - Android demo uses `examples/taphound-android-demo` and package `dev.taphound.demo`.

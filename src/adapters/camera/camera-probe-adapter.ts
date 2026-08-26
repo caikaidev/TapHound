@@ -7,6 +7,7 @@ import type {
   CameraProbePort,
   CameraProbeResult
 } from "../../ports/camera-probe.js";
+import { CameraProbeError } from "../../ports/camera-probe.js";
 
 const SHUTTER_KEYWORDS = ["shutter", "快门", "capture", "拍照"];
 const CONFIRM_KEYWORDS = [
@@ -22,24 +23,14 @@ const CONFIRM_KEYWORDS = [
   "确定",
   "保存"
 ];
-const CONFIRM_RESOURCE_ID_SUBSTRINGS = ["done", "confirm", "accept", "ok", "save"];
+const CONFIRM_RESOURCE_ID_SUBSTRINGS = ["done", "confirm", "accept", "save", "ok"];
 const SHUTTER_RESOURCE_ID_SUBSTRINGS = ["shutter"];
+const IMAGE_CAPTURE_ACTION = "android.media.action.IMAGE_CAPTURE";
 const CAMERA_FOREGROUND_TIMEOUT_MS = 8000;
 const CAMERA_FOREGROUND_POLL_INTERVAL_MS = 500;
 const LAYOUT_SETTLE_MS = 1500;
 const RESOLVER_KEYWORDS = ["resolver", "chooser"];
 const AOSP_CAMERA_PACKAGES = ["com.android.camera", "com.android.camera2"];
-const KNOWN_CAMERA_PACKAGES = [
-  "com.android.camera",
-  "com.android.camera2",
-  "com.google.android.GoogleCamera",
-  "com.sec.android.app.camera",
-  "com.huawei.camera",
-  "com.miui.camera",
-  "com.oppo.camera",
-  "com.coloros.camera",
-  "org.lineageos.snap"
-];
 
 export interface CameraProbeAdapterDeps {
   adb: AdbPort;
@@ -72,57 +63,91 @@ function matchesAnyKeyword(value: string, keywords: readonly string[]): boolean 
   return keywords.some((keyword) => lower.includes(keyword.toLowerCase()));
 }
 
+function resourceEntryName(resourceId: string): string {
+  const separator = resourceId.lastIndexOf(":id/");
+  return (
+    separator >= 0 ? resourceId.slice(separator + 4) : resourceId
+  ).toLowerCase();
+}
+
+function matchesResourceId(
+  resourceId: string,
+  token: string
+): boolean {
+  const entryName = resourceEntryName(resourceId);
+  const tokens = entryName.split(/[^a-z0-9]+/u);
+  return tokens.includes(token.toLowerCase());
+}
+
+function selectByResourceIdPriority(
+  candidates: readonly LayoutElement[],
+  resourceIdTokens: readonly string[]
+): LayoutElement[] {
+  for (const token of resourceIdTokens) {
+    const matches = candidates.filter(
+      (node) => (
+        node.resourceId !== undefined
+        && matchesResourceId(node.resourceId, token)
+      )
+    );
+    if (matches.length > 0) {
+      return matches;
+    }
+  }
+  return [];
+}
+
+function buttonMatch(node: LayoutElement): FindButtonResult {
+  if (node.resourceId === undefined) {
+    return "no_resource_id";
+  }
+  return {
+    resourceId: node.resourceId,
+    ...(node.contentDescription === undefined
+      ? {}
+      : { contentDescription: node.contentDescription })
+  };
+}
+
 function findButton(
   layout: readonly LayoutElement[],
   keywords: readonly string[],
   resourceIdSubstrings: readonly string[]
 ): FindButtonResult {
-  const candidates = flatten(layout).filter(
+  const eligible = flatten(layout).filter(
+    (node) => node.enabled && node.clickable === true
+  );
+  const candidates = eligible.filter(
     (node) => (
-      node.enabled
-      && node.clickable === true
-      && node.contentDescription !== undefined
+      node.contentDescription !== undefined
       && matchesAnyKeyword(node.contentDescription, keywords)
     )
   );
   if (candidates.length === 0) {
-    return "none";
+    const byResourceId = selectByResourceIdPriority(
+      eligible,
+      resourceIdSubstrings
+    );
+    if (byResourceId.length === 0) {
+      return "none";
+    }
+    if (byResourceId.length === 1) {
+      const node = byResourceId[0];
+      return node === undefined ? "none" : buttonMatch(node);
+    }
+    return "ambiguous";
   }
   if (candidates.length === 1) {
     const node = candidates[0];
-    if (node === undefined) {
-      return "none";
-    }
-    if (node.resourceId === undefined) {
-      return "no_resource_id";
-    }
-    const resourceId: string = node.resourceId;
-    return {
-      resourceId,
-      ...(node.contentDescription !== undefined
-        ? { contentDescription: node.contentDescription }
-        : {})
-    };
+    return node === undefined ? "none" : buttonMatch(node);
   }
-  const byResourceId = candidates.filter((node) => {
-    const rid = node.resourceId;
-    if (rid === undefined) {
-      return false;
-    }
-    return resourceIdSubstrings.some((sub) => rid.toLowerCase().includes(sub));
-  });
+  const byResourceId = selectByResourceIdPriority(
+    candidates,
+    resourceIdSubstrings
+  );
   if (byResourceId.length === 1) {
     const node = byResourceId[0];
-    if (node === undefined || node.resourceId === undefined) {
-      return "none";
-    }
-    const resourceId: string = node.resourceId;
-    return {
-      resourceId,
-      ...(node.contentDescription !== undefined
-        ? { contentDescription: node.contentDescription }
-        : {})
-    };
+    return node === undefined ? "none" : buttonMatch(node);
   }
   return "ambiguous";
 }
@@ -137,7 +162,10 @@ function centerOf(element: LayoutElement): Point {
       y: Math.round((element.bounds.top + element.bounds.bottom) / 2)
     };
   }
-  throw new Error("ALIGN_SHUTTER_NOT_FOUND: shutter element has no center or bounds");
+  throw new CameraProbeError(
+    "ALIGN_SHUTTER_NOT_FOUND",
+    "Shutter element has no center or bounds"
+  );
 }
 
 function isResolverOrChooser(packageName: string): boolean {
@@ -181,19 +209,16 @@ export class CameraProbeAdapter implements CameraProbePort {
       }
 
       const startResult = await this.deps.adb.startActivityByIntent({
-        action: "android.intent.action.IMAGE_CAPTURE",
+        action: IMAGE_CAPTURE_ACTION,
         deviceSerial,
         ...(signal === undefined ? {} : { signal })
       });
 
-      let fallbackExpectedPackage: string | undefined;
       if (startResult.exitCode !== 0) {
-        fallbackExpectedPackage = await this.tryFallbackLaunch(deviceSerial, signal);
-        if (fallbackExpectedPackage === undefined) {
-          throw new Error(
-            `ALIGN_CAMERA_INTENT_FAILED: am start exited with code ${String(startResult.exitCode)}: ${startResult.stderr || startResult.stdout}`
-          );
-        }
+        throw new CameraProbeError(
+          "ALIGN_CAMERA_INTENT_FAILED",
+          `am start exited with code ${String(startResult.exitCode)}: ${startResult.stderr || startResult.stdout}`
+        );
       }
 
       const deadline = this.deps.now() + CAMERA_FOREGROUND_TIMEOUT_MS;
@@ -202,27 +227,22 @@ export class CameraProbeAdapter implements CameraProbePort {
         current = await this.deps.adb.foregroundComponent(
           deviceIdentity(deviceSerial, signal)
         );
-        if (fallbackExpectedPackage === undefined) {
-          if (isResolverOrChooser(current.packageName)) {
-            throw new Error(
-              `ALIGN_CAMERA_INTENT_FAILED: IMAGE_CAPTURE landed on system resolver/chooser (${current.packageName}); set a default camera app`
-            );
-          }
-          if (current.packageName !== preForeground.packageName) {
-            cameraPackage = current.packageName;
-            break;
-          }
-        } else {
-          if (current.packageName === fallbackExpectedPackage) {
-            cameraPackage = current.packageName;
-            break;
-          }
+        if (isResolverOrChooser(current.packageName)) {
+          throw new CameraProbeError(
+            "ALIGN_CAMERA_INTENT_FAILED",
+            `IMAGE_CAPTURE landed on system resolver/chooser (${current.packageName}); set a default camera app`
+          );
+        }
+        if (current.packageName !== preForeground.packageName) {
+          cameraPackage = current.packageName;
+          break;
         }
         await this.deps.sleep(CAMERA_FOREGROUND_POLL_INTERVAL_MS);
       }
       if (cameraPackage === undefined) {
-        throw new Error(
-          "ALIGN_CAMERA_NOT_LAUNCHED: camera package did not become foreground within 8s"
+        throw new CameraProbeError(
+          "ALIGN_CAMERA_NOT_LAUNCHED",
+          "Camera package did not become foreground within 8s"
         );
       }
 
@@ -237,29 +257,43 @@ export class CameraProbeAdapter implements CameraProbePort {
         packageName: cameraPackage,
         ...(signal === undefined ? {} : { signal })
       });
+      const preShutterForeground = await this.waitForStableForeground(
+        deviceSerial,
+        signal
+      );
+      if (preShutterForeground.packageName !== cameraPackage) {
+        throw new CameraProbeError(
+          "ALIGN_CAMERA_NOT_LAUNCHED",
+          `Camera package left the foreground before shutter discovery: ${preShutterForeground.packageName}`
+        );
+      }
 
       const shutter = findButton(initialLayout, SHUTTER_KEYWORDS, SHUTTER_RESOURCE_ID_SUBSTRINGS);
       if (shutter === "none") {
-        throw new Error(
-          "ALIGN_SHUTTER_NOT_FOUND: no enabled clickable element matched shutter keywords"
+        throw new CameraProbeError(
+          "ALIGN_SHUTTER_NOT_FOUND",
+          "No enabled clickable element matched shutter contentDescription or resourceId"
         );
       }
       if (shutter === "ambiguous") {
-        throw new Error(
-          "ALIGN_SHUTTER_AMBIGUOUS: multiple shutter candidates, none disambiguated by resourceId"
+        throw new CameraProbeError(
+          "ALIGN_SHUTTER_AMBIGUOUS",
+          "Multiple shutter candidates could not be disambiguated by resourceId"
         );
       }
       if (shutter === "no_resource_id") {
-        throw new Error(
-          "ALIGN_SHUTTER_NO_RESOURCE_ID: shutter candidate has no resourceId for deterministic replay"
+        throw new CameraProbeError(
+          "ALIGN_SHUTTER_NO_RESOURCE_ID",
+          "Shutter candidate has no resourceId for deterministic replay"
         );
       }
       const shutterElement = flatten(initialLayout).find(
         (node) => node.resourceId === shutter.resourceId
       );
       if (shutterElement === undefined) {
-        throw new Error(
-          `ALIGN_SHUTTER_NOT_FOUND: shutter resourceId ${shutter.resourceId} not present in layout`
+        throw new CameraProbeError(
+          "ALIGN_SHUTTER_NOT_FOUND",
+          `Shutter resourceId ${shutter.resourceId} not present in layout`
         );
       }
 
@@ -280,20 +314,14 @@ export class CameraProbeAdapter implements CameraProbePort {
         packageName: cameraPackage,
         ...(signal === undefined ? {} : { signal })
       });
-
-      const confirm = findButton(
-        postShutterLayout,
-        CONFIRM_KEYWORDS,
-        CONFIRM_RESOURCE_ID_SUBSTRINGS
+      const postShutterForeground = await this.waitForStableForeground(
+        deviceSerial,
+        signal
       );
-      const activityName = current.activity;
 
-      if (confirm === "ambiguous") {
-        throw new Error(
-          "ALIGN_CONFIRM_AMBIGUOUS: multiple confirm candidates, none disambiguated by resourceId"
-        );
-      }
-      if (confirm === "none" || confirm === "no_resource_id") {
+      const activityName = preShutterForeground.activity;
+
+      if (postShutterForeground.packageName !== cameraPackage) {
         return {
           packageName: cameraPackage,
           activityName,
@@ -302,6 +330,29 @@ export class CameraProbeAdapter implements CameraProbePort {
             ? { shutterContentDescription: shutter.contentDescription }
             : {})
         };
+      }
+      const confirm = findButton(
+        postShutterLayout,
+        CONFIRM_KEYWORDS,
+        CONFIRM_RESOURCE_ID_SUBSTRINGS
+      );
+      if (confirm === "ambiguous") {
+        throw new CameraProbeError(
+          "ALIGN_CONFIRM_AMBIGUOUS",
+          "Multiple confirm candidates could not be disambiguated by resourceId"
+        );
+      }
+      if (confirm === "none") {
+        throw new CameraProbeError(
+          "ALIGN_CONFIRM_NOT_FOUND",
+          "Camera remained foreground after capture, but no deterministic confirm button was found"
+        );
+      }
+      if (confirm === "no_resource_id") {
+        throw new CameraProbeError(
+          "ALIGN_CONFIRM_NO_RESOURCE_ID",
+          "Confirm candidate has no resourceId for deterministic replay"
+        );
       }
       return {
         packageName: cameraPackage,
@@ -313,7 +364,8 @@ export class CameraProbeAdapter implements CameraProbePort {
         confirmResourceId: confirm.resourceId,
         ...(confirm.contentDescription !== undefined
           ? { confirmContentDescription: confirm.contentDescription }
-          : {})
+          : {}),
+        confirmActivityName: postShutterForeground.activity
       };
     } finally {
       if (cameraPackage !== undefined) {
@@ -330,30 +382,34 @@ export class CameraProbeAdapter implements CameraProbePort {
     }
   }
 
-  private async tryFallbackLaunch(
+  private async waitForStableForeground(
     deviceSerial: string,
     signal?: AbortSignal
-  ): Promise<string | undefined> {
-    for (const pkg of KNOWN_CAMERA_PACKAGES) {
-      try {
-        const resolved = await this.deps.adb.resolveLauncherActivity({
-          packageName: pkg,
-          deviceSerial,
-          ...(signal === undefined ? {} : { signal })
-        });
-        if (resolved !== undefined) {
-          await this.deps.adb.launchActivity({
-            packageName: resolved.packageName,
-            activity: resolved.activity,
-            deviceSerial,
-            ...(signal === undefined ? {} : { signal })
-          });
-          return resolved.packageName;
-        }
-      } catch {
-        // Package not installed or cannot launch — try next known package
+  ): Promise<ForegroundComponent> {
+    const deadline = this.deps.now() + CAMERA_FOREGROUND_TIMEOUT_MS;
+    let previous: ForegroundComponent | undefined;
+    while (this.deps.now() < deadline) {
+      const current = await this.deps.adb.foregroundComponent(
+        deviceIdentity(deviceSerial, signal)
+      );
+      if (
+        previous !== undefined
+        && previous.packageName === current.packageName
+        && previous.activity === current.activity
+      ) {
+        return current;
       }
+      previous = current;
+      await this.deps.sleep(
+        Math.min(
+          CAMERA_FOREGROUND_POLL_INTERVAL_MS,
+          Math.max(0, deadline - this.deps.now())
+        )
+      );
     }
-    return undefined;
+    throw new CameraProbeError(
+      "ALIGN_CAMERA_NOT_LAUNCHED",
+      "Foreground Activity did not stabilize within 8s"
+    );
   }
 }

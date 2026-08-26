@@ -38,7 +38,9 @@ describe("TapHound Android acceptance fixture", () => {
   });
 
   it("keeps Package and Activity identities aligned", async () => {
-    const config = TapHoundConfigSchema.parse(await json("taphound.config.json"));
+    const config = TapHoundConfigSchema.parse(
+      await json(".taphound/config.json")
+    );
     const journey = JourneySchema.parse(await json(".taphound/journeys/search.json"));
     const manifest = await text("app/src/main/AndroidManifest.xml");
     const main = await text(

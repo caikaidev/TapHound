@@ -25,7 +25,9 @@ async function json(relativePath: string): Promise<unknown> {
 
 describe("TapHound documentation examples", () => {
   it("keeps standalone config and Journey examples schema-valid", async () => {
-    const config = TapHoundConfigSchema.parse(await json("examples/taphound.config.json"));
+    const config = TapHoundConfigSchema.parse(
+      await json("examples/.taphound/config.json")
+    );
     const journey = JourneySchema.parse(await json("examples/search.journey.json"));
 
     expect(config.run.packageName).toBe("com.example.app");
@@ -166,6 +168,42 @@ describe("TapHound documentation examples", () => {
     expect(skillExternalFlow.steps.length).toBeGreaterThanOrEqual(1);
   });
 
+  it("keeps the optional TapHound Journey Brief contract discoverable", async () => {
+    const brief = await text(
+      "assets/skills/taphound-ai-journey/templates/taphound-journey-brief.example.md"
+    );
+    const prompt = await text(
+      "assets/skills/taphound-ai-journey/prompts/consume-journey-brief.md"
+    );
+    const skill = await text(
+      "assets/skills/taphound-ai-journey/SKILL.md"
+    );
+    const agent = await text("docs/agent-integration.md");
+
+    expect(brief).toContain("schemaVersion: 1");
+    expect(brief).toContain("kind: taphound.journeyBrief");
+    expect(brief).toContain("caseId: CASE-002");
+    for (const section of [
+      "# Goal",
+      "## Preconditions",
+      "## Expected Journey",
+      "## Assertions",
+      "## Implementation Hints",
+      "## Constraints",
+      "## Evidence References"
+    ]) {
+      expect(brief).toContain(section);
+      expect(prompt).toContain(section);
+    }
+    for (const document of [prompt, skill, agent]) {
+      expect(document).toContain("taphound-journey-brief.md");
+      expect(document).toContain("journeyBrief");
+      expect(document).toContain("sha256");
+    }
+    expect(skill).toContain("untrusted static hints");
+    expect(skill).toContain("final Replay remain authoritative");
+  });
+
   it("documents every executable command and its primary workflow", async () => {
     const readme = await text("README.md");
     const readmeZh = await text("README.zh-CN.md");
@@ -285,7 +323,7 @@ describe("TapHound documentation examples", () => {
     const report = await text("docs/report-schema.md");
 
     expect(journey).toContain("TapHound Journey");
-    expect(journey).toContain("taphound.config.json");
+    expect(journey).toContain(".taphound/config.json");
     expect(journey).not.toMatch(/\bAPR\b|\bapr\b/);
     expect(report).toContain("TapHound Report");
     expect(report).toContain(".taphound/build/runs");

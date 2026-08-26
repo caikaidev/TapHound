@@ -36,7 +36,11 @@ import {
 } from "../../domain/journey.js";
 import { LocatorSchema } from "../../domain/layout.js";
 import { RuntimeSnapshotSchema } from "../../domain/runtime-snapshot.js";
-import { JOBS_DIR } from "../../domain/workspace.js";
+import {
+  assertArtifactDirectory,
+  CONFIG_PATH,
+  JOBS_DIR
+} from "../../domain/workspace.js";
 import {
   GenerationSessionStoreError
 } from "../../ports/generation-session-store.js";
@@ -50,7 +54,6 @@ import {
   writeLine
 } from "../output.js";
 import { assertNoLegacyWorkspace } from "../workspace-guard.js";
-import { assertArtifactDirectory } from "../../domain/workspace.js";
 
 interface GenerationStartOptions {
   project: string;
@@ -465,7 +468,7 @@ function createStartCommand(dependencies: CliDependencies): Command {
   return new Command("start")
     .description("Start a Core-owned generation session")
     .option("--project <path>", "Android project root", dependencies.cwd())
-    .option("--config <path>", "TapHound config path", "taphound.config.json")
+    .option("--config <path>", "TapHound config path", CONFIG_PATH)
     .requiredOption("--context <path>", "Project Context path")
     .option("--module <id...>", "Select Context modules for this session")
     .option("--device <serial>", "Select an online Android device")
@@ -666,7 +669,7 @@ function createObserveCommand(dependencies: CliDependencies): Command {
   return new Command("observe")
     .description("Observe and bind authoritative runtime state")
     .option("--project <path>", "Android project root", dependencies.cwd())
-    .option("--config <path>", "TapHound config path", "taphound.config.json")
+    .option("--config <path>", "TapHound config path", CONFIG_PATH)
     .requiredOption("--session <id>", "Generation session id")
     .option(
       "--compact",
@@ -753,7 +756,7 @@ function addCommonOptions(
 ): Command {
   return command
     .option("--project <path>", "Android project root", dependencies.cwd())
-    .option("--config <path>", "TapHound config path", "taphound.config.json")
+    .option("--config <path>", "TapHound config path", CONFIG_PATH)
     .requiredOption("--session <id>", "Generation session id")
     .option("--json", "Emit one machine-readable JSON value");
 }
@@ -1398,7 +1401,7 @@ function createListCommand(dependencies: CliDependencies): Command {
   return new Command("list")
     .description("List generation sessions in the project workspace")
     .option("--project <path>", "Android project root", dependencies.cwd())
-    .option("--config <path>", "TapHound config path", "taphound.config.json")
+    .option("--config <path>", "TapHound config path", CONFIG_PATH)
     .option("--json", "Emit one machine-readable JSON value")
     .action(async (options: GenerationListOptions): Promise<void> => {
       try {

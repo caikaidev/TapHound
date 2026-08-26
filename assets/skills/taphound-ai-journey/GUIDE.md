@@ -31,6 +31,27 @@ User provides Goal (natural-language test scenario)
 Project Context is generated once and reused. It only needs regeneration
 when the project source changes significantly (see Section 5).
 
+### Optional Journey Brief
+
+An external Workflow may bind one project-relative
+`taphound-journey-brief.md` as `journeyBrief: {path, sha256}`. Read
+`prompts/consume-journey-brief.md` before using it. The Brief carries one
+Case's Goal, preconditions, expected Journey, assertions, implementation hints,
+constraints, and evidence references.
+
+The Brief reduces broad source rediscovery but remains untrusted static input.
+Project Context hashes, live Runtime Snapshots, Core risk decisions, and final
+Replay remain authoritative. A stale hash, escaped path, invalid frontmatter,
+missing section, or Goal conflict stops the Skill before generation.
+
+### External multi-Case orchestration
+
+An external Workflow may invoke this Skill once for each independent Case.
+That Workflow owns Requirement/Plan identities, scheduling, completion gates,
+and result aggregation. TapHound owns the individual Journey generation
+session and its final Replay. This guide remains the authoritative procedure
+for each Journey Case.
+
 ---
 
 ## 1. Prerequisites
@@ -286,7 +307,7 @@ Flow applies, continue without `--base-flow`.
 ```bash
 taphound generation start \
   --project /path/to/android-project \
-  --config taphound.config.json \
+  --config .taphound/config.json \
   --context .taphound/context/project-context.json \
   --module :feature:search \
   --device emulator-5554 \
@@ -631,6 +652,26 @@ opens the system camera, image picker, or file picker — a regular
 `generation step` proposal fails with `PACKAGE_ESCAPE` because the foreground
 leaves the target package. Use `generation bridge` instead.
 
+Before starting a `photoCapture` generation, require a valid project-level
+`camera/photo-capture` External Flow. The built-in flow targets one AOSP
+Camera2 variant and must not be treated as device-generic. If the project flow
+is missing or invalid, explain that alignment captures a real probe photo,
+obtain explicit permission, and run:
+
+```bash
+taphound align camera \
+  --project /path/to/android-project \
+  --device <deviceSerial> \
+  --json
+```
+
+Add `--force` only with explicit permission to replace an existing project
+flow. Then run `journey list-flows --include-external --json` again and bind
+the valid project flow in a new generation session. Alignment fails closed
+with `ALIGN_CONFIRM_NOT_FOUND`, `ALIGN_CONFIRM_NO_RESOURCE_ID`, or
+`ALIGN_CONFIRM_AMBIGUOUS` when it cannot produce deterministic confirm steps;
+do not hand-wave those failures into a shutter-only or manual flow.
+
 **Auto bridge** (deterministic, no operator): if an External Flow was bound at
 `generation start --external-flow`, pass `--flow <name>` so Core resolves the
 flow, stamps its steps as `externalSteps`, and commits with
@@ -834,7 +875,7 @@ taphound context validate \
 ```bash
 taphound generation start \
   --project examples/taphound-android-demo \
-  --config taphound.config.json \
+  --config .taphound/config.json \
   --context .taphound/context/project-context.json \
   --device emulator-5554 \
   --json
@@ -1104,6 +1145,9 @@ Each Goal is an independent generation session and does not affect others.
 | `EXTERNAL_ACTIVITY_MISMATCH` | External step `expectedActivity` did not match | Check the flow's activity expectations |
 | `EXTERNAL_STEP_FAILED` | External step action failed (e.g., locator not found) | Check the flow's `resourceId` locators |
 | `EXTERNAL_LOCATOR_STRICTNESS` | External step locator lacks `resourceId` | External steps require XML-only `resourceId` locators |
+| `ALIGN_CONFIRM_NOT_FOUND` | Camera stayed foreground but no deterministic confirm control was found | Do not generate; inspect the camera review UI or use a supported camera |
+| `ALIGN_CONFIRM_NO_RESOURCE_ID` | Camera confirm control has no replayable XML resourceId | Auto replay is unavailable for this camera in External Flow v1 |
+| `ALIGN_CONFIRM_AMBIGUOUS` | Multiple confirm controls cannot be selected deterministically | Disambiguate the camera UI before generating |
 | `MANUAL_STEP_REQUIRED` | Non-interactive finalize encountered a `replayMode: "manual"` step | Bind an External Flow (`--flow`) or run finalize in a TTY |
 | `APP_CRASHED` | App process crashed | Check Logcat, restart app |
 | `IDLE_TIMEOUT` | Configured idle strategy did not stabilize | Inspect `failure.details.idle`; use a new session for config changes |

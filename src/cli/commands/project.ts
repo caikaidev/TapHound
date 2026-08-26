@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { Command } from "commander";
 
 import { TapHoundConfigSchema } from "../../domain/config.js";
+import { CONFIG_PATH } from "../../domain/workspace.js";
 import type { CliDependencies } from "../dependencies.js";
 import {
   errorMessage,
@@ -42,7 +43,7 @@ export function createProjectCommand(
   const describe = new Command("describe")
     .description("Describe stable Android project facts")
     .option("--project <path>", "Android project root", dependencies.cwd())
-    .option("--config <path>", "TapHound config path", "taphound.config.json")
+    .option("--config <path>", "TapHound config path", CONFIG_PATH)
     .option("--json", "Emit one machine-readable JSON value")
     .action(async (options: ProjectDescribeOptions): Promise<void> => {
       let config;

@@ -5,7 +5,11 @@ import {
   type AlignCameraResult,
   type AlignCameraWrittenResult
 } from "../../../src/application/align/align-service.js";
-import type { CameraProbePort, CameraProbeResult } from "../../../src/ports/camera-probe.js";
+import {
+  CameraProbeError,
+  type CameraProbePort,
+  type CameraProbeResult
+} from "../../../src/ports/camera-probe.js";
 import type { AlignPromptPort } from "../../../src/ports/align-prompt.js";
 import type {
   ExternalFlowRegistry,
@@ -20,7 +24,8 @@ const probeResult: CameraProbeResult = {
   shutterResourceId: "com.android.camera:id/shutter_button",
   shutterContentDescription: "快门按钮",
   confirmResourceId: "com.android.camera:id/btn_done",
-  confirmContentDescription: "完成"
+  confirmContentDescription: "完成",
+  confirmActivityName: "com.android.camera.ReviewActivity"
 };
 
 function makeProbe(result: CameraProbeResult = probeResult): CameraProbePort {
@@ -115,7 +120,8 @@ describe("AlignService.alignCamera", () => {
       locator: { resourceId: "com.android.camera:id/shutter_button" }
     });
     expect(arg.flow.steps[2]).toMatchObject({
-      locator: { resourceId: "com.android.camera:id/btn_done" }
+      locator: { resourceId: "com.android.camera:id/btn_done" },
+      expectedActivity: "com.android.camera.ReviewActivity"
     });
   });
 
@@ -217,6 +223,26 @@ describe("AlignService.alignCamera", () => {
       projectRoot: "/project",
       json: false
     })).rejects.toMatchObject({ code: "ALIGN_DEVICE_UNAVAILABLE" });
+  });
+
+  it("maps CameraProbeError to AlignError", async () => {
+    const probe: CameraProbePort = {
+      probe: vi.fn(() => Promise.reject(new CameraProbeError(
+        "ALIGN_CONFIRM_NOT_FOUND",
+        "No deterministic confirm button"
+      )))
+    };
+    const prompt = makePrompt(true);
+    const { registry } = makeRegistry();
+    const adb = makeAdb([{ serial: "DEVICE1", status: "device" }]);
+    const service = new AlignService({ adb, probe, prompt, registry });
+
+    await expect(service.alignCamera({
+      projectRoot: "/project",
+      json: true
+    })).rejects.toMatchObject({
+      code: "ALIGN_CONFIRM_NOT_FOUND"
+    });
   });
 
   it("throws AlignError ALIGN_DEVICE_UNAVAILABLE when 2+ devices online and no --device", async () => {

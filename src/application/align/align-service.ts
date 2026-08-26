@@ -6,6 +6,7 @@ import type {
   CameraProbePort,
   CameraProbeResult
 } from "../../ports/camera-probe.js";
+import { CameraProbeError } from "../../ports/camera-probe.js";
 import type {
   ExternalFlowRegistry,
   WriteExternalFlowResult
@@ -81,7 +82,8 @@ function buildFlow(
     steps.push({
       action: "click",
       locator: { resourceId: probeResult.confirmResourceId },
-      expectedActivity: probeResult.activityName
+      expectedActivity: probeResult.confirmActivityName
+        ?? probeResult.activityName
     });
   }
   return {
@@ -113,10 +115,18 @@ export class AlignService {
       );
     }
 
-    const probeResult = await this.deps.probe.probe({
-      deviceSerial,
-      ...(input.signal === undefined ? {} : { signal: input.signal })
-    });
+    let probeResult: CameraProbeResult;
+    try {
+      probeResult = await this.deps.probe.probe({
+        deviceSerial,
+        ...(input.signal === undefined ? {} : { signal: input.signal })
+      });
+    } catch (error) {
+      if (error instanceof CameraProbeError) {
+        throw new AlignError(error.code, error.message);
+      }
+      throw error;
+    }
 
     if (!input.json) {
       const confirmed = await this.deps.prompt.confirmWrite({

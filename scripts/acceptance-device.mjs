@@ -34,7 +34,7 @@ const result = spawnSync(process.execPath, [
   "--project",
   projectRoot,
   "--config",
-  resolve(projectRoot, "taphound.config.json"),
+  resolve(projectRoot, ".taphound", "config.json"),
   "--journey",
   resolve(projectRoot, ".taphound", "journeys", "search.json"),
   "--json"

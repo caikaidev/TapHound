@@ -80,7 +80,7 @@ function baseDependencies(exitCodes: number[]): CliDependencies {
 async function runVerify(dependencies: CliDependencies): Promise<void> {
   await createProgram(dependencies).parseAsync([
     "node", "taphound", "verify",
-    "--config", "/project/taphound.config.json",
+    "--config", "/project/.taphound/config.json",
     "--journey", "/project/search.journey.json",
     "--json"
   ]);

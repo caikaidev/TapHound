@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { Command } from "commander";
 
 import { TapHoundConfigSchema } from "../../domain/config.js";
+import { CONFIG_PATH } from "../../domain/workspace.js";
 import type { CliDependencies } from "../dependencies.js";
 import {
   doctorMessage,
@@ -36,7 +37,7 @@ export function createDoctorCommand(dependencies: CliDependencies): Command {
   return new Command("doctor")
     .description("Check TapHound tools, permissions, application, and device")
     .option("--project <path>", "Android project root", dependencies.cwd())
-    .option("--config <path>", "TapHound config path", "taphound.config.json")
+    .option("--config <path>", "TapHound config path", CONFIG_PATH)
     .option("--device <serial>", "Select an online Android device")
     .option("--json", "Emit machine-readable JSON")
     .action(async (options: DoctorOptions): Promise<void> => {

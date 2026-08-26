@@ -44,7 +44,7 @@ A one-time, atomic, no-compatibility-layer migration is used. After migration:
 | Android Project Runtime / APR | TapHound |
 | `android-project-runtime` | `taphound` |
 | `apr` CLI | `taphound` |
-| `apr.config.json` | `taphound.config.json` |
+| `apr.config.json` | `.taphound/config.json` |
 | `.apr/runs` | `.taphound/runs` |
 | `APR_*` | `TAPHOUND_*` |
 | APR Journey | TapHound Journey |
@@ -151,7 +151,7 @@ Before the GitHub repository is officially made public, also add `CONTRIBUTING.m
 Automated verification includes:
 
 - Black-box tests for the new CLI name, help output, stdout/stderr, and exit codes.
-- Tests for the default `taphound.config.json`, `.taphound/runs`, and `TAPHOUND_*`.
+- Tests for the default `.taphound/config.json`, `.taphound/runs`, and `TAPHOUND_*`.
 - Tests for Domain types, report summaries, Recorder prompts, and Doctor error wording.
 - Contract tests for the example Android Package, Activity, directory, and acceptance runner.
 - Documentation example tests that only accept `taphound`.

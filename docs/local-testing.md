@@ -140,7 +140,7 @@ When multiple devices are present, specify the serial directly:
 ```bash
 node dist/cli/main.js verify \
   --project examples/taphound-android-demo \
-  --config taphound.config.json \
+  --config .taphound/config.json \
   --journey .taphound/journeys/search.json \
   --device emulator-5554 \
   --json

@@ -54,7 +54,9 @@ async function fixture(options: {
   await mkdir(bin);
   await symlink(fakeTool, join(bin, "adb"));
   await symlink(fakeTool, join(bin, "android"));
-  const configPath = join(root, "taphound.config.json");
+  const workspace = join(root, ".taphound");
+  await mkdir(workspace);
+  const configPath = join(workspace, "config.json");
   const journeyPath = join(root, "journey.json");
   await writeFile(configPath, `${JSON.stringify({
     version: 1,

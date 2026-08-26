@@ -51,7 +51,7 @@ and generate JSON matching provided schemas.
 |-----------|----------|-------------|
 | `project` | yes | Android project root path |
 | `goal` | yes | Natural-language test scenario description |
-| `config` | no | TapHound config path (default `taphound.config.json`) |
+| `config` | no | TapHound config path (default `.taphound/config.json`) |
 | `device` | no | Device serial (default: let doctor select) |
 | `output` | no | Output journey path (default `journeys/generated.json`) |
 | `maxSteps` | no | Max generation steps (default 30) |

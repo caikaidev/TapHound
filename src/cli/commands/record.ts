@@ -3,7 +3,10 @@ import { resolve } from "node:path";
 import { Command } from "commander";
 
 import { TapHoundConfigSchema } from "../../domain/config.js";
-import { assertArtifactDirectory } from "../../domain/workspace.js";
+import {
+  assertArtifactDirectory,
+  CONFIG_PATH
+} from "../../domain/workspace.js";
 import type { CliDependencies } from "../dependencies.js";
 import {
   errorMessage,
@@ -26,7 +29,7 @@ export function createRecordCommand(dependencies: CliDependencies): Command {
   return new Command("record")
     .description("Interactively record a TapHound Journey")
     .option("--project <path>", "Android project root", dependencies.cwd())
-    .option("--config <path>", "TapHound config path", "taphound.config.json")
+    .option("--config <path>", "TapHound config path", CONFIG_PATH)
     .option("--device <serial>", "Select an online Android device")
     .requiredOption("--name <name>", "Journey name")
     .requiredOption("--output <path>", "Journey output path")

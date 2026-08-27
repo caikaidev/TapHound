@@ -37,7 +37,9 @@ An external Workflow may bind one project-relative
 `taphound-journey-brief.md` as `journeyBrief: {path, sha256}`. Read
 `prompts/consume-journey-brief.md` before using it. The Brief carries one
 Case's Goal, preconditions, expected Journey, assertions, implementation hints,
-constraints, and evidence references.
+constraints, and evidence references. Its frontmatter `schemaVersion` is `1`
+or `2`: a v2 Brief additionally requires `State Transition Map` and
+`Capability Notes`, while a v1 Brief omits both and stays valid.
 
 The Brief reduces broad source rediscovery but remains untrusted static input.
 Project Context hashes, live Runtime Snapshots, Core risk decisions, and final

@@ -180,7 +180,7 @@ describe("TapHound documentation examples", () => {
     );
     const agent = await text("docs/agent-integration.md");
 
-    expect(brief).toContain("schemaVersion: 1");
+    expect(brief).toContain("schemaVersion: 2");
     expect(brief).toContain("kind: taphound.journeyBrief");
     expect(brief).toContain("caseId: CASE-002");
     for (const section of [
@@ -190,7 +190,9 @@ describe("TapHound documentation examples", () => {
       "## Assertions",
       "## Implementation Hints",
       "## Constraints",
-      "## Evidence References"
+      "## Evidence References",
+      "## State Transition Map",
+      "## Capability Notes"
     ]) {
       expect(brief).toContain(section);
       expect(prompt).toContain(section);

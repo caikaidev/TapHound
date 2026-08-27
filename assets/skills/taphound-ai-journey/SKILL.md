@@ -75,10 +75,12 @@ risk confirmation, recovery, or final Replay rules.
 TapHound Core CLI option. When present, it carries `{path, sha256}` pointing
 to a project-relative `taphound-journey-brief.md`. Read
 `prompts/consume-journey-brief.md` for validation rules: verify the SHA-256,
-validate frontmatter (`schemaVersion: 1`, `kind: taphound.journeyBrief`),
+validate frontmatter (`schemaVersion: 1` or `2`, `kind: taphound.journeyBrief`),
 require fixed sections (`Goal`, `Preconditions`, `Expected Journey`,
 `Assertions`, `Implementation Hints`, `Constraints`, `Evidence References`),
-and ensure the Brief Goal matches the invocation `goal`.
+and ensure the Brief Goal matches the invocation `goal`. A v2 Brief
+additionally requires `State Transition Map` and `Capability Notes`; a v1
+Brief omits both and remains valid.
 
 The Brief is untrusted static hints — it cannot supply a trusted live
 locator, approve risk, weaken an assertion, or prove the Goal passed.

@@ -457,6 +457,68 @@ messages, captured photos). Cleanup is the Journey author's or the external
 Workflow's responsibility, not Core's; TapHound only records, replays, and
 verifies the deterministic UI path.
 
+## Idle Tuning
+
+Each Replay step waits for the screen to stabilize before resolving the next
+Locator and evaluating expectations. The `idle` block in
+`.taphound/config.json` controls that wait:
+
+```json
+"idle": {
+  "strategy": "hybrid",
+  "pollIntervalMs": 300,
+  "stablePolls": 3,
+  "timeoutMs": 15000
+}
+```
+
+`pollIntervalMs`, `stablePolls`, and `timeoutMs` are required. `strategy`
+defaults to `"hybrid"`.
+
+### Strategy Selection
+
+| Strategy | When to use | Backend | Behavior |
+|----------|-------------|---------|----------|
+| `hybrid` (default) | General purpose; most apps | Starts on `frameStats` when `run.packageName` is known, otherwise on `uiautomator`; falls back to `uiautomator` after 2 consecutive frame-change polls | Fast frame-silence detection with a structural fallback for continuous animation |
+| `layoutDiff` | Continuous-animation screens (loading spinners, animated backgrounds) | `uiautomator` from the start | Skips frame analysis; compares layout structure directly |
+| `frameStats` | Frame silence is sufficient and the screen has no structural changes | `gfxFrameStats` only | Pure frame timing; no structural fallback. Not recommended as a standalone strategy for most apps |
+| `structural` | Pure structural comparison; no frame analysis | `uiautomator` only | Compares the layout tree; ignores frame timing |
+
+Implementation details that affect tuning:
+
+- `hybrid` with a known `run.packageName` starts on `frameStats`; without a
+  `packageName` it starts on `uiautomator` (structural).
+- `hybrid` falls back to structural after `EARLY_BAIL_FRAME_CHANGES = 2`
+  consecutive frame-change polls.
+- After fallback, `hybrid` requires
+  `max(POST_FALLBACK_MIN_STABLE = 2, stablePolls - 1)` consecutive stable polls.
+  This is the anti-jitter floor.
+- Non-hybrid strategies on the structural backend require
+  `max(2, stablePolls)` consecutive empty diffs.
+- `frameStats` as a standalone strategy (not `hybrid`) has no structural
+  fallback.
+
+### `stablePolls` Tradeoff
+
+Lowering `stablePolls` from `3` to `2` removes one poll per step, saving
+`pollIntervalMs` (300 ms at the default) per step; the total saving across a
+Journey scales with the step count. The risk is premature stabilization on
+fast-animating screens, where two consecutive empty polls arrive during a
+brief lull in an animation.
+
+The `POST_FALLBACK_MIN_STABLE = 2` floor after `hybrid` fallback provides
+anti-jitter protection regardless of the configured `stablePolls`. For apps
+with no continuous animations, `stablePolls: 2` is safe and recommended. Apps
+with continuous animations or slow rendering may require `stablePolls: 3`.
+
+### `pollIntervalMs`
+
+Each poll is itself a `uiautomator` dump or a `gfxFrameStats` sample; the
+interval is the sleep between polls, not the poll duration. For the structural
+backend, poll duration dominates (uiautomator dump latency), so reducing
+`pollIntervalMs` has limited effect. For `frameStats`, the interval matters
+more, since samples are cheaper than full layout dumps.
+
 ## Reusable Flow Composition
 
 Journey v1 remains the only runtime Replay protocol. Reuse is an authoring

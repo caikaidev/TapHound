@@ -135,6 +135,20 @@ describe("built taphound observe process contract", () => {
     });
   });
 
+  it("returns exit 2 with CONFIG_INVALID when --logcat-lines is not a non-negative integer", async () => {
+    const test = await fixture();
+    const result = runObserve(test, {}, ["--json", "--logcat-lines", "abc"]);
+
+    expect(result.status).toBe(2);
+    expect(jsonOutput(result)).toMatchObject({
+      exitCode: 2,
+      failure: {
+        code: "CONFIG_INVALID",
+        message: "--logcat-lines must be a non-negative integer"
+      }
+    });
+  });
+
   it("returns exit 3 when no device is available", async () => {
     const test = await fixture();
     const result = runObserve(test, { TAPHOUND_FAKE_DEVICE: "none" }, ["--json"]);
@@ -157,10 +171,10 @@ describe("built taphound observe process contract", () => {
 
   it("does not require a legacy workspace guard (no .taphound/.gitignore required)", async () => {
     const test = await fixture();
-    // No .gitignore is created because observe is read-only.
-    await expect(access(join(test.root, ".taphound", ".gitignore")))
-      .rejects.toThrow();
     const result = runObserve(test, {}, ["--json"]);
     expect(result.status).toBe(0);
+    // Observe is read-only and must not create a .gitignore.
+    await expect(access(join(test.root, ".taphound", ".gitignore")))
+      .rejects.toThrow();
   }, 15000);
 });

@@ -69,10 +69,9 @@ With `--json`, the command emits exactly one JSON value to stdout:
 
 - `deviceSerial`: the device TapHound observed.
 - `packageName`: the configured target package (from `config.run.packageName`).
-- `activity`: the target package's current Activity, when `currentActivity`
-  resolves. Omitted when the foreground is on a different package and
-  `currentActivity` cannot resolve the target; the `foreground` entry then
-  carries the actual foreground component.
+- `activity`: the target package's current Activity. Omitted when the foreground
+  package differs from the configured target package; the `foreground` entry
+  then carries the actual foreground component.
 - `foreground`: the actual foreground component at capture time, regardless of
   whether it is the target package. `foreground.packageName` may differ from
   `packageName` when the device is mid-transition or on a system surface.
@@ -100,7 +99,7 @@ persistence, and binding semantics:
 | Binding | returns no binding | returns `generationId`, `baseRevision`, `snapshotHash`, and a `snapshotRef` that subsequent proposals must bind to |
 | Revision advance | no | advances the session revision atomically via the session store |
 | State checks | runs `doctor` (config + env + device) | asserts the session is `active`, idle (`inFlight === null`), and has no pending risk confirmation |
-| Foreground tolerance | explicitly tolerates non-target foreground; `activity` is omitted when `currentActivity` cannot resolve the target package | collects the foreground component as-is into the snapshot and stamps `expectedPackageName` from the session target for snapshot traceability |
+| Foreground tolerance | explicitly tolerates non-target foreground; `activity` is omitted when the foreground package differs from the configured target package | collects the foreground component as-is into the snapshot and stamps `expectedPackageName` from the session target for snapshot traceability |
 | Output shape | `{ status, exitCode, report: ObserveReport }` | `{ status, exitCode, ...binding, snapshotRef, snapshot? }` |
 | Authoritative use | Brief `needs-observation` edge verification and ad-hoc inspection | authoring generation proposals that must bind to a session revision |
 

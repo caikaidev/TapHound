@@ -115,16 +115,14 @@ describe("ObserveService", () => {
     }));
   });
 
-  it("swallows currentActivity failure when a different package is in the foreground", async () => {
+  it("omits activity when a different package is in the foreground", async () => {
     const otherForeground: ForegroundComponent = {
       packageName: "com.other.app",
       activity: "com.other.app.OtherActivity"
     };
     const fakes = makeFakes({
       foreground: otherForeground,
-      currentActivity: () => Promise.reject(
-        new Error("currentActivity exploded")
-      )
+      currentActivity: () => Promise.resolve("com.other.app.OtherActivity")
     });
     const service = makeService(fakes);
 
@@ -135,24 +133,20 @@ describe("ObserveService", () => {
 
     expect(report.activity).toBeUndefined();
     expect(report.foreground).toEqual(otherForeground);
+    expect(fakes.adb.currentActivity).not.toHaveBeenCalled();
   });
 
-  it("rethrows currentActivity error when target package IS in the foreground", async () => {
-    const fakes = makeFakes({
-      foreground: {
-        packageName: TARGET_PACKAGE,
-        activity: TARGET_ACTIVITY
-      },
-      currentActivity: () => Promise.reject(
-        new Error("currentActivity transient failure")
-      )
-    });
+  it("reports foreground activity when target package is in the foreground", async () => {
+    const fakes = makeFakes();
     const service = makeService(fakes);
 
-    await expect(service.observe({
+    const report = await service.observe({
       packageName: TARGET_PACKAGE,
       deviceSerial: DEVICE_SERIAL
-    })).rejects.toThrow("currentActivity transient failure");
+    });
+
+    expect(report.activity).toBe(TARGET_ACTIVITY);
+    expect(fakes.adb.currentActivity).not.toHaveBeenCalled();
   });
 
   it("rethrows layout errors", async () => {

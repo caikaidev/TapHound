@@ -500,16 +500,38 @@ Implementation details that affect tuning:
 
 ### `stablePolls` Tradeoff
 
-Lowering `stablePolls` from `3` to `2` removes one poll per step, saving
-`pollIntervalMs` (300 ms at the default) per step; the total saving across a
-Journey scales with the step count. The risk is premature stabilization on
-fast-animating screens, where two consecutive empty polls arrive during a
-brief lull in an animation.
+Lowering `stablePolls` from `3` to `2` removes one confirmation poll per
+stable step on the simplest backend, but the actual saving depends on the
+strategy and whether `hybrid` falls back:
 
-The `POST_FALLBACK_MIN_STABLE = 2` floor after `hybrid` fallback provides
-anti-jitter protection regardless of the configured `stablePolls`. For apps
-with no continuous animations, `stablePolls: 2` is safe and recommended. Apps
-with continuous animations or slow rendering may require `stablePolls: 3`.
+- **Non-hybrid `structural` / `layoutDiff`:** lowering `3` to `2` saves
+  **1 poll per step** (~`pollIntervalMs`, 300 ms at the default). These
+  strategies require `max(2, stablePolls)` consecutive empty diffs on the
+  structural backend, so the saving is exactly one confirmation poll.
+- **`hybrid` without early-bail (the common stable-app path):** saves
+  **2 polls per step** (~600 ms at the default). `hybrid` starts on
+  `frameStats`, requires `stablePolls` consecutive empty frameStats polls,
+  then ALWAYS transitions to the structural backend and requires
+  `max(2, stablePolls)` MORE consecutive empty structural polls. So
+  `stablePolls: 3` is 3 frameStats + max(2, 3) = 3 structural = 6 polls,
+  while `stablePolls: 2` is 2 frameStats + max(2, 2) = 2 structural = 4
+  polls. The saving is one fewer frameStats poll AND one fewer structural
+  confirmation poll.
+- **`hybrid` with early-bail (frame changes detected):** saves **0 polls**.
+  After `hybrid` falls back from `frameStats`, it requires
+  `max(POST_FALLBACK_MIN_STABLE = 2, stablePolls - 1)` consecutive stable
+  polls. Both `stablePolls: 3` (max(2, 2) = 2) and `stablePolls: 2`
+  (max(2, 1) = 2) hit the anti-jitter floor, so the structural confirmation
+  cost is identical.
+
+Note that `hybrid` always confirms on the structural backend even when
+`frameStats` was quiet: it transitions after `stablePolls` consecutive empty
+`frameStats` polls and then needs structural confirmation. The total saving
+across a Journey scales with the step count on the non-early-bail path.
+
+For apps with no continuous animations, `stablePolls: 2` is safe and
+recommended. Apps with continuous animations or slow rendering may require
+`stablePolls: 3`.
 
 ### `pollIntervalMs`
 

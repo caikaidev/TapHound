@@ -77,6 +77,7 @@ git diff --exit-code -- assets/brand/png
 - `doctor`：检查 Node.js、ADB、Android CLI、应用安装、权限和设备。
 - `record`：交互式执行操作并录制 Journey。
 - `verify`：确定性重放 Journey 并发布报告。
+- `observe`：捕获设备即时快照（前台组件、Activity、布局、可选 logcat），无 session、无副作用。
 - `project describe`：输出稳定的 Android 项目事实。
 - `context list` / `validate` / `status`：查看或校验 v2 Project Context 索引及模块分片。
 - `context refresh`：在不重新分析源码的前提下，重算 Context 证据哈希（含语义哈希）。

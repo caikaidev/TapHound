@@ -47,6 +47,25 @@ export function createObserveCommand(dependencies: CliDependencies): Command {
     )
     .option("--json", "Emit one machine-readable JSON value")
     .action(async (options: ObserveOptions): Promise<void> => {
+      if (
+        options.logcatLines !== undefined
+        && (!Number.isFinite(options.logcatLines) || options.logcatLines < 0
+          || !Number.isInteger(options.logcatLines))
+      ) {
+        const output = failureOutput(
+          2,
+          "CONFIG_INVALID",
+          "--logcat-lines must be a non-negative integer"
+        );
+        if (options.json === true) {
+          writeJson(dependencies.stdout, output);
+        } else {
+          writeLine(dependencies.stderr, output.failure.message);
+        }
+        dependencies.setExitCode(2);
+        return;
+      }
+
       let config;
       try {
         const rawConfig = await dependencies.readJson(

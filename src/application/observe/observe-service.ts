@@ -49,15 +49,9 @@ export class ObserveService {
 
     const foreground = await this.dependencies.adb.foregroundComponent(identity);
 
-    let activity: string | undefined;
-    try {
-      activity = await this.dependencies.adb.currentActivity(identity);
-    } catch (error) {
-      if (foreground.packageName === packageName) {
-        throw error;
-      }
-      activity = undefined;
-    }
+    const activity = foreground.packageName === packageName
+      ? foreground.activity
+      : undefined;
 
     const layout = await this.dependencies.androidCli.layout({
       deviceSerial,

@@ -77,6 +77,7 @@ See the [local testing guide](docs/local-testing.md) for source, npm tarball, an
 - `doctor`: checks Node.js, ADB, Android CLI, app installation, permissions, and device.
 - `record`: interactively execute actions and record a Journey.
 - `verify`: deterministically replay a Journey and publish a report.
+- `observe`: capture a point-in-time device snapshot (foreground, activity, layout, optional logcat) without a session or side effects.
 - `project describe`: output stable Android project facts.
 - `context list` / `validate` / `status`: inspect or validate a v2 Project Context index and module shards.
 - `context refresh`: recompute Context evidence hashes, including semantic hashes, without re-analyzing source.

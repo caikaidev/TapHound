@@ -84,8 +84,8 @@ The code follows ports and adapters:
   `src/cli/dependencies.ts` wires production adapters into application services.
   `src/cli/main.ts` is the executable entry point.
 
-The CLI exposes `doctor`, `record`, `verify`, `project`, `context`, `journey`,
-`generation`, `init`, and `align`. Keep external tools and filesystem effects
+The CLI exposes `doctor`, `record`, `verify`, `observe`, `project`, `context`,
+`journey`, `generation`, `init`, and `align`. Keep external tools and filesystem effects
 behind ports so application tests can inject fakes.
 
 ### Host Project Workspace

@@ -43,6 +43,36 @@ Target-type Actions use one or more fields:
 
 The priority is fixed as `resourceId`, `text`, then `contentDescription`. Replay starts from the first field that has matches and uses subsequent fields to disambiguate.
 
+The candidate set is fixed by the first field that has any match. Once that
+field narrows the set to a single element, resolution ends immediately and
+subsequent fields are **not** validated. Concretely, when `resourceId` already
+matches exactly one element, `text` and `contentDescription` are never
+examined, so a Locator such as `{ "resourceId": "submit_button", "text": "Send" }`
+is equivalent to a bare `{ "resourceId": "submit_button" }` — the `text` field
+is silently ignored rather than asserted. The same short-circuit applies when
+`text` narrows the set to one element before `contentDescription` is reached.
+
+To assert an element's text content, use a text-only Locator (a Locator whose
+only identity field is `text`), or an `expect` element Locator that omits
+`resourceId`. The Locator engine drives both Action resolution and `expect`
+element resolution, so a multi-field Locator that already resolves uniquely
+through `resourceId` will not also assert `text` in either context.
+
+Counter-example — the following Locator **cannot** assert that the button label
+is `Send`, because `resourceId` already resolves uniquely and resolution stops
+before `text` is examined:
+
+```json
+{
+  "resourceId": "submit_button",
+  "text": "Send"
+}
+```
+
+If the element's `text` later changes to `Cancel`, replay still resolves the
+same `submit_button` and passes. Use a text-only Locator, or an `expect`
+element Locator, to verify the label.
+
 When identity fields still match repeated elements, a Locator can add a stable ancestor scope and/or zero-based ordinal:
 
 ```json
@@ -374,6 +404,58 @@ The Recorder does not auto-generate business assertions. A step may carry one `e
 ```
 
 Logcat is matched only within this step's `[T0, T1]` window. `match` may be `literal` or `regex`; the regex must be valid. For a full executable example see [`examples/search.journey.json`](../examples/search.journey.json).
+
+### Expect Semantics
+
+Each `expect` type evaluates against live device state with strict equality
+semantics; TapHound never applies fuzzy, prefix, or case-insensitive matching.
+
+- **`activity`**: polls `currentActivity` for the configured package and
+  compares the result against `value` with exact full-string equality. No
+  prefix, suffix, or substring matching is applied. A shorter alias or a
+  trailing fragment never matches the fully qualified class name.
+- **`element`**: resolves `locator` through the same Locator engine used for
+  Actions, with `requireEnabled` disabled, and requires the result to be
+  unique. Both an ambiguous match (more than one candidate without `index`)
+  and no element matching surface as `EXPECT_ELEMENT_FAILED`; the Locator
+  engine's internal `LOCATOR_AMBIGUOUS`/`LOCATOR_NOT_FOUND` is reduced to a
+  boolean by `expect` and is not surfaced separately. The Locator
+  short-circuit rules above apply, so a multi-field Locator that already
+  resolves uniquely through `resourceId` will not also assert `text`.
+- **`logcat`**: `tag` is compared with exact full-string equality, preserving
+  the full logger prefix. For example, a `tag` of `IM.SendMailActivity`
+  matches only logcat lines whose tag is exactly `IM.SendMailActivity`; a
+  partial `SendMailActivity` value does not match. `level` is compared
+  exactly (e.g. `I` matches only `I`, not `INFO`). When `match` is
+  `literal`, `pattern` is matched as a substring of the logcat message; when
+  `match` is `regex`, `pattern` is compiled into a `RegExp` and matched
+  partially (`.test`). Matching is restricted to logcat lines emitted within
+  this step's `[T0, T1]` window.
+
+## Idempotency and Repeat Runs
+
+TapHound captures no runtime variables during Replay: there is no extracted
+temp file, no captured dynamic ID, and no substitution into subsequent steps.
+Each Journey must therefore target stable, unique business identifiers chosen
+by the author (for example `resourceId: "order_1712345678"` rather than "the
+order I just created"). When the business key is genuinely dynamic and cannot
+be pinned in advance, the Journey cannot deterministically replay that edge
+and the author must either redesign the test fixture or delegate the side
+effect to an external Workflow.
+
+For list-shaped targets where replay may create additional rows on each run,
+prefer a `text`-only Locator with a stable unique label, or scope with
+`within` and fall back to `index: 0` only when the list genuinely contains
+identical candidates. `index: 0` selects the first row in Layout traversal
+order regardless of how many rows accumulated, which keeps repeat runs stable
+without pinning a specific ordinal that later runs may invalidate.
+
+TapHound does not clean up business data. Every committed step's Action
+produces real side effects on the device and on the backing service. Repeat
+runs of the same Journey accumulate those side effects (extra rows, sent
+messages, captured photos). Cleanup is the Journey author's or the external
+Workflow's responsibility, not Core's; TapHound only records, replays, and
+verifies the deterministic UI path.
 
 ## Reusable Flow Composition
 

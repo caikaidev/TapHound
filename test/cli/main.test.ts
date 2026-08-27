@@ -50,6 +50,9 @@ function dependencies(exitCodes: number[]): CliDependencies {
     align: {
       alignCamera: () => Promise.reject(new Error("unused"))
     },
+    observer: () => ({
+      observe: () => Promise.reject(new Error("unused"))
+    }),
     generationStarter: {
       start: () => Promise.reject(new Error("unused"))
     },

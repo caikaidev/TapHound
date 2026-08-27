@@ -38,6 +38,9 @@ function harness(result: AlignCameraResult): AlignTestHarness {
     init: { install: vi.fn() },
     initPrompt: { selectAgents: vi.fn() },
     align: { alignCamera: alignCameraMock },
+    observer: () => ({
+      observe: vi.fn(() => Promise.reject(new Error("unused")))
+    }),
     generationStarter: { start: vi.fn(() => Promise.reject(new Error("unused"))) },
     runtimeObserver: { observe: vi.fn(() => Promise.reject(new Error("unused"))) },
     workspaceLayout: fakeWorkspaceLayout(),

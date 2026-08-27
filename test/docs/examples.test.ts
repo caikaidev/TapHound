@@ -215,6 +215,7 @@ describe("TapHound documentation examples", () => {
       "doctor",
       "record",
       "verify",
+      "observe",
       "project",
       "context",
       "journey",

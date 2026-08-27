@@ -44,6 +44,11 @@ import { InquirerGenerationPrompt } from "../adapters/prompt/inquirer-generation
 import { InquirerInitPrompt } from "../adapters/prompt/inquirer-init-prompt.js";
 import { InquirerAlignPrompt } from "../adapters/prompt/inquirer-align-prompt.js";
 import { AlignService, type AlignCameraResult } from "../application/align/align-service.js";
+import {
+  ObserveService,
+  type ObserveInput
+} from "../application/observe/observe-service.js";
+import type { ObserveReport } from "../domain/observation.js";
 import { ContextGenerator } from "../application/context/context-generator.js";
 import { ContextRehasher } from "../application/context/context-rehasher.js";
 import { ContextValidator } from "../application/context/context-validator.js";
@@ -184,6 +189,9 @@ export interface CliDependencies {
       json: boolean;
       signal?: AbortSignal | undefined;
     }) => Promise<AlignCameraResult>;
+  };
+  observer: (layoutTimeoutMs: number) => {
+    observe: (input: ObserveInput) => Promise<ObserveReport>;
   };
   workspaceLayout: WorkspaceLayoutPort;
   readJson: (path: string) => Promise<unknown>;
@@ -365,6 +373,18 @@ export function createProductionDependencies(
       prompt: new InquirerAlignPrompt(),
       registry: externalFlowRegistry
     }),
+    observer: (layoutTimeoutMs: number): {
+      observe: (input: ObserveInput) => Promise<ObserveReport>;
+    } => {
+      const service = new ObserveService({
+        adb,
+        androidCli,
+        layoutTimeoutMs
+      });
+      return {
+        observe: (input): Promise<ObserveReport> => service.observe(input)
+      };
+    },
     workspaceLayout: new FileSystemWorkspaceLayout(),
     generationStarter: {
       start: async (input): Promise<

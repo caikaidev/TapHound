@@ -146,6 +146,9 @@ function dependencies(): {
       align: {
         alignCamera: vi.fn(() => Promise.reject(new Error("unused")))
       },
+      observer: () => ({
+        observe: vi.fn(() => Promise.reject(new Error("unused")))
+      }),
       generationStarter: {
         start: vi.fn(() => Promise.resolve({
           version: 1 as const,
@@ -240,7 +243,7 @@ describe("TapHound CLI commands", () => {
       )
     );
 
-    expect(configOptions).toHaveLength(18);
+    expect(configOptions).toHaveLength(19);
     expect(configOptions.every(
       (option) => option.defaultValue === CONFIG_PATH
     )).toBe(true);

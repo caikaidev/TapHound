@@ -19,6 +19,7 @@ describe("createProgram", () => {
       "doctor",
       "record",
       "verify",
+      "observe",
       "project",
       "context",
       "journey",

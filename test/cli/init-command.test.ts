@@ -85,6 +85,9 @@ function harness(
     init: { install: installMock },
     initPrompt: { selectAgents: selectAgentsMock },
     align: { alignCamera: vi.fn(() => Promise.reject(new Error("unused"))) },
+    observer: () => ({
+      observe: vi.fn(() => Promise.reject(new Error("unused")))
+    }),
     generationStarter: {
       start: vi.fn(() => Promise.reject(new Error("unused")))
     },

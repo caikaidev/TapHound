@@ -64,6 +64,9 @@ function baseDependencies(exitCodes: number[]): CliDependencies {
     align: {
       alignCamera: vi.fn(() => Promise.reject(new Error("unused")))
     },
+    observer: () => ({
+      observe: vi.fn(() => Promise.reject(new Error("unused")))
+    }),
     generationStarter: {
       start: vi.fn(() => Promise.reject(new Error("unused")))
     },

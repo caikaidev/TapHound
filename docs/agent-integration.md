@@ -44,8 +44,11 @@ A multi-Case orchestrator dispatches one brief-author subagent per Case.
 Configure the subagent with a **name** and a **PROMPT** field whose content
 is copied verbatim from
 [`brief-author-role.md`](../assets/skills/taphound-journey-brief-author/prompts/brief-author-role.md).
-That file is self-contained: it defines the role, capability boundary, inputs,
-execution procedure, output format, and rules. The orchestrator then
+That file is a lean bootstrap: it establishes the role, capability boundary,
+inputs, output format, and key rules, then directs the subagent to read
+`SKILL.md` from the installed skill directory for the full execution
+procedure. This keeps the PROMPT short enough for agent runtimes that
+impose a length limit on the PROMPT configuration field. The orchestrator then
 dispatches a dynamic task message per Case with these explicit inputs:
 
 | Field | Required | Description |

@@ -29,7 +29,7 @@ is the **consumer**. They communicate through a `{path, sha256}` binding.
 ## Skill Directory
 
 All file references are relative to `assets/skills/taphound-journey-brief-author/`.
-The directory contains `prompts/` (the self-contained subagent role prompt)
+The directory contains `prompts/` (the lean subagent bootstrap prompt)
 and `templates/` (the Brief v2 skeleton).
 
 ## How to Use This Skill
@@ -132,9 +132,9 @@ Project Context.
 
 ## Phase 1: Case Analysis
 
-> Read `prompts/brief-author-role.md` for the full procedure — it is the
-> self-contained prompt used by the subagent. The summary below is for
-> manual reference.
+> This section is the authoritative procedure. The subagent prompt
+> (`prompts/brief-author-role.md`) is a lean bootstrap that directs the
+> subagent here; it does not duplicate this procedure.
 
 1. If `contextPaths` is provided, read ONLY those explicit files. Extract
    context relevant to `caseGoal`.

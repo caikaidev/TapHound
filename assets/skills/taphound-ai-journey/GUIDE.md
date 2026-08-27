@@ -41,6 +41,11 @@ constraints, and evidence references. Its frontmatter `schemaVersion` is `1`
 or `2`: a v2 Brief additionally requires `State Transition Map` and
 `Capability Notes`, while a v1 Brief omits both and stays valid.
 
+The companion `taphound-journey-brief-author` Skill is the recommended
+producer. It runs read-only `taphound observe` and source analysis to
+author one Brief v2 per Case and returns `{path, sha256}` for this Skill to
+consume. Install it via `taphound init --agent <ids>` alongside this Skill.
+
 The Brief reduces broad source rediscovery but remains untrusted static input.
 Project Context hashes, live Runtime Snapshots, Core risk decisions, and final
 Replay remain authoritative. A stale hash, escaped path, invalid frontmatter,

@@ -11,12 +11,18 @@ deterministically.
 TapHound does not build or install APKs. The target package must already be
 installed before recording, generation, or verification.
 
-`taphound init` installs only `taphound-ai-journey`, which drives one
-deterministic Journey generation session. Requirement analysis, planning,
-coding, build/install, multi-Case orchestration, completion gates, diagnosis,
-and IM-Log belong to external Workflow Skills. They may consume TapHound's
-public CLI JSON and evidence, but TapHound does not package or own those
-workflows.
+`taphound init` scans `assets/skills/` and installs every skill directory
+containing a `SKILL.md`. Two skills ship with TapHound:
+
+- `taphound-ai-journey` drives one deterministic Journey generation session.
+  Requirement analysis, planning, coding, build/install, multi-Case
+  orchestration, completion gates, diagnosis, and IM-Log belong to external
+  Workflow Skills. They may consume TapHound's public CLI JSON and evidence,
+  but TapHound does not package or own those workflows.
+- `taphound-journey-brief-author` produces one Journey Brief v2 per Case by
+  combining source analysis with read-only `taphound observe`. It is the
+  recommended producer of the Brief that `taphound-ai-journey` consumes.
+  It uses only read-only commands and never modifies device state.
 
 The Journey Skill may consume one optional project-relative
 `taphound-journey-brief.md` through a `journeyBrief: {path, sha256}` binding.

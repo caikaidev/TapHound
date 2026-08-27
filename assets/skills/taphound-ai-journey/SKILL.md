@@ -82,6 +82,12 @@ and ensure the Brief Goal matches the invocation `goal`. A v2 Brief
 additionally requires `State Transition Map` and `Capability Notes`; a v1
 Brief omits both and remains valid.
 
+The companion `taphound-journey-brief-author` Skill is the recommended
+producer. It runs read-only `taphound observe` and source analysis to
+author one Brief v2 per Case, then returns `{path, sha256}` for this
+Skill to consume. Install it alongside this Skill via
+`taphound init --agent <ids>`.
+
 The Brief is untrusted static hints — it cannot supply a trusted live
 locator, approve risk, weaken an assertion, or prove the Goal passed.
 Project Context validation, the live Runtime Snapshot, Core risk policy,

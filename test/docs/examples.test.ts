@@ -206,6 +206,46 @@ describe("TapHound documentation examples", () => {
     expect(skill).toContain("final Replay remain authoritative");
   });
 
+  it("keeps the TapHound Journey Brief Author skill discoverable", async () => {
+    const skill = await text(
+      "assets/skills/taphound-journey-brief-author/SKILL.md"
+    );
+    const rolePrompt = await text(
+      "assets/skills/taphound-journey-brief-author/prompts/brief-author-role.md"
+    );
+    const template = await text(
+      "assets/skills/taphound-journey-brief-author/templates/taphound-journey-brief.template.md"
+    );
+
+    expect(skill).toContain("taphound-journey-brief-author");
+    expect(skill).toContain("taphound observe");
+    expect(skill).toContain("needs-observation");
+    expect(skill).toContain("contextPaths");
+    expect(skill).toContain("untrusted");
+
+    expect(rolePrompt).toContain("taphound observe");
+    expect(rolePrompt).toContain("needs-observation");
+    expect(rolePrompt).toContain("contextPaths");
+    expect(rolePrompt).toContain("plan.md");
+    expect(rolePrompt).toContain("requirement.md");
+
+    expect(template).toContain("schemaVersion: 2");
+    expect(template).toContain("kind: taphound.journeyBrief");
+    for (const section of [
+      "# Goal",
+      "## Preconditions",
+      "## Expected Journey",
+      "## State Transition Map",
+      "## Capability Notes",
+      "## Assertions",
+      "## Implementation Hints",
+      "## Constraints",
+      "## Evidence References"
+    ]) {
+      expect(template).toContain(section);
+    }
+  });
+
   it("documents every executable command and its primary workflow", async () => {
     const readme = await text("README.md");
     const readmeZh = await text("README.zh-CN.md");

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/brand/taphound-mark.svg" width="128" alt="TapHound HoundMark">
+  <img src="assets/brand/taphound-mark.svg" width="128" alt="TapHound - 基于 AI Agent 的 Android UI 测试与状态验证 CLI 工具">
 </p>
 
 # TapHound
@@ -8,7 +8,9 @@
 
 > Follow every tap. Catch every regression.
 
-TapHound 是一个用于 App Journey 录制、生成与确定性验证的 TypeScript/Node.js CLI。当前开发版本 TapHound for Android 支持录制原生 Android 工作流，也支持外部 Agent 基于 Project Context 和实时设备状态生成 Journey。
+**一款基于 AI Agent 驱动的 Android 原生应用 UI 测试与状态验证 CLI 工具。**
+
+TapHound 是一款专为 **Android AI 测试**与**状态验证**打造的 TypeScript/Node.js CLI。无论是日常的 **Android UI 自动化测试**，还是 **AI Agent 驱动的测试路径生成**，TapHound 都能基于项目上下文（Project Context）与实时设备状态，提供确定性的录制与回放能力。当前开发版本 TapHound for Android 支持录制原生 Android 工作流，并由外部 Agent 基于 Project Context 和实时设备状态生成 Journey。
 
 TapHound Journey 是本项目完全自研的 JSON 协议、Recorder、Generation、Replay 与断言模型，与 Android CLI 官方 Journey 概念不同且不兼容。TapHound Core 不调用模型：外部 Agent 可以分析源码并提出操作，但状态绑定、风险确认、设备执行、最终 Replay 与断言均由 TapHound 确定性完成。
 
@@ -17,6 +19,12 @@ TapHound 只负责验证。编译和安装 APK 是独立的前置步骤，由开
 ```
 修改代码 → 编译 APK → 安装到设备 → taphound verify → 循环直到符合预期
 ```
+
+## 为什么选择 TapHound 进行 Android AI 测试？
+
+- **确定性验证（Deterministic Verification）：** 告别脚本化 UI 自动化的脆弱性。TapHound 拥有自研的断言模型与回放机制，精准捕捉每一次回归。
+- **AI 代理原生（AI-Agent Native）：** 内置 `taphound-ai-journey` Skill，适配 Droid、Claude Code、Codex、Cursor 等 AI Agent，自动生成 Android 测试路径。
+- **无需侵入式构建：** 专注测试与验证，独立于 APK 编译与安装流程，可直接对已安装的目标 APK 进行原生 Android UI 自动化测试。
 
 ## 环境要求
 
@@ -144,7 +152,7 @@ TapHound 在 Android 项目中只留下一份可预测的目录结构：需要�
 `.taphound/runs`；一旦检测到这些目录，TapHound 会以 `CONFIG_INVALID` 停止并打印
 需要执行的 `mv` 命令；根目录中散落的时间戳 Verify run 也会按相同方式检测。
 
-## 交互式录制
+## 交互式录制与 Android UI 自动化测试 (Interactive Recording)
 
 TapHound Recorder 展示当前 Layout，让用户选择 Action 和目标，然后由 TapHound 自己通过 ADB 执行操作。它不监听任意触摸。每个成功步骤自动记录 `activity.before` 与 `activity.after`；失败步骤不会加入 Journey；只有选择 Finish 后才原子写入完整文件。
 
@@ -160,7 +168,7 @@ Recorder 不自动生成业务 `expect`。Activity、Element 或 Logcat 断言�
 
 支持的 Action 包括 `click`、`longClick`、`inputText`、`swipe`、`scrollTo`、`back` 和 `wait`。`scrollTo` 在确定的 `container` 中最多滑动 `maxSwipes` 次，目标 `locator` 唯一解析成功后停止，不会继续点击目标。
 
-## Agent 驱动的 Journey 生成
+## AI 驱动的 Android 测试路径生成 (Agent-Driven Generation)
 
 源码仓库提供
 [`taphound-ai-journey`](assets/skills/taphound-ai-journey/SKILL.md) Skill，
@@ -221,7 +229,7 @@ Base Flow 重放失败时，`generation start --json` 会返回
 step JSON 会分别报告 freshness、证据准备、观察、action、idle 等待、expect、Logcat
 收集及可选后续观察的耗时。
 
-### 为其他 AI Agent 安装 Skill
+### 为外部 AI Agent 安装 TapHound 测试技能 (Installing the Skill)
 
 `taphound init` 将 TapHound AI Journey Skill 复制到各 Agent 的 Skill 目录。交互式多选至少选择一个 Agent：
 
@@ -254,7 +262,7 @@ taphound init --agent claude --global
 该 Skill 随 npm 包发布，`taphound init` 从包内复制到目标目录。重新运行 `init`
 会覆盖 payload 中存在的同名文件，但不会删除目标目录中上一次安装遗留的陈旧文件。
 
-## 确定性验证
+## 确定性状态验证 (Deterministic Verification)
 
 ```bash
 taphound verify \
@@ -286,6 +294,20 @@ taphound verify --project . --journey .taphound/journeys/search.json --json
 ## 报告
 
 每次验证写入独立目录，固定包含 `report.json` 与 `summary.txt`，按实际执行结果提供步骤日志，并尽力采集最终截图和完整 Logcat。原始验证失败保存在 `primaryFailure`；截图或日志采集问题进入 `secondaryErrors`，不会覆盖已存在的原始失败。当验证本身通过但采集失败时，首个采集错误会成为 `primaryFailure`（错误码 `COLLECTION_FAILED`），其余进入 `secondaryErrors`；对应可选产物也可能缺失。
+
+## 常见问题（FAQ）
+
+**Q：TapHound 如何结合大模型进行 Android AI 验证？**
+A：TapHound Core 本身不调用 AI 模型。外部 AI Agent 通过分析源码提出测试动作，而 TapHound 负责状态绑定、风险确认、设备执行、最终 Replay 与断言，完成确定性的 Android 状态验证。
+
+**Q：TapHound 支持非 Android 平台吗？**
+A：当前开发版本专属优化于 Android 原生工作流，仅支持 Android SDK、ADB 及在线模拟器/真机。
+
+**Q：TapHound 会不会编译或安装 APK？**
+A：不会。编译与安装是独立的前置步骤，由开发者或 AI Agent 在验证循环中完成；TapHound 假设目标 APK 已安装到设备。
+
+**Q：Replay 过程会用到 AI 或视觉推断吗？**
+A：不会。Replay、设备操作和断言完全确定性，不包含 AI 或视觉推理。
 
 ## 当前限制
 

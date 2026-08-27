@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/brand/taphound-mark.svg" width="128" alt="TapHound HoundMark">
+  <img src="assets/brand/taphound-mark.svg" width="128" alt="TapHound - AI-Agent-driven Android UI testing and state verification CLI">
 </p>
 
 # TapHound
@@ -8,7 +8,9 @@ English | [简体中文](./README.zh-CN.md)
 
 > Follow every tap. Catch every regression.
 
-TapHound is a TypeScript/Node.js CLI for recording, generating, and deterministically verifying app journeys. The current development release, TapHound for Android, supports recording native Android workflows and AI-agent-driven journey generation based on a Project Context and live device state.
+**An AI-Agent-driven CLI for native Android UI testing and state verification.**
+
+TapHound is a TypeScript/Node.js CLI built for **Android AI testing** and **state verification**. From everyday **Android UI automation** to **AI-agent-driven test path generation**, TapHound delivers deterministic recording and replay grounded in a Project Context and live device state. The current development release, TapHound for Android, supports recording native Android workflows and AI-agent-driven journey generation.
 
 The TapHound Journey is a purpose-built JSON protocol with its own recorder, generation, replay, and assertion model. It is distinct from and incompatible with the Android CLI's official Journey concept. TapHound Core never invokes AI models: external agents may analyze source code and propose actions, but state binding, risk confirmation, device execution, final replay, and assertions are all handled deterministically by TapHound.
 
@@ -17,6 +19,12 @@ TapHound only handles verification. Compiling and installing the APK are indepen
 ```
 edit code → build APK → install to device → taphound verify → loop until passing
 ```
+
+## Why TapHound for Android AI Testing?
+
+- **Deterministic Verification:** Leave behind the fragility of scripted UI automation. TapHound ships its own assertion model and replay engine to catch every regression precisely.
+- **AI-Agent Native:** The built-in `taphound-ai-journey` Skill adapts to agents like Droid, Claude Code, Codex, and Cursor to generate Android test paths automatically.
+- **Non-invasive Build:** Focused on testing and verification, TapHound stays independent of APK compilation and install, driving native Android UI automation against an already-installed target APK.
 
 ## Requirements
 
@@ -149,7 +157,7 @@ stay under `.taphound/build/`. Earlier layouts used
 with `CONFIG_INVALID` and prints the exact `mv` commands when it finds them.
 Root-level timestamped Verify run directories are detected the same way.
 
-## Interactive Recording
+## Interactive Recording for Android UI Automation
 
 The TapHound Recorder displays the current layout, lets you choose an action and target, and executes it through ADB. It does not listen for arbitrary touch events. Each successful step automatically records `activity.before` and `activity.after`; failed steps are not added to the Journey; the complete file is written atomically only after you choose Finish.
 
@@ -165,7 +173,7 @@ The Recorder does not auto-generate business `expect` assertions. Activity, Elem
 
 Supported actions include `click`, `longClick`, `inputText`, `swipe`, `scrollTo`, `back`, and `wait`. `scrollTo` swipes within a deterministic `container` up to `maxSwipes` times, stopping once the target `locator` resolves uniquely without clicking it.
 
-## Agent-Driven Journey Generation
+## AI-Agent-Driven Android Test Path Generation
 
 The repository ships the
 [`taphound-ai-journey`](assets/skills/taphound-ai-journey/SKILL.md) Skill. It
@@ -239,7 +247,7 @@ Journey step. Generation step JSON includes phase timing for freshness,
 evidence setup, observation, action, idle waiting, expectations, Logcat
 collection, and the optional next observation.
 
-### Installing the Skill for Other AI Agents
+### Installing the TapHound Testing Skill for Other AI Agents
 
 `taphound init` copies the TapHound AI Journey Skill into each agent's Skill directory.
 Interactively select at least one agent:
@@ -275,7 +283,7 @@ package to the target directory. Re-running `init` overwrites existing files
 that exist in the payload, but does not remove stale files left in the target
 directory from a previous install.
 
-## Deterministic Verification
+## Deterministic State Verification
 
 ```bash
 taphound verify \
@@ -307,6 +315,20 @@ taphound verify --project . --journey .taphound/journeys/search.json --json
 ## Reports
 
 Each verification writes to an independent directory, always containing `report.json` and `summary.txt`, with step logs provided based on actual execution. A final screenshot and full Logcat are collected on a best-effort basis. The original verification failure is preserved in `primaryFailure`; screenshot or logcat collection issues go into `secondaryErrors` and never overwrite an existing original failure. When verification itself passes but collection fails, the first collection error becomes `primaryFailure` (with code `COLLECTION_FAILED`) and the rest enter `secondaryErrors`; corresponding optional artifacts may be missing.
+
+## FAQ
+
+**Q: How does TapHound combine with LLMs for Android AI verification?**
+A: TapHound Core never invokes AI models. External AI agents analyze source code and propose actions, while TapHound handles state binding, risk confirmation, device execution, final replay, and assertions to deliver deterministic Android state verification.
+
+**Q: Does TapHound support non-Android platforms?**
+A: The current development release is purpose-built for native Android workflows and supports only Android SDK, ADB, and an online emulator or device.
+
+**Q: Does TapHound build or install the APK?**
+A: No. Compiling and installing are independent prerequisites handled by the developer or AI agent in the verification loop; TapHound assumes the target APK is already installed.
+
+**Q: Does replay use AI or visual inference?**
+A: No. Replay, device operations, and assertions are fully deterministic, with no AI or visual inference.
 
 ## Current Limitations
 

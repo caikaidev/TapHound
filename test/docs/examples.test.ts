@@ -246,6 +246,26 @@ describe("TapHound documentation examples", () => {
     }
   });
 
+  it("keeps the TapHound Journey Brief Author zh-CN prompt discoverable", async () => {
+    const rolePromptZh = await text(
+      "assets/skills/taphound-journey-brief-author/prompts/brief-author-role.zh-CN.md"
+    );
+
+    // The zh-CN lean bootstrap keeps the same contract strings as the
+    // English prompt so the hard rule and capability boundary stay
+    // enforceable regardless of which translation the operator pastes.
+    for (const token of [
+      "taphound observe",
+      "needs-observation",
+      "contextPaths",
+      "plan.md",
+      "requirement.md",
+      "SKILL.md"
+    ]) {
+      expect(rolePromptZh).toContain(token);
+    }
+  });
+
   it("documents every executable command and its primary workflow", async () => {
     const readme = await text("README.md");
     const readmeZh = await text("README.zh-CN.md");

@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://taphound.dev/schemas/context-refresh-result.json",
+  "title": "TapHound context refresh --json Output",
+  "description": "Reference shape for the JSON result of `context refresh --json`. Core recomputes evidence hashes, backfills semanticSha256, rehashes formatting-only changes, repairs drifted hashes, and prunes deleted-file entries. The status field tells the agent whether to re-analyze source.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "indexHash", "acceptedSourceChanges", "scopes", "blocked", "exitCode"],
+  "properties": {
+    "status": {
+      "enum": ["refreshed", "unchanged", "blocked"],
+      "description": "refreshed: at least one scope was written. unchanged: no hashes needed repair. blocked: one or more scopes could not be auto-refreshed."
+    },
+    "indexHash": {
+      "$ref": "#/$defs/sha256",
+      "description": "SHA-256 of the root index file bytes after refresh."
+    },
+    "acceptedSourceChanges": {
+      "type": "boolean",
+      "description": "Whether --accept-source-changes was passed and semantic edits were rehashed."
+    },
+    "scopes": {
+      "type": "array",
+      "description": "One entry per module (scope=module) plus one for the root index (scope=index).",
+      "items": { "$ref": "#/$defs/scopeReport" }
+    },
+    "blocked": {
+      "type": "array",
+      "description": "Scopes that could not be auto-refreshed. Each block carries a resolution the agent must act on.",
+      "items": { "$ref": "#/$defs/block" }
+    },
+    "exitCode": {
+      "enum": [0, 1],
+      "description": "0 when status is refreshed or unchanged. 1 when status is blocked."
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f\\d]{64}$"
+    },
+    "scopeReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "id",
+        "contextPath",
+        "written",
+        "semanticBackfilled",
+        "formattingRehashed",
+        "semanticChanged",
+        "unresolved",
+        "pruned",
+        "inventoryChanged"
+      ],
+      "properties": {
+        "scope": { "enum": ["index", "module"] },
+        "id": {
+          "type": "string",
+          "description": "Module ID for scope=module, or \"index\" for scope=index."
+        },
+        "contextPath": {
+          "type": "string",
+          "description": "Project-relative path to the shard or index file."
+        },
+        "written": {
+          "type": "boolean",
+          "description": "Whether the file was actually written (hashes changed)."
+        },
+        "semanticBackfilled": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of evidence entries where semanticSha256 was missing and has been added."
+        },
+        "formattingRehashed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of evidence entries whose full hash changed but semantic hash did not (formatting-only edit, rehashed automatically)."
+        },
+        "semanticChanged": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Project-relative paths whose semantic hash changed. Requires --accept-source-changes to rehash; otherwise blocked."
+        },
+        "unresolved": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Project-relative paths that could not be read (deleted or moved). Requires --prune-deleted to drop; otherwise blocked."
+        },
+        "pruned": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of evidence entries pruned via --prune-deleted."
+        },
+        "inventoryChanged": {
+          "type": "boolean",
+          "description": "Whether the module's inventory pathSetSha256 changed (files added or removed). Always blocks auto-refresh; requires reanalysis."
+        }
+      }
+    },
+    "block": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "resolution", "message"],
+      "properties": {
+        "code": {
+          "enum": [
+            "EVIDENCE_UNRESOLVED",
+            "EVIDENCE_SEMANTIC_CHANGED",
+            "MODULE_INVENTORY_CHANGED"
+          ],
+          "description": "EVIDENCE_UNRESOLVED: file missing. EVIDENCE_SEMANTIC_CHANGED: source semantics changed. MODULE_INVENTORY_CHANGED: files added or removed."
+        },
+        "resolution": {
+          "enum": ["pruneDeleted", "acceptSourceChanges", "reanalyze"],
+          "description": "Action the agent must take: pruneDeleted → refresh --prune-deleted. acceptSourceChanges → refresh --accept-source-changes. reanalyze → re-scan source and regenerate the shard."
+        },
+        "message": { "type": "string" }
+      }
+    }
+  }
+}

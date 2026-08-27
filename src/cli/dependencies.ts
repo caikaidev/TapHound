@@ -25,6 +25,12 @@ import {
 } from "../adapters/filesystem/external-flow-registry.js";
 import { NodeProjectFileInspector } from "../adapters/filesystem/project-file-inspector.js";
 import { NodeProjectInventoryInspector } from "../adapters/filesystem/project-inventory-inspector.js";
+import {
+  GradleProjectModuleDiscoverer
+} from "../adapters/filesystem/project-module-discoverer.js";
+import {
+  AndroidProjectIdentityInspector
+} from "../adapters/filesystem/project-identity-inspector.js";
 import { FileSystemSkillInstaller } from "../adapters/filesystem/skill-installer.js";
 import {
   FileSystemWorkspaceLayout
@@ -38,6 +44,8 @@ import { InquirerGenerationPrompt } from "../adapters/prompt/inquirer-generation
 import { InquirerInitPrompt } from "../adapters/prompt/inquirer-init-prompt.js";
 import { InquirerAlignPrompt } from "../adapters/prompt/inquirer-align-prompt.js";
 import { AlignService, type AlignCameraResult } from "../application/align/align-service.js";
+import { ContextGenerator } from "../application/context/context-generator.js";
+import { ContextRehasher } from "../application/context/context-rehasher.js";
 import { ContextValidator } from "../application/context/context-validator.js";
 import { ContextLoader } from "../application/context/context-loader.js";
 import { ContextRefresher } from "../application/context/context-refresher.js";
@@ -133,6 +141,8 @@ export interface CliDependencies {
   contextValidator: Pick<ContextValidator, "validate">;
   contextLoader: Pick<ContextLoader, "load" | "readIndex">;
   contextRefresher: Pick<ContextRefresher, "refresh">;
+  contextGenerator: Pick<ContextGenerator, "generate">;
+  contextRehasher: Pick<ContextRehasher, "rehash">;
   journeyResolver?: Pick<
     JourneyResolver,
     "resolve" | "resolveFlow" | "listFlows"
@@ -221,6 +231,9 @@ export function createProductionDependencies(
     ));
   const projectFiles = new NodeProjectFileInspector();
   const projectInventory = new NodeProjectInventoryInspector();
+  const moduleDiscoverer = new GradleProjectModuleDiscoverer();
+  const identityInspector = new AndroidProjectIdentityInspector();
+  const contextWriter = new FileSystemContextDocumentWriter();
   const contextValidator = new ContextValidator(
     projectFiles,
     projectInventory
@@ -236,7 +249,19 @@ export function createProductionDependencies(
     files: projectFiles,
     inventory: projectInventory,
     loader: contextLoader,
-    writer: new FileSystemContextDocumentWriter()
+    writer: contextWriter
+  });
+  const contextGenerator = new ContextGenerator({
+    discoverer: moduleDiscoverer,
+    identity: identityInspector,
+    files: projectFiles,
+    inventory: projectInventory,
+    writer: contextWriter
+  });
+  const contextRehasher = new ContextRehasher({
+    files: projectFiles,
+    loader: contextLoader,
+    writer: contextWriter
   });
   const journeyCompositionStore = new FileSystemJourneyCompositionStore();
   const journeyResolver = new JourneyResolver(journeyCompositionStore);
@@ -309,10 +334,15 @@ export function createProductionDependencies(
       now: () => new Date(),
       createRunId: runId
     }),
-    projectDescriber: new ProjectDescriber(),
+    projectDescriber: new ProjectDescriber({
+      discoverer: moduleDiscoverer,
+      identity: identityInspector
+    }),
     contextValidator,
     contextLoader,
     contextRefresher,
+    contextGenerator,
+    contextRehasher,
     journeyResolver,
     journeyCompositionStore,
     externalFlowResolver,

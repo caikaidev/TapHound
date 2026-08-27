@@ -33,7 +33,7 @@ describe("createProgram", () => {
     expect(
       createProgram().commands.find((command) => command.name() === "context")
         ?.commands.map((command) => command.name())
-    ).toEqual(["validate", "status", "list", "refresh"]);
+    ).toEqual(["validate", "status", "list", "refresh", "generate", "rehash"]);
     expect(
       createProgram().commands.find((command) => command.name() === "journey")
         ?.commands.map((command) => command.name())

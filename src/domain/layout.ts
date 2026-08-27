@@ -29,20 +29,26 @@ export const LocatorEvidenceSchema = z.strictObject({
 
 export type LocatorEvidence = z.infer<typeof LocatorEvidenceSchema>;
 
+export type LocatorMatch = "exact" | "contains" | "startsWith";
+
 export interface Locator {
   resourceId?: string | undefined;
   text?: string | undefined;
   contentDescription?: string | undefined;
+  match?: LocatorMatch | undefined;
   index?: number | undefined;
   within?: Locator | undefined;
   evidence?: LocatorEvidence | undefined;
 }
 
+export const LocatorMatchSchema = z.enum(["exact", "contains", "startsWith"]);
+
 export const LocatorSchema: z.ZodType<Locator> = z.lazy(
   () => z.strictObject({
     resourceId: z.string().trim().min(1).optional(),
-    text: z.string().min(1).optional(),
-    contentDescription: z.string().min(1).optional(),
+    text: z.string().trim().min(1).optional(),
+    contentDescription: z.string().trim().min(1).optional(),
+    match: LocatorMatchSchema.optional(),
     index: z.number().int().nonnegative().optional(),
     within: LocatorSchema.optional(),
     evidence: LocatorEvidenceSchema.optional()

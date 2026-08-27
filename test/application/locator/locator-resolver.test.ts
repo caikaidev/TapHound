@@ -275,4 +275,91 @@ describe("resolveLocator", () => {
       code: "ACTION_FAILED"
     });
   });
+
+  it("matches contentDescription with contains modifier", () => {
+    const target = element({
+      id: "tab",
+      contentDescription: "消息, 2 new notifications"
+    });
+
+    expect(resolveLocator([target], {
+      contentDescription: "消息",
+      match: "contains"
+    })).toMatchObject({
+      status: "found",
+      element: { id: "tab" },
+      matchedBy: "contentDescription"
+    });
+  });
+
+  it("matches text with startsWith modifier", () => {
+    const target = element({
+      id: "label",
+      text: "Search results for query"
+    });
+
+    expect(resolveLocator([target], {
+      text: "Search results",
+      match: "startsWith"
+    })).toMatchObject({
+      status: "found",
+      element: { id: "label" },
+      matchedBy: "text"
+    });
+  });
+
+  it("does not match with contains when substring is absent", () => {
+    const target = element({
+      id: "tab",
+      contentDescription: "Settings"
+    });
+
+    expect(resolveLocator([target], {
+      contentDescription: "消息",
+      match: "contains"
+    })).toMatchObject({
+      status: "failed",
+      code: "LOCATOR_NOT_FOUND"
+    });
+  });
+
+  it("uses exact match by default for contentDescription", () => {
+    const target = element({
+      id: "tab",
+      contentDescription: "消息, 2 new notifications"
+    });
+
+    expect(resolveLocator([target], {
+      contentDescription: "消息"
+    })).toMatchObject({
+      status: "failed",
+      code: "LOCATOR_NOT_FOUND"
+    });
+  });
+
+  it("applies match modifier when narrowing ambiguous resourceId matches", () => {
+    const roots = [
+      element({ id: "one", resourceId: "row", text: "Item Alpha" }),
+      element({ id: "two", resourceId: "row", text: "Item Beta" })
+    ];
+
+    expect(resolveLocator(roots, {
+      resourceId: "row",
+      text: "Item",
+      match: "startsWith"
+    })).toMatchObject({
+      status: "failed",
+      code: "LOCATOR_AMBIGUOUS"
+    });
+
+    expect(resolveLocator(roots, {
+      resourceId: "row",
+      text: "Beta",
+      match: "contains"
+    })).toMatchObject({
+      status: "found",
+      element: { id: "two" },
+      matchedBy: "text"
+    });
+  });
 });

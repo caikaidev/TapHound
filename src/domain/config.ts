@@ -25,7 +25,7 @@ export const TapHoundConfigSchema = z.strictObject({
     activity: ActivityNameSchema
   }),
   idle: z.strictObject({
-    strategy: z.enum(["hybrid", "layoutDiff", "frameStats"]).default("hybrid"),
+    strategy: z.enum(["hybrid", "layoutDiff", "frameStats", "structural"]).default("hybrid"),
     pollIntervalMs: z.number().int().positive(),
     stablePolls: z.number().int().positive(),
     timeoutMs: z.number().int().positive()

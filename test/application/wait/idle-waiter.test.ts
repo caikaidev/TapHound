@@ -333,4 +333,40 @@ describe("IdleWaiter", () => {
       options.stabilityBackend === "uiautomator"
     ))).toBe(true);
   });
+
+  it("uses structural strategy to skip frameStats entirely", async () => {
+    const cli = androidCli();
+    vi.mocked(cli.layoutDiff)
+      .mockResolvedValueOnce({
+        changes: [{ layoutSha256: "layout-1" }],
+        backend: "uiautomator"
+      })
+      .mockResolvedValue({
+        changes: [],
+        backend: "uiautomator"
+      });
+
+    const result = await new IdleWaiter(
+      cli,
+      new FakeClock(),
+      "emulator-5554",
+      "com.example.app"
+    ).waitUntilIdle({
+      strategy: "structural",
+      pollIntervalMs: 100,
+      stablePolls: 2,
+      timeoutMs: 1000
+    });
+
+    expect(result).toMatchObject({
+      status: "stable",
+      backend: "uiautomator",
+      strategy: "structural",
+      fallbackUsed: false,
+      frameActivityDetected: false
+    });
+    expect(vi.mocked(cli.layoutDiff).mock.calls.every(([options]) => (
+      options.stabilityBackend === "uiautomator"
+    ))).toBe(true);
+  });
 });

@@ -1,5 +1,5 @@
 import { normalizeActivity } from "../../domain/activity.js";
-import { semanticSha256 } from "./evidence-hash.js";
+import { evidenceMatches } from "./evidence-match.js";
 import type { TapHoundConfig } from "../../domain/config.js";
 import {
   ResolvedProjectContextSchema,
@@ -10,6 +10,7 @@ import {
   type ProjectFileInspector
 } from "../../ports/project-file-inspector.js";
 import type {
+  ProjectInventoryInspection,
   ProjectInventoryInspector
 } from "../../ports/project-inventory-inspector.js";
 
@@ -201,6 +202,7 @@ export class ContextValidator {
     }
 
     let staleReason: ContextValidationReason | undefined;
+    const inventoryCache = new Map<string, ProjectInventoryInspection>();
     if (this.inventory !== undefined) {
       for (const module of parsed.data.selection.modules) {
         const inspection = await this.inventory.inspectProjectInventory({
@@ -208,6 +210,7 @@ export class ContextValidator {
           projectDir: module.projectDir,
           categories: module.inventory.categories
         });
+        inventoryCache.set(module.projectDir, inspection);
         if (inspection.status !== "inspected") {
           return invalid(
             "CONTEXT_SCHEMA_INVALID",
@@ -252,30 +255,18 @@ export class ContextValidator {
         return invalidInspection(evidence.path, inspection);
       }
       const inspected = inspection;
-      if (
-        evidence.semanticSha256 !== undefined
-        && (
-          inspected.bytes === undefined
-          || semanticSha256(inspected.bytes) !== evidence.semanticSha256
-        )
-      ) {
+      if (!evidenceMatches(evidence, inspected)) {
         staleReason ??= {
           code: "EVIDENCE_HASH_MISMATCH",
-          message: `Semantic evidence changed: ${evidence.path}`
-        };
-      } else if (
-        evidence.semanticSha256 === undefined
-        && inspection.sha256 !== evidence.sha256
-      ) {
-        staleReason ??= {
-          code: "EVIDENCE_HASH_MISMATCH",
-          message: `Evidence file changed: ${evidence.path}`
+          message: evidence.semanticSha256 !== undefined
+            ? `Semantic evidence changed: ${evidence.path}`
+            : `Evidence file changed: ${evidence.path}`
         };
       }
     }
 
     const scopes = input.reportScopes === true && input.modules !== undefined
-      ? await this.inspectScopes(input.projectRoot, input.modules)
+      ? await this.inspectScopes(input.projectRoot, input.modules, inventoryCache)
       : undefined;
 
     return staleReason === undefined
@@ -289,17 +280,21 @@ export class ContextValidator {
 
   private readonly inspectScopes = async (
     projectRoot: string,
-    modules: ProjectContextModule[]
+    modules: ProjectContextModule[],
+    inventoryCache?: Map<string, ProjectInventoryInspection>
   ): Promise<ContextValidationScope[]> => {
     const scopes: ContextValidationScope[] = [];
     for (const module of modules) {
-      const inventory = this.inventory === undefined
-        ? undefined
-        : await this.inventory.inspectProjectInventory({
-          projectRoot,
-          projectDir: module.projectDir,
-          categories: module.inventory.categories
-        });
+      const cached = inventoryCache?.get(module.projectDir);
+      const inventory = cached !== undefined
+        ? cached
+        : this.inventory === undefined
+          ? undefined
+          : await this.inventory.inspectProjectInventory({
+            projectRoot,
+            projectDir: module.projectDir,
+            categories: module.inventory.categories
+          });
       const inventoryChanged = inventory !== undefined
         && inventory.status === "inspected"
         && inventory.pathSetSha256 !== module.inventory.pathSetSha256;
@@ -320,11 +315,7 @@ export class ContextValidator {
         if (inspection.bytes === undefined) {
           continue;
         }
-        const semantic = semanticSha256(inspection.bytes);
-        const unchanged = evidence.semanticSha256 !== undefined
-          ? semantic === evidence.semanticSha256
-          : inspection.sha256 === evidence.sha256;
-        if (!unchanged) {
+        if (!evidenceMatches(evidence, inspection)) {
           changedPaths.push(evidence.path);
         }
       }

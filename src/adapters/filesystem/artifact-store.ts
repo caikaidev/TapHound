@@ -19,15 +19,12 @@ import type {
   ArtifactSession,
   ArtifactStore
 } from "../../ports/artifact-store.js";
+import { isErrnoException } from "../../shared/errors.js";
 
 function assertRunDirectoryName(name: string): void {
   if (!/^[A-Za-z0-9._-]+$/.test(name)) {
     throw new Error("Invalid artifact run directory name");
   }
-}
-
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && "code" in error;
 }
 
 async function projectedRealPath(path: string): Promise<string> {
@@ -37,7 +34,7 @@ async function projectedRealPath(path: string): Promise<string> {
     try {
       return resolve(await realpath(current), ...missing.reverse());
     } catch (error) {
-      if (!isNodeError(error) || error.code !== "ENOENT") {
+      if (!isErrnoException(error) || error.code !== "ENOENT") {
         throw error;
       }
       const parent = dirname(current);

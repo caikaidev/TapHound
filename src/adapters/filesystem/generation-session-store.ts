@@ -39,6 +39,8 @@ import {
   GenerationSessionStoreError,
   type GenerationSessionStore
 } from "../../ports/generation-session-store.js";
+import { isErrnoException } from "../../shared/errors.js";
+import { compareStrings } from "../../shared/strings.js";
 import { ensureBuildIgnored } from "./workspace-layout.js";
 
 export interface FileSystemGenerationSessionStoreOptions {
@@ -281,7 +283,7 @@ async function captureOptionalStoreFile(
   try {
     return await captureStoreFile(path);
   } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") {
+    if (isErrnoException(error) && error.code === "ENOENT") {
       return null;
     }
     throw error;
@@ -306,10 +308,6 @@ async function verifyOptionalStoreFile(
       `Generation state file identity changed: ${path}`
     );
   }
-}
-
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && "code" in error;
 }
 
 function asStoreIoError(error: unknown, action: string): Error {
@@ -785,7 +783,7 @@ async function pathExists(path: string): Promise<boolean> {
     await lstat(path);
     return true;
   } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") {
+    if (isErrnoException(error) && error.code === "ENOENT") {
       return false;
     }
     throw error;
@@ -808,7 +806,7 @@ async function createOrRequireDirectory(path: string): Promise<boolean> {
     await mkdir(path);
     created = true;
   } catch (error) {
-    if (!isNodeError(error) || error.code !== "EEXIST") {
+    if (!isErrnoException(error) || error.code !== "EEXIST") {
       throw error;
     }
   }
@@ -878,7 +876,7 @@ function canonicalizeEvidenceValue(
 
     return Object.fromEntries(
       Object.keys(value)
-        .sort((left, right) => left.localeCompare(right))
+        .sort((left, right) => compareStrings(left, right))
         .map((key) => [
           key,
           canonicalizeEvidenceValue(
@@ -1014,7 +1012,7 @@ async function assertEvidenceNamespaceAvailable(
     try {
       stats = await lstat(candidate);
     } catch (error) {
-      if (isNodeError(error) && error.code === "ENOENT") {
+      if (isErrnoException(error) && error.code === "ENOENT") {
         await verifyDirectoryEvidence(
           activeEvidence.canonicalPath,
           directories
@@ -2183,7 +2181,7 @@ implements GenerationSessionStore {
             // Preserve any path that cannot be proven to be our own link.
           }
         }
-        if (isNodeError(error) && error.code === "EEXIST") {
+        if (isErrnoException(error) && error.code === "EEXIST") {
           throw new GenerationSessionStoreError(
             "EVIDENCE_ALREADY_EXISTS",
             `Generation evidence already exists: ${relativePath}`,
@@ -2308,7 +2306,7 @@ implements GenerationSessionStore {
           try {
             stats = await lstat(childPath, { bigint: true });
           } catch (error) {
-            if (isNodeError(error) && error.code === "ENOENT") {
+            if (isErrnoException(error) && error.code === "ENOENT") {
               throw new GenerationSessionStoreError(
                 "INVALID_EVIDENCE_PATH",
                 `Generation evidence disappeared during snapshot: ${
@@ -2425,7 +2423,7 @@ implements GenerationSessionStore {
       };
 
       await visit(directory, []);
-      return files.sort((left, right) => left.path.localeCompare(right.path));
+      return files.sort((left, right) => compareStrings(left.path, right.path));
     });
   };
 
@@ -2488,7 +2486,7 @@ implements GenerationSessionStore {
         }
       } catch (error) {
         if (
-          isNodeError(error)
+          isErrnoException(error)
           && (
             error.code === "EEXIST"
             || error.code === "ENOTEMPTY"
@@ -2626,7 +2624,7 @@ implements GenerationSessionStore {
         try {
           evidence = await captureDirectoryEvidence(current);
         } catch (error) {
-          if (isNodeError(error) && error.code === "ENOENT") {
+          if (isErrnoException(error) && error.code === "ENOENT") {
             throw evidenceNotFound(relativePath, error);
           }
           throw error;
@@ -2644,7 +2642,7 @@ implements GenerationSessionStore {
           constants.O_RDONLY | constants.O_NOFOLLOW
         );
       } catch (error) {
-        if (isNodeError(error) && error.code === "ENOENT") {
+        if (isErrnoException(error) && error.code === "ENOENT") {
           throw evidenceNotFound(relativePath, error);
         }
         throw error;
@@ -2790,7 +2788,7 @@ implements GenerationSessionStore {
       try {
         await link(stagingPath, lockPath);
       } catch (error) {
-        if (isNodeError(error) && error.code === "EEXIST") {
+        if (isErrnoException(error) && error.code === "EEXIST") {
           return false;
         }
         throw error;
@@ -2837,7 +2835,7 @@ implements GenerationSessionStore {
       await unlink(tombstone);
       await this.syncDirectory(this.locksRoot);
     } catch (error) {
-      if (!isNodeError(error) || error.code !== "ENOENT") {
+      if (!isErrnoException(error) || error.code !== "ENOENT") {
         throw error;
       }
     }
@@ -2869,7 +2867,7 @@ implements GenerationSessionStore {
         }
       }
     } catch (error) {
-      if (!isNodeError(error) || error.code !== "ENOENT") {
+      if (!isErrnoException(error) || error.code !== "ENOENT") {
         throw error;
       }
     }
@@ -2920,7 +2918,7 @@ implements GenerationSessionStore {
       process.kill(pid, 0);
       return true;
     } catch (error) {
-      return !isNodeError(error) || error.code !== "ESRCH";
+      return !isErrnoException(error) || error.code !== "ESRCH";
     }
   };
 

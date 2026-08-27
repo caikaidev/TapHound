@@ -1,12 +1,15 @@
 import { createHash } from "node:crypto";
 import { readdir, realpath, stat } from "node:fs/promises";
-import { basename, isAbsolute, relative, resolve, sep } from "node:path";
+import { basename, relative, resolve } from "node:path";
 
 import type {
   ProjectInventoryCategory,
   ProjectInventoryInspection,
   ProjectInventoryInspector
 } from "../../ports/project-inventory-inspector.js";
+import { errnoCode } from "../../shared/errors.js";
+import { isContained } from "../../shared/paths.js";
+import { compareStrings } from "../../shared/strings.js";
 
 const EXCLUDED_DIRECTORIES = new Set([
   ".git",
@@ -15,27 +18,6 @@ const EXCLUDED_DIRECTORIES = new Set([
   ".taphound",
   "build"
 ]);
-
-function errorCode(error: unknown): string | undefined {
-  return (
-    typeof error === "object"
-    && error !== null
-    && "code" in error
-    && typeof error.code === "string"
-  )
-    ? error.code
-    : undefined;
-}
-
-function isContained(root: string, path: string): boolean {
-  const fromRoot = relative(root, path);
-  return fromRoot === ""
-    || (
-      fromRoot !== ".."
-      && !fromRoot.startsWith(`..${sep}`)
-      && !isAbsolute(fromRoot)
-    );
-}
 
 function matches(
   path: string,
@@ -80,7 +62,7 @@ implements ProjectInventoryInspector {
         return { status: "rootNotDirectory" };
       }
     } catch (error) {
-      return errorCode(error) === "ENOENT" || errorCode(error) === "ENOTDIR"
+      return errnoCode(error) === "ENOENT" || errnoCode(error) === "ENOTDIR"
         ? { status: "rootNotFound" }
         : { status: "rootUnreadable" };
     }
@@ -121,7 +103,7 @@ implements ProjectInventoryInspector {
     } catch {
       return { status: "rootUnreadable" };
     }
-    paths.sort((left, right) => left.localeCompare(right));
+    paths.sort((left, right) => compareStrings(left, right));
     return {
       status: "inspected",
       paths,

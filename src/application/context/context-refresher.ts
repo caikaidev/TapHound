@@ -1,5 +1,3 @@
-import { isAbsolute, relative, resolve } from "node:path";
-
 import {
   ProjectContextModuleSchema,
   ProjectContextSchema,
@@ -17,9 +15,11 @@ import type {
 import type {
   ProjectInventoryInspector
 } from "../../ports/project-inventory-inspector.js";
+import { projectRelativePath } from "../../shared/paths.js";
 import { MAX_CONTEXT_SHARD_BYTES, type ContextLoader } from "./context-loader.js";
 import { MAX_CONTEXT_EVIDENCE_BYTES } from "./context-validator.js";
 import { semanticSha256 } from "./evidence-hash.js";
+import { assertShardIdentity } from "./shard-identity.js";
 
 export type ContextRefreshErrorCode =
   | "CONTEXT_INVALID"
@@ -109,24 +109,6 @@ interface ModuleRefresh {
   report: ContextRefreshScopeReport;
 }
 
-function projectRelativePath(projectRoot: string, path: string): string {
-  const absolutePath = isAbsolute(path) ? path : resolve(projectRoot, path);
-  const result = relative(resolve(projectRoot), absolutePath)
-    .replaceAll("\\", "/");
-  if (
-    result.length === 0
-    || result === ".."
-    || result.startsWith("../")
-    || result.startsWith("/")
-  ) {
-    throw new ContextRefreshError(
-      "CONTEXT_INVALID",
-      "Project Context path must stay within the project"
-    );
-  }
-  return result;
-}
-
 function selectedReferences(
   bundle: ProjectContext,
   moduleIds: string[] | undefined
@@ -193,7 +175,11 @@ export class ContextRefresher {
   public readonly refresh = async (
     input: ContextRefreshInput
   ): Promise<ContextRefreshResult> => {
-    const indexPath = projectRelativePath(input.projectRoot, input.contextPath);
+    const indexPath = projectRelativePath(
+      input.projectRoot,
+      input.contextPath,
+      (message) => new ContextRefreshError("CONTEXT_INVALID", message)
+    );
     const { bundle, indexHash } = await this.dependencies.loader.readIndex({
       projectRoot: input.projectRoot,
       contextPath: input.contextPath
@@ -252,17 +238,53 @@ export class ContextRefresher {
     for (const module of modules) {
       if (!module.modified) {
         moduleHashes.set(module.reference.id, module.currentSha256);
-        continue;
       }
-      moduleHashes.set(
-        module.reference.id,
-        await this.writeDocument(
-          input.projectRoot,
-          module.reference.contextPath,
-          module.document
-        )
-      );
-      module.report.written = true;
+    }
+
+    const modifiedModules = modules.filter((module) => module.modified);
+    if (modifiedModules.length > 0) {
+      const batchWriter = this.dependencies.writer.writeContextDocumentBatch;
+      if (batchWriter !== undefined) {
+        const results = await batchWriter({
+          projectRoot: input.projectRoot,
+          documents: modifiedModules.map((module) => ({
+            relativePath: module.reference.contextPath,
+            document: module.document
+          }))
+        });
+        for (let i = 0; i < modifiedModules.length; i++) {
+          const module = modifiedModules[i];
+          if (module === undefined) {
+            continue;
+          }
+          const result = results[i];
+          if (result === undefined || result.status !== "written") {
+            let message: string;
+            if (result === undefined) {
+              message = `Context document cannot be written: ${module.reference.contextPath}`;
+            } else if (result.status === "escape") {
+              message = `Context document resolves outside the project: ${module.reference.contextPath}`;
+            } else {
+              message = `Context document cannot be written: ${module.reference.contextPath} (${result.message})`;
+            }
+            throw new ContextRefreshError("CONTEXT_WRITE_FAILED", message);
+          }
+          moduleHashes.set(module.reference.id, result.sha256);
+          module.report.written = true;
+        }
+      } else {
+        for (const module of modifiedModules) {
+          moduleHashes.set(
+            module.reference.id,
+            await this.writeDocument(
+              input.projectRoot,
+              module.reference.contextPath,
+              module.document
+            )
+          );
+          module.report.written = true;
+        }
+      }
     }
 
     const nextModules = bundle.modules.map((module) => {
@@ -486,16 +508,11 @@ export class ContextRefresher {
         }`
       );
     }
-    if (
-      document.data.moduleId !== reference.id
-      || document.data.projectDir !== reference.projectDir
-      || document.data.status !== reference.status
-    ) {
-      throw new ContextRefreshError(
-        "CONTEXT_INVALID",
-        `Context shard identity does not match its index: ${reference.id}`
-      );
-    }
+    assertShardIdentity(
+      reference,
+      document.data,
+      (message) => new ContextRefreshError("CONTEXT_INVALID", message)
+    );
     return { document: document.data, sha256: inspection.sha256 };
   };
 

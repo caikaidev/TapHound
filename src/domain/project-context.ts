@@ -5,16 +5,16 @@ const QualifiedNameSchema = z.string().regex(
   "Value must be fully qualified"
 );
 
-const GenerationActionSchema = z.enum([
+export const InteractionActionSchema = z.enum([
   "click",
   "longClick",
   "inputText",
   "swipe",
   "scrollTo",
   "back",
-  "wait",
-  "bridge"
+  "wait"
 ]);
+export type InteractionAction = z.infer<typeof InteractionActionSchema>;
 
 export const ContextEvidenceConfidenceSchema = z.enum([
   "sourceConfirmed",
@@ -64,9 +64,9 @@ export const ContextManifestSchema = z.strictObject({
 });
 
 export const InteractionPolicySchema = z.strictObject({
-  allowedActions: z.array(GenerationActionSchema),
-  confirmationRequiredActions: z.array(GenerationActionSchema),
-  forbiddenActions: z.array(GenerationActionSchema)
+  allowedActions: z.array(InteractionActionSchema),
+  confirmationRequiredActions: z.array(InteractionActionSchema),
+  forbiddenActions: z.array(InteractionActionSchema)
 }).superRefine((policy, context) => {
   const forbidden = new Set(policy.forbiddenActions);
   const overlap = policy.allowedActions.find((action) => forbidden.has(action));
@@ -192,7 +192,7 @@ const ContextElementSchema = z.strictObject({
   resourceId: z.string().trim().min(1).optional(),
   text: z.string().trim().min(1).optional(),
   contentDescription: z.string().trim().min(1).optional(),
-  actions: z.array(GenerationActionSchema).min(1)
+  actions: z.array(InteractionActionSchema).min(1)
 }).refine(
   (element) => (
     element.resourceId !== undefined

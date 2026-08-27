@@ -33,6 +33,8 @@ function harness(result: AlignCameraResult): AlignTestHarness {
     contextValidator: { validate: vi.fn(() => Promise.reject(new Error("unused"))) },
     contextLoader: { load: vi.fn(), readIndex: vi.fn() },
     contextRefresher: { refresh: vi.fn() },
+    contextGenerator: { generate: vi.fn() },
+    contextRehasher: { rehash: vi.fn() },
     init: { install: vi.fn() },
     initPrompt: { selectAgents: vi.fn() },
     align: { alignCamera: alignCameraMock },

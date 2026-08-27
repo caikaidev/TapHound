@@ -6,17 +6,14 @@ import {
   stat,
   type FileHandle
 } from "node:fs/promises";
-import {
-  isAbsolute,
-  relative,
-  resolve,
-  sep
-} from "node:path";
+import { relative, resolve } from "node:path";
 
 import {
   type ProjectFileInspection,
   type ProjectFileInspector
 } from "../../ports/project-file-inspector.js";
+import { errnoCode } from "../../shared/errors.js";
+import { isContained } from "../../shared/paths.js";
 
 interface FileIdentity {
   dev: bigint;
@@ -24,29 +21,6 @@ interface FileIdentity {
   size: bigint;
   mtimeNs: bigint;
   ctimeNs: bigint;
-}
-
-function errorCode(error: unknown): string | undefined {
-  return (
-    typeof error === "object"
-    && error !== null
-    && "code" in error
-    && typeof error.code === "string"
-  )
-    ? error.code
-    : undefined;
-}
-
-function isContained(root: string, path: string): boolean {
-  const fromRoot = relative(root, path);
-  return (
-    fromRoot === ""
-    || (
-      fromRoot !== ".."
-      && !fromRoot.startsWith(`..${sep}`)
-      && !isAbsolute(fromRoot)
-    )
-  );
 }
 
 function sameIdentity(left: FileIdentity, right: FileIdentity): boolean {
@@ -86,44 +60,97 @@ function normalizedRelativePath(root: string, path: string): string {
 }
 
 function evidenceFailure(error: unknown): ProjectFileInspection {
-  return errorCode(error) === "ENOENT" || errorCode(error) === "ENOTDIR"
+  return errnoCode(error) === "ENOENT" || errnoCode(error) === "ENOTDIR"
     ? { status: "notFound" }
     : { status: "unreadable" };
 }
 
+interface CachedRoot {
+  readonly canonical: string;
+  readonly identity: FileIdentity;
+}
+
+type RootResolution =
+  | { readonly status: "resolved"; readonly canonical: string; readonly identity: FileIdentity }
+  | { readonly status: "rootNotFound" }
+  | { readonly status: "rootUnreadable" }
+  | { readonly status: "rootNotDirectory" };
+
 export class NodeProjectFileInspector implements ProjectFileInspector {
-  public readonly inspectProjectFile = async (input: {
-    projectRoot: string;
-    relativePath: string;
-    maximumBytes: number;
-  }): Promise<ProjectFileInspection> => {
-    let canonicalRoot: string;
+  private rootCache: Map<string, CachedRoot> | undefined;
+
+  private readonly resolveRoot = async (
+    projectRoot: string
+  ): Promise<RootResolution> => {
+    const cached = this.rootCache?.get(projectRoot);
+    if (cached !== undefined) {
+      try {
+        const stats = await stat(cached.canonical, { bigint: true });
+        if (stats.isDirectory()) {
+          const identity: FileIdentity = {
+            dev: stats.dev,
+            ino: stats.ino,
+            size: stats.size,
+            mtimeNs: stats.mtimeNs,
+            ctimeNs: stats.ctimeNs
+          };
+          if (sameIdentity(cached.identity, identity)) {
+            return {
+              status: "resolved",
+              canonical: cached.canonical,
+              identity: cached.identity
+            };
+          }
+        }
+      } catch {
+        // cache stale, re-resolve below
+      }
+    }
+
+    let canonical: string;
     try {
-      canonicalRoot = await realpath(input.projectRoot);
+      canonical = await realpath(projectRoot);
     } catch (error: unknown) {
-      return errorCode(error) === "ENOENT" || errorCode(error) === "ENOTDIR"
+      return errnoCode(error) === "ENOENT" || errnoCode(error) === "ENOTDIR"
         ? { status: "rootNotFound" }
         : { status: "rootUnreadable" };
     }
 
-    let rootBefore: FileIdentity;
     try {
-      const rootStats = await stat(canonicalRoot, { bigint: true });
+      const rootStats = await stat(canonical, { bigint: true });
       if (!rootStats.isDirectory()) {
         return { status: "rootNotDirectory" };
       }
-      rootBefore = {
+      const identity: FileIdentity = {
         dev: rootStats.dev,
         ino: rootStats.ino,
         size: rootStats.size,
         mtimeNs: rootStats.mtimeNs,
         ctimeNs: rootStats.ctimeNs
       };
+      if (this.rootCache === undefined) {
+        this.rootCache = new Map();
+      }
+      this.rootCache.set(projectRoot, { canonical, identity });
+      return { status: "resolved", canonical, identity };
     } catch (error: unknown) {
-      return errorCode(error) === "ENOENT"
+      return errnoCode(error) === "ENOENT"
         ? { status: "rootNotFound" }
         : { status: "rootUnreadable" };
     }
+  };
+
+  public readonly inspectProjectFile = async (input: {
+    projectRoot: string;
+    relativePath: string;
+    maximumBytes: number;
+  }): Promise<ProjectFileInspection> => {
+    const root = await this.resolveRoot(input.projectRoot);
+    if (root.status !== "resolved") {
+      return root;
+    }
+    const canonicalRoot = root.canonical;
+    const rootBefore = root.identity;
 
     const normalizedPath = input.relativePath.replaceAll("\\", "/");
     if (
@@ -161,7 +188,7 @@ export class NodeProjectFileInspector implements ProjectFileInspector {
     try {
       handle = await open(canonicalBefore, openFlags);
     } catch (error: unknown) {
-      return errorCode(error) === "ELOOP"
+      return errnoCode(error) === "ELOOP"
         ? { status: "changedIdentity", resolvedRelativePath }
         : evidenceFailure(error);
     }

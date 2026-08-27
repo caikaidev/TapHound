@@ -3,8 +3,16 @@ import { resolve } from "node:path";
 import { Command } from "commander";
 
 import {
+  ContextGenerateError,
+  type ContextGenerateResult
+} from "../../application/context/context-generator.js";
+import {
   ContextLoadError
 } from "../../application/context/context-loader.js";
+import {
+  ContextRehashError,
+  type ContextRehashResult
+} from "../../application/context/context-rehasher.js";
 import {
   ContextRefreshError,
   type ContextRefreshResult
@@ -330,6 +338,151 @@ function createContextRefreshCommand(dependencies: CliDependencies): Command {
     });
 }
 
+interface ContextGenerateOptions {
+  project: string;
+  context: string;
+  force?: boolean | undefined;
+  json?: boolean | undefined;
+}
+
+function writeGenerateText(
+  dependencies: CliDependencies,
+  result: ContextGenerateResult
+): void {
+  writeLine(
+    dependencies.stdout,
+    `Context: generated (${String(result.modules.length)} modules)`
+  );
+  writeLine(
+    dependencies.stdout,
+    `Package: ${result.packageName}`
+  );
+  writeLine(
+    dependencies.stdout,
+    `Activity: ${result.launchActivity}`
+  );
+  for (const module of result.modules) {
+    writeLine(
+      dependencies.stdout,
+      `  ${module.id}: ${module.kind} (${String(module.evidenceCount)} evidence files)`
+    );
+  }
+}
+
+function createContextGenerateCommand(dependencies: CliDependencies): Command {
+  return new Command("generate")
+    .description("Generate Project Context scaffolding from project source")
+    .option("--project <path>", "Android project root", dependencies.cwd())
+    .option(
+      "--context <path>",
+      "Project Context index path",
+      ".taphound/context/project-context.json"
+    )
+    .option("--force", "Overwrite an existing Project Context")
+    .option("--json", "Emit one machine-readable JSON value")
+    .action(async (options: ContextGenerateOptions): Promise<void> => {
+      try {
+        const result = await dependencies.contextGenerator.generate({
+          projectRoot: options.project,
+          contextPath: resolve(options.project, options.context),
+          ...(options.force === undefined ? {} : { force: options.force })
+        });
+        const output = { ...result, exitCode: 0 };
+        if (options.json === true) {
+          writeJson(dependencies.stdout, output);
+        } else {
+          writeGenerateText(dependencies, result);
+        }
+        dependencies.setExitCode(0);
+      } catch (error) {
+        const output = error instanceof ContextGenerateError
+          ? {
+              status: "error" as const,
+              exitCode: 2 as const,
+              failure: { code: error.code, message: error.message }
+            }
+          : failureOutput(4, "INTERNAL_ERROR", errorMessage(error));
+        if (options.json === true) {
+          writeJson(dependencies.stdout, output);
+        } else {
+          writeLine(dependencies.stderr, output.failure.message);
+        }
+        dependencies.setExitCode(output.exitCode);
+      }
+    });
+}
+
+interface ContextRehashOptions {
+  project: string;
+  context: string;
+  module?: string[] | undefined;
+  json?: boolean | undefined;
+}
+
+function writeRehashText(
+  dependencies: CliDependencies,
+  result: ContextRehashResult
+): void {
+  writeLine(dependencies.stdout, `Context: ${result.status}`);
+  for (const module of result.modules) {
+    if (module.changed) {
+      writeLine(
+        dependencies.stdout,
+        `  ${module.id}: ${module.previousSha256} -> ${module.currentSha256}`
+      );
+    }
+  }
+}
+
+function createContextRehashCommand(dependencies: CliDependencies): Command {
+  return new Command("rehash")
+    .description("Recompute Project Context shard and index hashes")
+    .option("--project <path>", "Android project root", dependencies.cwd())
+    .option(
+      "--context <path>",
+      "Project Context index path",
+      ".taphound/context/project-context.json"
+    )
+    .option("--module <id...>", "Rehash only the listed Context modules")
+    .option("--json", "Emit one machine-readable JSON value")
+    .action(async (options: ContextRehashOptions): Promise<void> => {
+      try {
+        const result = await dependencies.contextRehasher.rehash({
+          projectRoot: options.project,
+          contextPath: resolve(options.project, options.context),
+          ...(options.module === undefined ? {} : { moduleIds: options.module })
+        });
+        const output = { ...result, exitCode: 0 };
+        if (options.json === true) {
+          writeJson(dependencies.stdout, output);
+        } else {
+          writeRehashText(dependencies, result);
+        }
+        dependencies.setExitCode(0);
+      } catch (error) {
+        const output = error instanceof ContextRehashError
+          ? {
+              status: "error" as const,
+              exitCode: 2 as const,
+              failure: { code: error.code, message: error.message }
+            }
+          : error instanceof ContextLoadError
+            ? {
+                status: "error" as const,
+                exitCode: 2 as const,
+                failure: { code: error.code, message: error.message }
+              }
+            : failureOutput(4, "INTERNAL_ERROR", errorMessage(error));
+        if (options.json === true) {
+          writeJson(dependencies.stdout, output);
+        } else {
+          writeLine(dependencies.stderr, output.failure.message);
+        }
+        dependencies.setExitCode(output.exitCode);
+      }
+    });
+}
+
 export function createContextCommand(
   dependencies: CliDependencies
 ): Command {
@@ -338,5 +491,7 @@ export function createContextCommand(
     .addCommand(createContextOperation(dependencies, "validate"))
     .addCommand(createContextOperation(dependencies, "status"))
     .addCommand(createContextListCommand(dependencies))
-    .addCommand(createContextRefreshCommand(dependencies));
+    .addCommand(createContextRefreshCommand(dependencies))
+    .addCommand(createContextGenerateCommand(dependencies))
+    .addCommand(createContextRehashCommand(dependencies));
 }

@@ -120,6 +120,9 @@ export class RiskEvaluator {
     const action = typeof actionOrProposal === "string"
       ? actionOrProposal
       : actionOrProposal.action;
+    if (action === "bridge") {
+      return { effectiveRisk: "safe" };
+    }
     if (policy.forbiddenActions.includes(action)) {
       return { effectiveRisk: "forbidden" };
     }

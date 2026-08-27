@@ -76,6 +76,12 @@ function harness(
     contextRefresher: {
       refresh: vi.fn(() => Promise.reject(new Error("unused")))
     },
+    contextGenerator: {
+      generate: vi.fn(() => Promise.reject(new Error("unused")))
+    },
+    contextRehasher: {
+      rehash: vi.fn(() => Promise.reject(new Error("unused")))
+    },
     init: { install: installMock },
     initPrompt: { selectAgents: selectAgentsMock },
     align: { alignCamera: vi.fn(() => Promise.reject(new Error("unused"))) },

@@ -1,8 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  ContextGenerateError
+} from "../../src/application/context/context-generator.js";
+import {
   ContextLoadError
 } from "../../src/application/context/context-loader.js";
+import {
+  ContextRehashError
+} from "../../src/application/context/context-rehasher.js";
 import {
   ContextRefreshError
 } from "../../src/application/context/context-refresher.js";
@@ -119,6 +125,12 @@ function dependencies(): {
           }],
           blocked: []
         }))
+      },
+      contextGenerator: {
+        generate: vi.fn(() => Promise.reject(new Error("unused")))
+      },
+      contextRehasher: {
+        rehash: vi.fn(() => Promise.reject(new Error("unused")))
       },
       init: {
         install: vi.fn(() => Promise.resolve({
@@ -1424,6 +1436,227 @@ describe("TapHound CLI commands", () => {
       contextPath: "/project/.taphound/context/project-context.json",
       allowIncomplete: true
     });
+  });
+
+  it("generates Context scaffolding and emits exactly one JSON value", async () => {
+    const test = dependencies();
+    vi.mocked(test.value.contextGenerator.generate).mockResolvedValueOnce({
+      status: "generated",
+      packageName: "com.example.app",
+      launchActivity: "com.example.app.MainActivity",
+      modules: [{
+        id: ":app",
+        projectDir: "app",
+        kind: "application",
+        status: "notAnalyzed",
+        evidenceCount: 3,
+        contextPath: ".taphound/context/modules/app.json",
+        sha256: "a".repeat(64)
+      }],
+      indexHash: "b".repeat(64),
+      contextPath: ".taphound/context/project-context.json"
+    });
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "context", "generate",
+      "--project", "/project",
+      "--context", ".taphound/context/project-context.json",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "generated",
+      exitCode: 0,
+      packageName: "com.example.app",
+      modules: [{ id: ":app", evidenceCount: 3 }]
+    });
+    expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
+    expect(test.value.contextGenerator.generate).toHaveBeenCalledWith({
+      projectRoot: "/project",
+      contextPath: "/project/.taphound/context/project-context.json"
+    });
+    expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("passes --force through to the generator", async () => {
+    const test = dependencies();
+    vi.mocked(test.value.contextGenerator.generate).mockResolvedValueOnce({
+      status: "generated",
+      packageName: "com.example.app",
+      launchActivity: "com.example.app.MainActivity",
+      modules: [],
+      indexHash: "b".repeat(64),
+      contextPath: ".taphound/context/project-context.json"
+    });
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "context", "generate",
+      "--project", "/project",
+      "--force",
+      "--json"
+    ]);
+
+    expect(test.value.contextGenerator.generate).toHaveBeenCalledWith({
+      projectRoot: "/project",
+      contextPath: "/project/.taphound/context/project-context.json",
+      force: true
+    });
+    expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("emits text output for context generate without --json", async () => {
+    const test = dependencies();
+    vi.mocked(test.value.contextGenerator.generate).mockResolvedValueOnce({
+      status: "generated",
+      packageName: "com.example.app",
+      launchActivity: "com.example.app.MainActivity",
+      modules: [{
+        id: ":app",
+        projectDir: "app",
+        kind: "application",
+        status: "notAnalyzed",
+        evidenceCount: 2,
+        contextPath: ".taphound/context/modules/app.json",
+        sha256: "a".repeat(64)
+      }],
+      indexHash: "b".repeat(64),
+      contextPath: ".taphound/context/project-context.json"
+    });
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "context", "generate",
+      "--project", "/project"
+    ]);
+
+    expect(test.stdout.value).toContain("Context: generated (1 modules)");
+    expect(test.stdout.value).toContain("Package: com.example.app");
+    expect(test.stdout.value).toContain(":app: application (2 evidence files)");
+    expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("maps Context generate failures to exit 2", async () => {
+    const test = dependencies();
+    vi.mocked(test.value.contextGenerator.generate).mockRejectedValueOnce(
+      new ContextGenerateError(
+        "CONTEXT_ALREADY_EXISTS",
+        "Project Context already exists (use --force to overwrite)"
+      )
+    );
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "context", "generate",
+      "--project", "/project",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "error",
+      exitCode: 2,
+      failure: { code: "CONTEXT_ALREADY_EXISTS" }
+    });
+    expect(test.exitCodes).toEqual([2]);
+  });
+
+  it("maps Context generate internal errors to exit 4", async () => {
+    const test = dependencies();
+    vi.mocked(test.value.contextGenerator.generate).mockRejectedValueOnce(
+      new Error("unexpected")
+    );
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "context", "generate",
+      "--project", "/project",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "error",
+      exitCode: 4,
+      failure: { code: "INTERNAL_ERROR" }
+    });
+    expect(test.exitCodes).toEqual([4]);
+  });
+
+  it("rehashes Context and emits exactly one JSON value", async () => {
+    const test = dependencies();
+    vi.mocked(test.value.contextRehasher.rehash).mockResolvedValueOnce({
+      status: "rehashed",
+      modules: [{
+        id: ":app",
+        previousSha256: "a".repeat(64),
+        currentSha256: "c".repeat(64),
+        changed: true
+      }],
+      previousIndexHash: "b".repeat(64),
+      indexHash: "d".repeat(64)
+    });
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "context", "rehash",
+      "--project", "/project",
+      "--context", ".taphound/context/project-context.json",
+      "--module", ":app",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "rehashed",
+      exitCode: 0,
+      indexHash: "d".repeat(64)
+    });
+    expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
+    expect(test.value.contextRehasher.rehash).toHaveBeenCalledWith({
+      projectRoot: "/project",
+      contextPath: "/project/.taphound/context/project-context.json",
+      moduleIds: [":app"]
+    });
+    expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("emits text output for context rehash without --json", async () => {
+    const test = dependencies();
+    vi.mocked(test.value.contextRehasher.rehash).mockResolvedValueOnce({
+      status: "unchanged",
+      modules: [{
+        id: ":app",
+        previousSha256: "a".repeat(64),
+        currentSha256: "a".repeat(64),
+        changed: false
+      }],
+      previousIndexHash: "b".repeat(64),
+      indexHash: "b".repeat(64)
+    });
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "context", "rehash",
+      "--project", "/project"
+    ]);
+
+    expect(test.stdout.value).toContain("Context: unchanged");
+    expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("maps Context rehash failures to exit 2", async () => {
+    const test = dependencies();
+    vi.mocked(test.value.contextRehasher.rehash).mockRejectedValueOnce(
+      new ContextRehashError(
+        "CONTEXT_INVALID",
+        "Context shard is not valid JSON"
+      )
+    );
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "context", "rehash",
+      "--project", "/project",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "error",
+      exitCode: 2,
+      failure: { code: "CONTEXT_INVALID" }
+    });
+    expect(test.exitCodes).toEqual([2]);
   });
 
   it("registers a top-level --version option", () => {

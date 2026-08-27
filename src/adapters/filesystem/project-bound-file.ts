@@ -19,6 +19,7 @@ import {
 import type {
   ProjectBoundPath
 } from "../../ports/project-bound-file.js";
+import { isErrnoException } from "../../shared/errors.js";
 
 export interface ProjectBoundFileHooks {
   beforeInstall?: (() => Promise<void> | void) | undefined;
@@ -44,10 +45,6 @@ interface BoundOutput {
 
 function sameIdentity(left: FileIdentity, right: FileIdentity): boolean {
   return left.dev === right.dev && left.ino === right.ino;
-}
-
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && "code" in error;
 }
 
 async function captureDirectory(path: string): Promise<DirectoryIdentity> {
@@ -77,7 +74,7 @@ async function captureOptionalFile(
   try {
     return await captureFile(path);
   } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") {
+    if (isErrnoException(error) && error.code === "ENOENT") {
       return null;
     }
     throw error;
@@ -218,7 +215,7 @@ async function prepareBoundOutput(
     } catch (error) {
       if (
         !createParents
-        || !isNodeError(error)
+        || !isErrnoException(error)
         || error.code !== "ENOENT"
       ) {
         throw error;

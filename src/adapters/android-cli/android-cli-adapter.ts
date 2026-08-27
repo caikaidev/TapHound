@@ -149,7 +149,7 @@ export class AndroidCliAdapter implements AndroidCliPort {
         ["shell", "rm", "-f", path],
         undefined,
         1000
-      ));
+      )).catch(() => {});
     }
   }
 

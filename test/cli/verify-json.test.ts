@@ -49,6 +49,12 @@ function baseDependencies(exitCodes: number[]): CliDependencies {
     contextRefresher: {
       refresh: vi.fn(() => Promise.reject(new Error("unused")))
     },
+    contextGenerator: {
+      generate: vi.fn(() => Promise.reject(new Error("unused")))
+    },
+    contextRehasher: {
+      rehash: vi.fn(() => Promise.reject(new Error("unused")))
+    },
     init: {
       install: vi.fn(() => Promise.reject(new Error("unused")))
     },

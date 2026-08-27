@@ -1,4 +1,4 @@
-import { isAbsolute, relative, resolve } from "node:path";
+import { resolve } from "node:path";
 
 import {
   ProjectContextModuleSchema,
@@ -16,6 +16,9 @@ import type {
 import type {
   ProjectInventoryInspector
 } from "../../ports/project-inventory-inspector.js";
+import { projectRelativePath } from "../../shared/paths.js";
+import { compareStrings } from "../../shared/strings.js";
+import { assertShardIdentity } from "./shard-identity.js";
 
 export const MAX_CONTEXT_SHARD_BYTES = 4 * 1024 * 1024;
 
@@ -90,24 +93,6 @@ function inspectionMessage(
   }
 }
 
-function projectRelativePath(projectRoot: string, path: string): string {
-  const absolutePath = isAbsolute(path) ? path : resolve(projectRoot, path);
-  const result = relative(resolve(projectRoot), absolutePath)
-    .replaceAll("\\", "/");
-  if (
-    result.length === 0
-    || result.startsWith("../")
-    || result === ".."
-    || result.startsWith("/")
-  ) {
-    throw new ContextLoadError(
-      "CONTEXT_INVALID",
-      "Project Context path must stay within the project"
-    );
-  }
-  return result;
-}
-
 function selectedReferences(
   bundle: ProjectContext,
   requestedIds: string[] | undefined
@@ -173,7 +158,7 @@ function effectiveContext(
     manifest: {
       version: 1,
       files: [...byPath.values()].sort((left, right) => (
-        left.path.localeCompare(right.path)
+        compareStrings(left.path, right.path)
       ))
     },
     interactionPolicy: bundle.interactionPolicy,
@@ -208,8 +193,8 @@ function sameStrings(left: string[], right: string[]): boolean {
   if (left.length !== right.length) {
     return false;
   }
-  const sortedLeft = [...left].sort();
-  const sortedRight = [...right].sort();
+  const sortedLeft = [...left].sort(compareStrings);
+  const sortedRight = [...right].sort(compareStrings);
   return sortedLeft.every(
     (value, index) => value === sortedRight[index]
   );
@@ -266,7 +251,11 @@ export class ContextLoader {
     projectRoot: string;
     contextPath: string;
   }): Promise<LoadedContextIndex> => {
-    const contextPath = projectRelativePath(input.projectRoot, input.contextPath);
+    const contextPath = projectRelativePath(
+      input.projectRoot,
+      input.contextPath,
+      (message) => new ContextLoadError("CONTEXT_INVALID", message)
+    );
     const loaded = await this.readStableDocument({
       projectRoot: input.projectRoot,
       relativePath: contextPath,
@@ -320,16 +309,11 @@ export class ContextLoader {
           `Context shard does not match the module schema: ${reference.contextPath}`
         );
       }
-      if (
-        module.data.moduleId !== reference.id
-        || module.data.projectDir !== reference.projectDir
-        || module.data.status !== reference.status
-      ) {
-        throw new ContextLoadError(
-          "CONTEXT_INVALID",
-          `Context shard identity does not match its index: ${reference.id}`
-        );
-      }
+      assertShardIdentity(
+        reference,
+        module.data,
+        (message) => new ContextLoadError("CONTEXT_INVALID", message)
+      );
       if (
         !sameStrings(reference.features, module.data.summary.features)
         || !sameStrings(

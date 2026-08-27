@@ -7,8 +7,11 @@ import type {
 } from "../../ports/android-cli.js";
 import type { Clock } from "../../ports/clock.js";
 
-export type IdleStrategy = "hybrid" | "layoutDiff" | "frameStats";
+export type IdleStrategy = "hybrid" | "layoutDiff" | "frameStats" | "structural";
 export type IdleBackend = "uiautomator" | "androidCli" | "gfxFrameStats";
+
+const EARLY_BAIL_FRAME_CHANGES = 2;
+const POST_FALLBACK_MIN_STABLE = 2;
 
 export interface IdleConfig {
   strategy?: IdleStrategy | undefined;
@@ -107,6 +110,7 @@ export class IdleWaiter {
     let frameActivityDetected = false;
     let samplingDurationMs = 0;
     let useStructuralBackend = strategy === "layoutDiff"
+      || strategy === "structural"
       || (strategy === "hybrid" && this.packageName === undefined);
 
     for (;;) {
@@ -173,7 +177,7 @@ export class IdleWaiter {
       if (
         strategy === "hybrid"
         && !useStructuralBackend
-        && consecutiveFrameChanges >= config.stablePolls
+        && consecutiveFrameChanges >= EARLY_BAIL_FRAME_CHANGES
       ) {
         useStructuralBackend = true;
         fallbackUsed = true;
@@ -190,8 +194,11 @@ export class IdleWaiter {
         lastDiff = diff;
       }
 
+      const isPostFallback = fallbackUsed && strategy === "hybrid";
       const requiredStableObservations = useStructuralBackend
-        ? Math.max(2, config.stablePolls)
+        ? (isPostFallback
+          ? Math.max(POST_FALLBACK_MIN_STABLE, config.stablePolls - 1)
+          : Math.max(2, config.stablePolls))
         : config.stablePolls;
       if (consecutiveEmpty >= requiredStableObservations) {
         if (strategy === "hybrid" && !useStructuralBackend) {

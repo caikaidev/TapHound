@@ -35,6 +35,12 @@ function dependencies(exitCodes: number[]): CliDependencies {
     contextRefresher: {
       refresh: () => Promise.reject(new Error("unused"))
     },
+    contextGenerator: {
+      generate: () => Promise.reject(new Error("unused"))
+    },
+    contextRehasher: {
+      rehash: () => Promise.reject(new Error("unused"))
+    },
     init: {
       install: () => Promise.reject(new Error("unused"))
     },

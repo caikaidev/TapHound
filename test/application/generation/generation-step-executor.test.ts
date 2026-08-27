@@ -2043,7 +2043,7 @@ describe("GenerationStepExecutor", () => {
         deviceSerial: "emulator-5554",
         resetStrategy: "processOnly",
         interactionPolicy: {
-          allowedActions: ["click", "inputText", "scrollTo", "back", "bridge"],
+          allowedActions: ["click", "inputText", "scrollTo", "back"],
           confirmationRequiredActions: ["back"],
           forbiddenActions: ["longClick"]
         }

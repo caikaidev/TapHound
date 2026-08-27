@@ -5,7 +5,8 @@ import {
 } from "../../domain/locator.js";
 import type {
   LayoutElement,
-  Locator
+  Locator,
+  LocatorMatch
 } from "../../domain/layout.js";
 import {
   locatorEvidenceMatches
@@ -54,6 +55,23 @@ function center(element: LayoutElement): Point {
   };
 }
 
+function fieldValueMatches(
+  elementValue: string | undefined,
+  locatorValue: string,
+  match: LocatorMatch | undefined
+): boolean {
+  if (elementValue === undefined) {
+    return false;
+  }
+  if (match === "contains") {
+    return elementValue.includes(locatorValue);
+  }
+  if (match === "startsWith") {
+    return elementValue.startsWith(locatorValue);
+  }
+  return elementValue === locatorValue;
+}
+
 type EntryResolution = {
   status: "found";
   entry: LayoutEntry;
@@ -85,6 +103,7 @@ function resolveEntry(
   }
   let candidates: LayoutEntry[] | undefined;
   let matchedBy: LocatorField | undefined;
+  const match = locator.match;
 
   for (const field of LOCATOR_FIELDS) {
     const value = locator[field];
@@ -94,7 +113,7 @@ function resolveEntry(
 
     if (candidates === undefined) {
       const matches = entries.filter(
-        ({ element }) => element[field] === value
+        ({ element }) => fieldValueMatches(element[field], value, match)
       );
       if (matches.length === 0) {
         continue;
@@ -103,7 +122,7 @@ function resolveEntry(
       matchedBy = field;
     } else if (candidates.length > 1) {
       const narrowed = candidates.filter(
-        ({ element }) => element[field] === value
+        ({ element }) => fieldValueMatches(element[field], value, match)
       );
       if (narrowed.length === 0) {
         return {

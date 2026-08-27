@@ -16,10 +16,8 @@ import {
   TAPHOUND_DIR
 } from "../../domain/workspace.js";
 import type { WorkspaceLayoutPort } from "../../ports/workspace-layout.js";
-
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && "code" in error;
-}
+import { isErrnoException } from "../../shared/errors.js";
+import { compareStrings } from "../../shared/strings.js";
 
 const STRAY_RUN_DIRECTORY = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -39,9 +37,9 @@ export async function findLegacyDirectories(
         || STRAY_RUN_DIRECTORY.test(entry.name)
       ) && (entry.isDirectory() || entry.isSymbolicLink()))
       .map((entry) => `${TAPHOUND_DIR}/${entry.name}`)
-      .sort((left, right) => left.localeCompare(right));
+      .sort((left, right) => compareStrings(left, right));
   } catch (error) {
-    if (!isNodeError(error) || error.code !== "ENOENT") {
+    if (!isErrnoException(error) || error.code !== "ENOENT") {
       throw error;
     }
     return [];
@@ -63,7 +61,7 @@ export async function ensureBuildIgnored(projectRoot: string): Promise<void> {
     await handle.sync();
   } catch (error) {
     // A file the developer already owns is never rewritten.
-    if (!isNodeError(error) || error.code !== "EEXIST") {
+    if (!isErrnoException(error) || error.code !== "EEXIST") {
       throw error;
     }
   } finally {
@@ -75,7 +73,7 @@ async function createOrRequireDirectory(path: string): Promise<void> {
   try {
     await mkdir(path);
   } catch (error) {
-    if (!isNodeError(error) || error.code !== "EEXIST") {
+    if (!isErrnoException(error) || error.code !== "EEXIST") {
       throw error;
     }
   }

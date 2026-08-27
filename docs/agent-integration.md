@@ -30,6 +30,93 @@ This is not a Core CLI argument. It provides static Case hints to the Journey
 Skill; Project Context, live Snapshot binding, risk policy, and final Replay
 remain authoritative.
 
+## Journey Brief Authoring
+
+The [`taphound-journey-brief-author` Skill](../assets/skills/taphound-journey-brief-author/SKILL.md)
+is the recommended producer of the Brief. It combines Android source analysis
+with read-only `taphound observe` to author one Brief v2 per Case, then
+returns `{path, sha256}` for the Journey Skill to consume. It uses only
+read-only commands and never modifies device state.
+
+### Subagent dispatch pattern
+
+A multi-Case orchestrator dispatches one brief-author subagent per Case.
+Configure the subagent with a **name** and a **PROMPT** field whose content
+is copied verbatim from
+[`brief-author-role.md`](../assets/skills/taphound-journey-brief-author/prompts/brief-author-role.md).
+That file is self-contained: it defines the role, capability boundary, inputs,
+execution procedure, output format, and rules. The orchestrator then
+dispatches a dynamic task message per Case with these explicit inputs:
+
+| Field | Required | Description |
+|---|---|---|
+| `project` | yes | Android project root path |
+| `caseGoal` | yes | One Case's test scenario (natural language) |
+| `caseId` | no | Case identifier for frontmatter |
+| `contextPaths` | no | Explicit path array; the subagent reads ONLY these files for surrounding context |
+| `observeSnapshot` | no | Pre-captured `taphound observe --json` result |
+| `output` | no | Brief output path (defaults to `.taphound/journeys/taphound-journey-brief.md`) |
+
+The subagent returns a single JSON summary:
+
+```json
+{
+  "status": "authored",
+  "caseId": "CASE-002",
+  "path": ".taphound/journeys/taphound-journey-brief.md",
+  "sha256": "<64-char hex hash>",
+  "edgesVerified": 2,
+  "edgesNeedsObservation": 1
+}
+```
+
+The orchestrator never re-parses raw exploration content from the subagent;
+it consumes only this structured summary.
+
+### Hard rule on file names
+
+The brief-author subagent MUST NEVER search for or assume files named
+`plan.md`, `requirement.md`, or any convention. It reads ONLY files the
+orchestrator explicitly passes via `contextPaths`. If no `contextPaths` are
+supplied, it works from `caseGoal` alone plus source code and Project Context.
+This rule is encoded in both `SKILL.md` and `brief-author-role.md`.
+
+### Parallel strategy and device contention
+
+To enable parallel brief authoring across multiple Cases without device
+contention, the orchestrator pre-captures one `taphound observe --json`
+snapshot and passes it to all parallel brief-author subagents via the
+`observeSnapshot` input. When `observeSnapshot` is provided, the subagent
+uses it directly and MUST NOT call `taphound observe` itself.
+
+```bash
+# Orchestrator captures once, before dispatching parallel subagents:
+taphound observe --project <project> --device <serial> --logcat-lines 200 --json
+# Then passes the result as observeSnapshot to each parallel subagent.
+```
+
+### Human Review gate
+
+The Brief is an inspectable artifact between the planning phase and Journey
+generation. After a brief-author subagent returns `status: "authored"`, the
+orchestrator should present the Brief path and summary to the user for
+Review before dispatching the downstream Journey generation subagent with
+the `journeyBrief: {path, sha256}` binding. Review is a Skill convention,
+not a Core CLI gate; the Journey Skill's own Brief validation (SHA-256
+check, frontmatter, required sections, Goal match) remains enforced.
+
+```
+Orchestrator
+  |-- dispatch brief-author subagent  (per Case, parallel)
+  |     output: {path, sha256, caseId, edgesVerified, edgesNeedsObservation}
+  |
+  |-- human Review (brief is an inspectable artifact)
+  |
+  |-- dispatch journey subagent
+        input:  {project, goal, journeyBrief: {path, sha256}}
+        output: {journeyPath, reportPath, verified}
+```
+
 ## Verifying an Existing Journey
 
 A typical flow: a developer uses Claude Code or another Agent CLI to implement a requirement, then has the Agent call TapHound Journey to verify whether the code meets expectations.

@@ -361,6 +361,30 @@ describe("TapHound documentation examples", () => {
     expect(agent).toContain("PACKAGE_ESCAPE");
   });
 
+  it("documents the Journey Brief Author subagent dispatch contract", async () => {
+    const agent = await text("docs/agent-integration.md");
+    const rolePrompt = await text(
+      "assets/skills/taphound-journey-brief-author/prompts/brief-author-role.md"
+    );
+
+    expect(agent).toContain("Journey Brief Authoring");
+    expect(agent).toContain("taphound-journey-brief-author");
+    expect(agent).toContain("brief-author-role.md");
+    expect(agent).toContain("observeSnapshot");
+    expect(agent).toContain("contextPaths");
+    expect(agent).toContain("parallel");
+    expect(agent).toContain("Review");
+    for (const field of ["project", "caseGoal", "caseId", "contextPaths", "observeSnapshot", "output"]) {
+      expect(agent).toContain(field);
+    }
+    // The hard rule against guessing file names lives in both the dispatch
+    // spec and the subagent role prompt.
+    expect(agent).toContain("plan.md");
+    expect(agent).toContain("requirement.md");
+    expect(rolePrompt).toContain("plan.md");
+    expect(rolePrompt).toContain("requirement.md");
+  });
+
   it("brands active schema documentation as TapHound", async () => {
     const journey = await text("docs/journey-schema.md");
     const report = await text("docs/report-schema.md");

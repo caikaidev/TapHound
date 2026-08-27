@@ -1,7 +1,8 @@
 import { Command } from "commander";
 
 import {
-  SkillPayloadMissingError
+  SkillPayloadMissingError,
+  NoSkillsFoundError
 } from "../../adapters/filesystem/skill-installer.js";
 import type { InitInput } from "../../application/init/init-service.js";
 import {
@@ -20,6 +21,7 @@ type InitFailureCode =
   | "NO_AGENTS_SELECTED"
   | "UNKNOWN_AGENT"
   | "SKILL_PAYLOAD_MISSING"
+  | "NO_SKILLS_FOUND"
   | "INTERNAL_ERROR";
 
 interface InitOptions {
@@ -57,18 +59,24 @@ function writeInitSuccess(
   result: {
     status: string;
     agents: string[];
-    paths: string[];
-    skipped?: string[] | undefined;
+    skills: Array<{
+      name: string;
+      paths: string[];
+      skipped?: string[] | undefined;
+    }>;
   }
 ): void {
   if (options.json === true) {
     writeJson(dependencies.stdout, result);
   } else {
     const agentList = result.agents.join(", ");
-    const pathList = result.paths.join("\n  ");
-    let message = `Installed TapHound Skill for: ${agentList}\n  ${pathList}`;
-    if (result.skipped !== undefined && result.skipped.length > 0) {
-      message += `\n  Skipped (already installed): ${result.skipped.join(", ")}`;
+    let message = `Installed TapHound Skills for: ${agentList}`;
+    for (const skill of result.skills) {
+      const pathList = skill.paths.join("\n  ");
+      message += `\n  ${skill.name}:\n  ${pathList}`;
+      if (skill.skipped !== undefined && skill.skipped.length > 0) {
+        message += `\n  Skipped (already installed): ${skill.skipped.join(", ")}`;
+      }
     }
     writeLine(dependencies.stdout, message);
   }
@@ -79,7 +87,7 @@ export function createInitCommand(
   dependencies: CliDependencies
 ): Command {
   return new Command("init")
-    .description("Install the TapHound AI Journey Skill for AI agents")
+    .description("Install TapHound Skills for AI agents")
     .option("--global", "Install to user-level directories instead of project-level")
     .option("--agent <ids>", "Comma-separated agent IDs (non-interactive)")
     .option("--json", "Emit one machine-readable JSON value")
@@ -161,6 +169,16 @@ export function createInitCommand(
             options,
             2,
             "SKILL_PAYLOAD_MISSING",
+            error
+          );
+          return;
+        }
+        if (error instanceof NoSkillsFoundError) {
+          writeInitFailure(
+            dependencies,
+            options,
+            2,
+            "NO_SKILLS_FOUND",
             error
           );
           return;

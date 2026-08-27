@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  SkillPayloadMissingError
+  SkillPayloadMissingError,
+  NoSkillsFoundError
 } from "../../src/adapters/filesystem/skill-installer.js";
 import { createProgram } from "../../src/cli/program.js";
 import type { CliDependencies, TextOutput } from "../../src/cli/dependencies.js";
@@ -37,9 +38,21 @@ const defaultInstallResult: InitResult = {
   status: "installed",
   exitCode: 0,
   agents: ["claude", "droid"],
-  paths: [
-    ".claude/skills/taphound-ai-journey",
-    ".factory/skills/taphound-ai-journey"
+  skills: [
+    {
+      name: "taphound-ai-journey",
+      paths: [
+        ".claude/skills/taphound-ai-journey",
+        ".factory/skills/taphound-ai-journey"
+      ]
+    },
+    {
+      name: "taphound-journey-brief-author",
+      paths: [
+        ".claude/skills/taphound-journey-brief-author",
+        ".factory/skills/taphound-journey-brief-author"
+      ]
+    }
   ]
 };
 
@@ -270,7 +283,7 @@ describe("taphound init command", () => {
       "node", "taphound", "init", "--agent", "claude,droid"
     ]);
 
-    expect(test.stdout.value).toContain("Installed TapHound Skill");
+    expect(test.stdout.value).toContain("Installed TapHound Skills");
     expect(test.stdout.value).toContain("claude, droid");
     expect(test.stdout.value).toContain(".claude/skills/taphound-ai-journey");
     expect(test.exitCodes).toEqual([0]);
@@ -282,8 +295,13 @@ describe("taphound init command", () => {
       status: "installed",
       exitCode: 0,
       agents: ["claude", "droid"],
-      paths: [".claude/skills/taphound-ai-journey"],
-      skipped: [".factory/skills/taphound-ai-journey"]
+      skills: [
+        {
+          name: "taphound-ai-journey",
+          paths: [".claude/skills/taphound-ai-journey"],
+          skipped: [".factory/skills/taphound-ai-journey"]
+        }
+      ]
     };
     test.installMock.mockResolvedValueOnce(resultWithSkipped);
 
@@ -292,9 +310,28 @@ describe("taphound init command", () => {
     ]);
 
     const output = parseOutput(test.stdout);
-    expect(output).toHaveProperty("skipped");
-    expect((output as InitResult).skipped).toEqual([
+    const skills = (output as InitResult).skills;
+    expect(skills).toBeDefined();
+    expect(skills[0]?.skipped).toEqual([
       ".factory/skills/taphound-ai-journey"
     ]);
+  });
+
+  it("errors with NO_SKILLS_FOUND when no skills are discovered", async () => {
+    const test = harness();
+    test.installMock.mockRejectedValueOnce(
+      new NoSkillsFoundError("/nonexistent/skills")
+    );
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "init", "--agent", "claude", "--json"
+    ]);
+
+    expect(parseOutput(test.stdout)).toMatchObject({
+      status: "error",
+      exitCode: 2,
+      failure: { code: "NO_SKILLS_FOUND" }
+    });
+    expect(test.exitCodes).toEqual([2]);
   });
 });

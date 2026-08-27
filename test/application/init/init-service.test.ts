@@ -7,26 +7,30 @@ import type {
   SkillInstallerPort
 } from "../../../src/ports/skill-installer.js";
 
+const SKILL_NAMES = ["taphound-ai-journey", "taphound-journey-brief-author"];
+
 function createFakeInstaller(
   results?: Map<string, SkillInstallResult>
-): SkillInstallerPort & { calls: string[] } {
-  const calls: string[] = [];
+): SkillInstallerPort & { calls: Array<{ skillName: string; targetDir: string }> } {
+  const calls: Array<{ skillName: string; targetDir: string }> = [];
   return {
     calls,
-    findPayload: vi.fn(() => Promise.resolve("/payload/taphound-ai-journey")),
-    installTo: vi.fn((targetDir: string): Promise<SkillInstallResult> => {
-      calls.push(targetDir);
-      const override = results?.get(targetDir);
-      if (override !== undefined) {
-        return Promise.resolve(override);
+    listSkillNames: vi.fn(() => Promise.resolve(SKILL_NAMES)),
+    installTo: vi.fn(
+      (skillName: string, targetDir: string): Promise<SkillInstallResult> => {
+        calls.push({ skillName, targetDir });
+        const override = results?.get(targetDir);
+        if (override !== undefined) {
+          return Promise.resolve(override);
+        }
+        return Promise.resolve({ targetPath: targetDir, skipped: false });
       }
-      return Promise.resolve({ targetPath: targetDir, skipped: false });
-    })
+    )
   };
 }
 
 describe("InitService", () => {
-  it("installs to each unique target path and returns the result", async () => {
+  it("installs all skills to each unique target path and returns the result", async () => {
     const installer = createFakeInstaller();
     const service = new InitService({
       installer,
@@ -42,13 +46,25 @@ describe("InitService", () => {
     expect(result.status).toBe("installed");
     expect(result.exitCode).toBe(0);
     expect(result.agents).toEqual(["claude", "droid"]);
-    expect(result.paths).toHaveLength(2);
-    expect(result.paths).toContain(".claude/skills/taphound-ai-journey");
-    expect(result.paths).toContain(".factory/skills/taphound-ai-journey");
-    expect(installer.calls).toHaveLength(2);
+    expect(result.skills).toHaveLength(2);
+
+    const journeySkill = result.skills.find(
+      (s) => s.name === "taphound-ai-journey"
+    );
+    expect(journeySkill?.paths).toContain(".claude/skills/taphound-ai-journey");
+    expect(journeySkill?.paths).toContain(".factory/skills/taphound-ai-journey");
+
+    const briefSkill = result.skills.find(
+      (s) => s.name === "taphound-journey-brief-author"
+    );
+    expect(briefSkill?.paths).toContain(".claude/skills/taphound-journey-brief-author");
+    expect(briefSkill?.paths).toContain(".factory/skills/taphound-journey-brief-author");
+
+    // 2 skills x 2 agents = 4 install calls
+    expect(installer.calls).toHaveLength(4);
   });
 
-  it("deduplicates codex and other to a single install call", async () => {
+  it("deduplicates codex and other to a single install call per skill", async () => {
     const installer = createFakeInstaller();
     const service = new InitService({
       installer,
@@ -61,9 +77,13 @@ describe("InitService", () => {
       global: false
     });
 
-    expect(installer.calls).toHaveLength(1);
+    // 2 skills x 1 deduplicated path = 2 install calls
+    expect(installer.calls).toHaveLength(2);
     expect(result.agents).toEqual(["codex", "other"]);
-    expect(result.paths).toEqual([".agents/skills/taphound-ai-journey"]);
+    expect(result.skills).toHaveLength(2);
+    for (const skill of result.skills) {
+      expect(skill.paths).toEqual([`.agents/skills/${skill.name}`]);
+    }
   });
 
   it("uses homedir for global installs", async () => {
@@ -80,7 +100,8 @@ describe("InitService", () => {
     });
 
     expect(installer.calls).toEqual([
-      "/home/.claude/skills/taphound-ai-journey"
+      { skillName: "taphound-ai-journey", targetDir: "/home/.claude/skills/taphound-ai-journey" },
+      { skillName: "taphound-journey-brief-author", targetDir: "/home/.claude/skills/taphound-journey-brief-author" }
     ]);
   });
 
@@ -97,13 +118,14 @@ describe("InitService", () => {
     expect(installer.calls).toHaveLength(0);
   });
 
-  it("reports skipped paths when installer returns skipped", async () => {
-    const projectPath = "/project/.factory/skills/taphound-ai-journey";
+  it("reports skipped paths per skill when installer returns skipped", async () => {
+    const factoryJourneyPath = "/project/.factory/skills/taphound-ai-journey";
+    const claudeBriefPath = "/project/.claude/skills/taphound-journey-brief-author";
     const installer = createFakeInstaller(
-      new Map([[projectPath, {
-        targetPath: projectPath,
-        skipped: true
-      }]])
+      new Map([
+        [factoryJourneyPath, { targetPath: factoryJourneyPath, skipped: true }],
+        [claudeBriefPath, { targetPath: claudeBriefPath, skipped: true }]
+      ])
     );
     const service = new InitService({
       installer,
@@ -116,8 +138,17 @@ describe("InitService", () => {
       global: false
     });
 
-    expect(result.paths).toEqual([".claude/skills/taphound-ai-journey"]);
-    expect(result.skipped).toEqual([".factory/skills/taphound-ai-journey"]);
+    const journeySkill = result.skills.find(
+      (s) => s.name === "taphound-ai-journey"
+    );
+    expect(journeySkill?.paths).toEqual([".claude/skills/taphound-ai-journey"]);
+    expect(journeySkill?.skipped).toEqual([".factory/skills/taphound-ai-journey"]);
+
+    const briefSkill = result.skills.find(
+      (s) => s.name === "taphound-journey-brief-author"
+    );
+    expect(briefSkill?.paths).toEqual([".factory/skills/taphound-journey-brief-author"]);
+    expect(briefSkill?.skipped).toEqual([".claude/skills/taphound-journey-brief-author"]);
   });
 
   it("does not include skipped key when nothing is skipped", async () => {
@@ -133,6 +164,8 @@ describe("InitService", () => {
       global: false
     });
 
-    expect(result.skipped).toBeUndefined();
+    for (const skill of result.skills) {
+      expect(skill.skipped).toBeUndefined();
+    }
   });
 });

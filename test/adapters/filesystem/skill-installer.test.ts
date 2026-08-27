@@ -13,26 +13,25 @@ const packageRoot = resolve(
   "../../.."
 );
 
-const payloadPath = join(
-  packageRoot,
-  "assets",
-  "skills",
-  "taphound-ai-journey"
-);
+const skillsDir = join(packageRoot, "assets", "skills");
+
+const journeySkillPath = join(skillsDir, "taphound-ai-journey");
 
 describe("FileSystemSkillInstaller", () => {
-  it("finds the packaged skill payload", async () => {
+  it("listSkillNames discovers all skill directories with SKILL.md", async () => {
     const installer = new FileSystemSkillInstaller();
-    const found = await installer.findPayload();
-    expect(found).toBe(payloadPath);
+    const names = await installer.listSkillNames();
+
+    expect(names).toContain("taphound-ai-journey");
+    expect(names.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("copies the full payload tree to a target directory", async () => {
+  it("installs a named skill payload to a target directory", async () => {
     const installer = new FileSystemSkillInstaller();
     const target = await mkdtemp(join(tmpdir(), "taphound-init-test-"));
 
     try {
-      await installer.installTo(join(target, "my-skill"));
+      await installer.installTo("taphound-ai-journey", join(target, "my-skill"));
 
       const copied = await readFile(
         join(target, "my-skill", "SKILL.md"),
@@ -57,9 +56,9 @@ describe("FileSystemSkillInstaller", () => {
 
   it("skips and returns skipped=true when target equals payload", async () => {
     const installer = new FileSystemSkillInstaller();
-    const result = await installer.installTo(payloadPath);
+    const result = await installer.installTo("taphound-ai-journey", journeySkillPath);
     expect(result.skipped).toBe(true);
-    expect(result.targetPath).toBe(payloadPath);
+    expect(result.targetPath).toBe(journeySkillPath);
   });
 
   it("overwrites existing files in the target directory", async () => {
@@ -68,11 +67,24 @@ describe("FileSystemSkillInstaller", () => {
 
     try {
       const targetSkill = join(target, "skill");
-      await installer.installTo(targetSkill);
-      await installer.installTo(targetSkill);
+      await installer.installTo("taphound-ai-journey", targetSkill);
+      await installer.installTo("taphound-ai-journey", targetSkill);
 
       const copied = await readFile(join(targetSkill, "SKILL.md"), "utf8");
       expect(copied).toContain("taphound-ai-journey");
+    } finally {
+      await rm(target, { recursive: true, force: true });
+    }
+  });
+
+  it("throws SkillPayloadMissingError for an unknown skill name", async () => {
+    const installer = new FileSystemSkillInstaller();
+    const target = await mkdtemp(join(tmpdir(), "taphound-init-test-"));
+
+    try {
+      await expect(
+        installer.installTo("nonexistent-skill", join(target, "skill"))
+      ).rejects.toThrow(/Skill payload not found/);
     } finally {
       await rm(target, { recursive: true, force: true });
     }

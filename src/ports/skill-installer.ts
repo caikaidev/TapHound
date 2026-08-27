@@ -4,6 +4,6 @@ export interface SkillInstallResult {
 }
 
 export interface SkillInstallerPort {
-  findPayload: () => Promise<string>;
-  installTo: (targetDir: string) => Promise<SkillInstallResult>;
+  listSkillNames: () => Promise<readonly string[]>;
+  installTo: (skillName: string, targetDir: string) => Promise<SkillInstallResult>;
 }

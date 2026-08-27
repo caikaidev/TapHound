@@ -1,9 +1,8 @@
-import { access, cp, mkdir } from "node:fs/promises";
+import { access, cp, mkdir, readdir, stat } from "node:fs/promises";
 import { constants } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { SKILL_DIRECTORY_NAME } from "../../domain/init.js";
 import type {
   SkillInstallResult,
   SkillInstallerPort
@@ -14,11 +13,10 @@ const PACKAGE_ROOT = resolve(
   "../../.."
 );
 
-const PAYLOAD_PATH = resolve(
+const SKILLS_DIR = resolve(
   PACKAGE_ROOT,
   "assets",
-  "skills",
-  SKILL_DIRECTORY_NAME
+  "skills"
 );
 
 export class SkillPayloadMissingError extends Error {
@@ -29,18 +27,51 @@ export class SkillPayloadMissingError extends Error {
   }
 }
 
+export class NoSkillsFoundError extends Error {
+  public override readonly name = "NoSkillsFoundError";
+
+  public constructor(public readonly scannedDir: string) {
+    super(`No skills (directories with SKILL.md) found under ${scannedDir}`);
+  }
+}
+
 export class FileSystemSkillInstaller implements SkillInstallerPort {
-  public async findPayload(): Promise<string> {
-    try {
-      await access(PAYLOAD_PATH, constants.R_OK);
-    } catch {
-      throw new SkillPayloadMissingError(PAYLOAD_PATH);
+  public async listSkillNames(): Promise<readonly string[]> {
+    const entries = await readdir(SKILLS_DIR, { withFileTypes: true });
+    const skillNames: string[] = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+      const skillMd = join(SKILLS_DIR, entry.name, "SKILL.md");
+      try {
+        await access(skillMd, constants.R_OK);
+        skillNames.push(entry.name);
+      } catch {
+        // Not a skill directory (no SKILL.md), skip
+      }
     }
-    return PAYLOAD_PATH;
+    if (skillNames.length === 0) {
+      throw new NoSkillsFoundError(SKILLS_DIR);
+    }
+    return skillNames;
   }
 
-  public async installTo(targetDir: string): Promise<SkillInstallResult> {
-    const payloadPath = await this.findPayload();
+  public async installTo(
+    skillName: string,
+    targetDir: string
+  ): Promise<SkillInstallResult> {
+    const payloadPath = resolve(SKILLS_DIR, skillName);
+    try {
+      await access(payloadPath, constants.R_OK);
+      const stats = await stat(payloadPath);
+      if (!stats.isDirectory()) {
+        throw new SkillPayloadMissingError(payloadPath);
+      }
+    } catch {
+      throw new SkillPayloadMissingError(payloadPath);
+    }
+
     const resolvedTarget = resolve(targetDir);
 
     if (resolvedTarget === resolve(payloadPath)) {

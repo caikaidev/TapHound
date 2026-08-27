@@ -2,8 +2,6 @@ import { resolve } from "node:path";
 
 import { z } from "zod";
 
-export const SKILL_DIRECTORY_NAME = "taphound-ai-journey";
-
 export const AGENT_IDS = [
   "claude",
   "codex",
@@ -95,6 +93,7 @@ export class NoAgentsSelectedError extends Error {
 }
 
 export interface TargetPath {
+  readonly skillName: string;
   readonly absolutePath: string;
   readonly relativePath: string;
   readonly agents: AgentId[];
@@ -102,6 +101,7 @@ export interface TargetPath {
 }
 
 export function resolveTargetPaths(
+  skillNames: readonly string[],
   agents: readonly AgentId[],
   global: boolean,
   cwd: string,
@@ -111,29 +111,33 @@ export function resolveTargetPaths(
     throw new NoAgentsSelectedError();
   }
 
-  const map = new Map<string, { relativePath: string; agents: AgentId[] }>();
+  const map = new Map<string, { skillName: string; relativePath: string; agents: AgentId[] }>();
 
-  for (const id of agents) {
-    const definition = findAgentDefinition(id);
-    const baseDir = global ? definition.globalPath : definition.projectPath;
-    const relativePath = `${baseDir}/${SKILL_DIRECTORY_NAME}`;
-    const absolutePath = resolve(
-      global ? homedir : cwd,
-      relativePath
-    );
+  for (const skillName of skillNames) {
+    for (const id of agents) {
+      const definition = findAgentDefinition(id);
+      const baseDir = global ? definition.globalPath : definition.projectPath;
+      const relativePath = `${baseDir}/${skillName}`;
+      const absolutePath = resolve(
+        global ? homedir : cwd,
+        relativePath
+      );
 
-    const existing = map.get(absolutePath);
-    if (existing === undefined) {
-      map.set(absolutePath, {
-        relativePath,
-        agents: [id]
-      });
-    } else {
-      existing.agents.push(id);
+      const existing = map.get(absolutePath);
+      if (existing === undefined) {
+        map.set(absolutePath, {
+          skillName,
+          relativePath,
+          agents: [id]
+        });
+      } else {
+        existing.agents.push(id);
+      }
     }
   }
 
   return [...map.entries()].map(([absolutePath, entry]) => ({
+    skillName: entry.skillName,
     absolutePath,
     relativePath: entry.relativePath,
     agents: entry.agents,
@@ -141,12 +145,23 @@ export function resolveTargetPaths(
   }));
 }
 
+export interface SkillInstallGroup {
+  readonly name: string;
+  readonly paths: string[];
+  readonly skipped: string[];
+}
+
 export const InitResultSchema = z.strictObject({
   status: z.literal("installed"),
   exitCode: z.literal(0),
   agents: z.array(z.string()),
-  paths: z.array(z.string()),
-  skipped: z.array(z.string()).optional()
+  skills: z.array(
+    z.strictObject({
+      name: z.string(),
+      paths: z.array(z.string()),
+      skipped: z.array(z.string()).optional()
+    })
+  )
 });
 
 export type InitResult = z.infer<typeof InitResultSchema>;

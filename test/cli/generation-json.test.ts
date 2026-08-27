@@ -221,7 +221,10 @@ function harness(signal?: AbortSignal): Harness {
         status: "installed" as const,
         exitCode: 0 as const,
         agents: ["droid"],
-        paths: [".factory/skills/taphound-ai-journey"]
+        skills: [{
+          name: "taphound-ai-journey",
+          paths: [".factory/skills/taphound-ai-journey"]
+        }]
       }))
     },
     initPrompt: {

@@ -4,12 +4,13 @@ import {
   AGENT_IDS,
   AGENT_REGISTRY,
   NoAgentsSelectedError,
-  SKILL_DIRECTORY_NAME,
   UnknownAgentError,
   findAgentDefinition,
   parseAgentIds,
   resolveTargetPaths
 } from "../../src/domain/init.js";
+
+const SKILL_NAMES = ["taphound-ai-journey", "taphound-journey-brief-author"];
 
 describe("init domain", () => {
   it("exports five agent IDs in stable order", () => {
@@ -27,10 +28,6 @@ describe("init domain", () => {
     for (const agent of AGENT_REGISTRY) {
       expect(findAgentDefinition(agent.id)).toBe(agent);
     }
-  });
-
-  it("uses taphound-ai-journey as the skill directory name", () => {
-    expect(SKILL_DIRECTORY_NAME).toBe("taphound-ai-journey");
   });
 
   describe("parseAgentIds", () => {
@@ -57,23 +54,27 @@ describe("init domain", () => {
   });
 
   describe("resolveTargetPaths", () => {
-    it("maps each agent to its project-level path", () => {
+    it("maps each skill x agent to its project-level path", () => {
       const targets = resolveTargetPaths(
+        SKILL_NAMES,
         ["claude", "cursor", "droid"],
         false,
         "/project",
         "/home"
       );
 
-      expect(targets).toHaveLength(3);
+      expect(targets).toHaveLength(6);
       const paths = targets.map((t) => t.relativePath);
-      expect(paths).toContain(".claude/skills/taphound-ai-journey");
-      expect(paths).toContain(".cursor/skills/taphound-ai-journey");
-      expect(paths).toContain(".factory/skills/taphound-ai-journey");
+      for (const skillName of SKILL_NAMES) {
+        expect(paths).toContain(`.claude/skills/${skillName}`);
+        expect(paths).toContain(`.cursor/skills/${skillName}`);
+        expect(paths).toContain(`.factory/skills/${skillName}`);
+      }
     });
 
-    it("maps each agent to its global path when global is true", () => {
+    it("maps each skill x agent to its global path when global is true", () => {
       const targets = resolveTargetPaths(
+        SKILL_NAMES,
         ["claude", "droid"],
         true,
         "/project",
@@ -81,25 +82,35 @@ describe("init domain", () => {
       );
 
       const absolutePaths = targets.map((t) => t.absolutePath);
-      expect(absolutePaths).toContain("/home/.claude/skills/taphound-ai-journey");
-      expect(absolutePaths).toContain("/home/.factory/skills/taphound-ai-journey");
+      for (const skillName of SKILL_NAMES) {
+        expect(absolutePaths).toContain(`/home/.claude/skills/${skillName}`);
+        expect(absolutePaths).toContain(`/home/.factory/skills/${skillName}`);
+      }
     });
 
-    it("deduplicates codex and other to the same .agents/skills path", () => {
+    it("deduplicates codex and other to the same .agents/skills path per skill", () => {
       const targets = resolveTargetPaths(
+        SKILL_NAMES,
         ["codex", "other"],
         false,
         "/project",
         "/home"
       );
 
-      expect(targets).toHaveLength(1);
-      expect(targets[0]?.agents).toEqual(["codex", "other"]);
-      expect(targets[0]?.relativePath).toBe(".agents/skills/taphound-ai-journey");
+      expect(targets).toHaveLength(2);
+      for (const skillName of SKILL_NAMES) {
+        const target = targets.find(
+          (t) => t.relativePath === `.agents/skills/${skillName}`
+        );
+        expect(target).toBeDefined();
+        expect(target?.agents).toEqual(["codex", "other"]);
+        expect(target?.skillName).toBe(skillName);
+      }
     });
 
     it("deduplicates when codex and other are both selected alongside others", () => {
       const targets = resolveTargetPaths(
+        ["taphound-ai-journey"],
         ["claude", "codex", "other", "droid"],
         false,
         "/project",
@@ -114,12 +125,13 @@ describe("init domain", () => {
     });
 
     it("throws NoAgentsSelectedError for an empty agent list", () => {
-      expect(() => resolveTargetPaths([], false, "/project", "/home"))
+      expect(() => resolveTargetPaths(SKILL_NAMES, [], false, "/project", "/home"))
         .toThrow(NoAgentsSelectedError);
     });
 
     it("produces absolute paths resolved from cwd for project-level", () => {
       const [target] = resolveTargetPaths(
+        ["taphound-ai-journey"],
         ["claude"],
         false,
         "/project",
@@ -133,6 +145,7 @@ describe("init domain", () => {
 
     it("produces absolute paths resolved from homedir for global", () => {
       const [target] = resolveTargetPaths(
+        ["taphound-ai-journey"],
         ["claude"],
         true,
         "/project",
@@ -146,6 +159,7 @@ describe("init domain", () => {
 
     it("marks all targets as not skipped", () => {
       const targets = resolveTargetPaths(
+        ["taphound-ai-journey"],
         ["claude", "droid"],
         false,
         "/project",
@@ -155,6 +169,20 @@ describe("init domain", () => {
       for (const target of targets) {
         expect(target.skipped).toBe(false);
       }
+    });
+
+    it("carries skillName on each target", () => {
+      const targets = resolveTargetPaths(
+        SKILL_NAMES,
+        ["claude"],
+        false,
+        "/project",
+        "/home"
+      );
+
+      const skillNames = targets.map((t) => t.skillName);
+      expect(skillNames).toContain("taphound-ai-journey");
+      expect(skillNames).toContain("taphound-journey-brief-author");
     });
   });
 });

@@ -4,7 +4,8 @@ import {
   NoAgentsSelectedError,
   resolveTargetPaths,
   type AgentId,
-  type InitResult
+  type InitResult,
+  type SkillInstallGroup
 } from "../../domain/init.js";
 import type { SkillInstallerPort } from "../../ports/skill-installer.js";
 
@@ -27,24 +28,39 @@ export class InitService {
       throw new NoAgentsSelectedError();
     }
 
+    const skillNames = await this.deps.installer.listSkillNames();
+
     const targets = resolveTargetPaths(
+      skillNames,
       input.agents,
       input.global,
       this.deps.cwd,
       this.deps.homedir
     );
 
-    const installedPaths: string[] = [];
-    const skippedPaths: string[] = [];
-    const allAgents: string[] = [];
+    const groupMap = new Map<string, SkillInstallGroup>();
 
     for (const target of targets) {
-      const result = await this.deps.installer.installTo(target.absolutePath);
-      if (result.skipped) {
-        skippedPaths.push(target.relativePath);
-      } else {
-        installedPaths.push(target.relativePath);
+      const result = await this.deps.installer.installTo(
+        target.skillName,
+        target.absolutePath
+      );
+
+      let group = groupMap.get(target.skillName);
+      if (group === undefined) {
+        group = { name: target.skillName, paths: [], skipped: [] };
+        groupMap.set(target.skillName, group);
       }
+
+      if (result.skipped) {
+        group.skipped.push(target.relativePath);
+      } else {
+        group.paths.push(target.relativePath);
+      }
+    }
+
+    const allAgents: string[] = [];
+    for (const target of targets) {
       for (const agent of target.agents) {
         if (!allAgents.includes(agent)) {
           allAgents.push(agent);
@@ -52,16 +68,23 @@ export class InitService {
       }
     }
 
-    const result: InitResult = {
+    const skills = [...groupMap.values()].map((group) => {
+      const skill: { name: string; paths: string[]; skipped?: string[] } = {
+        name: group.name,
+        paths: group.paths
+      };
+      if (group.skipped.length > 0) {
+        skill.skipped = group.skipped;
+      }
+      return skill;
+    });
+
+    return {
       status: "installed",
       exitCode: 0,
       agents: allAgents,
-      paths: installedPaths
+      skills
     };
-    if (skippedPaths.length > 0) {
-      return { ...result, skipped: skippedPaths };
-    }
-    return result;
   }
 }
 

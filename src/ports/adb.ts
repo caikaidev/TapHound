@@ -53,6 +53,13 @@ export interface LogcatOptions {
   signal?: AbortSignal | undefined;
 }
 
+export interface DumpLogcatOptions {
+  deviceSerial: string;
+  maxLines: number;
+  signal?: AbortSignal | undefined;
+  timeoutMs?: number | undefined;
+}
+
 export interface AdbPort {
   devices: (signal?: AbortSignal) => Promise<readonly DeviceInfo[]>;
   foregroundComponent: (
@@ -98,4 +105,5 @@ export interface AdbPort {
     signal?: AbortSignal
   ) => Promise<CommandResult>;
   startLogcat: (options: LogcatOptions) => RunningCommand;
+  dumpLogcat: (options: DumpLogcatOptions) => Promise<CommandResult>;
 }

@@ -55,7 +55,8 @@ function fixture(overrides: {
     swipe: vi.fn(),
     back: vi.fn(),
     inputText: vi.fn(),
-    startLogcat: vi.fn()
+    startLogcat: vi.fn(),
+    dumpLogcat: vi.fn()
   };
   const checkPermissions = vi.fn(() => Promise.resolve(
     overrides.permissions === false

@@ -77,7 +77,8 @@ function makeAdb(fake: FakeAdb): AdbPort {
     swipe: (): Promise<CommandResult> => Promise.resolve(commandResult()),
     back: (): Promise<CommandResult> => Promise.resolve(commandResult()),
     inputText: (): Promise<CommandResult> => Promise.resolve(commandResult()),
-    startLogcat: (): RunningCommand => runningCommand()
+    startLogcat: (): RunningCommand => runningCommand(),
+    dumpLogcat: (): Promise<CommandResult> => Promise.resolve(commandResult())
   };
 }
 

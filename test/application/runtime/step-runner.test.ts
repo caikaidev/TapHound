@@ -47,7 +47,8 @@ function adbPort(): AdbPort {
     swipe: vi.fn(() => Promise.resolve(commandResult())),
     back: vi.fn(() => Promise.resolve(commandResult())),
     inputText: vi.fn(() => Promise.resolve(commandResult())),
-    startLogcat: vi.fn(() => runningCommand())
+    startLogcat: vi.fn(() => runningCommand()),
+    dumpLogcat: vi.fn()
   };
 }
 

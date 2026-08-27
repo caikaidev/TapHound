@@ -143,7 +143,8 @@ export function runtimeFixture(): RuntimeFixture {
           return completion;
         })
       };
-    })
+    }),
+    dumpLogcat: vi.fn(() => Promise.resolve(commandResult()))
   };
   const writer = new ReportWriter();
   return {

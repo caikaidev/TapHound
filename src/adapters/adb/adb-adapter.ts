@@ -10,6 +10,7 @@ import type {
   AdbPort,
   AppIdentity,
   DeviceInfo,
+  DumpLogcatOptions,
   LaunchActivityOptions,
   LogcatOptions,
   ResolveLauncherActivityOptions,
@@ -386,5 +387,15 @@ export class AdbAdapter implements AdbPort {
         ? {}
         : { onStderrLine: options.onStderrLine })
     });
+  }
+
+  public dumpLogcat(options: DumpLogcatOptions): Promise<CommandResult> {
+    return this.run([
+      ...deviceArgs(options.deviceSerial),
+      "logcat",
+      "-d",
+      "-t",
+      String(options.maxLines)
+    ], options.signal, options.timeoutMs);
   }
 }

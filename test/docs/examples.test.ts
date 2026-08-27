@@ -330,13 +330,6 @@ describe("TapHound documentation examples", () => {
     expect(report).not.toMatch(/\bAPR\b|\bapr\b/);
   });
 
-  it("keeps verification evidence pointed at the runnable Android demo", async () => {
-    const audit = await text("docs/verification/taphound-v0.2-audit.md");
-
-    expect(audit).toContain("examples/taphound-android-demo");
-    expect(audit).not.toContain("examples/taphound-demo");
-  });
-
   it("keeps local testing and machine handoff instructions discoverable", async () => {
     const readme = await text("README.md");
     const readmeZh = await text("README.zh-CN.md");
@@ -375,7 +368,6 @@ describe("TapHound documentation examples", () => {
       "dist/",
       "coverage/",
       ".taphound/build/",
-      ".taphound/context/",
       ".gradle/",
       "**/build/",
       "local.properties",

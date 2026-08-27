@@ -25,17 +25,15 @@ Open Search, submit an empty query, and verify validation.
 ```mermaid
 stateDiagram-v2
     HomeActivity --> SearchActivity: click open_search [source]
-    SearchActivity --> SearchKeyboard: click search_input [source]
-    SearchKeyboard --> SearchDialog: back [needs-observation]
-    SearchDialog --> HomeActivity: click submit_search [source]
+    SearchActivity --> SearchActivity+Keyboard: click search_input [source]
+    SearchActivity+Keyboard --> SearchActivity+Dialog: click submit_search [needs-observation]
 ```
 
 | edge | action | from | to | confidence | locator hint |
 |------|--------|------|----|-----------|--------------|
 | e1 | click | HomeActivity | SearchActivity | source | resourceId: open_search |
-| e2 | click | SearchActivity+Keyboard | SearchActivity+Keyboard | source | resourceId: search_input |
-| e3 | back | SearchActivity+Keyboard | SearchActivity+Dialog | needs-observation | — |
-| e4 | click | SearchActivity+Dialog | HomeActivity | source | text: Save draft; logcat expect tag=IM.SendMailActivity |
+| e2 | click | SearchActivity | SearchActivity+Keyboard | source | resourceId: search_input |
+| e3 | click | SearchActivity+Keyboard | SearchActivity+Dialog | needs-observation | text: submit_search |
 
 Overlay sub-states of the same Activity (keyboard/dialog/drawer) use distinct
 node names (`Activity+Suffix`).
@@ -64,7 +62,7 @@ node names (`Activity+Suffix`).
 
 - Do not use coordinates or visual guessing.
 - Final Replay must pass.
-- Idempotency: repeat runs create duplicates; draft list uses index: 0.
+- Idempotency: repeat runs create duplicate search history entries; history list uses index: 0.
 
 ## Evidence References
 

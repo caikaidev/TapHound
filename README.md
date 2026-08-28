@@ -23,7 +23,7 @@ edit code → build APK → install to device → taphound verify → loop until
 ## Why TapHound for Android AI Testing?
 
 - **Deterministic Verification:** Leave behind the fragility of scripted UI automation. TapHound ships its own assertion model and replay engine to catch every regression precisely.
-- **AI-Agent Native:** The built-in `taphound-ai-journey` Skill adapts to agents like Droid, Claude Code, Codex, and Cursor to generate Android test paths automatically.
+- **AI-Agent Native:** Built-in `taphound-journey-brief-author` and `taphound-journey-generator` Skills adapt to agents like Droid, Claude Code, Codex, and Cursor to generate Project Context, per-Case Briefs, and Android test paths automatically.
 - **Non-invasive Build:** Focused on testing and verification, TapHound stays independent of APK compilation and install, driving native Android UI automation against an already-installed target APK.
 
 ## Requirements
@@ -79,7 +79,7 @@ See the [local testing guide](docs/local-testing.md) for source, npm tarball, an
 - `verify`: deterministically replay a Journey and publish a report.
 - `observe`: capture a point-in-time device snapshot (foreground, activity, layout, optional logcat) without a session or side effects.
 - `project describe`: output stable Android project facts.
-- `context list` / `validate` / `status`: inspect or validate a v2 Project Context index and module shards.
+- `context list` / `validate` / `status`: inspect or validate a Project Context index and module shards.
 - `context refresh`: recompute Context evidence hashes, including semantic hashes, without re-analyzing source.
 - `journey list-flows` / `journey resolve`: validate reusable Flows and resolve
   composed Journey Sources into flat Journey v1 files. `list-flows --include-external`
@@ -88,7 +88,7 @@ See the [local testing guide](docs/local-testing.md) for source, npm tarball, an
   `status` / `recover` / `archive` / `list` / `finalize`: manage deterministic
   Journey generation sessions. `bridge` records cross-app flows (e.g. camera,
   picker, share) through a bound External Flow.
-- `init`: install the TapHound AI Journey Skill for AI agents.
+- `init`: install TapHound's two built-in Skills (`taphound-journey-brief-author`, `taphound-journey-generator`) for AI agents.
 - `align camera`: probe the device's default camera app and write a deterministic
   `flows/external/camera/photo-capture.json` External Flow. Requires
   `--force` to overwrite an existing flow.
@@ -176,10 +176,13 @@ Supported actions include `click`, `longClick`, `inputText`, `swipe`, `scrollTo`
 
 ## AI-Agent-Driven Android Test Path Generation
 
-The repository ships the
-[`taphound-ai-journey`](assets/skills/taphound-ai-journey/SKILL.md) Skill. It
-drives one deterministic Journey scenario from Context and live device state
-through final Replay.
+The repository ships two Skills.
+[`taphound-journey-brief-author`](assets/skills/taphound-journey-brief-author/SKILL.md)
+generates and maintains the Project Context Bundle from source evidence and
+produces one Brief per Case.
+[`taphound-journey-generator`](assets/skills/taphound-journey-generator/SKILL.md) drives one
+deterministic Journey scenario from Context and live device state through final
+Replay.
 
 Requirement analysis, planning, coding, build/install, multi-Case scheduling,
 completion gates, and diagnosis belong to external Workflow Skills. Those
@@ -196,7 +199,7 @@ Replay remain authoritative.
 
 The Journey Skill guides agents such as Droid, Claude Code, Codex, and Cursor:
 
-1. Discover Gradle modules and generate a compact Project Context v2 index plus one semantic/evidence shard per module.
+1. Run the `taphound-journey-brief-author` Skill to generate a compact Project Context root index plus one semantic/evidence shard per Gradle module (one-time; refreshed on demand).
 2. Use `context list` to choose Goal-relevant modules and `context validate` / `context status` to check shard, evidence, and inventory freshness.
 3. Select reusable Base Flows by their deterministic Activity contract. Their
    first resolved step must start from a stable cold-launch destination, not
@@ -234,7 +237,7 @@ The device is bound at `generation start`; subsequent `observe`, `step`,
 `confirm`, `manual`, `bridge`, `status`, `recover`, and `archive` commands use
 that binding via the session. `generation start --external-flow <name...>` binds
 named External Flows by content hash so `generation bridge --flow <name>` can
-resolve them deterministically later. See the Skill's [`GUIDE.md`](assets/skills/taphound-ai-journey/GUIDE.md) for the full workflow.
+resolve them deterministically later. See the Skill's [`GUIDE.md`](assets/skills/taphound-journey-generator/GUIDE.md) for the full workflow.
 
 If Base Flow replay fails, `generation start --json` reports
 `FLOW_REPLAY_FAILED` with the Flow name, Verify report path, primary failure,
@@ -248,9 +251,9 @@ Journey step. Generation step JSON includes phase timing for freshness,
 evidence setup, observation, action, idle waiting, expectations, Logcat
 collection, and the optional next observation.
 
-### Installing the TapHound Testing Skill for Other AI Agents
+### Installing the TapHound Testing Skills for Other AI Agents
 
-`taphound init` copies the TapHound AI Journey Skill into each agent's Skill directory.
+`taphound init` copies TapHound's two built-in Skills into each agent's Skill directory.
 Interactively select at least one agent:
 
 ```bash
@@ -279,10 +282,10 @@ Supported agents and paths:
 | Droid | `.factory/skills/` | `~/.factory/skills/` |
 | Other | `.agents/skills/` | `~/.agents/skills/` |
 
-The Skill is published with the npm package; `taphound init` copies it from the
-package to the target directory. Re-running `init` overwrites existing files
-that exist in the payload, but does not remove stale files left in the target
-directory from a previous install.
+The Skills are published with the npm package; `taphound init` copies them from
+the package to the target directories. Re-running `init` overwrites existing
+files that exist in the payload, but does not remove stale files left in the
+target directory from a previous install.
 
 ## Deterministic State Verification
 
@@ -339,5 +342,5 @@ A: No. Replay, device operations, and assertions are fully deterministic, with n
 - The Recorder only provides swipe for scrollable elements that have bounds from the Android CLI; Replay does not guess swipe regions for elements missing bounds.
 - Annotated screenshot fallback applies only to `click` and `longClick`, and requires an explicitly saved `#label`.
 - Replay, device operations, and assertions are fully deterministic, with no AI or visual inference.
-- The repository provides one Agent Skill installable via `taphound init`, but there is no dedicated SubAgent wrapper yet.
+- The repository provides two Agent Skills installable via `taphound init`, but there is no dedicated SubAgent wrapper yet.
 - Regular tests do not require a real device; Replay and Generation device acceptance requires explicitly setting `TAPHOUND_ACCEPTANCE_DEVICE=1` and meeting external Android prerequisites.

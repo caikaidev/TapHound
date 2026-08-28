@@ -25,7 +25,7 @@ For one Case, an external orchestrator may supply the optional Skill-level
 ```
 
 The Markdown format is defined by
-[`taphound-journey-brief.example.md`](../assets/skills/taphound-ai-journey/templates/taphound-journey-brief.example.md).
+[`taphound-journey-brief.example.md`](../assets/skills/taphound-journey-generator/templates/taphound-journey-brief.example.md).
 This is not a Core CLI argument. It provides static Case hints to the Journey
 Skill; Project Context, live Snapshot binding, risk policy, and final Replay
 remain authoritative.
@@ -34,7 +34,7 @@ remain authoritative.
 
 The [`taphound-journey-brief-author` Skill](../assets/skills/taphound-journey-brief-author/SKILL.md)
 is the recommended producer of the Brief. It combines Android source analysis
-with read-only `taphound observe` to author one Brief v2 per Case, then
+with read-only `taphound observe` to author one Brief per Case, then
 returns `{path, sha256}` for the Journey Skill to consume. It uses only
 read-only commands and never modifies device state.
 
@@ -172,10 +172,10 @@ The caller must also use an argument array and keep `shell: false`, to avoid tur
 
 ## Generating a New Journey
 
-The generation flow uses the in-repo [`taphound-ai-journey` Skill](../assets/skills/taphound-ai-journey/SKILL.md):
+The generation flow uses the in-repo [`taphound-journey-generator` Skill](../assets/skills/taphound-journey-generator/SKILL.md):
 
 1. `project describe --json` outputs stable Package and Activity information.
-2. The Agent analyzes each Gradle module independently and produces a Project Context v2 root index plus module shards.
+2. The [`taphound-journey-brief-author` Skill](../assets/skills/taphound-journey-brief-author/SKILL.md) analyzes each Gradle module independently and produces the Project Context root index plus module shards. It owns the full Context lifecycle: initial generation, `context refresh` re-hashing, and full regeneration.
 3. `context list` exposes the compact module catalog. `context validate` / `context status` check the index, shard hashes, source evidence, and per-module file inventory. `context refresh` recomputes evidence hashes for an existing Context without re-analyzing source.
 4. `journey list-flows --json` validates reusable local prefixes. The Agent
    selects the deepest applicable valid Flow, never by filename alone. The
@@ -259,7 +259,7 @@ for freshness, evidence setup, observation, action, idle wait, expectations,
 Logcat, and optional next observation. Detached finalize progress and stdout
 live under `.taphound/build/jobs/<generationId>/`, outside the authoritative
 bundle. For the full protocol, retry rules, and Context update strategy, see
-the Skill's [`GUIDE.md`](../assets/skills/taphound-ai-journey/GUIDE.md).
+the Skill's [`GUIDE.md`](../assets/skills/taphound-journey-generator/GUIDE.md).
 
 The `generation step --input` envelope is a strict object with exactly three
 top-level fields. Unknown, missing, or flat (unwrapped) fields are rejected as
@@ -317,7 +317,7 @@ audit.
 
 ## Installing the Skill for AI Agents
 
-`taphound init` copies the TapHound AI Journey Skill from the npm package into
+`taphound init` copies the TapHound Journey Generator Skill from the npm package into
 each Agent's Skill directory. The interactive multi-select requires choosing
 at least one Agent; you can also specify non-interactively with `--agent`:
 

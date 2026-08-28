@@ -40,10 +40,10 @@ const defaultInstallResult: InitResult = {
   agents: ["claude", "droid"],
   skills: [
     {
-      name: "taphound-ai-journey",
+      name: "taphound-journey-generator",
       paths: [
-        ".claude/skills/taphound-ai-journey",
-        ".factory/skills/taphound-ai-journey"
+        ".claude/skills/taphound-journey-generator",
+        ".factory/skills/taphound-journey-generator"
       ]
     },
     {
@@ -285,7 +285,7 @@ describe("taphound init command", () => {
 
     expect(test.stdout.value).toContain("Installed TapHound Skills");
     expect(test.stdout.value).toContain("claude, droid");
-    expect(test.stdout.value).toContain(".claude/skills/taphound-ai-journey");
+    expect(test.stdout.value).toContain(".claude/skills/taphound-journey-generator");
     expect(test.exitCodes).toEqual([0]);
   });
 
@@ -297,9 +297,9 @@ describe("taphound init command", () => {
       agents: ["claude", "droid"],
       skills: [
         {
-          name: "taphound-ai-journey",
-          paths: [".claude/skills/taphound-ai-journey"],
-          skipped: [".factory/skills/taphound-ai-journey"]
+          name: "taphound-journey-generator",
+          paths: [".claude/skills/taphound-journey-generator"],
+          skipped: [".factory/skills/taphound-journey-generator"]
         }
       ]
     };
@@ -313,7 +313,7 @@ describe("taphound init command", () => {
     const skills = (output as InitResult).skills;
     expect(skills).toBeDefined();
     expect(skills[0]?.skipped).toEqual([
-      ".factory/skills/taphound-ai-journey"
+      ".factory/skills/taphound-journey-generator"
     ]);
   });
 

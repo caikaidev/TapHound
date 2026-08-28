@@ -554,7 +554,7 @@ deterministically reaches. Do not require a transient Splash Activity to remain
 foreground. A reusable launch anchor such as `core/launch-home` is a
 `wait: Home -> Home` step with an `element` expectation for a unique Home
 control, as shown in
-[`flow.example.json`](../assets/skills/taphound-ai-journey/templates/flow.example.json).
+[`flow.example.json`](../assets/skills/taphound-journey-generator/templates/flow.example.json).
 
 ```json
 {

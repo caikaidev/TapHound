@@ -240,7 +240,7 @@ function compactOutput(options: GenerationOptions): boolean {
 
 function envelopeHint(options: GenerationOptions): string {
   if ("input" in options) {
-    return "Planner envelope must be a strict object with exactly three top-level fields: version (1), proposal (object), and snapshot (object). Unknown or missing fields are rejected. See docs/agent-integration.md and assets/skills/taphound-ai-journey/schemas/proposed-step-envelope.json.";
+    return "Planner envelope must be a strict object with exactly three top-level fields: version (1), proposal (object), and snapshot (object). Unknown or missing fields are rejected. See docs/agent-integration.md and assets/skills/taphound-journey-generator/schemas/proposed-step-envelope.json.";
   }
   return "TapHound rejected the JSON input. See docs/agent-integration.md for the command contract.";
 }

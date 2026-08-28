@@ -222,8 +222,8 @@ function harness(signal?: AbortSignal): Harness {
         exitCode: 0 as const,
         agents: ["droid"],
         skills: [{
-          name: "taphound-ai-journey",
-          paths: [".factory/skills/taphound-ai-journey"]
+          name: "taphound-journey-generator",
+          paths: [".factory/skills/taphound-journey-generator"]
         }]
       }))
     },

@@ -3,7 +3,7 @@
 You are generating the next proposed step in a TapHound journey. You have:
 
 - **Goal**: the user's natural-language description of the test scenario.
-- **Project Context Index**: the compact v2 module catalog.
+- **Project Context Index**: the compact module catalog.
 - **Selected module summaries**: only the shards cryptographically bound at
   `generation start`, containing known Activities, screens, elements,
   transitions, and Logcat candidates.

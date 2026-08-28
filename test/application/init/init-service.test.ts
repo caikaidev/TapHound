@@ -7,7 +7,7 @@ import type {
   SkillInstallerPort
 } from "../../../src/ports/skill-installer.js";
 
-const SKILL_NAMES = ["taphound-ai-journey", "taphound-journey-brief-author"];
+const SKILL_NAMES = ["taphound-journey-generator", "taphound-journey-brief-author"];
 
 function createFakeInstaller(
   results?: Map<string, SkillInstallResult>
@@ -49,10 +49,10 @@ describe("InitService", () => {
     expect(result.skills).toHaveLength(2);
 
     const journeySkill = result.skills.find(
-      (s) => s.name === "taphound-ai-journey"
+      (s) => s.name === "taphound-journey-generator"
     );
-    expect(journeySkill?.paths).toContain(".claude/skills/taphound-ai-journey");
-    expect(journeySkill?.paths).toContain(".factory/skills/taphound-ai-journey");
+    expect(journeySkill?.paths).toContain(".claude/skills/taphound-journey-generator");
+    expect(journeySkill?.paths).toContain(".factory/skills/taphound-journey-generator");
 
     const briefSkill = result.skills.find(
       (s) => s.name === "taphound-journey-brief-author"
@@ -100,7 +100,7 @@ describe("InitService", () => {
     });
 
     expect(installer.calls).toEqual([
-      { skillName: "taphound-ai-journey", targetDir: "/home/.claude/skills/taphound-ai-journey" },
+      { skillName: "taphound-journey-generator", targetDir: "/home/.claude/skills/taphound-journey-generator" },
       { skillName: "taphound-journey-brief-author", targetDir: "/home/.claude/skills/taphound-journey-brief-author" }
     ]);
   });
@@ -119,7 +119,7 @@ describe("InitService", () => {
   });
 
   it("reports skipped paths per skill when installer returns skipped", async () => {
-    const factoryJourneyPath = "/project/.factory/skills/taphound-ai-journey";
+    const factoryJourneyPath = "/project/.factory/skills/taphound-journey-generator";
     const claudeBriefPath = "/project/.claude/skills/taphound-journey-brief-author";
     const installer = createFakeInstaller(
       new Map([
@@ -139,10 +139,10 @@ describe("InitService", () => {
     });
 
     const journeySkill = result.skills.find(
-      (s) => s.name === "taphound-ai-journey"
+      (s) => s.name === "taphound-journey-generator"
     );
-    expect(journeySkill?.paths).toEqual([".claude/skills/taphound-ai-journey"]);
-    expect(journeySkill?.skipped).toEqual([".factory/skills/taphound-ai-journey"]);
+    expect(journeySkill?.paths).toEqual([".claude/skills/taphound-journey-generator"]);
+    expect(journeySkill?.skipped).toEqual([".factory/skills/taphound-journey-generator"]);
 
     const briefSkill = result.skills.find(
       (s) => s.name === "taphound-journey-brief-author"

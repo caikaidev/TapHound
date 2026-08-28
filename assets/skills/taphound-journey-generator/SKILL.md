@@ -1,14 +1,14 @@
 ---
-name: taphound-ai-journey
+name: taphound-journey-generator
 description: >-
   Drive TapHound's deterministic Android journey generation protocol
-  end-to-end. Analyze Android project source to produce a Project Context,
-  then iteratively observe device state, propose and execute UI steps via
-  the TapHound CLI, and finalize a verified Journey. Use when the user
-  wants to create or verify Android test journeys using AI-driven
-  generation, record UI interactions for testing, automate Android UI
-  test scenarios, or generate TapHound Journey files from a natural-language
-  test goal.
+  end-to-end. Iteratively observe device state, propose and execute UI
+  steps via the TapHound CLI, and finalize a verified Journey. Requires a
+  valid Project Context (produced by the taphound-journey-brief-author skill).
+  Use when the user wants to create or verify Android test journeys using
+  AI-driven generation, record UI interactions for testing, automate
+  Android UI test scenarios, or generate TapHound Journey files from a
+  natural-language test goal.
 compatibility: >-
   Requires Node.js 22+, Android SDK with ADB and uiautomator, one online
   Android device (emulator or USB), and TapHound built and linked via
@@ -18,7 +18,7 @@ metadata:
   version: "1.0"
 ---
 
-# TapHound AI Journey Skill
+# TapHound Journey Generator Skill
 
 Platform-neutral instructions for any AI agent (Droid, Claude Code, Cursor,
 etc.) to drive TapHound's deterministic generation protocol end-to-end.
@@ -28,21 +28,26 @@ time. External Workflow Skills may invoke it once per independent Case, but
 they own requirement analysis, planning, coding, build/install, multi-Case
 scheduling, completion gates, and diagnosis.
 
+This Skill requires a valid Project Context as a prerequisite. The
+`taphound-journey-brief-author` Skill is the recommended producer — it analyzes
+Android source and maintains the Context Bundle. When this Skill encounters
+a stale or invalid Context, it stops and requires `taphound-journey-brief-author`
+to run first; it never generates or repairs Context itself.
+
 ## Skill Directory
 
-All file references are relative to `assets/skills/taphound-ai-journey/`.
-The directory contains `prompts/` (Phase 1 analysis, Flow selection, step
-generation, completion check, Brief validation), `schemas/` (JSON Schemas
-for Context, proposals, observe output, Flows, Journey sources), and
-`templates/` (example files). Read the relevant schema and prompt before
-each phase.
+All file references are relative to `assets/skills/taphound-journey-generator/`.
+The directory contains `prompts/` (Flow selection, step generation,
+completion check, Brief validation), `schemas/` (JSON Schemas for proposals,
+observe output, Flows, Journey sources), and `templates/` (example files).
+Read the relevant schema and prompt before each phase.
 
 ## How to Use This Skill
 
 Run `taphound init --agent droid,claude,codex,cursor` to install. For
 global installation: `taphound init --agent droid --global`.
 
-In the TapHound source repository, `.factory/skills/taphound-ai-journey`
+In the TapHound source repository, `.factory/skills/taphound-journey-generator`
 is a symlink so Droid auto-discovers it.
 
 The agent does NOT need to understand TapHound's internal TypeScript code.
@@ -75,16 +80,15 @@ risk confirmation, recovery, or final Replay rules.
 TapHound Core CLI option. When present, it carries `{path, sha256}` pointing
 to a project-relative `taphound-journey-brief.md`. Read
 `prompts/consume-journey-brief.md` for validation rules: verify the SHA-256,
-validate frontmatter (`schemaVersion: 1` or `2`, `kind: taphound.journeyBrief`),
+validate frontmatter (`schemaVersion: 2`, `kind: taphound.journeyBrief`),
 require fixed sections (`Goal`, `Preconditions`, `Expected Journey`,
 `Assertions`, `Implementation Hints`, `Constraints`, `Evidence References`),
-and ensure the Brief Goal matches the invocation `goal`. A v2 Brief
-additionally requires `State Transition Map` and `Capability Notes`; a v1
-Brief omits both and remains valid.
+and ensure the Brief Goal matches the invocation `goal`. The Brief
+additionally requires `State Transition Map` and `Capability Notes`.
 
 The companion `taphound-journey-brief-author` Skill is the recommended
 producer. It runs read-only `taphound observe` and source analysis to
-author one Brief v2 per Case, then returns `{path, sha256}` for this
+author one Brief per Case, then returns `{path, sha256}` for this
 Skill to consume. Install it alongside this Skill via
 `taphound init --agent <ids>`.
 
@@ -96,8 +100,9 @@ deterministic execution, and final Replay remain authoritative.
 ## Phase 0: Preflight
 
 Prerequisites: Node.js 22+ (avoid 23), Android SDK with ADB and
-`uiautomator`, one online device, and TapHound built and linked
-(`npm run build && npm link`).
+`uiautomator`, one online device, TapHound built and linked
+(`npm run build && npm link`), and a **valid Project Context** (produced by
+the `taphound-journey-brief-author` Skill).
 
 1. Verify `taphound` is available. Run `adb devices -l`; confirm at least
    one device is online.
@@ -107,33 +112,23 @@ Prerequisites: Node.js 22+ (avoid 23), Android SDK with ADB and
    ```
    Confirm `"status": "passed"`. Capture `deviceSerial`. If doctor fails,
    stop and report.
-3. **Context currency check**: If a Project Context exists at
+3. **Context currency check** — this Skill requires a valid Context and
+   never generates or repairs it. If a Project Context exists at
    `<project>/.taphound/context/project-context.json`:
    ```bash
    taphound context status \
      --project <project> \
      --context .taphound/context/project-context.json --json
    ```
-   - `"valid"`: Skip to step 4.
-   - `"stale"`: Run `context refresh --json`. It returns a `blocked` array;
-     each block has a `resolution` field:
-     - `pruneDeleted` → `refresh --prune-deleted`
-     - `acceptSourceChanges` → `refresh --accept-source-changes` (rehashes
-       semantic edits). Re-analyze (Phase 1) only when the module summary
-       is wrong or new UI files were added.
-     - `reanalyze` → Re-scan that module in Phase 1.
-   - `"invalid"`: Run `context generate --force` (Phase 1).
-   - File missing: Proceed to Phase 1 (`context generate`).
-   The typical reconcile for routine edits + deletions:
-   ```bash
-   taphound context refresh --project <project> \
-     --context .taphound/context/project-context.json \
-     --prune-deleted --accept-source-changes --json
-   ```
-   `--module <id...>` narrows scope. `--accept-source-changes` does NOT
-   add newly added Activities/layouts to the summary — re-analyze in
-   Phase 1 if the Goal may reach a new screen.
-
+   - `"valid"`: Proceed to step 4.
+   - `"stale"`: **Stop and report.** The Context is stale. Run the
+     `taphound-journey-brief-author` Skill to refresh it before generating a
+     Journey.
+   - `"invalid"`: **Stop and report.** The Context is structurally
+     invalid. Run the `taphound-journey-brief-author` Skill to regenerate it.
+   - File missing: **Stop and report.** No Project Context exists. Run the
+     `taphound-journey-brief-author` Skill to generate one before generating a
+     Journey.
 4. When status is valid, list the module index and choose Goal-relevant
    modules:
    ```bash
@@ -141,71 +136,9 @@ Prerequisites: Node.js 22+ (avoid 23), Android SDK with ADB and
      --project <project> \
      --context .taphound/context/project-context.json --json
    ```
-   Skip Phase 1 and continue to Phase 2.
+   Continue to Phase 1 (Flow Discovery).
 
-## Phase 1: Project Context Generation
-
-> Read `prompts/analyze-project.md` before starting — it contains detailed
-> guidance on module-by-module semantic analysis. Read both Context
-> schemas and both templates before editing shards.
-
-Core does all bookkeeping: module discovery, identity inspection, evidence
-and inventory hashing, and atomic writes. The agent's job is to fill in
-semantic `summary` fields that Core cannot infer from source alone.
-
-1. Generate the Context skeleton. Core discovers Gradle modules, inspects
-   `applicationId` and launch Activity, computes evidence and inventory
-   hashes, and writes one `notAnalyzed` shard per module with an empty
-   `summary`:
-   ```bash
-   taphound context generate \
-     --project <project> \
-     --json
-   ```
-   Use `--force` to overwrite an existing Context. Review the generated
-   module list and verify `packageName` and `launchActivity` match the
-   project.
-
-2. Fill in semantic summaries. For each shard under
-   `.taphound/context/modules/<module>.json`, read the module's source
-   per `prompts/analyze-project.md` and populate the `summary` object:
-   - `features`: domain terms this module contributes
-   - `activities`: Activity names, entry points, and screen names
-   - `elements`: interactive UI elements per screen with supported actions
-   - `transitions`: cross-Activity navigation paths
-   - `logcat`: `Log.i`/`Log.d` tag+pattern candidates for expectations
-   Set the shard `status` to `complete`, `partial`, or `unsupported`.
-   Never leave a shard as `notAnalyzed` after this step.
-
-3. Update the root index (`.taphound/context/project-context.json`):
-   - Copy `features`, `activities`, and `status` from each shard into the
-     corresponding module entry.
-   - Update `interactionPolicy.allowedActions` to match actions the UI
-     actually supports (derived from source evidence). Leave
-     `confirmationRequiredActions` empty unless ALL instances of an
-     action are genuinely dangerous.
-
-4. Rehash to update all shard and index hashes:
-   ```bash
-   taphound context rehash \
-     --project <project> \
-     --context .taphound/context/project-context.json \
-     --json
-   ```
-
-5. Validate:
-   ```bash
-   taphound context validate \
-     --project <project> \
-     --context .taphound/context/project-context.json \
-     --json
-   ```
-   If validation fails, fix the named index or shard and retry. Common
-   failures: package name mismatch, stale hash (run `context rehash`),
-   path containing `..` or starting with `/`, file listed in manifest but
-   not found on disk.
-
-## Phase 1.5: Reusable Flow Discovery
+## Phase 1: Reusable Flow Discovery
 
 Before starting generation, inspect the local Flow catalog:
 
@@ -225,7 +158,7 @@ cold-launches and replays the Flow before creating the session, binding its
 hashes. If replay fails, stop and report `FLOW_REPLAY_FAILED` — do not
 silently bypass it. If no Flow applies, omit `--base-flow`.
 
-## Phase 1.6: External Flow Discovery
+## Phase 2: External Flow Discovery
 
 External Flows make `bridge` steps deterministic (`replayMode: "auto"`) by
 supplying fixed steps for known external apps. List them:
@@ -253,7 +186,7 @@ fail with `EXTERNAL_FLOW_NOT_FOUND`. Without a bound flow, bridge steps
 commit with `replayMode: "manual"` and a non-interactive finalize rejects
 them with `MANUAL_STEP_REQUIRED`.
 
-## Phase 2: Journey Generation
+## Phase 3: Journey Generation
 
 > Read `schemas/proposed-step-envelope.json` to understand the envelope
 > structure before building step proposals. Read `prompts/generate-step.md`
@@ -276,7 +209,7 @@ them with `MANUAL_STEP_REQUIRED`.
      --base-flow <selected-flow> \
      --json
    ```
-   Omit `--base-flow` when Phase 1.5 selected no reusable prefix.
+   Omit `--base-flow` when Phase 1 selected no reusable prefix.
    Omit `--module` only when all modules are intentionally needed. Capture
    `generationId` and `contextSelection`. The config path is relative to the
    project root. The selected device is bound; subsequent `observe`, `step`,
@@ -311,7 +244,7 @@ them with `MANUAL_STEP_REQUIRED`.
       `incomplete`, stop. Do not use coordinates or visual guessing.
 
    b. **Check completion**: Read `prompts/check-completion.md`. If the Goal
-      is accomplished, break to Phase 3.
+       is accomplished, break to Phase 4.
 
    c. **Generate proposed step**: Read `prompts/generate-step.md`. Build the
       envelope (proposed step + binding + full snapshot) and write to a temp
@@ -370,7 +303,7 @@ taphound generation bridge \
   --compact --json
 ```
 
-**Auto bridge** (deterministic): pass `--flow <name>` to bind a Phase 1.6
+**Auto bridge** (deterministic): pass `--flow <name>` to bind a Phase 2
 External Flow. The step commits with `replayMode: "auto"`. **Manual bridge**:
 omit `--flow`; commits with `replayMode: "manual"` (human operator required
 during finalize). Options: `--scenario` (`photoCapture`, `pickImage`,
@@ -388,7 +321,7 @@ with manual replay — bind an External Flow or use a TTY).
 
 A successful bridge returns `nextBinding` and `nextSnapshotRef` like any step.
 
-## Phase 3: Finalize
+## Phase 4: Finalize
 
 1. Start finalize as a detached job so the replay survives agent or terminal
    interruption:
@@ -430,7 +363,8 @@ A successful bridge returns `nextBinding` and `nextSnapshotRef` like any step.
 | Situation                  | Action                                          |
 |----------------------------|-------------------------------------------------|
 | Doctor fails               | Stop, report environment issue                  |
-| Context validation fails   | Fix JSON, rehash, retry validation              |
+| Context stale/invalid/missing | Stop, run `taphound-journey-brief-author` skill first |
+| Context validation fails   | Stop, run `taphound-journey-brief-author` skill first |
 | Step rejected              | Re-observe + re-generate (up to retryCount)     |
 | PACKAGE_ESCAPE             | Use `generation bridge` (`--flow` for auto)     |
 | Bridge failure             | Check trigger, scenario, timeout; retry or `custom` |
@@ -455,8 +389,9 @@ A successful bridge returns `nextBinding` and `nextSnapshotRef` like any step.
   uniqueness).
 - The agent NEVER submits a `bridge` action via `generation step --input`.
   Bridge is handled by the separate `generation bridge` CLI command.
-- SHA-256 hashes are computed by Core (`context generate`, `context rehash`).
-  The agent NEVER computes hashes manually.
+- SHA-256 hashes are computed by Core. The agent NEVER computes hashes
+  manually. Context hashes are maintained by the `taphound-journey-brief-author`
+  Skill; this Skill consumes a validated Context.
 - The agent does NOT modify TapHound Core source code.
 - The agent does NOT use coordinates, visual guessing, or fallback.
 - Locator priority is fixed: `resourceId` > `text` > `contentDescription`.
@@ -473,8 +408,8 @@ A successful bridge returns `nextBinding` and `nextSnapshotRef` like any step.
 
 - `packageName` comes from `applicationId` in `build.gradle(.kts)`, NOT
   from the `package` attribute in `AndroidManifest.xml` (deprecated in
-  AGP 7+). Core's `context generate` resolves this automatically; verify
-  the result matches the installed app.
+  AGP 7+). The `taphound-journey-brief-author` Skill resolves this automatically;
+  verify the result matches the installed app.
 - The `resourceId` in locators is the bare name without the `id/` prefix
   (e.g., `open_search`, not `id/open_search`).
 - The same `@+id/submit` can appear in multiple layout XML files — this is

@@ -64,7 +64,7 @@ describe("generation project context contracts", () => {
       .toEqual(projectContextModule);
   });
 
-  it("requires an application module in the v2 index", () => {
+  it("requires an application module in the index", () => {
     expect(() => ProjectContextSchema.parse({
       ...projectContextIndex,
       modules: projectContextIndex.modules.map((module) => ({

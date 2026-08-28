@@ -8,7 +8,7 @@ import {
 import { validReport } from "../fixtures/report.js";
 
 describe("TapHoundReportSchema", () => {
-  it("accepts the layered v2 report contract", () => {
+  it("accepts the layered report contract", () => {
     expect(TapHoundReportSchema.parse(validReport())).toEqual(validReport());
   });
 

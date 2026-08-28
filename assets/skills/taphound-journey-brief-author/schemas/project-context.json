@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://taphound.dev/schemas/project-context.json",
-  "title": "TapHound Project Context Index v2",
+  "title": "TapHound Project Context Index",
   "type": "object",
   "additionalProperties": false,
   "required": [

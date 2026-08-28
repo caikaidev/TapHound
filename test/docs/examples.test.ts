@@ -136,13 +136,13 @@ describe("TapHound documentation examples", () => {
       "examples/composition/.taphound/sources/chat/send-message.json"
     ));
     const skillFlow = FlowSchema.parse(await json(
-      "assets/skills/taphound-ai-journey/templates/flow.example.json"
+      "assets/skills/taphound-journey-generator/templates/flow.example.json"
     ));
     const skillSource = JourneySourceSchema.parse(await json(
-      "assets/skills/taphound-ai-journey/templates/journey-source.example.json"
+      "assets/skills/taphound-journey-generator/templates/journey-source.example.json"
     ));
     const skillExternalFlow = ExternalFlowSchema.parse(await json(
-      "assets/skills/taphound-ai-journey/templates/external-flow.example.json"
+      "assets/skills/taphound-journey-generator/templates/external-flow.example.json"
     ));
 
     expect(core.includes).toEqual([]);
@@ -170,13 +170,13 @@ describe("TapHound documentation examples", () => {
 
   it("keeps the optional TapHound Journey Brief contract discoverable", async () => {
     const brief = await text(
-      "assets/skills/taphound-ai-journey/templates/taphound-journey-brief.example.md"
+      "assets/skills/taphound-journey-generator/templates/taphound-journey-brief.example.md"
     );
     const prompt = await text(
-      "assets/skills/taphound-ai-journey/prompts/consume-journey-brief.md"
+      "assets/skills/taphound-journey-generator/prompts/consume-journey-brief.md"
     );
     const skill = await text(
-      "assets/skills/taphound-ai-journey/SKILL.md"
+      "assets/skills/taphound-journey-generator/SKILL.md"
     );
     const agent = await text("docs/agent-integration.md");
 

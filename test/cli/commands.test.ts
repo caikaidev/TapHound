@@ -138,8 +138,8 @@ function dependencies(): {
           exitCode: 0 as const,
           agents: ["droid"],
           skills: [{
-            name: "taphound-ai-journey",
-            paths: [".factory/skills/taphound-ai-journey"]
+            name: "taphound-journey-generator",
+            paths: [".factory/skills/taphound-journey-generator"]
           }]
         }))
       },
@@ -1220,7 +1220,7 @@ describe("TapHound CLI commands", () => {
     }
   );
 
-  it("lists the compact v2 Context module index", async () => {
+  it("lists the compact Context module index", async () => {
     const test = dependencies();
 
     await createProgram(test.value).parseAsync([

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://taphound.dev/schemas/project-context-module.json",
-  "title": "TapHound Project Context Module v2",
+  "title": "TapHound Project Context Module",
   "type": "object",
   "additionalProperties": false,
   "required": [

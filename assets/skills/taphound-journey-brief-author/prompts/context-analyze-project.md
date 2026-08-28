@@ -1,7 +1,7 @@
 # Analyze Android Project for TapHound Context
 
 You are filling in the semantic `summary` fields of a TapHound Project Context
-Bundle v2 that Core has already scaffolded. Core owns module discovery,
+Bundle that Core has already scaffolded. Core owns module discovery,
 identity inspection (`packageName`, `launchActivity`), evidence and inventory
 hashing, and atomic writes. Your job is to read Android source files and
 populate the `summary` object in each generated shard.

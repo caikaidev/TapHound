@@ -117,7 +117,7 @@ describe("ProposedStepSchema", () => {
       locator: { resourceId: "search" },
       fallback: { type: "annotatedLabel", label: "#1" }
     }
-  ])("rejects coordinates, v2 locators, and annotated fallback", (shape) => {
+  ])("rejects coordinates, unknown locator keys, and annotated fallback", (shape) => {
     expect(() => ProposedStepSchema.parse({
       binding,
       ...shape,
@@ -125,7 +125,7 @@ describe("ProposedStepSchema", () => {
     })).toThrow();
   });
 
-  it("rejects a v2 expectation and unknown planner metadata", () => {
+  it("rejects a visual expectation and unknown planner metadata", () => {
     expect(() => ProposedStepSchema.parse({
       binding,
       action: "wait",

@@ -14,15 +14,18 @@ installed before recording, generation, or verification.
 `taphound init` scans `assets/skills/` and installs every skill directory
 containing a `SKILL.md`. Two skills ship with TapHound:
 
-- `taphound-ai-journey` drives one deterministic Journey generation session.
+- `taphound-journey-generator` drives one deterministic Journey generation session.
   Requirement analysis, planning, coding, build/install, multi-Case
   orchestration, completion gates, diagnosis, and IM-Log belong to external
   Workflow Skills. They may consume TapHound's public CLI JSON and evidence,
   but TapHound does not package or own those workflows.
-- `taphound-journey-brief-author` produces one Journey Brief v2 per Case by
-  combining source analysis with read-only `taphound observe`. It is the
-  recommended producer of the Brief that `taphound-ai-journey` consumes.
-  It uses only read-only commands and never modifies device state.
+- `taphound-journey-brief-author` generates and maintains the Project Context
+  Bundle (root index plus one shard per Gradle module) by analyzing source
+  evidence through read-only `taphound project`/`context` commands, and
+  produces one Journey Brief per Case by combining source analysis with
+  read-only `taphound observe`. It is the recommended producer of the Project
+  Context and Brief that `taphound-journey-generator` consumes. It uses only read-only
+  commands and never modifies device state.
 
 The Journey Skill may consume one optional project-relative
 `taphound-journey-brief.md` through a `journeyBrief: {path, sha256}` binding.
@@ -200,7 +203,7 @@ yield `ALIGN_DEVICE_UNAVAILABLE` (exit code 2).
 ### Project Context and Generation Flow
 
 `ProjectDescriber` emits stable package and launch facts. Project Context is a
-v2-only Bundle: a compact root index plus one semantic/evidence shard per
+Bundle: a compact root index plus one semantic/evidence shard per
 Gradle module. `ContextLoader` safely loads selected modules and dependencies;
 `ContextValidator` validates the resolved project identity and evidence.
 Per-module inventory path-set hashes detect newly added and removed manifest,

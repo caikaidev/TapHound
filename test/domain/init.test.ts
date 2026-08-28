@@ -10,7 +10,7 @@ import {
   resolveTargetPaths
 } from "../../src/domain/init.js";
 
-const SKILL_NAMES = ["taphound-ai-journey", "taphound-journey-brief-author"];
+const SKILL_NAMES = ["taphound-journey-generator", "taphound-journey-brief-author"];
 
 describe("init domain", () => {
   it("exports five agent IDs in stable order", () => {
@@ -110,7 +110,7 @@ describe("init domain", () => {
 
     it("deduplicates when codex and other are both selected alongside others", () => {
       const targets = resolveTargetPaths(
-        ["taphound-ai-journey"],
+        ["taphound-journey-generator"],
         ["claude", "codex", "other", "droid"],
         false,
         "/project",
@@ -119,7 +119,7 @@ describe("init domain", () => {
 
       expect(targets).toHaveLength(3);
       const agentsPath = targets.find(
-        (t) => t.relativePath === ".agents/skills/taphound-ai-journey"
+        (t) => t.relativePath === ".agents/skills/taphound-journey-generator"
       );
       expect(agentsPath?.agents).toEqual(["codex", "other"]);
     });
@@ -131,7 +131,7 @@ describe("init domain", () => {
 
     it("produces absolute paths resolved from cwd for project-level", () => {
       const [target] = resolveTargetPaths(
-        ["taphound-ai-journey"],
+        ["taphound-journey-generator"],
         ["claude"],
         false,
         "/project",
@@ -139,13 +139,13 @@ describe("init domain", () => {
       );
 
       expect(target?.absolutePath).toBe(
-        "/project/.claude/skills/taphound-ai-journey"
+        "/project/.claude/skills/taphound-journey-generator"
       );
     });
 
     it("produces absolute paths resolved from homedir for global", () => {
       const [target] = resolveTargetPaths(
-        ["taphound-ai-journey"],
+        ["taphound-journey-generator"],
         ["claude"],
         true,
         "/project",
@@ -153,13 +153,13 @@ describe("init domain", () => {
       );
 
       expect(target?.absolutePath).toBe(
-        "/home/.claude/skills/taphound-ai-journey"
+        "/home/.claude/skills/taphound-journey-generator"
       );
     });
 
     it("marks all targets as not skipped", () => {
       const targets = resolveTargetPaths(
-        ["taphound-ai-journey"],
+        ["taphound-journey-generator"],
         ["claude", "droid"],
         false,
         "/project",
@@ -181,7 +181,7 @@ describe("init domain", () => {
       );
 
       const skillNames = targets.map((t) => t.skillName);
-      expect(skillNames).toContain("taphound-ai-journey");
+      expect(skillNames).toContain("taphound-journey-generator");
       expect(skillNames).toContain("taphound-journey-brief-author");
     });
   });

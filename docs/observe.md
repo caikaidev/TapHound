@@ -111,7 +111,7 @@ not yet satisfied the session's idle policy).
 
 ## Use in Brief `needs-observation` Edges
 
-A TapHound Journey Brief v2 may mark a State Transition Map edge as
+A TapHound Journey Brief may mark a State Transition Map edge as
 `needs-observation`, signalling that the Brief's Activity and locator claims
 for that edge must be verified against a live Runtime Snapshot before they may
 inform a proposed generation step. `taphound observe` is the lightweight

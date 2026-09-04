@@ -482,6 +482,53 @@ selects structural stability directly. An action attempt that returns
 `generation status`, obtain explicit user approval before `recover`, and never
 assume that recovery committed the interrupted action or returned a snapshot.
 
+## Verification Cost Model
+
+Generation finalizes a Journey with exactly one uninterrupted cold-start
+replay of the complete step list. This is a deliberate design decision, not an
+implementation shortcut: the published report is self-contained proof that the
+exact Journey, launched from a reset process, replays step by step without
+relying on any session-time execution history.
+
+The cost consequence is equally deliberate: finalize replay time grows
+linearly with the step count, and a Journey that fails verification late must
+be corrected and re-verified in full. Two alternatives were evaluated and
+rejected:
+
+- **Trusting session-time execution as partial verification.** Steps executed
+  during generation run in a warm process: the activity stack, caches, and
+  process state carry over between steps. Accepting that history as evidence
+  would publish Journeys whose cold-start determinism was never proven by
+  Core; the first full replay would effectively be the user's, not TapHound's.
+- **Verified-prefix caching.** Reusing a previously replayed prefix would
+  require binding cached replay results to an exact prefix hash, environment,
+  and device state, and silently invalidating them on any `step --replace`,
+  app reinstall, or tool change. The bookkeeping would duplicate the session
+  revision protocol without adding any guarantee that the cached prefix still
+  reproduces from a cold start.
+
+The shipped mitigations keep full replay authoritative while bounding its
+cost:
+
+1. `generation step --replace <index>` localizes corrections. A locator or
+   step fix replays only the stored prefix through the same cold-launch
+   engine, truncates the session, and re-binds a fresh snapshot; subsequent
+   steps are not re-executed because they no longer exist. Without replace,
+   every late correction would otherwise force re-recording the entire
+   suffix.
+2. `generation finalize --detach` plus the persisted verification `phase`
+   (with per-step `stepIndex`/`stepCount` progress) make long replays
+   observable without holding a terminal open; `generation status --wait`
+   polls to completion.
+3. Finalize refuses redundant work: it validates all bindings before
+   starting, and only a genuine replay failure durably marks verification
+   `failed`, so precondition mistakes do not consume a replay cycle.
+
+Agents should therefore budget one full-replay duration per finalize attempt,
+prefer `step --replace` over restarting a session after a mid-journey
+correction, and treat finalize replay time as an expected, one-time cost of
+publishing proof rather than a retry penalty.
+
 ## Cross-Application Flows
 
 TapHound Core enforces single-package determinism. When a step causes the

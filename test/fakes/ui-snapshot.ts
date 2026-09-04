@@ -3,6 +3,7 @@ import { vi } from "vitest";
 import type { LayoutElement } from "../../src/domain/layout.js";
 import type { DisplayViewport } from "../../src/domain/geometry.js";
 import type {
+  OpenUiSnapshotProviderOptions,
   UiSnapshotProvider,
   UiSnapshotProviderFactory
 } from "../../src/ports/ui-snapshot.js";
@@ -42,6 +43,20 @@ export function uiSnapshotFactory(
 ): UiSnapshotProviderFactory {
   return {
     open: vi.fn(() => Promise.resolve(provider))
+  };
+}
+
+export function uiSnapshotFactoryFromLayout(
+  layout: (options: {
+    deviceSerial: string;
+    signal?: AbortSignal | undefined;
+    timeoutMs?: number | undefined;
+  }) => Promise<readonly LayoutElement[]>
+): UiSnapshotProviderFactory {
+  return {
+    open: vi.fn((options: OpenUiSnapshotProviderOptions) => Promise.resolve(
+      uiSnapshotProviderFromLayout(layout, options.deviceSerial)
+    ))
   };
 }
 

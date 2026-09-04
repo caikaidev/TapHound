@@ -36,6 +36,7 @@ import {
 import { ProposedStepSchema } from "../../domain/proposed-step.js";
 import {
   BridgeScenarioSchema,
+  DEFAULT_DEVICE_ROLE,
   type BridgeScenario
 } from "../../domain/journey.js";
 import { LocatorSchema } from "../../domain/layout.js";
@@ -571,7 +572,10 @@ function createStartCommand(dependencies: CliDependencies): Command {
                 config,
                 journey: resolution.journey,
                 projectRoot: options.project,
-                deviceSerial,
+                devices: [{
+                  role: resolution.journey.devices[0]?.role ?? DEFAULT_DEVICE_ROLE,
+                  deviceSerial
+                }],
                 toolVersions: tools(doctor.checks),
                 requireFocusedInput: true,
                 generatedReplayPolicy: true,

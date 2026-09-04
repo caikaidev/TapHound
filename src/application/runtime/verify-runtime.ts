@@ -7,7 +7,11 @@ import {
   failureCodeFromUnknown,
   type FailureCode
 } from "../../domain/failure.js";
-import { DEFAULT_DEVICE_ROLE, type Journey } from "../../domain/journey.js";
+import {
+  DEFAULT_DEVICE_ROLE,
+  type Journey,
+  type JourneyStep
+} from "../../domain/journey.js";
 import {
   hashJourney,
   type TapHoundReport,
@@ -25,6 +29,7 @@ import type {
   UiSnapshotProvider,
   UiSnapshotProviderFactory
 } from "../../ports/ui-snapshot.js";
+import type { DeviceAssignment } from "../devices/resolve-device-assignments.js";
 import { LogcatCollector } from "../collector/logcat-collector.js";
 import { logcatStopFailed } from "../collector/logcat-stop.js";
 import type { ReportWriter } from "../report/report-writer.js";
@@ -41,7 +46,7 @@ export interface VerifyInput {
   config: TapHoundConfig;
   journey: Journey;
   projectRoot: string;
-  deviceSerial: string;
+  devices: DeviceAssignment[];
   toolVersions: Record<string, string>;
   requireFocusedInput?: boolean | undefined;
   generatedReplayPolicy?: boolean | undefined;
@@ -77,6 +82,20 @@ export interface VerifyResult {
   report: TapHoundReport;
   reportPath: string;
   summaryPath: string;
+}
+
+interface DeviceRuntime {
+  role: string;
+  deviceSerial: string;
+  provider: UiSnapshotProvider | undefined;
+  logcat: LogcatCollector;
+  logcatStarted: boolean;
+  runner: StepRunnerLike | undefined;
+}
+
+interface DeviceCoverageFailure {
+  code: Extract<FailureCode, "CONFIG_INVALID" | "DEVICE_ROLE_UNMAPPED">;
+  message: string;
 }
 
 function commandFailed(result: {
@@ -125,10 +144,84 @@ function layerForFailure(code: FailureCode): keyof TapHoundReport["layers"] {
   return "structural";
 }
 
+function soleRoleForJourney(journey: Journey): string {
+  return journey.devices[0]?.role ?? DEFAULT_DEVICE_ROLE;
+}
+
+function stepDeviceRole(step: JourneyStep, soleRole: string): string {
+  return step.device ?? soleRole;
+}
+
+function deviceCoverageFailure(
+  journey: Journey,
+  devices: readonly DeviceAssignment[]
+): DeviceCoverageFailure | undefined {
+  const duplicateRole = devices.find((assignment, index) => devices.some(
+    (other, otherIndex) => otherIndex > index && other.role === assignment.role
+  ));
+  if (duplicateRole !== undefined) {
+    return {
+      code: "CONFIG_INVALID",
+      message: `Duplicate device assignment for role: ${duplicateRole.role}`
+    };
+  }
+
+  const reusedSerial = devices.find((assignment, index) => devices.some(
+    (other, otherIndex) => otherIndex > index
+      && other.deviceSerial === assignment.deviceSerial
+  ));
+  if (reusedSerial !== undefined) {
+    return {
+      code: "CONFIG_INVALID",
+      message: `Device serial is mapped to multiple roles: ${reusedSerial.deviceSerial}`
+    };
+  }
+
+  const declaredRoles = journey.devices.map((device) => device.role);
+  const unknownRole = devices.find(
+    (assignment) => !declaredRoles.includes(assignment.role)
+  );
+  if (unknownRole !== undefined) {
+    return {
+      code: "CONFIG_INVALID",
+      message: `Device assignment references a role the Journey does not declare: ${unknownRole.role}`
+    };
+  }
+
+  const assignedRoles = new Set(devices.map((assignment) => assignment.role));
+  const missingRoles = declaredRoles.filter((role) => !assignedRoles.has(role));
+  if (missingRoles.length > 0) {
+    return {
+      code: "DEVICE_ROLE_UNMAPPED",
+      message: `No device mapping for journey role(s): ${missingRoles.join(", ")}`
+    };
+  }
+
+  return undefined;
+}
+
+function uniqueAssignmentsByRole(
+  devices: readonly DeviceAssignment[]
+): DeviceAssignment[] {
+  const seen = new Set<string>();
+  const unique: DeviceAssignment[] = [];
+  for (const assignment of devices) {
+    if (seen.has(assignment.role)) {
+      continue;
+    }
+    seen.add(assignment.role);
+    unique.push(assignment);
+  }
+  return unique;
+}
+
 export class VerifyRuntime {
   public constructor(private readonly dependencies: VerifyRuntimeDependencies) {}
 
   public async verify(input: VerifyInput): Promise<VerifyResult> {
+    if (input.devices.length === 0) {
+      throw new Error("VerifyInput.devices requires at least one device assignment");
+    }
     const startedAt = this.dependencies.now();
     const runId = this.dependencies.createRunId();
     const launchActivity = normalizeActivity(
@@ -139,15 +232,37 @@ export class VerifyRuntime {
       resolve(input.projectRoot, input.config.artifactsDir),
       runId
     );
-    const logcat = new LogcatCollector(
-      this.dependencies.adb,
-      this.dependencies.clock
+    const coverage = deviceCoverageFailure(input.journey, input.devices);
+    const assignmentByRole = new Map(
+      input.devices.map((assignment) => [assignment.role, assignment])
     );
-    let logcatStarted = false;
-    let primaryFailure: ReportFailure | undefined;
+    const runtimes: DeviceRuntime[] = input.journey.devices.flatMap(
+      (declaration) => {
+        const assignment = assignmentByRole.get(declaration.role);
+        return assignment === undefined
+          ? []
+          : [{
+              role: declaration.role,
+              deviceSerial: assignment.deviceSerial,
+              provider: undefined,
+              logcat: new LogcatCollector(
+                this.dependencies.adb,
+                this.dependencies.clock
+              ),
+              logcatStarted: false,
+              runner: undefined
+            }];
+      }
+    );
+    let primaryFailure: ReportFailure | undefined = coverage === undefined
+      ? undefined
+      : {
+          code: coverage.code,
+          message: coverage.message,
+          phase: "runtime"
+        };
     const secondaryErrors: ReportFailure[] = [];
     const collectionErrors: ReportFailure[] = [];
-    let uiSnapshotProvider: UiSnapshotProvider | undefined;
     const steps: TapHoundReport["steps"] = [];
     const layers: TapHoundReport["layers"] = {
       run: "notRun",
@@ -156,6 +271,9 @@ export class VerifyRuntime {
       explicitExpect: "notRun",
       collection: "passed"
     };
+    if (coverage !== undefined) {
+      layers[layerForFailure(coverage.code)] = "failed";
+    }
 
     const setPrimary = (
       code: FailureCode,
@@ -185,39 +303,52 @@ export class VerifyRuntime {
     };
 
     try {
-      uiSnapshotProvider = await this.dependencies.uiSnapshots.open({
-        deviceSerial: input.deviceSerial,
-        timeoutMs: input.config.ui?.snapshotTimeoutMs
-          ?? input.config.idle.timeoutMs,
-        backend: input.config.ui?.backend ?? "auto",
-        cacheEnabled: input.config.ui?.cacheEnabled ?? true,
-        ...(input.signal === undefined ? {} : { signal: input.signal })
-      });
-      try {
-        const installed = await this.dependencies.adb.isInstalled({
-          packageName: input.config.run.packageName,
-          deviceSerial: input.deviceSerial,
-          ...(input.signal === undefined ? {} : { signal: input.signal }),
-          timeoutMs: input.config.idle.timeoutMs
-        });
-        if (!installed) {
-          setPrimary(
-            "APP_NOT_INSTALLED",
-            `Package ${input.config.run.packageName} is not installed on ${input.deviceSerial}`,
-            "install"
-          );
+      const createStepRunner = this.dependencies.createStepRunner
+        ?? ((options: StepRunnerOptions): StepRunnerLike => new StepRunner(options));
+      for (const runtime of runtimes) {
+        if (primaryFailure !== undefined) {
+          break;
         }
-      } catch (error) {
-        setPrimary("APP_NOT_INSTALLED", errorMessage(error), "install");
-      }
+        const provider = await this.dependencies.uiSnapshots.open({
+          deviceSerial: runtime.deviceSerial,
+          timeoutMs: input.config.ui?.snapshotTimeoutMs
+            ?? input.config.idle.timeoutMs,
+          backend: input.config.ui?.backend ?? "auto",
+          cacheEnabled: input.config.ui?.cacheEnabled ?? true,
+          ...(input.signal === undefined ? {} : { signal: input.signal })
+        });
+        runtime.provider = provider;
 
-      if (primaryFailure === undefined) {
+        let installFailed = false;
         try {
-          await logcat.start({
-            deviceSerial: input.deviceSerial,
+          const installed = await this.dependencies.adb.isInstalled({
+            packageName: input.config.run.packageName,
+            deviceSerial: runtime.deviceSerial,
+            ...(input.signal === undefined ? {} : { signal: input.signal }),
+            timeoutMs: input.config.idle.timeoutMs
+          });
+          if (!installed) {
+            setPrimary(
+              "APP_NOT_INSTALLED",
+              `Package ${input.config.run.packageName} is not installed on ${runtime.deviceSerial}`,
+              "install"
+            );
+            installFailed = true;
+          }
+        } catch (error) {
+          setPrimary("APP_NOT_INSTALLED", errorMessage(error), "install");
+          installFailed = true;
+        }
+        if (installFailed) {
+          break;
+        }
+
+        try {
+          await runtime.logcat.start({
+            deviceSerial: runtime.deviceSerial,
             ...(input.signal === undefined ? {} : { signal: input.signal })
           });
-          logcatStarted = true;
+          runtime.logcatStarted = true;
         } catch (error) {
           layers.collection = "failed";
           setPrimary(
@@ -226,153 +357,182 @@ export class VerifyRuntime {
             "collection"
           );
         }
+        if (!runtime.logcatStarted) {
+          break;
+        }
 
-        if (logcatStarted) {
-          const identity = {
+        const identity = {
+          packageName: input.config.run.packageName,
+          deviceSerial: runtime.deviceSerial,
+          ...(input.signal === undefined ? {} : { signal: input.signal }),
+          timeoutMs: input.config.idle.timeoutMs
+        };
+        const stopped = await this.dependencies.adb.forceStop(identity);
+        const launched = commandFailed(stopped)
+          ? undefined
+          : await this.dependencies.adb.launchActivity({
+              packageName: input.config.run.packageName,
+              activity: launchActivity,
+              deviceSerial: runtime.deviceSerial,
+              ...(input.signal === undefined ? {} : { signal: input.signal }),
+              timeoutMs: input.config.idle.timeoutMs
+            });
+        const launchError = launched === undefined
+          ? commandMessage(stopped, "App reset failed")
+          : launchFailure(launched);
+        if (launchError !== undefined) {
+          layers.run = "failed";
+          setPrimary("APP_LAUNCH_FAILED", launchError, "run");
+          break;
+        }
+
+        try {
+          const launchReadinessStartedAt = this.dependencies.clock.now();
+          const processReadiness = await new ProcessWaiter(
+            this.dependencies.adb,
+            this.dependencies.clock
+          ).wait({
             packageName: input.config.run.packageName,
-            deviceSerial: input.deviceSerial,
+            deviceSerial: runtime.deviceSerial,
+            pollIntervalMs: input.config.idle.pollIntervalMs,
+            timeoutMs: input.config.idle.timeoutMs,
+            ...(input.signal === undefined ? {} : { signal: input.signal })
+          });
+          if (processReadiness.status === "timeout") {
+            setPrimary(
+              "APP_LAUNCH_FAILED",
+              "App process was not found after launch",
+              "readiness"
+            );
+            break;
+          }
+          if (processReadiness.status === "cancelled") {
+            setPrimary(
+              "INTERNAL_ERROR",
+              "Verification was cancelled",
+              "readiness"
+            );
+            break;
+          }
+          runtime.logcat.scopeToPids(processReadiness.pids);
+          const soleRole = soleRoleForJourney(input.journey);
+          const firstOwnStep = input.journey.steps.find(
+            (step) => stepDeviceRole(step, soleRole) === runtime.role
+          );
+          if (firstOwnStep === undefined) {
+            throw new Error("Journey requires at least one step");
+          }
+          const remainingReadinessMs = input.config.idle.timeoutMs
+            - (
+              this.dependencies.clock.now()
+              - launchReadinessStartedAt
+            );
+          if (remainingReadinessMs <= 0) {
+            setPrimary(
+              "APP_LAUNCH_FAILED",
+              `Expected startup Activity ${firstOwnStep.activity.before}, found none before timeout`,
+              "readiness"
+            );
+            break;
+          }
+          const readiness = await new ActivityWaiter(
+            this.dependencies.adb,
+            this.dependencies.clock
+          ).wait({
+            packageName: input.config.run.packageName,
+            deviceSerial: runtime.deviceSerial,
+            expectedActivity: firstOwnStep.activity.before,
+            pollIntervalMs: input.config.idle.pollIntervalMs,
+            timeoutMs: remainingReadinessMs,
+            ...(input.signal === undefined ? {} : { signal: input.signal })
+          });
+
+          if (readiness.status === "processMissing") {
+            setPrimary(
+              "APP_LAUNCH_FAILED",
+              "App process exited before reaching the first Journey Activity",
+              "readiness"
+            );
+            break;
+          }
+          if (readiness.status === "timeout") {
+            setPrimary(
+              "APP_LAUNCH_FAILED",
+              `Expected startup Activity ${firstOwnStep.activity.before}, found ${readiness.actual ?? "none"} before timeout`,
+              "readiness"
+            );
+            break;
+          }
+          if (readiness.status === "cancelled") {
+            setPrimary(
+              "INTERNAL_ERROR",
+              "Verification was cancelled",
+              "readiness"
+            );
+            break;
+          }
+          await provider.capture({
+            reason: "locate",
             ...(input.signal === undefined ? {} : { signal: input.signal }),
             timeoutMs: input.config.idle.timeoutMs
-          };
-          const stopped = await this.dependencies.adb.forceStop(identity);
-          const launched = commandFailed(stopped)
-            ? undefined
-            : await this.dependencies.adb.launchActivity({
-                packageName: input.config.run.packageName,
-                activity: launchActivity,
-                deviceSerial: input.deviceSerial,
-                ...(input.signal === undefined ? {} : { signal: input.signal }),
-                timeoutMs: input.config.idle.timeoutMs
-              });
-          const launchError = launched === undefined
-            ? commandMessage(stopped, "App reset failed")
-            : launchFailure(launched);
-          if (launchError !== undefined) {
-            layers.run = "failed";
-            setPrimary("APP_LAUNCH_FAILED", launchError, "run");
-          } else {
-            try {
-              const launchReadinessStartedAt = this.dependencies.clock.now();
-              const processReadiness = await new ProcessWaiter(
-                this.dependencies.adb,
-                this.dependencies.clock
-              ).wait({
-                packageName: input.config.run.packageName,
-                deviceSerial: input.deviceSerial,
-                pollIntervalMs: input.config.idle.pollIntervalMs,
-                timeoutMs: input.config.idle.timeoutMs,
-                ...(input.signal === undefined ? {} : { signal: input.signal })
-              });
-              if (processReadiness.status === "timeout") {
-                setPrimary(
-                  "APP_LAUNCH_FAILED",
-                  "App process was not found after launch",
-                  "readiness"
-                );
-              } else if (processReadiness.status === "cancelled") {
-                setPrimary(
-                  "INTERNAL_ERROR",
-                  "Verification was cancelled",
-                  "readiness"
-                );
-              } else {
-                logcat.scopeToPids(processReadiness.pids);
-                const firstStep = input.journey.steps[0];
-                if (firstStep === undefined) {
-                  throw new Error("Journey requires at least one step");
-                }
-                const remainingReadinessMs = input.config.idle.timeoutMs
-                  - (
-                    this.dependencies.clock.now()
-                    - launchReadinessStartedAt
-                  );
-                if (remainingReadinessMs <= 0) {
-                  setPrimary(
-                    "APP_LAUNCH_FAILED",
-                    `Expected startup Activity ${firstStep.activity.before}, found none before timeout`,
-                    "readiness"
-                  );
-                } else {
-                  const readiness = await new ActivityWaiter(
-                    this.dependencies.adb,
-                    this.dependencies.clock
-                  ).wait({
-                    packageName: input.config.run.packageName,
-                    deviceSerial: input.deviceSerial,
-                    expectedActivity: firstStep.activity.before,
-                    pollIntervalMs: input.config.idle.pollIntervalMs,
-                    timeoutMs: remainingReadinessMs,
-                    ...(input.signal === undefined ? {} : { signal: input.signal })
-                  });
-
-                  if (readiness.status === "processMissing") {
-                    setPrimary(
-                      "APP_LAUNCH_FAILED",
-                      "App process exited before reaching the first Journey Activity",
-                      "readiness"
-                    );
-                  } else if (readiness.status === "timeout") {
-                    setPrimary(
-                      "APP_LAUNCH_FAILED",
-                      `Expected startup Activity ${firstStep.activity.before}, found ${readiness.actual ?? "none"} before timeout`,
-                      "readiness"
-                    );
-                  } else if (readiness.status === "cancelled") {
-                    setPrimary(
-                      "INTERNAL_ERROR",
-                      "Verification was cancelled",
-                      "readiness"
-                    );
-                  } else {
-                    await uiSnapshotProvider.capture({
-                      reason: "locate",
-                      ...(input.signal === undefined ? {} : { signal: input.signal }),
-                      timeoutMs: input.config.idle.timeoutMs
-                    });
-                    layers.run = "passed";
-                    layers.structural = "passed";
-                    layers.activityCheckpoint = "passed";
-                    layers.explicitExpect = "passed";
-                  }
-                }
-              }
-            } catch (error) {
-              setPrimary(
-                failureCodeFromUnknown(error) ?? "APP_LAUNCH_FAILED",
-                errorMessage(error),
-                "readiness"
-              );
-            }
-          }
+          });
+          runtime.runner = createStepRunner({
+            adb: this.dependencies.adb,
+            screenshots: this.dependencies.screenshots,
+            annotatedScreens: this.dependencies.annotatedScreens,
+            uiStability: this.dependencies.uiStability,
+            uiSnapshotProvider: provider,
+            clock: this.dependencies.clock,
+            logcat: runtime.logcat,
+            artifacts: session,
+            packageName: input.config.run.packageName,
+            deviceSerial: runtime.deviceSerial,
+            deviceRole: runtime.role,
+            idle: input.config.idle,
+            ...(input.requireFocusedInput === undefined
+              ? {}
+              : { requireFocusedInput: input.requireFocusedInput }),
+            ...(input.generatedReplayPolicy === undefined
+              ? {}
+              : { generatedReplayPolicy: input.generatedReplayPolicy }),
+            ...(input.manualReplay === undefined
+              ? {}
+              : { manualReplay: input.manualReplay })
+          });
+        } catch (error) {
+          setPrimary(
+            failureCodeFromUnknown(error) ?? "APP_LAUNCH_FAILED",
+            errorMessage(error),
+            "readiness"
+          );
+          break;
         }
       }
 
       if (primaryFailure === undefined) {
-        const createStepRunner = this.dependencies.createStepRunner
-          ?? ((options: StepRunnerOptions): StepRunnerLike => new StepRunner(options));
-        const runner = createStepRunner({
-          adb: this.dependencies.adb,
-          screenshots: this.dependencies.screenshots,
-          annotatedScreens: this.dependencies.annotatedScreens,
-          uiStability: this.dependencies.uiStability,
-          uiSnapshotProvider,
-          clock: this.dependencies.clock,
-          logcat,
-          artifacts: session,
-          packageName: input.config.run.packageName,
-          deviceSerial: input.deviceSerial,
-          idle: input.config.idle,
-          ...(input.requireFocusedInput === undefined
-            ? {}
-            : { requireFocusedInput: input.requireFocusedInput }),
-          ...(input.generatedReplayPolicy === undefined
-            ? {}
-            : { generatedReplayPolicy: input.generatedReplayPolicy }),
-          ...(input.manualReplay === undefined
-            ? {}
-            : { manualReplay: input.manualReplay })
-        });
+        layers.run = "passed";
+        layers.structural = "passed";
+        layers.activityCheckpoint = "passed";
+        layers.explicitExpect = "passed";
+      }
+
+      if (primaryFailure === undefined) {
+        const soleRole = soleRoleForJourney(input.journey);
+        const runtimeByRole = new Map(
+          runtimes.map((runtime) => [runtime.role, runtime])
+        );
         for (const [index, step] of input.journey.steps.entries()) {
+          const role = stepDeviceRole(step, soleRole);
+          const runner = runtimeByRole.get(role)?.runner;
+          if (runner === undefined) {
+            setPrimary(
+              "CONFIG_INVALID",
+              `Step references an unmapped device role: ${role}`,
+              "replay",
+              index
+            );
+            break;
+          }
           const result = await runner.run(step, index, input.signal);
           steps.push(result.report);
           if (result.status === "manualRequired") {
@@ -416,9 +576,12 @@ export class VerifyRuntime {
         });
       }
     } finally {
-      if (uiSnapshotProvider !== undefined) {
+      for (const runtime of runtimes) {
+        if (runtime.provider === undefined) {
+          continue;
+        }
         try {
-          await uiSnapshotProvider.close();
+          await runtime.provider.close();
         } catch (error) {
           secondaryErrors.push({
             code: "INTERNAL_ERROR",
@@ -429,37 +592,42 @@ export class VerifyRuntime {
       }
     }
 
-    const screenshotPath = `screenshot-${DEFAULT_DEVICE_ROLE}.png`;
-    let screenshotCollected = false;
-    try {
-      const screenshot = await this.dependencies.screenshots.capture({
-        outputPath: session.path(screenshotPath),
-        deviceSerial: input.deviceSerial,
-        ...(input.signal === undefined ? {} : { signal: input.signal })
-      });
-      if (commandFailed(screenshot)) {
-        collectionFailure(commandMessage(screenshot, "Screen capture failed"));
-      } else {
-        screenshotCollected = true;
-      }
-    } catch (error) {
-      collectionFailure(errorMessage(error));
-    }
-
-    let logcatCollected = false;
-    if (logcatStarted) {
-      try {
-        const stopped = await logcat.stop();
-        if (logcatStopFailed(stopped)) {
-          collectionFailure(commandMessage(stopped, "Logcat stop failed"));
+    const screenshotEntries: TapHoundReport["artifacts"]["screenshots"] = [];
+    const logcatEntries: TapHoundReport["artifacts"]["logcats"] = [];
+    if (coverage === undefined) {
+      for (const runtime of runtimes) {
+        const screenshotPath = `screenshot-${runtime.role}.png`;
+        try {
+          const screenshot = await this.dependencies.screenshots.capture({
+            outputPath: session.path(screenshotPath),
+            deviceSerial: runtime.deviceSerial,
+            ...(input.signal === undefined ? {} : { signal: input.signal })
+          });
+          if (commandFailed(screenshot)) {
+            collectionFailure(commandMessage(screenshot, "Screen capture failed"));
+          } else {
+            screenshotEntries.push({ role: runtime.role, path: screenshotPath });
+          }
+        } catch (error) {
+          collectionFailure(errorMessage(error));
         }
-        await session.writeText(
-          `logcat-${DEFAULT_DEVICE_ROLE}.txt`,
-          logcat.lines().map((line) => line.raw).join("\n")
-        );
-        logcatCollected = true;
-      } catch (error) {
-        collectionFailure(errorMessage(error));
+
+        if (runtime.logcatStarted) {
+          const logcatPath = `logcat-${runtime.role}.txt`;
+          try {
+            const stopped = await runtime.logcat.stop();
+            if (logcatStopFailed(stopped)) {
+              collectionFailure(commandMessage(stopped, "Logcat stop failed"));
+            }
+            await session.writeText(
+              logcatPath,
+              runtime.logcat.lines().map((line) => line.raw).join("\n")
+            );
+            logcatEntries.push({ role: runtime.role, path: logcatPath });
+          } catch (error) {
+            collectionFailure(errorMessage(error));
+          }
+        }
       }
     }
 
@@ -480,6 +648,7 @@ export class VerifyRuntime {
             "CONFIG_INVALID",
             "ENVIRONMENT_MISSING_TOOL",
             "DEVICE_UNAVAILABLE",
+            "DEVICE_ROLE_UNMAPPED",
             "APP_NOT_INSTALLED",
             "INTERNAL_ERROR"
           ].includes(failure.code)
@@ -502,18 +671,23 @@ export class VerifyRuntime {
         sha256: hashJourney(input.journey)
       },
       environment: {
-        devices: [{
-          role: DEFAULT_DEVICE_ROLE,
-          deviceSerial: input.deviceSerial,
-          ...(uiSnapshotProvider === undefined
-            ? {}
-            : {
-                uiBackend: uiSnapshotProvider.descriptor,
-                ...(uiSnapshotProvider.cacheTelemetry === undefined
-                  ? {}
-                  : { uiCache: uiSnapshotProvider.cacheTelemetry() })
-              })
-        }],
+        devices: coverage === undefined
+          ? runtimes.map((runtime) => ({
+              role: runtime.role,
+              deviceSerial: runtime.deviceSerial,
+              ...(runtime.provider === undefined
+                ? {}
+                : {
+                    uiBackend: runtime.provider.descriptor,
+                    ...(runtime.provider.cacheTelemetry === undefined
+                      ? {}
+                      : { uiCache: runtime.provider.cacheTelemetry() })
+                  })
+            }))
+          : uniqueAssignmentsByRole(input.devices).map((assignment) => ({
+              role: assignment.role,
+              deviceSerial: assignment.deviceSerial
+            })),
         tools: input.toolVersions
       },
       layers,
@@ -522,12 +696,8 @@ export class VerifyRuntime {
         directory: session.finalDirectory,
         report: "report.json",
         summary: "summary.txt",
-        screenshots: screenshotCollected
-          ? [{ role: DEFAULT_DEVICE_ROLE, path: screenshotPath }]
-          : [],
-        logcats: logcatCollected
-          ? [{ role: DEFAULT_DEVICE_ROLE, path: `logcat-${DEFAULT_DEVICE_ROLE}.txt` }]
-          : [],
+        screenshots: screenshotEntries,
+        logcats: logcatEntries,
         stepLogs: steps.flatMap((step) => (
           step.logcatPath === undefined ? [] : [step.logcatPath]
         ))

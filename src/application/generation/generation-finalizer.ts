@@ -371,7 +371,10 @@ export class GenerationFinalizer {
           config,
           journey,
           projectRoot: canonicalProjectRoot,
-          deviceSerial: input.deviceSerial,
+          devices: [{
+            role: journey.devices[0]?.role ?? DEFAULT_DEVICE_ROLE,
+            deviceSerial: input.deviceSerial
+          }],
           toolVersions: input.toolVersions,
           requireFocusedInput: true,
           generatedReplayPolicy: true,

@@ -7,6 +7,7 @@ import {
 } from "../../../src/application/runtime/verify-runtime.js";
 import type { StepRunner } from "../../../src/application/runtime/step-runner.js";
 import type { AppProcess } from "../../../src/domain/app-process.js";
+import type { Journey } from "../../../src/domain/journey.js";
 import type { CommandResult } from "../../../src/ports/process-runner.js";
 import {
   runtimeConfig,
@@ -21,7 +22,7 @@ function input(signal?: AbortSignal): VerifyInput {
     config: runtimeConfig,
     journey: runtimeJourney,
     projectRoot: "/project",
-    deviceSerial: "emulator-5554",
+    devices: [{ role: "default", deviceSerial: "emulator-5554" }],
     toolVersions: { node: "24.3.0", adb: "1.0.41", android: "1.0.0" },
     ...(signal === undefined ? {} : { signal })
   };
@@ -446,5 +447,310 @@ describe("VerifyRuntime", () => {
       report: { primaryFailure: { code: "INTERNAL_ERROR" } }
     });
     expect(test.order.at(-1)).toBe("report");
+  });
+});
+
+const MAIN = "com.example.app.MainActivity";
+const SEARCH = "com.example.app.SearchActivity";
+
+function clickStep(
+  device: string
+): Journey["steps"][number] {
+  return {
+    action: "click",
+    device,
+    locator: { resourceId: "search" },
+    activity: { before: MAIN, after: SEARCH }
+  };
+}
+
+describe("VerifyRuntime multi-device", () => {
+  const twoDeviceJourney: Journey = {
+    version: 2,
+    name: "CrossDevice",
+    devices: [{ role: "sender" }, { role: "receiver" }],
+    steps: [clickStep("sender"), clickStep("receiver")]
+  };
+
+  function multiInput(
+    journey: Journey,
+    devices: VerifyInput["devices"]
+  ): VerifyInput {
+    return {
+      ...input(),
+      journey,
+      devices
+    };
+  }
+
+  it("sets up each declared device and interleaves steps across roles", async () => {
+    const test = runtimeFixture({ serials: ["emulator-5554", "emulator-5556"] });
+
+    const result = await new VerifyRuntime(test.dependencies).verify(
+      multiInput(twoDeviceJourney, [
+        { role: "sender", deviceSerial: "emulator-5554" },
+        { role: "receiver", deviceSerial: "emulator-5556" }
+      ])
+    );
+
+    expect(result).toMatchObject({ status: "passed", exitCode: 0 });
+    expect(result.report.environment.devices).toEqual([
+      {
+        role: "sender",
+        deviceSerial: "emulator-5554",
+        uiBackend: {
+          id: "system-uiautomator",
+          adapterVersion: "test-v1",
+          configSha256: "0".repeat(64)
+        }
+      },
+      {
+        role: "receiver",
+        deviceSerial: "emulator-5556",
+        uiBackend: {
+          id: "system-uiautomator",
+          adapterVersion: "test-v1",
+          configSha256: "0".repeat(64)
+        }
+      }
+    ]);
+    expect(result.report.steps.map((step) => step.device))
+      .toEqual(["sender", "receiver"]);
+    expect(result.report.artifacts.screenshots).toEqual([
+      { role: "sender", path: "screenshot-sender.png" },
+      { role: "receiver", path: "screenshot-receiver.png" }
+    ]);
+    expect(result.report.artifacts.logcats).toEqual([
+      { role: "sender", path: "logcat-sender.txt" },
+      { role: "receiver", path: "logcat-receiver.txt" }
+    ]);
+    expect(test.artifacts.session.text.has("logcat-sender.txt")).toBe(true);
+    expect(test.artifacts.session.text.has("logcat-receiver.txt")).toBe(true);
+    expect(test.uiSnapshots.open).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(test.uiSnapshots.open).mock.calls[0]?.[0].deviceSerial)
+      .toBe("emulator-5554");
+    expect(vi.mocked(test.uiSnapshots.open).mock.calls[1]?.[0].deviceSerial)
+      .toBe("emulator-5556");
+    expect(vi.mocked(test.adb.tap).mock.calls.map((call) => call[1]))
+      .toEqual(["emulator-5554", "emulator-5556"]);
+    expect(test.order).toEqual([
+      "install@emulator-5554",
+      "logcat-start@emulator-5554",
+      "force-stop@emulator-5554",
+      "launch@emulator-5554",
+      "pid@emulator-5554",
+      "pid@emulator-5554",
+      "activity-main@emulator-5554",
+      "baseline@emulator-5554",
+      "install@emulator-5556",
+      "logcat-start@emulator-5556",
+      "force-stop@emulator-5556",
+      "launch@emulator-5556",
+      "pid@emulator-5556",
+      "pid@emulator-5556",
+      "activity-main@emulator-5556",
+      "baseline@emulator-5556",
+      "activity-main@emulator-5554",
+      "step-layout@emulator-5554",
+      "action@emulator-5554",
+      "idle@emulator-5554",
+      "idle@emulator-5554",
+      "idle@emulator-5554",
+      "pid@emulator-5554",
+      "activity-search@emulator-5554",
+      "activity-main@emulator-5556",
+      "step-layout@emulator-5556",
+      "action@emulator-5556",
+      "idle@emulator-5556",
+      "idle@emulator-5556",
+      "idle@emulator-5556",
+      "pid@emulator-5556",
+      "activity-search@emulator-5556",
+      "screenshot@emulator-5554",
+      "logcat-stop@emulator-5554",
+      "screenshot@emulator-5556",
+      "logcat-stop@emulator-5556",
+      "report"
+    ]);
+  });
+
+  it("routes repeated interleaved steps back to their device runtime", async () => {
+    const test = runtimeFixture({ serials: ["emulator-5554", "emulator-5556"] });
+    const scripts = new Map<string, string[]>([
+      ["emulator-5554", [MAIN, MAIN, SEARCH, MAIN, SEARCH]],
+      ["emulator-5556", [MAIN, MAIN, SEARCH]]
+    ]);
+    vi.mocked(test.adb.currentActivity).mockImplementation((identity) => {
+      const value = scripts.get(identity.deviceSerial)?.shift() ?? SEARCH;
+      return Promise.resolve(value);
+    });
+
+    const result = await new VerifyRuntime(test.dependencies).verify(
+      multiInput(
+        {
+          version: 2,
+          name: "CrossDevicePingPong",
+          devices: [{ role: "sender" }, { role: "receiver" }],
+          steps: [
+            clickStep("sender"),
+            clickStep("receiver"),
+            clickStep("sender")
+          ]
+        },
+        [
+          { role: "sender", deviceSerial: "emulator-5554" },
+          { role: "receiver", deviceSerial: "emulator-5556" }
+        ]
+      )
+    );
+
+    expect(result).toMatchObject({ status: "passed", exitCode: 0 });
+    expect(result.report.steps.map((step) => step.device))
+      .toEqual(["sender", "receiver", "sender"]);
+    expect(vi.mocked(test.adb.tap).mock.calls.map((call) => call[1]))
+      .toEqual(["emulator-5554", "emulator-5556", "emulator-5554"]);
+  });
+
+  it("stops at the first device whose install check fails but still collects per-device evidence", async () => {
+    const test = runtimeFixture({ serials: ["emulator-5554", "emulator-5556"] });
+    vi.mocked(test.adb.isInstalled).mockImplementation((identity) => {
+      test.order.push(`install@${identity.deviceSerial}`);
+      return Promise.resolve(identity.deviceSerial !== "emulator-5556");
+    });
+
+    const result = await new VerifyRuntime(test.dependencies).verify(
+      multiInput(twoDeviceJourney, [
+        { role: "sender", deviceSerial: "emulator-5554" },
+        { role: "receiver", deviceSerial: "emulator-5556" }
+      ])
+    );
+
+    expect(result).toMatchObject({
+      status: "error",
+      exitCode: 3,
+      report: {
+        primaryFailure: {
+          code: "APP_NOT_INSTALLED",
+          phase: "install",
+          message: "Package com.example.app is not installed on emulator-5556"
+        },
+        steps: []
+      }
+    });
+    expect(result.report.artifacts.screenshots).toEqual([
+      { role: "sender", path: "screenshot-sender.png" },
+      { role: "receiver", path: "screenshot-receiver.png" }
+    ]);
+    expect(result.report.artifacts.logcats).toEqual([
+      { role: "sender", path: "logcat-sender.txt" }
+    ]);
+    expect(test.order).toEqual([
+      "install@emulator-5554",
+      "logcat-start@emulator-5554",
+      "force-stop@emulator-5554",
+      "launch@emulator-5554",
+      "pid@emulator-5554",
+      "pid@emulator-5554",
+      "activity-main@emulator-5554",
+      "baseline@emulator-5554",
+      "install@emulator-5556",
+      "screenshot@emulator-5554",
+      "logcat-stop@emulator-5554",
+      "screenshot@emulator-5556",
+      "report"
+    ]);
+  });
+
+  it("fails with DEVICE_ROLE_UNMAPPED when a declared role has no assignment", async () => {
+    const test = runtimeFixture({ serials: ["emulator-5554", "emulator-5556"] });
+
+    const result = await new VerifyRuntime(test.dependencies).verify(
+      multiInput(twoDeviceJourney, [
+        { role: "sender", deviceSerial: "emulator-5554" }
+      ])
+    );
+
+    expect(result).toMatchObject({
+      status: "error",
+      exitCode: 3,
+      report: {
+        primaryFailure: {
+          code: "DEVICE_ROLE_UNMAPPED",
+          phase: "runtime",
+          message: "No device mapping for journey role(s): receiver"
+        },
+        steps: [],
+        layers: { structural: "failed" },
+        environment: {
+          devices: [{ role: "sender", deviceSerial: "emulator-5554" }]
+        },
+        artifacts: { screenshots: [], logcats: [] }
+      }
+    });
+    expect(test.order).toEqual(["report"]);
+  });
+
+  it("fails with CONFIG_INVALID for assignments the Journey does not declare", async () => {
+    const test = runtimeFixture();
+
+    const result = await new VerifyRuntime(test.dependencies).verify(
+      multiInput(runtimeJourney, [
+        { role: "default", deviceSerial: "emulator-5554" },
+        { role: "rogue", deviceSerial: "emulator-5556" }
+      ])
+    );
+
+    expect(result).toMatchObject({
+      status: "error",
+      exitCode: 2,
+      report: {
+        primaryFailure: {
+          code: "CONFIG_INVALID",
+          message: "Device assignment references a role the Journey does not declare: rogue"
+        },
+        steps: []
+      }
+    });
+    expect(result.report.environment.devices).toEqual([
+      { role: "default", deviceSerial: "emulator-5554" },
+      { role: "rogue", deviceSerial: "emulator-5556" }
+    ]);
+    expect(test.order).toEqual(["report"]);
+  });
+
+  it("fails with CONFIG_INVALID when one role is assigned twice", async () => {
+    const test = runtimeFixture();
+
+    const result = await new VerifyRuntime(test.dependencies).verify(
+      multiInput(runtimeJourney, [
+        { role: "default", deviceSerial: "emulator-5554" },
+        { role: "default", deviceSerial: "emulator-5556" }
+      ])
+    );
+
+    expect(result).toMatchObject({
+      status: "error",
+      exitCode: 2,
+      report: {
+        primaryFailure: {
+          code: "CONFIG_INVALID",
+          message: "Duplicate device assignment for role: default"
+        },
+        environment: {
+          devices: [{ role: "default", deviceSerial: "emulator-5554" }]
+        }
+      }
+    });
+    expect(test.order).toEqual(["report"]);
+  });
+
+  it("rejects an empty device assignment list", async () => {
+    const test = runtimeFixture();
+
+    await expect(new VerifyRuntime(test.dependencies).verify(
+      multiInput(runtimeJourney, [])
+    )).rejects.toThrow(
+      "VerifyInput.devices requires at least one device assignment"
+    );
   });
 });

@@ -346,7 +346,7 @@ describe("TapHound CLI commands", () => {
     const verifyInput = vi.mocked(test.value.verifier.verify).mock.calls[0]?.[0];
     expect(verifyInput).toMatchObject({
       projectRoot: "/project",
-      deviceSerial: "pixel-1",
+      devices: [{ role: "default", deviceSerial: "pixel-1" }],
       config: {
         ...runtimeConfig,
         run: {
@@ -641,7 +641,7 @@ describe("TapHound CLI commands", () => {
       expect.objectContaining({
         config: runtimeConfig,
         journey,
-        deviceSerial: "emulator-5554",
+        devices: [{ role: "default", deviceSerial: "emulator-5554" }],
         requireFocusedInput: true,
         generatedReplayPolicy: true
       })

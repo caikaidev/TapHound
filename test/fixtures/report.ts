@@ -1,10 +1,10 @@
-import type { TapHoundReportV2 } from "../../src/domain/report.js";
+import type { TapHoundReport } from "../../src/domain/report.js";
 
 export function validReport(
-  overrides: Partial<TapHoundReportV2> = {}
-): TapHoundReportV2 {
+  overrides: Partial<TapHoundReport> = {}
+): TapHoundReport {
   return {
-    schemaVersion: 2,
+    schemaVersion: 4,
     runId: "run-123",
     status: "passed",
     startedAt: "2026-07-19T10:00:00.000Z",
@@ -20,7 +20,10 @@ export function validReport(
       sha256: "a".repeat(64)
     },
     environment: {
-      deviceSerial: "emulator-5554",
+      devices: [{
+        role: "default",
+        deviceSerial: "emulator-5554"
+      }],
       tools: {
         node: "24.3.0",
         adb: "1.0.41",
@@ -38,6 +41,7 @@ export function validReport(
       index: 0,
       action: "click",
       status: "passed",
+      device: "default",
       startedAtMs: 0,
       finishedAtMs: 300,
       durationMs: 300,
@@ -72,8 +76,8 @@ export function validReport(
       directory: "/reports/run-123",
       report: "report.json",
       summary: "summary.txt",
-      screenshot: "screenshot.png",
-      logcat: "logcat.txt",
+      screenshots: [{ role: "default", path: "screenshot-default.png" }],
+      logcats: [{ role: "default", path: "logcat-default.txt" }],
       stepLogs: ["steps/001-logcat.txt"]
     },
     secondaryErrors: [],

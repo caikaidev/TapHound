@@ -150,7 +150,7 @@ function report(root: string, fallbackUsed = false): TapHoundReport {
     }]
   };
   return {
-    schemaVersion: 2,
+    schemaVersion: 4,
     runId: "verify-run",
     status: "passed",
     startedAt: "2026-07-23T00:00:00.000Z",
@@ -163,7 +163,7 @@ function report(root: string, fallbackUsed = false): TapHoundReport {
     },
     journey: { name: "generated", sha256: hashJourney(journey) },
     environment: {
-      deviceSerial: "emulator-5554",
+      devices: [{ role: "default", deviceSerial: "emulator-5554" }],
       tools: { adb: "1" }
     },
     layers: {
@@ -205,6 +205,8 @@ function report(root: string, fallbackUsed = false): TapHoundReport {
       directory: "/reports/verify-run",
       report: "report.json",
       summary: "summary.txt",
+      screenshots: [],
+      logcats: [],
       stepLogs: []
     },
     secondaryErrors: [],
@@ -231,7 +233,7 @@ function bridgeReport(root: string): TapHoundReport {
     }]
   };
   return {
-    schemaVersion: 2,
+    schemaVersion: 4,
     runId: "verify-run",
     status: "passed",
     startedAt: "2026-07-23T00:00:00.000Z",
@@ -244,7 +246,7 @@ function bridgeReport(root: string): TapHoundReport {
     },
     journey: { name: "generated", sha256: hashJourney(journey) },
     environment: {
-      deviceSerial: "emulator-5554",
+      devices: [{ role: "default", deviceSerial: "emulator-5554" }],
       tools: { adb: "1" }
     },
     layers: {
@@ -288,6 +290,8 @@ function bridgeReport(root: string): TapHoundReport {
       directory: "/reports/verify-run",
       report: "report.json",
       summary: "summary.txt",
+      screenshots: [],
+      logcats: [],
       stepLogs: []
     },
     secondaryErrors: [],
@@ -985,7 +989,18 @@ describe("GenerationFinalizer", () => {
       value.project.launchActivity = "com.example.app.OtherActivity";
     }],
     ["device", (value: TapHoundReport): void => {
-      value.environment.deviceSerial = "other-device";
+      const device = value.environment.devices[0];
+      if (device !== undefined) device.deviceSerial = "other-device";
+    }],
+    ["device role", (value: TapHoundReport): void => {
+      const device = value.environment.devices[0];
+      if (device !== undefined) device.role = "sender";
+    }],
+    ["device count", (value: TapHoundReport): void => {
+      value.environment.devices.push({
+        role: "peer",
+        deviceSerial: "emulator-5556"
+      });
     }],
     ["tools", (value: TapHoundReport): void => {
       value.environment.tools = { adb: "different" };

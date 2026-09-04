@@ -770,9 +770,11 @@ export class GenerationFinalizer {
     expected: ExpectedVerification,
     code: "VERIFICATION_FAILED" | "RECOVERY_REQUIRED"
   ): void {
-    const reportUiBackend = report.schemaVersion === 3
-      ? report.environment.uiBackend
-      : undefined;
+    const reportDevice = report.environment.devices[0];
+    const singleDefaultDevice = report.environment.devices.length === 1
+      && reportDevice?.role === DEFAULT_DEVICE_ROLE
+      && reportDevice.deviceSerial === expected.deviceSerial;
+    const reportUiBackend = reportDevice?.uiBackend;
     if (
       report.status !== "passed"
       || report.fallbackUsed
@@ -784,7 +786,7 @@ export class GenerationFinalizer {
       || report.project.root !== expected.project.root
       || report.project.packageName !== expected.project.packageName
       || report.project.launchActivity !== expected.project.launchActivity
-      || report.environment.deviceSerial !== expected.deviceSerial
+      || !singleDefaultDevice
       || (
         expected.bindings.uiBackend !== undefined
         && !sameJson(reportUiBackend, expected.bindings.uiBackend)

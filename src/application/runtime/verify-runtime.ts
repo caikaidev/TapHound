@@ -7,7 +7,7 @@ import {
   failureCodeFromUnknown,
   type FailureCode
 } from "../../domain/failure.js";
-import type { Journey } from "../../domain/journey.js";
+import { DEFAULT_DEVICE_ROLE, type Journey } from "../../domain/journey.js";
 import {
   hashJourney,
   type TapHoundReport,
@@ -429,7 +429,7 @@ export class VerifyRuntime {
       }
     }
 
-    const screenshotPath = "screenshot.png";
+    const screenshotPath = `screenshot-${DEFAULT_DEVICE_ROLE}.png`;
     let screenshotCollected = false;
     try {
       const screenshot = await this.dependencies.screenshots.capture({
@@ -454,7 +454,7 @@ export class VerifyRuntime {
           collectionFailure(commandMessage(stopped, "Logcat stop failed"));
         }
         await session.writeText(
-          "logcat.txt",
+          `logcat-${DEFAULT_DEVICE_ROLE}.txt`,
           logcat.lines().map((line) => line.raw).join("\n")
         );
         logcatCollected = true;
@@ -486,7 +486,7 @@ export class VerifyRuntime {
         ? "error"
         : "failed";
     const report: TapHoundReport = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       runId,
       status,
       startedAt: startedAt.toISOString(),
@@ -502,16 +502,19 @@ export class VerifyRuntime {
         sha256: hashJourney(input.journey)
       },
       environment: {
-        deviceSerial: input.deviceSerial,
-        tools: input.toolVersions,
-        ...(uiSnapshotProvider === undefined
-          ? {}
-          : {
-              uiBackend: uiSnapshotProvider.descriptor,
-              ...(uiSnapshotProvider.cacheTelemetry === undefined
-                ? {}
-                : { uiCache: uiSnapshotProvider.cacheTelemetry() })
-            })
+        devices: [{
+          role: DEFAULT_DEVICE_ROLE,
+          deviceSerial: input.deviceSerial,
+          ...(uiSnapshotProvider === undefined
+            ? {}
+            : {
+                uiBackend: uiSnapshotProvider.descriptor,
+                ...(uiSnapshotProvider.cacheTelemetry === undefined
+                  ? {}
+                  : { uiCache: uiSnapshotProvider.cacheTelemetry() })
+              })
+        }],
+        tools: input.toolVersions
       },
       layers,
       steps,
@@ -519,8 +522,12 @@ export class VerifyRuntime {
         directory: session.finalDirectory,
         report: "report.json",
         summary: "summary.txt",
-        ...(screenshotCollected ? { screenshot: screenshotPath } : {}),
-        ...(logcatCollected ? { logcat: "logcat.txt" } : {}),
+        screenshots: screenshotCollected
+          ? [{ role: DEFAULT_DEVICE_ROLE, path: screenshotPath }]
+          : [],
+        logcats: logcatCollected
+          ? [{ role: DEFAULT_DEVICE_ROLE, path: `logcat-${DEFAULT_DEVICE_ROLE}.txt` }]
+          : [],
         stepLogs: steps.flatMap((step) => (
           step.logcatPath === undefined ? [] : [step.logcatPath]
         ))

@@ -350,7 +350,7 @@ function buildPassingReport(
   candidateSteps: readonly JourneyStep[]
 ): TapHoundReport {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     runId: "verify-run",
     status: "passed",
     startedAt: "2026-07-23T00:00:00.000Z",
@@ -363,13 +363,16 @@ function buildPassingReport(
     },
     journey: { name: journey.name, sha256: hashJourney(journey) },
     environment: {
-      deviceSerial,
-      tools: { adb: "1" },
-      uiBackend: {
-        id: "system-uiautomator",
-        adapterVersion: "test-v1",
-        configSha256: "0".repeat(64)
-      }
+      devices: [{
+        role: "default",
+        deviceSerial,
+        uiBackend: {
+          id: "system-uiautomator",
+          adapterVersion: "test-v1",
+          configSha256: "0".repeat(64)
+        }
+      }],
+      tools: { adb: "1" }
     },
     layers: {
       run: "passed",
@@ -421,6 +424,8 @@ function buildPassingReport(
       directory: "/reports/verify-run",
       report: "report.json",
       summary: "summary.txt",
+      screenshots: [],
+      logcats: [],
       stepLogs: []
     },
     secondaryErrors: [],

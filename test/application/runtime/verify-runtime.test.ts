@@ -51,19 +51,24 @@ describe("VerifyRuntime", () => {
           collection: "passed"
         },
         artifacts: {
-          screenshot: "screenshot.png",
-          logcat: "logcat.txt",
+          screenshots: [{ role: "default", path: "screenshot-default.png" }],
+          logcats: [{ role: "default", path: "logcat-default.txt" }],
           stepLogs: ["steps/001-logcat.txt"]
         }
       }
     });
-    expect(result.report.schemaVersion).toBe(3);
-    if (result.report.schemaVersion !== 3) {
-      throw new Error("Expected report v3");
-    }
-    expect(result.report.environment.uiBackend).toMatchObject({
-      id: "system-uiautomator"
-    });
+    expect(result.report.schemaVersion).toBe(4);
+    expect(result.report.environment.devices).toEqual([
+      {
+        role: "default",
+        deviceSerial: "emulator-5554",
+        uiBackend: {
+          id: "system-uiautomator",
+          adapterVersion: "test-v1",
+          configSha256: "0".repeat(64)
+        }
+      }
+    ]);
     expect(test.uiSnapshots.open).toHaveBeenCalledWith({
       deviceSerial: "emulator-5554",
       timeoutMs: runtimeConfig.idle.timeoutMs,
@@ -91,7 +96,7 @@ describe("VerifyRuntime", () => {
       "logcat-stop",
       "report"
     ]);
-    expect(test.artifacts.session.text.has("logcat.txt")).toBe(true);
+    expect(test.artifacts.session.text.has("logcat-default.txt")).toBe(true);
     expect(test.artifacts.session.published).toBe(true);
   });
 

@@ -259,7 +259,8 @@ export class GenerationStarter {
               config.run.packageName,
               config.run.activity
             )
-            || report.environment.deviceSerial !== input.deviceSerial
+            || report.environment.devices.length !== 1
+            || report.environment.devices[0]?.deviceSerial !== input.deviceSerial
             || journey.steps.some((step, index) => {
               const result = report.steps[index];
               const expectationType = step.expect?.type;

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import { FAILURE_CODES } from "./failure.js";
+import { DeviceRoleSchema } from "./journey.js";
 import { UiBackendDescriptorSchema } from "./ui-backend.js";
 import { UiCacheTelemetrySchema } from "./ui-cache.js";
 
@@ -85,6 +86,7 @@ export const StepReportSchema = z.strictObject({
     "bridge"
   ]),
   status: ResultStatusSchema,
+  device: DeviceRoleSchema.optional(),
   replayMode: z.enum(["auto", "manual"]).optional(),
   startedAtMs: z.number().nonnegative(),
   finishedAtMs: z.number().nonnegative(),
@@ -111,12 +113,17 @@ const LayersSchema = z.strictObject({
   collection: ResultStatusSchema
 });
 
+const ArtifactRolePathSchema = z.strictObject({
+  role: DeviceRoleSchema,
+  path: z.string().min(1)
+});
+
 const ArtifactsSchema = z.strictObject({
   directory: z.string().min(1),
   report: z.string().min(1),
   summary: z.string().min(1),
-  screenshot: z.string().min(1).optional(),
-  logcat: z.string().min(1).optional(),
+  screenshots: z.array(ArtifactRolePathSchema),
+  logcats: z.array(ArtifactRolePathSchema),
   stepLogs: z.array(z.string().min(1))
 });
 
@@ -143,36 +150,49 @@ const ReportFields = {
   fallbackUsed: z.boolean()
 };
 
-export const TapHoundReportV2Schema = z.strictObject({
-  schemaVersion: z.literal(2),
+const ReportDeviceSchema = z.strictObject({
+  role: DeviceRoleSchema,
+  deviceSerial: z.string().min(1),
+  uiBackend: UiBackendDescriptorSchema.optional(),
+  uiCache: UiCacheTelemetrySchema.optional()
+});
+
+export const TapHoundReportV4Schema = z.strictObject({
+  schemaVersion: z.literal(4),
   ...ReportFields,
   environment: z.strictObject({
-    deviceSerial: z.string().min(1),
+    devices: z.array(ReportDeviceSchema).min(1),
     tools: z.record(z.string(), z.string())
   })
+}).superRefine((report, context) => {
+  const roles = new Set(report.environment.devices.map(
+    (device) => device.role
+  ));
+  if (roles.size !== report.environment.devices.length) {
+    context.addIssue({
+      code: "custom",
+      message: "Device roles must be unique within a report"
+    });
+    return;
+  }
+  const unknownArtifactRole = [
+    ...report.artifacts.screenshots,
+    ...report.artifacts.logcats
+  ].some((entry) => !roles.has(entry.role));
+  if (unknownArtifactRole) {
+    context.addIssue({
+      code: "custom",
+      message: "Artifacts reference an unknown device role"
+    });
+  }
 });
 
-export const TapHoundReportV3Schema = z.strictObject({
-  schemaVersion: z.literal(3),
-  ...ReportFields,
-  environment: z.strictObject({
-    deviceSerial: z.string().min(1),
-    tools: z.record(z.string(), z.string()),
-    uiBackend: UiBackendDescriptorSchema.optional(),
-    uiCache: UiCacheTelemetrySchema.optional()
-  })
-});
-
-export const TapHoundReportSchema = z.discriminatedUnion("schemaVersion", [
-  TapHoundReportV2Schema,
-  TapHoundReportV3Schema
-]);
+export const TapHoundReportSchema = TapHoundReportV4Schema;
 
 export type ReportFailure = z.infer<typeof ReportFailureSchema>;
 export type StepReport = z.infer<typeof StepReportSchema>;
-export type TapHoundReportV2 = z.infer<typeof TapHoundReportV2Schema>;
-export type TapHoundReportV3 = z.infer<typeof TapHoundReportV3Schema>;
-export type TapHoundReport = z.infer<typeof TapHoundReportSchema>;
+export type TapHoundReportV4 = z.infer<typeof TapHoundReportV4Schema>;
+export type TapHoundReport = TapHoundReportV4;
 
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) {

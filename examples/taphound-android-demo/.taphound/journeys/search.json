@@ -1,6 +1,11 @@
 {
-  "version": 1,
+  "version": 2,
   "name": "TapHound demo search",
+  "devices": [
+    {
+      "role": "default"
+    }
+  ],
   "steps": [
     {
       "action": "click",

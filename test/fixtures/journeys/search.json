@@ -1,6 +1,7 @@
 {
-  "version": 1,
+  "version": 2,
   "name": "Search",
+  "devices": [{ "role": "default" }],
   "steps": [
     {
       "action": "click",

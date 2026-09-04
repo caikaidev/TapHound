@@ -693,7 +693,7 @@ Finalize performs:
 3. Verify no fallback, no crash, all assertions pass
 4. Atomically publish the authoritative bundle to
    `.taphound/build/generations/<id>/`
-5. Export Journey v1 and sidecar meta to the `--output` path
+5. Export Journey v2 and sidecar meta to the `--output` path
 
 **Failure**: troubleshoot by `failure.code`. Common:
 
@@ -707,7 +707,7 @@ Finalize performs:
 ### 3.9 Verify Artifacts
 
 ```bash
-# Exported Journey (standard Journey v1, can be replayed with verify)
+# Exported Journey (standard Journey v2, can be replayed with verify)
 cat /path/to/project/.taphound/journeys/generated-search.json
 
 # Sidecar meta (verification status, binding hashes, manual override records)
@@ -744,7 +744,7 @@ Authoritative bundle directory structure:
 
 ### 3.10 Re-verify with Standard verify (Optional)
 
-The generated Journey is a standard Journey v1 and can be independently
+The generated Journey is a standard Journey v2 and can be independently
 replayed with the regular verify command:
 
 ```bash
@@ -940,7 +940,7 @@ activity to Core-owned structural layout hashing.
   policy, locator uniqueness).
 - SHA-256 hashes are ALWAYS computed via shell; the AI never guesses hash
   values.
-- The generated Journey is a standard Journey v1 and can be independently
+- The generated Journey is a standard Journey v2 and can be independently
   replayed with the regular `verify` command.
 - Real-device acceptance is fully separate from the normal test suite and
   does NOT run in `npm test`.

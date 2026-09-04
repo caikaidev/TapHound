@@ -349,8 +349,9 @@ async function createBridgeFixture(): Promise<BridgeFixture> {
   const verify = vi.fn<VerifyFunction>(async () => {
     const session = await store.read("generation-bridge-id");
     const journey: Journey = {
-      version: 1,
+      version: 2,
       name: "generated",
+      devices: [{ role: "default" }],
       steps: session.candidateSteps
     };
     return {
@@ -675,7 +676,7 @@ describe("Bridge External Flow lifecycle regression", () => {
       exitCode: 0,
       report: buildBridgePassingReport(
         test.canonicalRoot,
-        { version: 1, name: "generated", steps: manualSteps },
+        { version: 2, name: "generated", devices: [{ role: "default" }], steps: manualSteps },
         manualSteps
       ),
       reportPath: "/reports/report.json",

@@ -274,8 +274,9 @@ async function createLifecycleFixture(): Promise<LifecycleFixture> {
   const verify = vi.fn<VerifyFunction>(async () => {
     const session = await store.read("generation-core-id");
     const journey: Journey = {
-      version: 1,
+      version: 2,
       name: "generated",
+      devices: [{ role: "default" }],
       steps: session.candidateSteps
     };
     return {
@@ -687,8 +688,9 @@ describe("Generation lifecycle regression", () => {
         ...buildPassingReport(
           test.canonicalRoot,
           {
-            version: 1,
+            version: 2,
             name: "generated",
+            devices: [{ role: "default" }],
             steps: (await test.store.read("generation-core-id")).candidateSteps
           },
           (await test.store.read("generation-core-id")).candidateSteps

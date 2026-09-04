@@ -82,7 +82,7 @@ See the [local testing guide](docs/local-testing.md) for source, npm tarball, an
 - `context list` / `validate` / `status`: inspect or validate a Project Context index and module shards.
 - `context refresh`: recompute Context evidence hashes, including semantic hashes, without re-analyzing source.
 - `journey list-flows` / `journey resolve`: validate reusable Flows and resolve
-  composed Journey Sources into flat Journey v1 files. `list-flows --include-external`
+  composed Journey Sources into flat Journey v2 files. `list-flows --include-external`
   also lists External Flows used by `generation bridge --flow`.
 - `generation start` / `observe` / `step` / `confirm` / `manual` / `bridge` /
   `status` / `recover` / `archive` / `list` / `finalize`: manage deterministic

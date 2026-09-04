@@ -16,7 +16,11 @@ import {
   type GenerationMeta,
   type GenerationSession
 } from "../../domain/generation.js";
-import { JourneySchema, type Journey } from "../../domain/journey.js";
+import {
+  DEFAULT_DEVICE_ROLE,
+  JourneySchema,
+  type Journey
+} from "../../domain/journey.js";
 import {
   ProjectRelativePathSchema,
   ResolvedProjectContextSchema,
@@ -268,8 +272,9 @@ export class GenerationFinalizer {
     this.assertBindings(session, input, config, context, project);
 
     const journey = JourneySchema.parse({
-      version: 1,
+      version: 2,
       name,
+      devices: [{ role: DEFAULT_DEVICE_ROLE }],
       steps: session.candidateSteps
     });
     if (
@@ -999,8 +1004,9 @@ export class GenerationFinalizer {
       this.assertReport(
         report,
         {
-          version: 1,
+          version: 2,
           name: expected.journey.name,
+          devices: [{ role: DEFAULT_DEVICE_ROLE }],
           steps: running.candidateSteps
         },
         expected,
@@ -1137,8 +1143,9 @@ export class GenerationFinalizer {
     this.assertReport(
       report,
       {
-        version: 1,
+        version: 2,
         name: expected.journey.name,
+        devices: [{ role: DEFAULT_DEVICE_ROLE }],
         steps: session.candidateSteps
       },
       expected,

@@ -350,7 +350,7 @@ A successful bridge returns `nextBinding` and `nextSnapshotRef` like any step.
 3. Check the detached result `status`:
    - **`"verified"`**: Success. Report to the user:
      - `bundlePath` (authoritative generation bundle)
-     - `journeyPath` (exported Journey v1)
+      - `journeyPath` (exported Journey v2)
      - `metaPath` (sidecar meta with verification evidence)
      - `replayed` (should be `true`)
    - **Any other status**: Failure. Report the failure detail and session

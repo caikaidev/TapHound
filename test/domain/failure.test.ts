@@ -19,7 +19,8 @@ describe("exitCodeForFailure", () => {
     "EXPECT_ACTIVITY_FAILED",
     "EXPECT_ELEMENT_FAILED",
     "EXPECT_LOGCAT_FAILED",
-    "COLLECTION_FAILED"
+    "COLLECTION_FAILED",
+    "WAIT_TIMEOUT"
   ] as const)("maps %s to verification exit code 1", (failure) => {
     expect(exitCodeForFailure(failure)).toBe(1);
   });
@@ -31,7 +32,8 @@ describe("exitCodeForFailure", () => {
   it.each([
     "ENVIRONMENT_MISSING_TOOL",
     "DEVICE_UNAVAILABLE",
-    "APP_NOT_INSTALLED"
+    "APP_NOT_INSTALLED",
+    "DEVICE_ROLE_UNMAPPED"
   ] as const)("maps %s to environment exit code 3", (failure) => {
     expect(exitCodeForFailure(failure)).toBe(3);
   });
@@ -43,7 +45,7 @@ describe("exitCodeForFailure", () => {
   });
 
   it("defines exactly the approved failure vocabulary", () => {
-    expect(FAILURE_CODES).toHaveLength(40);
+    expect(FAILURE_CODES).toHaveLength(42);
   });
 
   it.each([

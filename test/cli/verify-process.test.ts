@@ -67,8 +67,9 @@ async function fixture(options: {
       : "reports"
   })}\n`);
   await writeFile(journeyPath, `${JSON.stringify({
-    version: 1,
+    version: 2,
     name: "Process contract",
+    devices: [{ role: "default" }],
     steps: options.invalidJourney === true ? [] : [{
       action: "wait",
       activity: {

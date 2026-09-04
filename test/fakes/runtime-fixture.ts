@@ -44,8 +44,9 @@ export const runtimeConfig: TapHoundConfig = {
 };
 
 export const runtimeJourney: Journey = {
-  version: 1,
+  version: 2,
   name: "Search",
+  devices: [{ role: "default" }],
   steps: [{
     action: "click",
     locator: { resourceId: "search" },

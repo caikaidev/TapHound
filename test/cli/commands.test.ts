@@ -669,8 +669,9 @@ describe("TapHound CLI commands", () => {
   it("fails closed when a selected base Flow does not replay", async () => {
     const test = dependencies();
     const journey: Journey = {
-      version: 1,
+      version: 2,
       name: "Home to search",
+      devices: [{ role: "default" }],
       steps: [{
         action: "click",
         locator: { resourceId: "search" },

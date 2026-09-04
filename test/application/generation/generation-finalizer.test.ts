@@ -133,8 +133,9 @@ function project(root: string): {
 
 function report(root: string, fallbackUsed = false): TapHoundReport {
   const journey = {
-    version: 1 as const,
+    version: 2 as const,
     name: "generated",
+    devices: [{ role: "default" }],
     steps: [{
       action: "wait" as const,
       activity: {
@@ -213,8 +214,9 @@ function report(root: string, fallbackUsed = false): TapHoundReport {
 
 function bridgeReport(root: string): TapHoundReport {
   const journey = {
-    version: 1 as const,
+    version: 2 as const,
     name: "generated",
+    devices: [{ role: "default" }],
     steps: [{
       action: "bridge" as const,
       scenario: "photoCapture" as const,
@@ -573,7 +575,7 @@ describe("GenerationFinalizer", () => {
     await expect(readFile(
       join(test.root, ".taphound/journeys/generated.json"),
       "utf8"
-    )).resolves.toContain('"version": 1');
+    )).resolves.toContain('"version": 2');
     await expect(readFile(
       join(test.root, ".taphound/journeys/generated.meta.json"),
       "utf8"
@@ -1150,7 +1152,7 @@ describe("GenerationFinalizer", () => {
     await expect(readFile(
       join(test.root, ".taphound/journeys/generated.json"),
       "utf8"
-    )).resolves.toContain('"version": 1');
+    )).resolves.toContain('"version": 2');
   });
 
   it("detects authority mutation immediately after Journey export", async () => {

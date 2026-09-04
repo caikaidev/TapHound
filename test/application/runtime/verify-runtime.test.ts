@@ -127,8 +127,9 @@ describe("VerifyRuntime", () => {
     const result = await new VerifyRuntime(test.dependencies).verify({
       ...input(),
       journey: {
-        version: 1,
+        version: 2,
         name: "core/launch-home",
+        devices: [{ role: "default" }],
         steps: [{
           action: "wait",
           activity: {

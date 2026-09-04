@@ -1,20 +1,38 @@
-# TapHound Journey Schema v1
+# TapHound Journey Schema v2
 
-TapHound Journey is an independent, self-developed, strictly validated JSON protocol. The default config file is `.taphound/config.json`. It does not reuse, invoke, or stay compatible with the official Android CLI Journey. Unknown fields, empty step lists, non-v1 documents, and natural-language steps are all rejected.
+TapHound Journey is an independent, self-developed, strictly validated JSON protocol. The default config file is `.taphound/config.json`. It does not reuse, invoke, or stay compatible with the official Android CLI Journey. Unknown fields, empty step lists, non-v2 documents, and natural-language steps are all rejected.
 
 ## Top-Level Structure
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "name": "Search flow",
+  "devices": [{ "role": "default" }],
   "steps": []
 }
 ```
 
-- `version`: currently fixed at `1`.
+- `version`: currently fixed at `2`.
 - `name`: a non-empty Journey name.
+- `devices`: at least one device role declaration. Multi-device Journeys declare
+  several roles and bind every step to one of them; single-device Journeys
+  declare exactly one role (conventionally `default`) and may omit per-step
+  bindings.
 - `steps`: at least one step, executed serially in array order, stopping after the first failure.
+
+## Device Roles
+
+Each entry in `devices` carries a `role` (lowercase identifier, unique across
+the Journey) and an optional human-readable `description`. When more than one
+role is declared, every step MUST set `device` to a declared role; a step that
+references an undeclared role, or a declared role no step uses, is rejected.
+With a single declared role, `device` may be omitted and defaults to that role.
+
+At replay time each role is mapped to a concrete device serial, for example
+`--device sender=emulator-5554 --device receiver=emulator-5556`. All devices
+run the same configured package. Multi-device replay executes steps strictly in
+Journey order on one timeline.
 
 ## Activity Checkpoint
 
@@ -90,7 +108,7 @@ Newly recorded or generated indexed steps may also contain Core-owned
 window/parser IDs, focus, and other transient state. Replay recomputes it for
 the element selected by `index` and returns `LOCATOR_NOT_FOUND` before mutation
 when represented semantic content changed; annotated fallback cannot bypass
-that mismatch. The field is optional so older Journey v1 files retain their
+that mismatch. The field is optional; steps without `evidence` keep their
 existing ordinal behavior. Authors and Agents should not calculate it
 themselves.
 
@@ -102,7 +120,14 @@ themselves.
 - `swipe`: requires `locator`, `direction`; `distancePercent` is in `(0, 1]`, default 0.6; `durationMs` default 300. The Recorder only shows elements that Android CLI marks as scrollable and that provide bounds; a hand-written Journey that only locates an element without bounds will terminate with `ACTION_FAILED` and will not guess a swipe region.
 - `scrollTo`: requires a target `locator`, a scroll container `container`, and `direction`; `maxSwipes` ranges from 1 to 30, default 20; `distancePercent` and `durationMs` default to 0.6 and 300 respectively. Replay deterministically resolves the target before and after each swipe, stopping once the target appears uniquely, without clicking the target; exceeding the limit returns `SCROLL_TARGET_NOT_FOUND`. The container must be unique and provide bounds; annotated fallback is not supported.
 - `back`: performs the ADB BACK keyevent.
-- `wait`: performs only Layout stability detection, with no fixed sleep.
+- `wait`: performs only Layout stability detection, with no fixed sleep. A
+  conditional wait adds `until: { "element": <locator> }` together with a
+  positive `timeoutMs`; Replay then polls the Layout until the locator resolves
+  uniquely (matching `expect` element semantics, enabled state not required)
+  and fails with `WAIT_TIMEOUT` when the element does not appear in time. The
+  two fields must be provided together. This is the cross-device
+  synchronization primitive, e.g. waiting on the receiver device for a message
+  the sender device just sent.
 - `bridge`: executes a cross-application flow. Core clicks the `triggerLocator`,
   detects that the foreground escaped the target package, optionally executes
   deterministic `externalSteps` (or resolves a named `flow`) inside the escaped
@@ -159,8 +184,8 @@ Each step may carry an optional `replayMode` field:
   portion and the operator confirms return. Bridge steps without `flow` or
   `externalSteps` use this mode.
 
-Older Journey v1 files without `replayMode` are treated as `"auto"` for every
-step. The field is optional to preserve backward compatibility.
+Steps without `replayMode` are treated as `"auto"`. The field exists so bridge
+steps can opt into operator-driven replay.
 
 ## Cross-Application Bridge
 
@@ -543,9 +568,9 @@ more, since samples are cheaper than full layout dumps.
 
 ## Reusable Flow Composition
 
-Journey v1 remains the only runtime Replay protocol. Reuse is an authoring
+Journey v2 remains the only runtime Replay protocol. Reuse is an authoring
 layer that resolves strict Flow and Journey Source documents into a complete,
-flat Journey v1 before verification.
+flat Journey v2 before verification.
 
 Reusable Flows live under `.taphound/flows/`:
 
@@ -609,7 +634,7 @@ Resolution expands dependencies depth-first in declared order, rejects cycles,
 duplicate or diamond inclusion, missing Flows, unsafe paths, and Activity
 boundary gaps, then writes both the flat Journey and a `.resolve.json`
 dependency/hash manifest. `verify` continues to accept only the resolved
-Journey v1.
+Journey v2.
 
 List reusable prefixes with `taphound journey list-flows --project . --json`.
 For AI generation, `generation start --base-flow chat/open-thread` performs a

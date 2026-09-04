@@ -59,6 +59,8 @@ A post-processing failure must not overwrite `primaryFailure`. For example, when
 - `EXPECT_LOGCAT_FAILED`
 - `BRIDGE_NO_ESCAPE`
 - `BRIDGE_NOT_RETURNED`
+- `WAIT_TIMEOUT`
+- `DEVICE_ROLE_UNMAPPED`
 - `EXTERNAL_FLOW_NOT_FOUND`
 - `EXTERNAL_FLOW_STALE`
 - `EXTERNAL_LOCATOR_STRICTNESS`

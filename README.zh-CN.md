@@ -82,7 +82,7 @@ git diff --exit-code -- assets/brand/png
 - `context list` / `validate` / `status`：查看或校验 Project Context 索引及模块分片。
 - `context refresh`：在不重新分析源码的前提下，重算 Context 证据哈希（含语义哈希）。
 - `journey list-flows` / `journey resolve`：校验可复用 Flow，并将组合式 Journey
-  Source 解析为扁平 Journey v1。`list-flows --include-external` 还会列出供
+  Source 解析为扁平 Journey v2。`list-flows --include-external` 还会列出供
   `generation bridge --flow` 使用的 External Flow。
 - `generation start` / `observe` / `step` / `confirm` / `manual` / `bridge` /
   `status` / `recover` / `archive` / `list` / `finalize`：管理确定性 Journey 生成会话。

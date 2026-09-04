@@ -156,6 +156,7 @@ export interface GenerationFinalizerDependencies {
     GenerationSessionStore,
     | "read"
     | "beginVerification"
+    | "abortVerification"
     | "completeVerification"
     | "failVerification"
     | "markBundlePublishable"
@@ -292,6 +293,7 @@ export class GenerationFinalizer {
     let verificationReport: TapHoundReport | undefined;
 
     if (session.verification.status === "notRun") {
+      await this.revalidate(input, config, context, project, session);
       this.dependencies.progress?.("verification");
       const begun = await this.beginVerification(session);
       session = begun.session;
@@ -359,7 +361,6 @@ export class GenerationFinalizer {
       }
       if (begun.owned) {
         try {
-        await this.revalidate(input, config, context, project, session);
         if (input.signal?.aborted === true) {
           throw failure(
             "VERIFICATION_FAILED",
@@ -398,7 +399,12 @@ export class GenerationFinalizer {
             && !(error instanceof GenerationFinalizationError
               && error.code === "FINALIZATION_IN_PROGRESS")
           ) {
-            await this.persistFailedVerification(session, error);
+            const aborted = error instanceof GenerationFinalizationError
+              && error.stage === "precondition"
+              && await this.tryAbortVerification(session);
+            if (!aborted) {
+              await this.persistFailedVerification(session, error);
+            }
           }
           throw error instanceof GenerationFinalizationError
             ? error
@@ -1033,6 +1039,31 @@ export class GenerationFinalizer {
       session: await this.persistPassedVerification(running, report, expected),
       report
     };
+  }
+
+  private async tryAbortVerification(
+    running: GenerationSession
+  ): Promise<boolean> {
+    const latest = GenerationSessionSchema.parse(
+      await this.dependencies.store.read(running.id)
+    );
+    if (
+      running.verification.status !== "running"
+      || latest.verification.status !== "running"
+      || latest.revision !== running.revision
+      || latest.verification.attemptId !== running.verification.attemptId
+    ) {
+      return false;
+    }
+    try {
+      await this.dependencies.store.abortVerification(
+        latest.id,
+        latest.revision
+      );
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private async persistFailedVerification(

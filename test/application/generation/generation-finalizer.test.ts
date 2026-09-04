@@ -935,7 +935,7 @@ describe("GenerationFinalizer", () => {
     expect(test.verify).not.toHaveBeenCalled();
   });
 
-  it("fails verification when Context changes after replay", async () => {
+  it("rolls back the attempt when Context changes after replay", async () => {
     const test = await fixture();
     test.validateContext
       .mockResolvedValueOnce({ status: "valid" })
@@ -951,7 +951,63 @@ describe("GenerationFinalizer", () => {
       code: "CONTEXT_STALE"
     });
     await expect(test.store.read("generation-1")).resolves.toMatchObject({
-      verification: { status: "failed" }
+      verification: { status: "notRun" }
+    });
+    expect(test.verify).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the session retryable when Context drifts before replay", async () => {
+    const test = await fixture();
+    test.validateContext.mockResolvedValueOnce({
+      status: "stale",
+      reason: {
+        code: "EVIDENCE_HASH_MISMATCH",
+        message: "context changed"
+      }
+    });
+
+    await expect(test.finalize.finalize(input(test.root))).rejects.toMatchObject({
+      code: "CONTEXT_STALE",
+      stage: "precondition"
+    });
+    await expect(test.store.read("generation-1")).resolves.toMatchObject({
+      verification: { status: "notRun" }
+    });
+    expect(test.verify).not.toHaveBeenCalled();
+    expect(test.validateContext).toHaveBeenCalledOnce();
+
+    const result = await test.finalize.finalize(input(test.root));
+
+    expect(result).toMatchObject({ status: "verified", replayed: true });
+    expect(test.verify).toHaveBeenCalledOnce();
+  });
+
+  it("durably fails when the abort rollback itself is rejected", async () => {
+    const test = await fixture();
+    test.validateContext
+      .mockResolvedValueOnce({ status: "valid" })
+      .mockResolvedValueOnce({
+        status: "stale",
+        reason: {
+          code: "EVIDENCE_HASH_MISMATCH",
+          message: "context changed"
+        }
+      });
+    vi.spyOn(test.store, "abortVerification").mockRejectedValueOnce(
+      new GenerationSessionStoreError(
+        "IO_ERROR",
+        "abort rejected"
+      )
+    );
+
+    await expect(test.finalize.finalize(input(test.root))).rejects.toMatchObject({
+      code: "CONTEXT_STALE"
+    });
+    await expect(test.store.read("generation-1")).resolves.toMatchObject({
+      verification: {
+        status: "failed",
+        failure: { code: "CONTEXT_STALE" }
+      }
     });
   });
   it("allows post-replay evidence drift only with explicit opt-in", async () => {

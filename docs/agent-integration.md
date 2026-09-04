@@ -236,7 +236,13 @@ The generation flow uses the in-repo [`taphound-journey-generator` Skill](../ass
    after explicit `generation recover --decision retry` acknowledgement.
 8. `generation finalize --detach` survives caller interruption and fully
    Replays from the initial state. The Journey and immutable evidence are
-   published only after exact verification passes.
+   published only after exact verification passes. Precondition failures
+   (`CONTEXT_STALE` / `CONTEXT_INVALID` from binding or Context validation)
+   never terminally poison the attempt: finalize validates before the attempt
+   is recorded, and a drift detected after replay rolls the running attempt
+   back to `notRun`, so the session stays retryable once the underlying drift
+   is repaired or reverted. Only genuine replay failures durably mark
+   verification `failed`.
 9. `generation list --json` enumerates all sessions in the workspace (active,
    archived, and published). `generation archive --session <id>` marks an idle
    active session as archived so it no longer clutters active listings. Archive

@@ -84,6 +84,10 @@ export interface GenerationSessionStore {
     attemptId: string,
     owner?: { pid: number; startedAt: string }
   ) => Promise<GenerationSession>;
+  abortVerification: (
+    id: string,
+    expectedRevision: number
+  ) => Promise<GenerationSession>;
   completeVerification: (
     id: string,
     expectedRevision: number,

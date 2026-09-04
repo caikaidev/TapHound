@@ -792,6 +792,126 @@ describe("FileSystemGenerationSessionStore", () => {
     );
   });
 
+  it("aborts a running verification attempt back to notRun", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(verificationCandidate());
+    const running = await store.beginVerification(
+      "generation-1",
+      0,
+      "verification-attempt",
+      { pid: 1234, startedAt: "2026-08-20T00:00:00.000Z" }
+    );
+
+    const aborted = await store.abortVerification(
+      "generation-1",
+      running.revision
+    );
+
+    expect(aborted).toEqual({
+      ...running,
+      revision: running.revision + 1,
+      verification: { status: "notRun" }
+    });
+    await expect(store.read("generation-1")).resolves.toEqual(aborted);
+    const restarted = await store.beginVerification(
+      "generation-1",
+      aborted.revision,
+      "verification-retry"
+    );
+    expect(restarted.verification).toMatchObject({
+      status: "running",
+      attemptId: "verification-retry"
+    });
+  });
+
+  it.each([
+    ["notRun", (candidate: GenerationSession): GenerationSession => candidate],
+    ["passed", (candidate: GenerationSession): GenerationSession => ({
+      ...candidate,
+      verification: {
+        status: "passed",
+        attemptId: "verification-attempt",
+        reportPath: "verification/report.json",
+        reportSha256: "f".repeat(64),
+        runId: "verification-run"
+      }
+    })],
+    ["failed", (candidate: GenerationSession): GenerationSession => ({
+      ...candidate,
+      verification: {
+        status: "failed",
+        failure: { code: "VERIFICATION_FAILED", message: "replay failed" }
+      }
+    })]
+  ] as const)("rejects aborting a %s verification", async (
+    _status,
+    mutate
+  ) => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(mutate(verificationCandidate()));
+
+    await expectStoreError(
+      store.abortVerification("generation-1", 0),
+      "INVALID_TRANSITION"
+    );
+  });
+
+  it("rejects verification abort after immutable evidence exists", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(verificationCandidate());
+    const running = await store.beginVerification(
+      "generation-1",
+      0,
+      "verification-attempt",
+      { pid: 1234, startedAt: "2026-08-20T00:00:00.000Z" }
+    );
+    await store.writeEvidence(
+      "generation-1",
+      "verification/receipt.json",
+      { status: "passed" }
+    );
+
+    await expectStoreError(
+      store.abortVerification("generation-1", running.revision),
+      "INVALID_TRANSITION"
+    );
+    await expect(store.read("generation-1")).resolves.toMatchObject({
+      verification: { status: "running" }
+    });
+  });
+
+  it("rejects verification abort on revision conflict", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(verificationCandidate());
+    await store.beginVerification(
+      "generation-1",
+      0,
+      "verification-attempt"
+    );
+
+    await expectStoreError(
+      store.abortVerification("generation-1", 0),
+      "REVISION_CONFLICT"
+    );
+  });
+
+  it("rejects aborting verification of a published session", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(verificationCandidate());
+    await markPublishable(store, verificationCandidate());
+    await store.publish("generation-1");
+
+    await expectStoreError(
+      store.abortVerification("generation-1", 3),
+      "SESSION_PUBLISHED"
+    );
+  });
+
   it("rejects recovery unless only recovery state and inFlight are cleared", async () => {
     const root = await temporaryRoot();
     const store = new FileSystemGenerationSessionStore(root);

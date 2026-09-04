@@ -339,6 +339,30 @@ describe("FileSystemGenerationSessionStore", () => {
     await expect(store.read("generation-1")).resolves.toEqual(retuned);
   });
 
+  it("allows ordinary idle updates to truncate candidate steps", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    const candidate = validSession(0, {
+      candidateSteps: [successfulWaitStep(), successfulWaitStep()],
+      candidateSources: ["planner", "planner"]
+    });
+    await store.create(candidate);
+
+    const truncated = validSession(1, {
+      candidateSteps: [candidate.candidateSteps[0] ?? successfulWaitStep()],
+      candidateSources: ["planner"]
+    });
+    await store.update("generation-1", 0, truncated);
+    await expect(store.read("generation-1")).resolves.toEqual(truncated);
+
+    const emptied = validSession(2, {
+      candidateSteps: [],
+      candidateSources: []
+    });
+    await store.update("generation-1", 1, emptied);
+    await expect(store.read("generation-1")).resolves.toEqual(emptied);
+  });
+
   it("CAS-commits only the authoritative snapshot binding", async () => {
     const root = await temporaryRoot();
     const store = new FileSystemGenerationSessionStore(root);

@@ -89,7 +89,8 @@ interface GenerationStatusOptions extends GenerationObserveOptions {
 }
 
 interface GenerationStepOptions extends GenerationObserveOptions {
-  input: string;
+  input?: string | undefined;
+  replace?: string | undefined;
 }
 
 interface GenerationConfirmOptions extends GenerationObserveOptions {
@@ -262,7 +263,7 @@ function compactOutput(options: GenerationOptions): boolean {
 }
 
 function envelopeHint(options: GenerationOptions): string {
-  if ("input" in options) {
+  if ("input" in options && options.input !== undefined) {
     return "Planner envelope must be a strict object with exactly three top-level fields: version (1), proposal (object), and either snapshot (the full RuntimeSnapshot object) or snapshotRef (the snapshotRef string from the preceding observe output). Unknown or missing fields are rejected. See docs/agent-integration.md and assets/skills/taphound-journey-generator/schemas/proposed-step-envelope.json.";
   }
   return "TapHound rejected the JSON input. See docs/agent-integration.md for the command contract.";
@@ -831,7 +832,11 @@ function createStepCommand(dependencies: CliDependencies): Command {
         "--compact",
         "Return authoritative nextSnapshotRef instead of the full next snapshot"
       )
-      .requiredOption("--input <path>", "Strict proposal envelope path"),
+      .option("--input <path>", "Strict proposal envelope path")
+      .option(
+        "--replace <index>",
+        "Truncate candidate steps at <index>, replay the stored prefix, and bind a fresh snapshot"
+      ),
     dependencies
   ).action(async (options: GenerationStepOptions): Promise<void> => {
     try {
@@ -839,6 +844,72 @@ function createStepCommand(dependencies: CliDependencies): Command {
       const config = await loadConfig(dependencies, options);
       const runtime = requireRuntime(dependencies, options.project, config);
       await assertRuntimeConfig(runtime, generationId);
+      if (options.replace !== undefined) {
+        if (options.input !== undefined) {
+          throw new GenerationOperationError(
+            "CONFIG_INVALID",
+            "generation step accepts either --input or --replace, not both"
+          );
+        }
+        const stepIndex = z.coerce.number().int().nonnegative().parse(
+          options.replace
+        );
+        const session = await runtime.readSession(generationId);
+        const doctor = await dependencies.doctor.run({
+          packageName: config.run.packageName,
+          skipPermissionProbe: true,
+          requestedDevice: session.target.deviceSerial,
+          ...(config.ui?.backend === undefined
+            ? {}
+            : { requestedUiBackend: config.ui.backend }),
+          ...(dependencies.signal === undefined
+            ? {}
+            : { signal: dependencies.signal })
+        });
+        if (doctor.status === "failed") {
+          writeFailure(
+            dependencies,
+            options,
+            3,
+            doctor.failureCode ?? "ENVIRONMENT_MISSING_TOOL",
+            doctor.checks.find((check) => check.status === "failed")?.message
+              ?? "TapHound environment preflight failed"
+          );
+          return;
+        }
+        const result = await runtime.replace({
+          generationId,
+          stepIndex,
+          projectRoot: options.project,
+          config,
+          toolVersions: tools(doctor.checks),
+          manualReplay: process.stdin.isTTY,
+          ...(dependencies.signal === undefined
+            ? {}
+            : { signal: dependencies.signal })
+        });
+        writeSuccess(dependencies, options, {
+          status: "replaced",
+          exitCode: 0,
+          stepIndex: result.stepIndex,
+          remainingStepCount: result.remainingStepCount,
+          truncatedStepCount: result.truncatedStepCount,
+          ...result.observation.binding,
+          snapshotRef: result.observation.snapshotRef,
+          ...(options.compact === true
+            ? {}
+            : { snapshot: result.observation.snapshot })
+        }, `Generation truncated to ${
+          String(result.remainingStepCount)
+        } step(s) at index ${String(result.stepIndex)} and re-observed`);
+        return;
+      }
+      if (options.input === undefined) {
+        throw new GenerationOperationError(
+          "CONFIG_INVALID",
+          "generation step requires either --input <envelope> or --replace <index>"
+        );
+      }
       const envelope: z.infer<typeof PlannerEnvelopeSchema> = PlannerEnvelopeSchema.parse(
         await dependencies.readJson(resolve(options.project, options.input))
       );

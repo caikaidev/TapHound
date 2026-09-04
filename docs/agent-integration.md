@@ -259,17 +259,39 @@ The generation flow uses the in-repo [`taphound-journey-generator` Skill](../ass
      active session as archived so it no longer clutters active listings. Archive
     is only permitted on sessions with no in-flight step or pending
     confirmation; recoveryRequired sessions must be recovered first.
-10. `generation config idle --session <id> [--strategy <s>]
-    [--poll-interval-ms <n>] [--stable-polls <n>] [--timeout-ms <n>]`
-    hot-adjusts the session's idle policy without restarting the session or
-    invalidating the config binding. At least one setting is required; the patch
-    merges onto the session's current policy (initially the bound config's
-    `idle`) and advances the session revision, so the next proposal must bind
-    the new revision. Updates are rejected with `CONFIG_INVALID` unless the
-    session is `active` with no in-flight step, no pending confirmation, and
-    verification and publication both `notRun`. Subsequent observe, step, and
-    finalize replay all honor the stored session policy; `generation status`
-    reports it as `idlePolicy`.
+ 10. `generation config idle --session <id> [--strategy <s>]
+     [--poll-interval-ms <n>] [--stable-polls <n>] [--timeout-ms <n>]`
+     hot-adjusts the session's idle policy without restarting the session or
+     invalidating the config binding. At least one setting is required; the patch
+     merges onto the session's current policy (initially the bound config's
+     `idle`) and advances the session revision, so the next proposal must bind
+     the new revision. Updates are rejected with `CONFIG_INVALID` unless the
+     session is `active` with no in-flight step, no pending confirmation, and
+     verification and publication both `notRun`. Subsequent observe, step, and
+     finalize replay all honor the stored session policy; `generation status`
+     reports it as `idlePolicy`.
+ 11. `generation step --replace <index> --session <id>` rewinds an active
+     session instead of accepting a proposal: TapHound replays the stored
+     candidate prefix `[0, index)` through the same cold-launch replay engine
+     as finalize (honoring the session's stored idle policy), truncates the
+     candidate steps to that prefix by advancing the session revision, and
+     binds a fresh post-replay snapshot, so the agent can re-propose from the
+     stored prefix without restarting the session. The index must be an
+     integer in `[0, candidateStepCount]`; an index inside the bound Base
+     Flow prefix fails with `FLOW_INVALID`. Index `0` cold-resets the app
+     without replay. Replace is rejected with `CONFIG_INVALID` unless the
+     session is `active` with no in-flight step, no pending confirmation, and
+     verification and publication both `notRun`. A prefix replay failure fails
+     with `VERIFICATION_FAILED` and leaves the session untouched. Superseded
+     step evidence stays in the generation bundle as an audit trail; the
+     published manifest is rebuilt from the surviving evidence at finalize.
+     The output matches `generation observe` (binding plus `snapshotRef`,
+     full snapshot unless `--compact`) plus `status: "replaced"`,
+     `stepIndex`, `remainingStepCount`, and `truncatedStepCount`; the next
+     proposal must bind the returned revision and snapshot. `--input` and
+     `--replace` are mutually exclusive, and the replace preflight pins the
+     session's bound device, so no `--device` flag exists.
+
 
 ```bash
 taphound project describe --project /workspace/android-app --json
@@ -312,7 +334,8 @@ Generation's `--json` commands likewise write only one machine-readable JSON
 value to stdout and indicate the result with `exitCode`. `observe` always
 returns `snapshotRef`; `--compact` omits the duplicate inline snapshot.
 `step`, `confirm`, and `manual` similarly replace `nextSnapshot` with
-`nextSnapshotRef` in compact mode. The referenced file is still the full
+`nextSnapshotRef` in compact mode, and `step --replace` returns the same
+binding plus `snapshotRef` shape as `observe`. The referenced file is still the full
 RuntimeSnapshot behind the proposal binding. The Agent must retain
 `generationId`, `baseRevision`, `snapshotHash`, and that exact snapshot, and
 must not fabricate or reuse expired bindings; the step envelope may submit
@@ -448,7 +471,11 @@ must choose `idle.strategy` before `generation start`; after start, any config
 change other than the idle policy requires a new session. The idle policy alone
 can be hot-adjusted mid-session through `generation config idle`, which stores a
 session-scoped override that observe, step, and finalize replay honor while the
-original `configHash` binding stays authoritative. `hybrid` falls back from
+original `configHash` binding stays authoritative. When a step needs correction,
+`generation step --replace <index>` rewinds the session to its stored prefix
+through the same deterministic replay engine as finalize; if the prefix no
+longer replays exactly, the replace fails and the session is left untouched.
+`hybrid` falls back from
 active frame counters to Core-owned UIAutomator layout hashes; `layoutDiff`
 selects structural stability directly. An action attempt that returns
 `status: "recoveryRequired"` may already have executed. Inspect

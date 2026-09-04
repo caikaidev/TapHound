@@ -96,6 +96,10 @@ import {
   type GenerationIdlePolicyPatch
 } from "../application/generation/generation-config-service.js";
 import {
+  GenerationReplaceService,
+  type GenerationReplaceResult
+} from "../application/generation/generation-replace-service.js";
+import {
   GenerationStarter,
   GenerationOperationError,
   hashGenerationBinding,
@@ -164,6 +168,15 @@ export interface GenerationCliRuntime {
     id: string,
     patch: GenerationIdlePolicyPatch
   ) => Promise<GenerationSession>;
+  replace: (input: {
+    generationId: string;
+    stepIndex: number;
+    projectRoot: string;
+    config: TapHoundConfig;
+    toolVersions: Record<string, string>;
+    manualReplay?: boolean | undefined;
+    signal?: AbortSignal | undefined;
+  }) => Promise<GenerationReplaceResult>;
 }
 
 export interface CliDependencies {
@@ -549,21 +562,22 @@ export function createProductionDependencies(
         journeyWriter: new FileSystemJourneyWriter(),
         metaWriter: new FileSystemGenerationMetaWriter()
       });
+      const verifyRuntime = new VerifyRuntime({
+        screenshots: androidCli,
+        annotatedScreens: androidCli,
+        uiStability: androidCli,
+        uiSnapshots,
+        adb,
+        clock,
+        artifactStore: new FileSystemArtifactStore(),
+        reportWriter: new ReportWriter(),
+        now: (): Date => new Date(),
+        createRunId: runId
+      });
       const finalizer = new GenerationFinalizer({
         store,
         contextValidator,
-        verifyRuntime: new VerifyRuntime({
-          screenshots: androidCli,
-          annotatedScreens: androidCli,
-          uiStability: androidCli,
-          uiSnapshots,
-          adb,
-          clock,
-          artifactStore: new FileSystemArtifactStore(),
-          reportWriter: new ReportWriter(),
-          now: (): Date => new Date(),
-          createRunId: runId
-        }),
+        verifyRuntime,
         publisher,
         generateAttemptId: randomUUID,
         owner: { pid: process.pid, now: (): Date => new Date() },
@@ -627,6 +641,14 @@ export function createProductionDependencies(
             config,
             patch
           })
+        ),
+        replace: (input): Promise<GenerationReplaceResult> => (
+          new GenerationReplaceService({
+            store,
+            observer,
+            verifyRuntime,
+            appPreparer: new GenerationAppPreparer(adb, clock)
+          }).replace(input)
         )
       };
     },

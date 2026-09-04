@@ -14,6 +14,8 @@ import { delimiter, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { childSpawnEnv } from "./spawn-env.js";
+
 const repositoryRoot = process.cwd();
 const cli = join(repositoryRoot, "dist", "cli", "main.js");
 const fakeTool = join(
@@ -105,7 +107,7 @@ function runVerify(
     encoding: "utf8",
     timeout: 10_000,
     env: {
-      ...process.env,
+      ...childSpawnEnv(),
       PATH: `${test.bin}${delimiter}${process.env.PATH ?? ""}`,
       TAPHOUND_FAKE_ROOT: test.root,
       ...environment
@@ -139,7 +141,8 @@ describe("built taphound verify --json process contract", () => {
 
     const result = spawnSync(process.execPath, [binary, "--help"], {
       cwd: repositoryRoot,
-      encoding: "utf8"
+      encoding: "utf8",
+      env: childSpawnEnv()
     });
 
     expect(result.status).toBe(0);

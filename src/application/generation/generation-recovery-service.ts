@@ -20,6 +20,7 @@ export interface GenerationRecoveryStatus {
   revision: number;
   state: GenerationSession["state"];
   candidateStepCount: number;
+  idlePolicy?: GenerationSession["idlePolicy"];
   inFlight: GenerationSession["inFlight"];
   pendingConfirmation: (
     & NonNullable<GenerationSession["pendingConfirmation"]>
@@ -124,6 +125,9 @@ export class GenerationRecoveryService {
       revision: session.revision,
       state: session.state,
       candidateStepCount: session.candidateSteps.length,
+      ...(session.idlePolicy === undefined
+        ? {}
+        : { idlePolicy: session.idlePolicy }),
       inFlight: session.inFlight,
       pendingConfirmation: session.pendingConfirmation === null
         ? null

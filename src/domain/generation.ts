@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import { z } from "zod";
 import { UiBackendDescriptorSchema } from "./ui-backend.js";
+import { IdlePolicySchema } from "./config.js";
 
 import { JourneyStepSchema } from "./journey.js";
 import { FlowNameSchema } from "./journey-composition.js";
@@ -210,6 +211,7 @@ export const GenerationSessionSchema = z.strictObject({
     interactionPolicy: InteractionPolicySchema
   }),
   contextSelection: ContextSelectionSchema,
+  idlePolicy: IdlePolicySchema.optional(),
   variables: GenerationVariablesSchema,
   baseFlow: GenerationBaseFlowSchema.optional(),
   externalFlows: z.array(GenerationExternalFlowBindingSchema).default([]),

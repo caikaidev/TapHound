@@ -255,10 +255,21 @@ The generation flow uses the in-repo [`taphound-journey-generator` Skill](../ass
     session stays retryable once the underlying drift is repaired or reverted.
     Only genuine replay failures durably mark verification `failed`.
  9. `generation list --json` enumerates all sessions in the workspace (active,
-    archived, and published). `generation archive --session <id>` marks an idle
-    active session as archived so it no longer clutters active listings. Archive
-   is only permitted on sessions with no in-flight step or pending
-   confirmation; recoveryRequired sessions must be recovered first.
+     archived, and published). `generation archive --session <id>` marks an idle
+     active session as archived so it no longer clutters active listings. Archive
+    is only permitted on sessions with no in-flight step or pending
+    confirmation; recoveryRequired sessions must be recovered first.
+10. `generation config idle --session <id> [--strategy <s>]
+    [--poll-interval-ms <n>] [--stable-polls <n>] [--timeout-ms <n>]`
+    hot-adjusts the session's idle policy without restarting the session or
+    invalidating the config binding. At least one setting is required; the patch
+    merges onto the session's current policy (initially the bound config's
+    `idle`) and advances the session revision, so the next proposal must bind
+    the new revision. Updates are rejected with `CONFIG_INVALID` unless the
+    session is `active` with no in-flight step, no pending confirmation, and
+    verification and publication both `notRun`. Subsequent observe, step, and
+    finalize replay all honor the stored session policy; `generation status`
+    reports it as `idlePolicy`.
 
 ```bash
 taphound project describe --project /workspace/android-app --json
@@ -278,7 +289,7 @@ taphound generation start \
   --json
 ```
 
-The application module is always selected; dependencies declared by selected modules are expanded automatically. Omitting `--module` selects all modules. Selected modules must be `complete` or explicitly `unsupported`; `unsupported` is an analyzed verdict (no journey-relevant surfaces) and a legitimate terminal state. Modules that are `partial` or `notAnalyzed` fail loading with `CONTEXT_MODULE_INCOMPLETE` — finish or re-analyze those shards first. The exact root-index hash and selected shard IDs/hashes are returned as `contextSelection` and bound to the session. Pass `--compact` to summarize `contextSelection` as `bundleVersion`, `indexHash`, and a `moduleIds` list instead of per-module binding hashes; the session still binds the full selection. Modules cannot be added later. The device is bound at `generation start`. `generation observe`, `step`, `confirm`, `manual`, `status`, and `recover` use that binding via `--session` and do not accept `--device`; `generation finalize` resolves the bound Context from the session's immutable snapshot (`context/resolved.json`, integrity-checked against the session's `contextHash`) and may explicitly provide `--device`, but must not change the session identity binding. Legacy sessions without a snapshot fall back to reloading the bound module set from `--context`.
+The application module is always selected; dependencies declared by selected modules are expanded automatically. Omitting `--module` selects all modules. Selected modules must be `complete` or explicitly `unsupported`; `unsupported` is an analyzed verdict (no journey-relevant surfaces) and a legitimate terminal state. Modules that are `partial` or `notAnalyzed` fail loading with `CONTEXT_MODULE_INCOMPLETE` — finish or re-analyze those shards first. The exact root-index hash and selected shard IDs/hashes are returned as `contextSelection` and bound to the session. Pass `--compact` to summarize `contextSelection` as `bundleVersion`, `indexHash`, and a `moduleIds` list instead of per-module binding hashes; the session still binds the full selection. Modules cannot be added later. The device is bound at `generation start`. `generation observe`, `step`, `confirm`, `manual`, `status`, `recover`, and `config idle` use that binding via `--session` and do not accept `--device`; `generation finalize` resolves the bound Context from the session's immutable snapshot (`context/resolved.json`, integrity-checked against the session's `contextHash`) and may explicitly provide `--device`, but must not change the session identity binding. Legacy sessions without a snapshot fall back to reloading the bound module set from `--context`.
 
 ### Refreshing Context Evidence Hashes
 
@@ -433,10 +444,13 @@ Do not modify the Journey to mask implementation defects.
 TapHound Replay never invokes AI. The Agent may select an existing Journey or propose new steps in a generation session, but the final judgment of Locator, Activity, Layout Diff, risk policy, and Expect is performed by deterministic code. The Agent must not automatically loosen assertions, swap the Package, delete steps, or bypass confirmation after a failure.
 
 Generation binds the normalized config for the lifetime of the session. Agents
-must choose `idle.strategy` before `generation start` and must start a new
-session after any config change. `hybrid` falls back from active frame counters
-to Core-owned UIAutomator layout hashes; `layoutDiff` selects structural
-stability directly. An action attempt that returns
+must choose `idle.strategy` before `generation start`; after start, any config
+change other than the idle policy requires a new session. The idle policy alone
+can be hot-adjusted mid-session through `generation config idle`, which stores a
+session-scoped override that observe, step, and finalize replay honor while the
+original `configHash` binding stays authoritative. `hybrid` falls back from
+active frame counters to Core-owned UIAutomator layout hashes; `layoutDiff`
+selects structural stability directly. An action attempt that returns
 `status: "recoveryRequired"` may already have executed. Inspect
 `generation status`, obtain explicit user approval before `recover`, and never
 assume that recovery committed the interrupted action or returned a snapshot.

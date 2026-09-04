@@ -369,6 +369,41 @@ describe("RuntimeObserver", () => {
     );
   });
 
+  it("prefers the session idle policy over the observe idle input", async () => {
+    const test = harness();
+    test.store.current = {
+      ...test.store.current,
+      idlePolicy: {
+        strategy: "structural",
+        pollIntervalMs: 250,
+        stablePolls: 4,
+        timeoutMs: 30000
+      }
+    };
+
+    await test.observer.observe({
+      generationId: "generation-1",
+      idle: {
+        strategy: "hybrid",
+        pollIntervalMs: 150,
+        stablePolls: 2,
+        timeoutMs: 3000
+      }
+    });
+
+    expect(test.waitUntilIdle).toHaveBeenCalledWith(
+      "emulator-5554",
+      {
+        strategy: "structural",
+        pollIntervalMs: 250,
+        stablePolls: 4,
+        timeoutMs: 30000
+      },
+      undefined,
+      "com.example.app"
+    );
+  });
+
   it("reports structured IDLE_TIMEOUT diagnostics without changing session state", async () => {
     const test = harness();
     test.waitUntilIdle.mockResolvedValueOnce({

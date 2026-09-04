@@ -579,9 +579,12 @@ export class GenerationStepExecutor {
       const session = GenerationSessionSchema.parse(
         await this.dependencies.store.read(input.generationId)
       );
+      const idle = session.idlePolicy === undefined
+        ? this.dependencies.idle
+        : session.idlePolicy;
       const uiSnapshotProvider = await this.dependencies.uiSnapshots.open({
         deviceSerial: session.target.deviceSerial,
-        timeoutMs: this.dependencies.idle.timeoutMs,
+        timeoutMs: idle.timeoutMs,
         ...(session.bindings.uiBackend === undefined
           ? {}
           : { backend: session.bindings.uiBackend.id }),
@@ -593,6 +596,7 @@ export class GenerationStepExecutor {
       try {
         return await new GenerationStepExecutor({
           ...this.dependencies,
+          idle,
           freshnessGuard: this.dependencies.createFreshnessGuard(
             uiSnapshotProvider
           ),

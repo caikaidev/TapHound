@@ -351,6 +351,49 @@ describe("GenerationSessionSchema", () => {
     })).toThrow(/unique/i);
   });
 
+  it("accepts an optional session idle policy override", () => {
+    const parsed = GenerationSessionSchema.parse({
+      ...(validSession() as object),
+      idlePolicy: {
+        strategy: "structural",
+        pollIntervalMs: 250,
+        stablePolls: 4,
+        timeoutMs: 30000
+      }
+    });
+    expect(parsed.idlePolicy).toEqual({
+      strategy: "structural",
+      pollIntervalMs: 250,
+      stablePolls: 4,
+      timeoutMs: 30000
+    });
+
+    expect(GenerationSessionSchema.parse(validSession()).idlePolicy)
+      .toBeUndefined();
+  });
+
+  it("rejects an invalid session idle policy override", () => {
+    expect(() => GenerationSessionSchema.parse({
+      ...(validSession() as object),
+      idlePolicy: {
+        strategy: "structural",
+        pollIntervalMs: 250,
+        stablePolls: 4,
+        timeoutMs: -1
+      }
+    })).toThrow();
+
+    expect(() => GenerationSessionSchema.parse({
+      ...(validSession() as object),
+      idlePolicy: {
+        strategy: "unknown",
+        pollIntervalMs: 250,
+        stablePolls: 4,
+        timeoutMs: 30000
+      }
+    })).toThrow();
+  });
+
   it("projects every immutable Core-owned identity field", () => {
     const session = GenerationSessionSchema.parse(validSession());
 

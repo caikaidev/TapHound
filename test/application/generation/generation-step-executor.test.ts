@@ -401,6 +401,35 @@ describe("GenerationStepExecutor", () => {
     expect(test.uiSnapshotProvider.close).toHaveBeenCalledOnce();
   });
 
+  it("applies the session idle policy override through the factory path", async () => {
+    const runtime = snapshot();
+    const test = harness(
+      session(runtime, {
+        idlePolicy: {
+          strategy: "layoutDiff",
+          pollIntervalMs: 5,
+          stablePolls: 5,
+          timeoutMs: 30000
+        }
+      }),
+      () => "attempt-1",
+      true
+    );
+
+    await expect(test.execute({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime,
+      source: "planner"
+    })).resolves.toMatchObject({ status: "succeeded" });
+
+    expect(test.uiSnapshots.open).toHaveBeenCalledWith({
+      deviceSerial: "emulator-5554",
+      timeoutMs: 30000
+    });
+    expect(test.androidCli.layoutDiff).toHaveBeenCalledTimes(5);
+  });
+
   it("durably begins a fresh safe step before ADB action and appends literals with provenance", async () => {
     const runtime = snapshot();
     const test = harness(session(runtime));

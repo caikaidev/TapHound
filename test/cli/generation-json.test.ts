@@ -88,6 +88,7 @@ interface Harness {
   list: Mock;
   readSession: Mock;
   readContextSnapshot: Mock;
+  updateIdlePolicy: Mock;
   contextValidate: Mock;
   contextLoad: Mock;
   workspaceLayout: FakeWorkspaceLayout;
@@ -188,6 +189,15 @@ function harness(signal?: AbortSignal): Harness {
   const readContextSnapshot = vi.fn(
     (): Promise<unknown> => Promise.resolve(null)
   );
+  const updateIdlePolicy = vi.fn(() => Promise.resolve({
+    revision: 5,
+    idlePolicy: {
+      strategy: "hybrid" as const,
+      pollIntervalMs: 500,
+      stablePolls: 3,
+      timeoutMs: 30000
+    }
+  }));
   const contextValidate = vi.fn(() => Promise.resolve({
     status: "valid" as const
   }));
@@ -259,6 +269,7 @@ function harness(signal?: AbortSignal): Harness {
       list,
       readSession,
       readContextSnapshot,
+      updateIdlePolicy,
       assertConfigIdentity
     })),
     detachedProcess: {
@@ -297,6 +308,7 @@ function harness(signal?: AbortSignal): Harness {
     list,
     readSession,
     readContextSnapshot,
+    updateIdlePolicy,
     contextValidate,
     contextLoad,
     workspaceLayout
@@ -2000,6 +2012,132 @@ describe("generation JSON process protocol", () => {
     expect(test.stdout.value).toContain("generation-1");
   });
 
+  it("updates the session idle policy as one JSON value", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "config", "idle",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--strategy", "structural",
+      "--poll-interval-ms", "250",
+      "--stable-polls", "4",
+      "--timeout-ms", "30000",
+      "--json"
+    ]);
+
+    expect(test.updateIdlePolicy).toHaveBeenCalledWith("generation-1", {
+      strategy: "structural",
+      pollIntervalMs: 250,
+      stablePolls: 4,
+      timeoutMs: 30000
+    });
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "updated",
+      exitCode: 0,
+      generationId: "generation-1",
+      revision: 5,
+      idlePolicy: {
+        strategy: "hybrid",
+        pollIntervalMs: 500,
+        stablePolls: 3,
+        timeoutMs: 30000
+      }
+    });
+  });
+
+  it("renders the idle policy update for human output", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "config", "idle",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--timeout-ms", "30000"
+    ]);
+
+    expect(test.updateIdlePolicy).toHaveBeenCalledWith("generation-1", {
+      timeoutMs: 30000
+    });
+    expect(test.exitCodes[0]).toBe(0);
+    expect(test.stdout.value).toContain("revision 5");
+    expect(test.stdout.value).toContain("timeout 30000ms");
+  });
+
+  it("rejects an idle policy update without any setting", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "config", "idle",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--json"
+    ]);
+
+    expect(test.updateIdlePolicy).not.toHaveBeenCalled();
+    const output = JSON.parse(test.stdout.value) as {
+      status: string;
+      exitCode: number;
+      failure: { code: string };
+    };
+    expect(output.exitCode).toBe(2);
+    expect(output.failure.code).toBe("CONFIG_INVALID");
+    expect(test.exitCodes[0]).toBe(2);
+  });
+
+  it("rejects an idle policy update with an invalid strategy", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "config", "idle",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--strategy", "guessing",
+      "--json"
+    ]);
+
+    expect(test.updateIdlePolicy).not.toHaveBeenCalled();
+    expect(test.exitCodes[0]).toBe(2);
+  });
+
+  it("renders the session idle policy in status text", async () => {
+    const test = harness();
+    test.recoveryStatus.mockReturnValueOnce(Promise.resolve({
+      generationId: "generation-1",
+      revision: 4,
+      state: "active" as const,
+      candidateStepCount: 1,
+      idlePolicy: {
+        strategy: "structural" as const,
+        pollIntervalMs: 250,
+        stablePolls: 4,
+        timeoutMs: 30000
+      },
+      inFlight: null,
+      pendingConfirmation: null,
+      verification: { status: "notRun" as const },
+      publication: { status: "notRun" as const },
+      recovery: {
+        available: false,
+        kind: null,
+        actionMayHaveExecuted: false,
+        attemptOutcome: null,
+        requiredDecision: null,
+        ownerAlive: null
+      }
+    }));
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "status",
+      "--project", "/project",
+      "--session", "generation-1"
+    ]);
+
+    expect(test.stdout.value).toContain(
+      "Idle policy: strategy structural, poll 250ms x4, timeout 30000ms"
+    );
+  });
+
   it("lists generation sessions as one JSON value", async () => {
     const test = harness();
 
@@ -2174,6 +2312,7 @@ describe("generation JSON process protocol", () => {
         pendingConfirmation: challenge
       })),
       readContextSnapshot: vi.fn((): Promise<unknown> => Promise.resolve(null)),
+      updateIdlePolicy: test.updateIdlePolicy,
       assertConfigIdentity: test.assertConfigIdentity
     });
 

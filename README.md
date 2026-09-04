@@ -85,9 +85,10 @@ See the [local testing guide](docs/local-testing.md) for source, npm tarball, an
   composed Journey Sources into flat Journey v2 files. `list-flows --include-external`
   also lists External Flows used by `generation bridge --flow`.
 - `generation start` / `observe` / `step` / `confirm` / `manual` / `bridge` /
-  `status` / `recover` / `archive` / `list` / `finalize`: manage deterministic
-  Journey generation sessions. `bridge` records cross-app flows (e.g. camera,
-  picker, share) through a bound External Flow.
+  `status` / `recover` / `config idle` / `archive` / `list` / `finalize`:
+  manage deterministic Journey generation sessions. `bridge` records cross-app
+  flows (e.g. camera, picker, share) through a bound External Flow.
+  `config idle` hot-adjusts the session's idle policy without restarting.
 - `init`: install TapHound's two built-in Skills (`taphound-journey-brief-author`, `taphound-journey-generator`) for AI agents.
 - `align camera`: probe the device's default camera app and write a deterministic
   `flows/external/camera/photo-capture.json` External Flow. Requires
@@ -141,8 +142,11 @@ entirely for apps with known continuous rendering, or `frameStats` only when
 pixel-level frame quiescence is required.
 
 Generation binds the normalized configuration when a session starts. Choose
-the idle strategy and timeout before `generation start`; changing the config
-requires a new session.
+the idle strategy and timeout before `generation start`; after start, any config
+change except the idle policy requires a new session. The idle policy can be
+hot-adjusted mid-session with
+`generation config idle --session <id> ...` when no step is in flight, no
+confirmation is pending, and verification has not run.
 
 ## Workspace Layout
 

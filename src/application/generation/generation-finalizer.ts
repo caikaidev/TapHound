@@ -377,8 +377,11 @@ export class GenerationFinalizer {
           session.id,
           expected.attemptId
         );
+        const replayConfig = session.idlePolicy === undefined
+          ? config
+          : { ...config, idle: session.idlePolicy };
         const result = await this.dependencies.verifyRuntime.verify({
-          config,
+          config: replayConfig,
           journey,
           projectRoot: canonicalProjectRoot,
           devices: [{

@@ -317,6 +317,28 @@ describe("FileSystemGenerationSessionStore", () => {
     );
   });
 
+  it("allows ordinary idle updates to adjust the session idle policy", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(validSession());
+
+    const idlePolicy = {
+      strategy: "structural" as const,
+      pollIntervalMs: 250,
+      stablePolls: 4,
+      timeoutMs: 30000
+    };
+    const next = validSession(1, { idlePolicy });
+    await store.update("generation-1", 0, next);
+    await expect(store.read("generation-1")).resolves.toEqual(next);
+
+    const retuned = validSession(2, {
+      idlePolicy: { ...idlePolicy, timeoutMs: 60000 }
+    });
+    await store.update("generation-1", 1, retuned);
+    await expect(store.read("generation-1")).resolves.toEqual(retuned);
+  });
+
   it("CAS-commits only the authoritative snapshot binding", async () => {
     const root = await temporaryRoot();
     const store = new FileSystemGenerationSessionStore(root);

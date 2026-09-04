@@ -92,6 +92,10 @@ import {
   GenerationRecoveryService
 } from "../application/generation/generation-recovery-service.js";
 import {
+  GenerationConfigService,
+  type GenerationIdlePolicyPatch
+} from "../application/generation/generation-config-service.js";
+import {
   GenerationStarter,
   GenerationOperationError,
   hashGenerationBinding,
@@ -156,6 +160,10 @@ export interface GenerationCliRuntime {
     id: string
   ) => Promise<ResolvedProjectContext | null>;
   assertConfigIdentity: (id: string) => Promise<void>;
+  updateIdlePolicy: (
+    id: string,
+    patch: GenerationIdlePolicyPatch
+  ) => Promise<GenerationSession>;
 }
 
 export interface CliDependencies {
@@ -609,7 +617,17 @@ export function createProductionDependencies(
               "Generation configuration does not match the authoritative session"
             );
           }
-        }
+        },
+        updateIdlePolicy: async (
+          id: string,
+          patch: GenerationIdlePolicyPatch
+        ): Promise<GenerationSession> => (
+          new GenerationConfigService({ store }).updateIdlePolicy({
+            generationId: id,
+            config,
+            patch
+          })
+        )
       };
     },
     detachedProcess: new NodeDetachedProcessLauncher(),

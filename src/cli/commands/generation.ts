@@ -123,6 +123,13 @@ interface GenerationRecoverOptions extends GenerationObserveOptions {
   decision: string;
 }
 
+interface GenerationConfigIdleOptions extends GenerationObserveOptions {
+  strategy?: string | undefined;
+  pollIntervalMs?: string | undefined;
+  stablePolls?: string | undefined;
+  timeoutMs?: string | undefined;
+}
+
 interface GenerationListOptions {
   project: string;
   config: string;
@@ -138,6 +145,7 @@ type GenerationOptions =
   | GenerationBridgeOptions
   | GenerationRecoverOptions
   | GenerationFinalizeOptions
+  | GenerationConfigIdleOptions
   | GenerationListOptions;
 
 const PlannerEnvelopeSchema = z.union([
@@ -300,6 +308,9 @@ function generationStatusText(status: GenerationRecoveryStatus): string {
     `State: ${status.state}`,
     `Revision: ${String(status.revision)}`,
     `Candidate steps: ${String(status.candidateStepCount)}`,
+    ...(status.idlePolicy === undefined
+      ? []
+      : [`Idle policy: ${idlePolicyText(status.idlePolicy)}`]),
     `In flight: ${inFlight}`,
     `Pending confirmation: ${confirmation}`,
     `Verification: ${status.verification.status} (attempt ${verificationAttempt})`,
@@ -1496,6 +1507,90 @@ function createArchiveCommand(dependencies: CliDependencies): Command {
   });
 }
 
+function idlePolicyText(policy: NonNullable<GenerationSession["idlePolicy"]>): string {
+  return `strategy ${policy.strategy}, poll ${String(policy.pollIntervalMs)}ms x${
+    String(policy.stablePolls)
+  }, timeout ${String(policy.timeoutMs)}ms`;
+}
+
+function createConfigCommand(dependencies: CliDependencies): Command {
+  return new Command("config")
+    .description("Adjust session-scoped generation settings")
+    .addCommand(addCommonOptions(
+      new Command("idle")
+        .description(
+          "Hot-adjust the idle policy bound to a generation session"
+        )
+        .option(
+          "--strategy <strategy>",
+          "Idle strategy: hybrid, layoutDiff, frameStats, or structural"
+        )
+        .option(
+          "--poll-interval-ms <milliseconds>",
+          "Idle poll interval in milliseconds"
+        )
+        .option(
+          "--stable-polls <count>",
+          "Consecutive stable polls required before idle"
+        )
+        .option(
+          "--timeout-ms <milliseconds>",
+          "Idle timeout in milliseconds"
+        ),
+      dependencies
+    ).action(async (options: GenerationConfigIdleOptions): Promise<void> => {
+      try {
+        const generationId = GenerationSessionIdSchema.parse(options.session);
+        const config = await loadConfig(dependencies, options);
+        const runtime = requireRuntime(dependencies, options.project, config);
+        await assertRuntimeConfig(runtime, generationId);
+        const strategy = options.strategy === undefined
+          ? undefined
+          : z
+            .enum(["hybrid", "layoutDiff", "frameStats", "structural"])
+            .parse(options.strategy);
+        const pollIntervalMs = options.pollIntervalMs === undefined
+          ? undefined
+          : z.coerce.number().int().positive().parse(options.pollIntervalMs);
+        const stablePolls = options.stablePolls === undefined
+          ? undefined
+          : z.coerce.number().int().positive().parse(options.stablePolls);
+        const timeoutMs = options.timeoutMs === undefined
+          ? undefined
+          : z.coerce.number().int().positive().parse(options.timeoutMs);
+        if (
+          strategy === undefined
+          && pollIntervalMs === undefined
+          && stablePolls === undefined
+          && timeoutMs === undefined
+        ) {
+          throw new GenerationOperationError(
+            "CONFIG_INVALID",
+            "Generation idle policy update requires at least one setting"
+          );
+        }
+        const session = await runtime.updateIdlePolicy(generationId, {
+          ...(strategy === undefined ? {} : { strategy }),
+          ...(pollIntervalMs === undefined ? {} : { pollIntervalMs }),
+          ...(stablePolls === undefined ? {} : { stablePolls }),
+          ...(timeoutMs === undefined ? {} : { timeoutMs })
+        });
+        const policy = session.idlePolicy;
+        writeSuccess(dependencies, options, {
+          status: "updated",
+          exitCode: 0,
+          generationId,
+          revision: session.revision,
+          ...(policy === undefined ? {} : { idlePolicy: policy })
+        }, policy === undefined
+          ? `Generation idle policy updated (revision ${String(session.revision)})`
+          : `Generation idle policy updated (revision ${String(session.revision)}): ${idlePolicyText(policy)}`);
+      } catch (error) {
+        mappedFailure(dependencies, options, error);
+      }
+    }));
+}
+
 function generationListText(sessions: readonly GenerationSession[]): string {
   if (sessions.length === 0) {
     return "No generation sessions found.";
@@ -1550,6 +1645,7 @@ export function createGenerationCommand(
     .addCommand(createStatusCommand(dependencies))
     .addCommand(createRecoverCommand(dependencies))
     .addCommand(createArchiveCommand(dependencies))
+    .addCommand(createConfigCommand(dependencies))
     .addCommand(createListCommand(dependencies))
     .addCommand(createFinalizeCommand(dependencies));
 }

@@ -587,6 +587,29 @@ describe("GenerationFinalizer", () => {
     )).resolves.toContain('"status": "verified"');
   });
 
+  it("replays with the session idle policy override applied to the config", async () => {
+    const test = await fixture();
+    const current = await test.store.read("generation-1");
+    const idlePolicy = {
+      strategy: "structural" as const,
+      pollIntervalMs: 250,
+      stablePolls: 4,
+      timeoutMs: 45000
+    };
+    await test.store.update("generation-1", current.revision, {
+      ...current,
+      revision: current.revision + 1,
+      idlePolicy
+    });
+
+    const result = await test.finalize.finalize(input(test.root));
+
+    expect(result.status).toBe("verified");
+    expect(test.verify).toHaveBeenCalledOnce();
+    const verifyInput = test.verify.mock.calls[0]?.[0];
+    expect(verifyInput?.config.idle).toEqual(idlePolicy);
+  });
+
   it("persists replay progress phases during the owned verification attempt", async () => {
     const test = await fixture();
     const phases: VerificationPhase[] = [];

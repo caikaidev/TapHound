@@ -134,9 +134,14 @@ quiescence is genuinely required and there are no structural changes.
 The **entire** config (including the `idle` block and any explicit `ui`
 fields) is normalized and hashed when a generation session starts, and every
 `generation` subcommand re-verifies that hash. Choose the idle strategy and
-timeouts before `generation start`; changing the config requires a new
-session. (Idle rebind support is planned; until then, budget a session
-restart for idle changes.)
+timeouts before `generation start`; after start, any config change except the
+idle policy requires a new session. The idle policy alone can be hot-adjusted
+in place with `generation config idle --session <id> [--strategy ...]
+[--poll-interval-ms ...] [--stable-polls ...] [--timeout-ms ...]`, which stores
+a session-scoped override (observe, step, and finalize replay honor it) while
+the original config hash stays bound. Updates are only accepted while the
+session is `active` with no in-flight step, no pending confirmation, and
+verification and publication both not run.
 
 ## Editor Validation
 

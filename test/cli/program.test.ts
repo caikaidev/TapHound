@@ -53,6 +53,7 @@ describe("createProgram", () => {
       "status",
       "recover",
       "archive",
+      "config",
       "list",
       "finalize"
     ]);

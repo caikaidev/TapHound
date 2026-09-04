@@ -129,6 +129,7 @@ import type { WorkspaceLayoutPort } from "../ports/workspace-layout.js";
 import type {
   JourneyCompositionStore
 } from "../ports/journey-composition-store.js";
+import { isErrnoException } from "../shared/errors.js";
 
 export interface TextOutput {
   write: (content: string) => void;
@@ -561,8 +562,8 @@ export function createProductionDependencies(
           try {
             process.kill(pid, 0);
             return true;
-          } catch {
-            return false;
+          } catch (error) {
+            return !isErrnoException(error) || error.code !== "ESRCH";
           }
         }
       });

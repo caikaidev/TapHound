@@ -125,6 +125,7 @@ function dependencies(): {
             semanticChanged: [],
             unresolved: [],
             pruned: 0,
+            droppedIneligible: 0,
             inventoryChanged: false
           }],
           blocked: []

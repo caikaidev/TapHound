@@ -63,6 +63,7 @@ export interface ContextRefreshScopeReport {
   semanticChanged: string[];
   unresolved: string[];
   pruned: number;
+  droppedIneligible: number;
   inventoryChanged: boolean;
 }
 
@@ -99,6 +100,7 @@ interface ManifestRefresh {
   semanticChanged: string[];
   unresolved: string[];
   pruned: number;
+  droppedIneligible: number;
 }
 
 interface ModuleRefresh {
@@ -204,6 +206,7 @@ export class ContextRefresher {
       semanticChanged: root.semanticChanged,
       unresolved: root.unresolved,
       pruned: root.pruned,
+      droppedIneligible: root.droppedIneligible,
       inventoryChanged: false
     };
 
@@ -341,12 +344,6 @@ export class ContextRefresher {
     pruneDeleted: boolean
   ): Promise<ModuleRefresh> => {
     const shard = await this.readShard(projectRoot, reference);
-    const manifest = await this.refreshManifest(
-      projectRoot,
-      shard.document.manifest,
-      acceptSourceChanges,
-      pruneDeleted
-    );
     const inventory = await this.dependencies.inventory.inspectProjectInventory({
       projectRoot,
       projectDir: shard.document.projectDir,
@@ -362,6 +359,13 @@ export class ContextRefresher {
       inventory.pathSetSha256 !== shard.document.inventory.pathSetSha256
     );
     const acceptedInventory = inventoryChanged && acceptSourceChanges;
+    const manifest = await this.refreshManifest(
+      projectRoot,
+      shard.document.manifest,
+      acceptSourceChanges,
+      pruneDeleted,
+      acceptedInventory ? new Set(inventory.paths) : undefined
+    );
     const document = ProjectContextModuleSchema.safeParse({
       ...shard.document,
       inventory: acceptedInventory
@@ -395,6 +399,7 @@ export class ContextRefresher {
         semanticChanged: manifest.semanticChanged,
         unresolved: manifest.unresolved,
         pruned: manifest.pruned,
+        droppedIneligible: manifest.droppedIneligible,
         inventoryChanged
       }
     };
@@ -404,7 +409,8 @@ export class ContextRefresher {
     projectRoot: string,
     manifest: ContextManifest,
     acceptSourceChanges: boolean,
-    pruneDeleted: boolean
+    pruneDeleted: boolean,
+    eligiblePaths?: Set<string> | undefined
   ): Promise<ManifestRefresh> => {
     const files: ContextEvidence[] = [];
     const semanticChanged: string[] = [];
@@ -413,6 +419,7 @@ export class ContextRefresher {
     let semanticBackfilled = 0;
     let formattingRehashed = 0;
     let pruned = 0;
+    let droppedIneligible = 0;
 
     for (const evidence of manifest.files) {
       const inspection = await this.dependencies.files.inspectProjectFile({
@@ -428,6 +435,11 @@ export class ContextRefresher {
         }
         unresolved.push(`${evidence.path}: ${inspection.status}`);
         files.push(evidence);
+        continue;
+      }
+      if (eligiblePaths !== undefined && !eligiblePaths.has(evidence.path)) {
+        droppedIneligible += 1;
+        modified = true;
         continue;
       }
       const semantic = semanticSha256(inspection.bytes);
@@ -471,7 +483,8 @@ export class ContextRefresher {
       formattingRehashed,
       semanticChanged,
       unresolved,
-      pruned
+      pruned,
+      droppedIneligible
     };
   };
 

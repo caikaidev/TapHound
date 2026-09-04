@@ -2,12 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ExpectationEvaluator } from "../../../src/application/assertion/expectation-evaluator.js";
 import { LogcatCollector } from "../../../src/application/collector/logcat-collector.js";
+import type { LayoutElement } from "../../../src/domain/layout.js";
 import type { AdbPort, LogcatOptions } from "../../../src/ports/adb.js";
-import type { AndroidCliPort } from "../../../src/ports/android-cli.js";
+import type { UiSnapshotProvider } from "../../../src/ports/ui-snapshot.js";
 import { FakeClock } from "../../fakes/fake-clock.js";
 import {
   runningCommand
 } from "../../fakes/process-runner.js";
+import { uiSnapshotProviderFromLayout } from "../../fakes/ui-snapshot.js";
 
 function adbPort(): AdbPort {
   return {
@@ -33,12 +35,26 @@ function adbPort(): AdbPort {
   };
 }
 
-function androidCli(): AndroidCliPort {
+function androidCli(): UiSnapshotProvider & {
+  layout: (options: {
+    deviceSerial: string;
+    signal?: AbortSignal | undefined;
+    timeoutMs?: number | undefined;
+  }) => Promise<readonly LayoutElement[]>;
+} {
+  const layout = vi.fn<(
+    options: {
+      deviceSerial: string;
+      signal?: AbortSignal | undefined;
+      timeoutMs?: number | undefined;
+    }
+  ) => Promise<readonly LayoutElement[]>>();
+  const provider = uiSnapshotProviderFromLayout(layout);
   return {
-    layout: vi.fn(),
-    layoutDiff: vi.fn(),
-    captureScreen: vi.fn(),
-    resolveScreen: vi.fn()
+    layout,
+    descriptor: provider.descriptor,
+    capture: provider.capture,
+    close: provider.close
   };
 }
 

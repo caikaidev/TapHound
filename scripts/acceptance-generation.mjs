@@ -35,7 +35,10 @@ const moduleFiles = [
   "app/src/main/AndroidManifest.xml",
   "app/src/main/java/dev/taphound/demo/MainActivity.kt",
   "app/src/main/java/dev/taphound/demo/SearchActivity.kt",
+  "app/src/main/java/dev/taphound/demo/ComposeActivity.kt",
+  "app/src/main/java/dev/taphound/demo/HybridActivity.kt",
   "app/src/main/res/layout/activity_main.xml",
+  "app/src/main/res/layout/activity_hybrid.xml",
   "app/src/main/res/layout/activity_search.xml"
 ];
 const projectFiles = ["settings.gradle.kts"];
@@ -70,7 +73,7 @@ const moduleContext = {
     )
   },
   summary: {
-    features: ["launch", "search"],
+    features: ["launch", "search", "compose", "hybrid"],
     activities: [
       {
         name: "dev.taphound.demo.MainActivity",
@@ -81,6 +84,16 @@ const moduleContext = {
         name: "dev.taphound.demo.SearchActivity",
         entryPoints: ["dev.taphound.demo.MainActivity"],
         screens: ["search"]
+      },
+      {
+        name: "dev.taphound.demo.ComposeActivity",
+        entryPoints: ["dev.taphound.demo.MainActivity"],
+        screens: ["compose"]
+      },
+      {
+        name: "dev.taphound.demo.HybridActivity",
+        entryPoints: ["dev.taphound.demo.MainActivity"],
+        screens: ["hybrid"]
       }
     ],
     elements: [
@@ -127,10 +140,12 @@ const projectContext = {
     kind: "application",
     contextPath: ".taphound/context/modules/app.json",
     sha256: moduleHash,
-    features: ["launch", "search"],
+    features: ["launch", "search", "compose", "hybrid"],
     activities: [
       "dev.taphound.demo.MainActivity",
-      "dev.taphound.demo.SearchActivity"
+      "dev.taphound.demo.SearchActivity",
+      "dev.taphound.demo.ComposeActivity",
+      "dev.taphound.demo.HybridActivity"
     ],
     dependsOn: [],
     status: "complete"

@@ -2,7 +2,10 @@ import { resolve } from "node:path";
 
 import { Command } from "commander";
 
-import { TapHoundConfigSchema } from "../../domain/config.js";
+import {
+  TapHoundConfigSchema,
+  type TapHoundConfig
+} from "../../domain/config.js";
 import { CONFIG_PATH } from "../../domain/workspace.js";
 import type { CliDependencies } from "../dependencies.js";
 import {
@@ -20,14 +23,14 @@ interface DoctorOptions {
   json?: boolean | undefined;
 }
 
-async function configuredPackageName(
+async function configuredConfig(
   dependencies: CliDependencies,
   options: DoctorOptions
-): Promise<string | undefined> {
+): Promise<TapHoundConfig | undefined> {
   try {
     return TapHoundConfigSchema.parse(await dependencies.readJson(
       resolve(options.project, options.config)
-    )).run.packageName;
+    ));
   } catch {
     return undefined;
   }
@@ -42,9 +45,12 @@ export function createDoctorCommand(dependencies: CliDependencies): Command {
     .option("--json", "Emit machine-readable JSON")
     .action(async (options: DoctorOptions): Promise<void> => {
       try {
-        const packageName = await configuredPackageName(dependencies, options);
+        const config = await configuredConfig(dependencies, options);
         const report = await dependencies.doctor.run({
-          ...(packageName === undefined ? {} : { packageName }),
+          ...(config === undefined ? {} : { packageName: config.run.packageName }),
+          ...(config?.ui?.backend === undefined
+            ? {}
+            : { requestedUiBackend: config.ui.backend }),
           ...(options.device === undefined
             ? {}
             : { requestedDevice: options.device }),

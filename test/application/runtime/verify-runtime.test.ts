@@ -57,7 +57,19 @@ describe("VerifyRuntime", () => {
         }
       }
     });
-    expect(result.report.schemaVersion).toBe(2);
+    expect(result.report.schemaVersion).toBe(3);
+    if (result.report.schemaVersion !== 3) {
+      throw new Error("Expected report v3");
+    }
+    expect(result.report.environment.uiBackend).toMatchObject({
+      id: "system-uiautomator"
+    });
+    expect(test.uiSnapshots.open).toHaveBeenCalledWith({
+      deviceSerial: "emulator-5554",
+      timeoutMs: runtimeConfig.idle.timeoutMs,
+      backend: "auto",
+      cacheEnabled: true
+    });
     expect(test.order).toEqual([
       "install",
       "logcat-start",
@@ -282,7 +294,7 @@ describe("VerifyRuntime", () => {
         test.order.push("step-layout");
         return Promise.resolve([]);
       });
-    vi.mocked(test.androidCli.captureScreen).mockImplementation(() => {
+    vi.mocked(test.screenshots.capture).mockImplementation(() => {
       test.order.push("screenshot");
       return Promise.resolve(commandResult({ exitCode: 1, stderr: "capture failed" }));
     });

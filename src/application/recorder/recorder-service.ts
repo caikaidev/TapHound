@@ -13,9 +13,14 @@ import {
 } from "../../domain/journey.js";
 import type { LayoutElement, Locator } from "../../domain/layout.js";
 import type { AppIdentity, AdbPort } from "../../ports/adb.js";
-import type { AndroidCliPort } from "../../ports/android-cli.js";
 import type { Clock } from "../../ports/clock.js";
 import type { JourneyWriterPort } from "../../ports/journey-writer.js";
+import type { ScreenshotPort } from "../../ports/screenshot.js";
+import type { UiStabilityProbe } from "../../ports/ui-stability.js";
+import type {
+  UiSnapshotProvider,
+  UiSnapshotProviderFactory
+} from "../../ports/ui-snapshot.js";
 import type {
   ExternalStepAction,
   RecorderAction,
@@ -31,9 +36,12 @@ import {
   listRecorderTargets,
   type RecorderTarget
 } from "./locator-selector.js";
+import { closeUiSnapshotProvider } from "../ui/ui-snapshot-lifecycle.js";
 
 export interface RecorderDependencies {
-  androidCli: AndroidCliPort;
+  screenshots: ScreenshotPort;
+  uiStability: UiStabilityProbe;
+  uiSnapshots: UiSnapshotProviderFactory;
   adb: AdbPort;
   clock: Clock;
   prompt: RecorderPromptPort;
@@ -197,14 +205,23 @@ export class RecorderService {
       };
     }
 
+    const uiSnapshotProvider = await this.dependencies.uiSnapshots.open({
+      deviceSerial: input.deviceSerial,
+      timeoutMs: input.config.ui?.snapshotTimeoutMs
+        ?? input.config.idle.timeoutMs,
+      backend: input.config.ui?.backend ?? "auto",
+      cacheEnabled: input.config.ui?.cacheEnabled ?? true,
+      ...(input.signal === undefined ? {} : { signal: input.signal })
+    });
+    try {
     const idleWaiter = new IdleWaiter(
-      this.dependencies.androidCli,
+      this.dependencies.uiStability,
       this.dependencies.clock,
       input.deviceSerial,
       input.config.run.packageName
     );
-    await this.dependencies.androidCli.layout({
-      deviceSerial: input.deviceSerial,
+    await uiSnapshotProvider.capture({
+      reason: "locate",
       ...(input.signal === undefined ? {} : { signal: input.signal }),
       timeoutMs: input.config.idle.timeoutMs
     });
@@ -226,15 +243,17 @@ export class RecorderService {
     const steps: JourneyStep[] = [];
     const executor = new ActionExecutor(
       this.dependencies.adb,
-      input.deviceSerial
+      input.deviceSerial,
+      (): void => uiSnapshotProvider.invalidate?.("beforeAction")
     );
 
     for (;;) {
-      const layout = await this.dependencies.androidCli.layout({
-        deviceSerial: input.deviceSerial,
+      const layout = (await uiSnapshotProvider.capture({
+        reason: "locate",
+        freshness: "sameMutationEpoch",
         ...(input.signal === undefined ? {} : { signal: input.signal }),
         timeoutMs: input.config.idle.timeoutMs
-      });
+      })).roots;
       const action = await this.dependencies.prompt.selectAction();
       if (action === "cancel") {
         return { status: "cancelled", stepsRecorded: steps.length };
@@ -257,7 +276,12 @@ export class RecorderService {
       }
 
       if (action === "bridgeTrigger") {
-        const result = await this.recordBridgeStep(layout, input, identity);
+        const result = await this.recordBridgeStep(
+          layout,
+          input,
+          identity,
+          uiSnapshotProvider
+        );
         if (result.status === "cancelled") {
           return { status: "cancelled", stepsRecorded: steps.length };
         }
@@ -274,7 +298,12 @@ export class RecorderService {
         continue;
       }
 
-      const prepared = await this.prepareAction(action, layout, input);
+      const prepared = await this.prepareAction(
+        action,
+        layout,
+        input,
+        uiSnapshotProvider
+      );
       if (prepared === undefined) {
         continue;
       }
@@ -322,15 +351,19 @@ export class RecorderService {
         activity: { before, after }
       }));
     }
+    } finally {
+      await closeUiSnapshotProvider(uiSnapshotProvider);
+    }
   }
 
   private async prepareAction(
     action: Exclude<RecorderAction, "finish" | "cancel" | "bridgeTrigger">,
     layout: readonly LayoutElement[],
-    input: RecordInput
+    input: RecordInput,
+    uiSnapshotProvider: UiSnapshotProvider
   ): Promise<{ draft: ActionDraft; target?: RecorderTarget } | undefined> {
     if (action === "scrollTo") {
-      return this.prepareScrollTo(layout, input);
+      return this.prepareScrollTo(layout, input, uiSnapshotProvider);
     }
     if (action === "inputText") {
       return {
@@ -375,7 +408,7 @@ export class RecorderService {
 
     let fallback: { type: "annotatedLabel"; label: string } | undefined;
     const screenshotPath = annotatedPath(input.outputPath);
-    const capture = await this.dependencies.androidCli.captureScreen({
+    const capture = await this.dependencies.screenshots.capture({
       outputPath: screenshotPath,
       annotate: true,
       deviceSerial: input.deviceSerial,
@@ -413,6 +446,7 @@ export class RecorderService {
   private async prepareScrollTo(
     layout: readonly LayoutElement[],
     input: RecordInput,
+    uiSnapshotProvider: UiSnapshotProvider,
     packageName: string = input.config.run.packageName,
     resourceIdOnly: boolean = false
   ): Promise<{ draft: ActionDraft; target?: RecorderTarget } | undefined> {
@@ -436,9 +470,13 @@ export class RecorderService {
     const direction = await this.dependencies.prompt.selectSwipeDirection();
     const options = await this.dependencies.prompt.swipeOptions();
 
-    const executor = new ActionExecutor(this.dependencies.adb, input.deviceSerial);
+    const executor = new ActionExecutor(
+      this.dependencies.adb,
+      input.deviceSerial,
+      (): void => uiSnapshotProvider.invalidate?.("beforeAction")
+    );
     const idleWaiter = new IdleWaiter(
-      this.dependencies.androidCli,
+      this.dependencies.uiStability,
       this.dependencies.clock,
       input.deviceSerial,
       packageName
@@ -506,18 +544,20 @@ export class RecorderService {
         return undefined;
       }
       swipesUsed += 1;
-      currentLayout = await this.dependencies.androidCli.layout({
-        deviceSerial: input.deviceSerial,
+      currentLayout = (await uiSnapshotProvider.capture({
+        reason: "locate",
+        freshness: "sameMutationEpoch",
         ...(input.signal === undefined ? {} : { signal: input.signal }),
         timeoutMs: input.config.idle.timeoutMs
-      });
+      })).roots;
     }
   }
 
   private async recordBridgeStep(
     layout: readonly LayoutElement[],
     input: RecordInput,
-    identity: AppIdentity
+    identity: AppIdentity,
+    uiSnapshotProvider: UiSnapshotProvider
   ): Promise<BridgeRecordResult> {
     try {
       const scenario = await this.dependencies.prompt.selectBridgeScenario();
@@ -554,7 +594,8 @@ export class RecorderService {
 
       const executor = new ActionExecutor(
         this.dependencies.adb,
-        input.deviceSerial
+        input.deviceSerial,
+        (): void => uiSnapshotProvider.invalidate?.("beforeAction")
       );
       const triggerClick: Extract<JourneyStep, { action: "click" }> = {
         action: "click",
@@ -578,7 +619,11 @@ export class RecorderService {
       }
       await this.dependencies.prompt.notifyExternalEscape(escapedPackageName);
 
-      const externalResult = await this.recordExternalSteps(input, escapedPackageName);
+      const externalResult = await this.recordExternalSteps(
+        input,
+        escapedPackageName,
+        uiSnapshotProvider
+      );
       if (externalResult.status === "cancelled") {
         return { status: "cancelled" };
       }
@@ -594,7 +639,7 @@ export class RecorderService {
       await this.dependencies.prompt.notifyExternalReturn();
 
       const idleWaiter = new IdleWaiter(
-        this.dependencies.androidCli,
+        this.dependencies.uiStability,
         this.dependencies.clock,
         input.deviceSerial,
         input.config.run.packageName
@@ -645,7 +690,8 @@ export class RecorderService {
 
   private async recordExternalSteps(
     input: RecordInput,
-    escapedPackageName: string
+    escapedPackageName: string,
+    uiSnapshotProvider: UiSnapshotProvider
   ): Promise<ExternalStepsResult> {
     const externalSteps: ExternalStep[] = [];
     const externalIdentity: AppIdentity = {
@@ -655,14 +701,15 @@ export class RecorderService {
       timeoutMs: input.config.idle.timeoutMs
     };
     const externalIdleWaiter = new IdleWaiter(
-      this.dependencies.androidCli,
+      this.dependencies.uiStability,
       this.dependencies.clock,
       input.deviceSerial,
       escapedPackageName
     );
     const executor = new ActionExecutor(
       this.dependencies.adb,
-      input.deviceSerial
+      input.deviceSerial,
+      (): void => uiSnapshotProvider.invalidate?.("beforeAction")
     );
 
     for (;;) {
@@ -679,13 +726,20 @@ export class RecorderService {
       }
       const expectedActivity = foreground.activity;
 
-      const layout = await this.dependencies.androidCli.layout({
-        deviceSerial: input.deviceSerial,
+      const layout = (await uiSnapshotProvider.capture({
+        reason: "locate",
+        freshness: "sameMutationEpoch",
         ...(input.signal === undefined ? {} : { signal: input.signal }),
         timeoutMs: input.config.idle.timeoutMs
-      });
+      })).roots;
 
-      const prepared = await this.prepareExternalStep(action, layout, input, escapedPackageName);
+      const prepared = await this.prepareExternalStep(
+        action,
+        layout,
+        input,
+        escapedPackageName,
+        uiSnapshotProvider
+      );
       if (prepared === undefined) {
         continue;
       }
@@ -738,10 +792,17 @@ export class RecorderService {
     action: Exclude<ExternalStepAction, "finishExternal">,
     layout: readonly LayoutElement[],
     input: RecordInput,
-    packageName: string
+    packageName: string,
+    uiSnapshotProvider: UiSnapshotProvider
   ): Promise<{ draft: ActionDraft; target?: RecorderTarget } | undefined> {
     if (action === "scrollTo") {
-      return this.prepareScrollTo(layout, input, packageName, true);
+      return this.prepareScrollTo(
+        layout,
+        input,
+        uiSnapshotProvider,
+        packageName,
+        true
+      );
     }
     if (action === "inputText") {
       return {

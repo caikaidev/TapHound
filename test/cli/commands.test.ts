@@ -25,6 +25,10 @@ import { runtimeConfig, runtimeJourney } from "../fakes/runtime-fixture.js";
 import { fakeWorkspaceLayout } from "../fakes/workspace-layout.js";
 import { validReport } from "../fixtures/report.js";
 import {
+  uiSnapshotFactory,
+  uiSnapshotProvider
+} from "../fakes/ui-snapshot.js";
+import {
   contextSelection,
   projectContextIndex,
   projectContextModule,
@@ -190,6 +194,14 @@ function dependencies(): {
         }))
       },
       workspaceLayout: fakeWorkspaceLayout(),
+      uiCache: {
+        status: vi.fn(() => Promise.resolve({
+          directory: ".taphound/build/cache/ui",
+          entries: 2,
+          bytes: 512
+        })),
+        clear: vi.fn(() => Promise.resolve())
+      },
       runtimeObserver: {
         observe: vi.fn(() => Promise.resolve({
           binding: {
@@ -262,6 +274,30 @@ describe("TapHound CLI commands", () => {
     expect(JSON.parse(test.stdout.value)).toMatchObject({ status: "passed" });
     expect(test.stderr.value).toBe("");
     expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("inspects and explicitly clears only the rebuildable UI cache", async () => {
+    const test = dependencies();
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "ui-cache", "status", "--project", "/project", "--json"
+    ]);
+    expect(JSON.parse(test.stdout.value)).toEqual({
+      status: "ok",
+      cache: {
+        directory: ".taphound/build/cache/ui",
+        entries: 2,
+        bytes: 512
+      }
+    });
+    expect(test.value.uiCache?.status).toHaveBeenCalledWith("/project");
+
+    test.stdout.value = "";
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "ui-cache", "clear", "--project", "/project", "--yes", "--json"
+    ]);
+    expect(JSON.parse(test.stdout.value)).toEqual({ status: "cleared" });
+    expect(test.value.uiCache?.clear).toHaveBeenCalledWith("/project");
   });
 
   it("loads config and invokes the interactive Recorder after preflight", async () => {
@@ -1067,6 +1103,7 @@ describe("TapHound CLI commands", () => {
     test.value.generationStarter = new GenerationStarter({
       contextValidator: test.value.contextValidator,
       appPreparer: { prepare: vi.fn(() => Promise.resolve()) },
+      uiSnapshots: uiSnapshotFactory(uiSnapshotProvider()),
       store: { create: vi.fn((): Promise<void> => Promise.resolve()) },
       now: (): Date => new Date("2026-07-22T12:00:00.000Z"),
       generateId: (): string => "unused-id",

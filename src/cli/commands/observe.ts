@@ -5,6 +5,10 @@ import { Command } from "commander";
 import { TapHoundConfigSchema } from "../../domain/config.js";
 import { CONFIG_PATH } from "../../domain/workspace.js";
 import type { ObserveReport } from "../../domain/observation.js";
+import {
+  exitCodeForFailure,
+  failureCodeFromUnknown
+} from "../../domain/failure.js";
 import type { CliDependencies } from "../dependencies.js";
 import {
   errorMessage,
@@ -29,6 +33,11 @@ function summarize(report: ObserveReport): string {
     `TapHound observe: ${report.packageName} on ${report.deviceSerial}`,
     `activity: ${report.activity ?? "(unavailable)"}`,
     `foreground: ${report.foreground.packageName}/${report.foreground.activity}`,
+    `ui backend: ${report.uiBackend.id}`,
+    `ui capture: ${String(report.uiCaptureDurationMs)}ms`,
+    ...(report.uiCache === undefined
+      ? []
+      : [`ui cache: ${String(report.uiCache.hits)} hit(s), ${String(report.uiCache.misses)} miss(es), ${String(report.uiCache.capturesSaved)} capture(s) saved`]),
     `layout: ${String(report.layout.length)} element(s)`,
     logcatLine
   ].join("\n");
@@ -86,6 +95,9 @@ export function createObserveCommand(dependencies: CliDependencies): Command {
       try {
         const doctor = await dependencies.doctor.run({
           packageName: config.run.packageName,
+          ...(config.ui?.backend === undefined
+            ? {}
+            : { requestedUiBackend: config.ui.backend }),
           ...(options.device === undefined
             ? {}
             : { requestedDevice: options.device }),
@@ -112,7 +124,11 @@ export function createObserveCommand(dependencies: CliDependencies): Command {
         if (deviceSerial === undefined) {
           throw new Error("Doctor did not select a device");
         }
-        const observer = dependencies.observer(config.idle.timeoutMs);
+        const observer = dependencies.observer(
+          config.ui?.snapshotTimeoutMs ?? config.idle.timeoutMs,
+          config.ui?.backend ?? "auto",
+          config.ui?.cacheEnabled ?? true
+        );
         const report = await observer.observe({
           packageName: config.run.packageName,
           deviceSerial,
@@ -134,13 +150,15 @@ export function createObserveCommand(dependencies: CliDependencies): Command {
         }
         dependencies.setExitCode(0);
       } catch (error) {
-        const output = failureOutput(4, "INTERNAL_ERROR", errorMessage(error));
+        const code = failureCodeFromUnknown(error) ?? "INTERNAL_ERROR";
+        const exitCode = exitCodeForFailure(code);
+        const output = failureOutput(exitCode, code, errorMessage(error));
         if (options.json === true) {
           writeJson(dependencies.stdout, output);
         } else {
           writeLine(dependencies.stderr, output.failure.message);
         }
-        dependencies.setExitCode(4);
+        dependencies.setExitCode(exitCode);
       }
     });
 }

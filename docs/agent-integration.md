@@ -172,6 +172,19 @@ The caller must also use an argument array and keep `shell: false`, to avoid tur
 
 ## Generating a New Journey
 
+Generation sessions bind one exact UI backend descriptor (`id`, adapter and
+engine version, and configuration hash). Runtime Snapshot v2 carries that
+descriptor, the physical-display viewport, observation ID, and capture timing.
+An Agent must submit the exact referenced snapshot and must not substitute a
+snapshot captured by another backend. A legacy session without evidence may
+bind once on its first snapshot; a legacy session with evidence must be
+restarted rather than migrated implicitly.
+
+`ui.backend=auto` chooses only at provider open and does not silently fail over
+during an authoritative operation. `appium-uiautomator2` is opt-in and supplies
+only the page-source tree; application lifecycle, actions, waiting, Logcat, and
+verification remain TapHound/ADB responsibilities.
+
 The generation flow uses the in-repo [`taphound-journey-generator` Skill](../assets/skills/taphound-journey-generator/SKILL.md):
 
 1. `project describe --json` outputs stable Package and Activity information.

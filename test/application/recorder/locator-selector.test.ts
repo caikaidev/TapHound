@@ -89,6 +89,22 @@ describe("Recorder locator selection", () => {
       (choice) => choice.element.id
     )).toEqual(["results"]);
   });
+
+  it("does not list a geometry-free structure node as an action target", () => {
+    const structure: LayoutElement = {
+      id: "structure",
+      resourceId: "structure",
+      clickable: true,
+      longClickable: true,
+      scrollable: true,
+      enabled: true,
+      children: []
+    };
+
+    expect(listRecorderTargets([structure], "click")).toEqual([]);
+    expect(listRecorderTargets([structure], "longClick")).toEqual([]);
+    expect(listRecorderTargets([structure], "swipe")).toEqual([]);
+  });
 });
 
 const orphanRowLayout: LayoutElement[] = [{

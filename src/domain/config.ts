@@ -4,6 +4,7 @@ import {
   DEFAULT_ARTIFACTS_DIR,
   isInvalidRelativeArtifactDirectory
 } from "./workspace.js";
+import { UiBackendSelectionSchema } from "./ui-backend.js";
 
 const PackageNameSchema = z.string().regex(
   /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/,
@@ -30,6 +31,11 @@ export const TapHoundConfigSchema = z.strictObject({
     stablePolls: z.number().int().positive(),
     timeoutMs: z.number().int().positive()
   }),
+  ui: z.strictObject({
+    backend: UiBackendSelectionSchema,
+    snapshotTimeoutMs: z.number().int().positive().optional(),
+    cacheEnabled: z.boolean().optional()
+  }).optional(),
   artifactsDir: z.string().trim().min(1).refine(
     (path) => !isInvalidRelativeArtifactDirectory(path),
     "artifactsDir inside .taphound/ must stay under .taphound/build/"
@@ -37,3 +43,7 @@ export const TapHoundConfigSchema = z.strictObject({
 });
 
 export type TapHoundConfig = z.infer<typeof TapHoundConfigSchema>;
+
+export const DEFAULT_UI_CONFIG = {
+  backend: "auto" as const
+};

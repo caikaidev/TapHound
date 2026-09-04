@@ -17,6 +17,7 @@ export const BUILD_DIR = `${TAPHOUND_DIR}/build`;
 export const GENERATIONS_DIR = `${BUILD_DIR}/generations`;
 export const JOBS_DIR = `${BUILD_DIR}/jobs`;
 export const DEFAULT_ARTIFACTS_DIR = `${BUILD_DIR}/runs`;
+export const UI_CACHE_DIR = `${BUILD_DIR}/cache/ui`;
 export const BUILD_IGNORE_FILE = `${TAPHOUND_DIR}/.gitignore`;
 export const BUILD_IGNORE_CONTENT = "build/\n";
 

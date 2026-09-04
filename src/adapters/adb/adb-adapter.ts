@@ -17,7 +17,7 @@ import type {
   ResolvedActivity,
   StartActivityByIntentOptions
 } from "../../ports/adb.js";
-import type { Point } from "../../ports/android-cli.js";
+import type { Point } from "../../domain/geometry.js";
 import type {
   CommandResult,
   ProcessRunner,

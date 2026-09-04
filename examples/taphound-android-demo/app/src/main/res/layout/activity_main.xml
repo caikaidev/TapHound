@@ -11,4 +11,16 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="Open search" />
+
+    <Button
+        android:id="@+id/open_compose"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Open Compose" />
+
+    <Button
+        android:id="@+id/open_hybrid"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Open hybrid" />
 </LinearLayout>

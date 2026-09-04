@@ -4,79 +4,28 @@ import { AndroidCliAdapter } from "../../../src/adapters/android-cli/android-cli
 import { commandResult, processRunner } from "../../fakes/process-runner.js";
 
 describe("AndroidCliAdapter", () => {
-  it("reads full Layout and Layout Diff", async () => {
-    const runner = processRunner();
-    vi.mocked(runner.run)
-      .mockResolvedValueOnce(commandResult({ exitCode: 1 }))
-      .mockResolvedValueOnce(commandResult())
-      .mockResolvedValueOnce(commandResult({
-        stdout: JSON.stringify({
-          id: "root",
-          enabled: true,
-          bounds: { left: 0, top: 0, right: 100, bottom: 100 },
-          children: []
-        })
-      }));
-    const adapter = new AndroidCliAdapter(
-      runner,
-      () => "/sdcard/taphound-uiautomator.xml"
-    );
-
-    await expect(adapter.layout({ deviceSerial: "emulator-5554" }))
-      .resolves.toHaveLength(1);
-    vi.mocked(runner.run).mockResolvedValueOnce(commandResult({ stdout: "[]" }));
-    await expect(adapter.layoutDiff({ deviceSerial: "emulator-5554" }))
-      .resolves.toMatchObject({
-        changes: [],
-        backend: "androidCli"
-      });
-
-    expect(vi.mocked(runner.run)).toHaveBeenNthCalledWith(1, {
-      executable: "adb",
-      args: [
-        "-s",
-        "emulator-5554",
-        "shell",
-        "uiautomator",
-        "dump",
-        "/sdcard/taphound-uiautomator.xml"
-      ]
-    });
-    expect(vi.mocked(runner.run)).toHaveBeenNthCalledWith(4, {
-      executable: "android",
-      args: ["layout", "--diff", "--device=emulator-5554"]
-    });
-  });
-
   it("uses the dedicated Android CLI diff backend for layout stability", async () => {
     const runner = processRunner();
     vi.mocked(runner.run)
-      .mockResolvedValueOnce(commandResult())
-      .mockResolvedValueOnce(commandResult({
-        stdout: "<hierarchy><node text='Home' bounds='[0,0][100,100]' " +
-          "enabled='true' /></hierarchy>"
-      }))
-      .mockResolvedValueOnce(commandResult())
       .mockResolvedValueOnce(commandResult({ stdout: "[]" }))
       .mockResolvedValueOnce(commandResult({
         stdout: JSON.stringify({ modified: [{ id: "popup" }] })
       }));
     const adapter = new AndroidCliAdapter(runner);
 
-    await adapter.layout({ deviceSerial: "emulator-5554" });
-    await expect(adapter.layoutDiff({
+    await expect(adapter.sample({
       deviceSerial: "emulator-5554"
     })).resolves.toMatchObject({
       changes: [],
       backend: "androidCli"
     });
-    await expect(adapter.layoutDiff({
+    await expect(adapter.sample({
       deviceSerial: "emulator-5554"
     })).resolves.toMatchObject({
       changes: [{ id: "popup" }],
       backend: "androidCli"
     });
-    expect(vi.mocked(runner.run)).toHaveBeenCalledTimes(5);
+    expect(vi.mocked(runner.run)).toHaveBeenCalledTimes(2);
   });
 
   it("uses fast frame counters when the target package is known", async () => {
@@ -89,11 +38,11 @@ describe("AndroidCliAdapter", () => {
       packageName: "com.example.app"
     };
 
-    await expect(adapter.layoutDiff(options)).resolves.toMatchObject({
+    await expect(adapter.sample(options)).resolves.toMatchObject({
       changes: [{ frameStats: "42" }],
       backend: "gfxFrameStats"
     });
-    await expect(adapter.layoutDiff(options)).resolves.toMatchObject({
+    await expect(adapter.sample(options)).resolves.toMatchObject({
       changes: [],
       backend: "gfxFrameStats"
     });
@@ -135,7 +84,7 @@ describe("AndroidCliAdapter", () => {
       stabilityBackend: "uiautomator" as const
     };
 
-    const first = await adapter.layoutDiff(options);
+    const first = await adapter.sample(options);
     expect(Array.isArray(first)).toBe(false);
     if (!Array.isArray(first)) {
       expect(first.backend).toBe("uiautomator");
@@ -151,7 +100,7 @@ describe("AndroidCliAdapter", () => {
         expect(change.layoutSha256).toMatch(/^[a-f\d]{64}$/);
       }
     }
-    const second = await adapter.layoutDiff(options);
+    const second = await adapter.sample(options);
     expect(Array.isArray(second)).toBe(false);
     if (!Array.isArray(second)) {
       expect(second).toMatchObject({
@@ -173,7 +122,7 @@ describe("AndroidCliAdapter", () => {
       .mockResolvedValueOnce(commandResult({ stdout: "[]" }));
     const adapter = new AndroidCliAdapter(runner);
 
-    await expect(adapter.layoutDiff({
+    await expect(adapter.sample({
       deviceSerial: "emulator-5554",
       packageName: "com.example.app",
       stabilityBackend: "uiautomator"
@@ -187,32 +136,15 @@ describe("AndroidCliAdapter", () => {
     });
   });
 
-  it("does not fall back after a UIAutomator timeout", async () => {
-    const runner = processRunner(commandResult({
-      exitCode: null,
-      timedOut: true
-    }));
-    const adapter = new AndroidCliAdapter(runner);
-
-    await expect(adapter.layout({
-      deviceSerial: "emulator-5554",
-      timeoutMs: 100
-    })).rejects.toThrow(/deadline/);
-    expect(runner.run).toHaveBeenCalledTimes(2);
-    expect(runner.run).not.toHaveBeenCalledWith(
-      expect.objectContaining({ executable: "android" })
-    );
-  });
-
   it("captures normal and annotated screenshots", async () => {
     const runner = processRunner();
     const adapter = new AndroidCliAdapter(runner);
 
-    await adapter.captureScreen({
+    await adapter.capture({
       outputPath: "/tmp/final.png",
       deviceSerial: "emulator-5554"
     });
-    await adapter.captureScreen({
+    await adapter.capture({
       outputPath: "/tmp/annotated.png",
       annotate: true,
       deviceSerial: "emulator-5554"
@@ -243,7 +175,7 @@ describe("AndroidCliAdapter", () => {
     const runner = processRunner(commandResult({ stdout: "(123, 456)\n" }));
     const adapter = new AndroidCliAdapter(runner);
 
-    await expect(adapter.resolveScreen("/tmp/annotated.png", "#7"))
+    await expect(adapter.resolve("/tmp/annotated.png", "#7"))
       .resolves.toEqual({ x: 123, y: 456 });
 
     expect(vi.mocked(runner.run)).toHaveBeenCalledWith({

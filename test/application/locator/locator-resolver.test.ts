@@ -231,6 +231,40 @@ describe("resolveLocator", () => {
     });
   });
 
+  it("returns a typed Action failure for a matched structure node without geometry", () => {
+    const result = resolveLocator([element({
+      resourceId: "structure",
+      bounds: undefined,
+      center: undefined
+    })], { resourceId: "structure" });
+    expect(result).toMatchObject({
+      status: "failed",
+      code: "ACTION_FAILED"
+    });
+    if (result.status !== "failed") throw new Error("Expected failed result");
+    expect(result.message).toContain("no executable geometry");
+  });
+
+  it("rejects live geometry outside the physical viewport", () => {
+    const result = resolveLocator([element({
+      resourceId: "edge",
+      bounds: { left: 90, top: 90, right: 110, bottom: 110 }
+    })], { resourceId: "edge" }, {
+      viewport: {
+        width: 100,
+        height: 100,
+        rotation: 0,
+        coordinateSpace: "physicalDisplayPixels"
+      }
+    });
+    expect(result).toMatchObject({
+      status: "failed",
+      code: "ACTION_FAILED"
+    });
+    if (result.status !== "failed") throw new Error("Expected failed result");
+    expect(result.message).toContain("viewport");
+  });
+
   it("searches nested Layout elements", () => {
     const root = element({
       id: "root",

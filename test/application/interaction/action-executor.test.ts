@@ -56,6 +56,31 @@ const target = {
 };
 
 describe("ActionExecutor", () => {
+  it("invalidates UI observations before mutation even when ADB fails", async () => {
+    const adb = adbPort(result(1));
+    const beforeMutation = vi.fn();
+    const executor = new ActionExecutor(
+      adb,
+      "emulator-5554",
+      beforeMutation
+    );
+
+    await executor.execute({
+      action: "click",
+      locator: { resourceId: "target" },
+      activity: checkpoint
+    }, { point: { x: 10, y: 20 } });
+
+    expect(beforeMutation).toHaveBeenCalledOnce();
+    const invalidationOrder = beforeMutation.mock.invocationCallOrder[0];
+    const actionOrder = vi.mocked(adb.tap).mock.invocationCallOrder[0];
+    expect(invalidationOrder).toBeDefined();
+    expect(actionOrder).toBeDefined();
+    if (invalidationOrder === undefined || actionOrder === undefined) {
+      throw new Error("Expected mutation invalidation and ADB action calls");
+    }
+    expect(invalidationOrder).toBeLessThan(actionOrder);
+  });
   it("executes click and longClick at the resolved point", async () => {
     const adb = adbPort();
     const executor = new ActionExecutor(adb, "emulator-5554");

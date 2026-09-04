@@ -113,6 +113,9 @@ function supportsAction(
   element: LayoutElement,
   action: RecorderTargetAction
 ): boolean {
+  const hasGeometry = element.center !== undefined
+    || element.bounds !== undefined;
+  if (!hasGeometry) return false;
   return action === "click"
     ? element.clickable === true
     : action === "longClick"

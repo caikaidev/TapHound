@@ -1,4 +1,5 @@
 import type { FailureCode } from "../../domain/failure.js";
+import type { UiBackendSelection } from "../../domain/ui-backend.js";
 import type { AdbPort } from "../../ports/adb.js";
 import type { ProcessRunner } from "../../ports/process-runner.js";
 
@@ -8,7 +9,8 @@ export type DoctorCheckName =
   | "android"
   | "app"
   | "permissions"
-  | "device";
+  | "device"
+  | "appium";
 
 export interface DoctorCheck {
   name: DoctorCheckName;
@@ -32,6 +34,7 @@ export interface DoctorRunInput {
   requestedDevice?: string | undefined;
   signal?: AbortSignal | undefined;
   skipPermissionProbe?: boolean | undefined;
+  requestedUiBackend?: UiBackendSelection | undefined;
 }
 
 export interface DoctorDependencies {
@@ -43,6 +46,13 @@ export interface DoctorDependencies {
     signal?: AbortSignal
   ) => Promise<{
     status: "passed" | "failed";
+    message?: string | undefined;
+  }>;
+  checkAppiumUiAutomator2?: (
+    signal?: AbortSignal
+  ) => Promise<{
+    status: "passed" | "failed";
+    version?: string | undefined;
     message?: string | undefined;
   }>;
 }
@@ -113,6 +123,33 @@ export class DoctorService {
       await tool("adb", "adb", ["version"]),
       await tool("android", "android", ["--version"])
     );
+    if (input.requestedUiBackend === "appium-uiautomator2") {
+      try {
+        const appium = await this.dependencies.checkAppiumUiAutomator2?.(signal);
+        checks.push(appium === undefined ? {
+          name: "appium",
+          status: "failed",
+          message: "Appium UiAutomator2 check is not configured"
+        } : {
+          name: "appium",
+          status: appium.status,
+          ...(appium.version === undefined ? {} : { version: appium.version }),
+          ...(appium.message === undefined ? {} : { message: appium.message })
+        });
+      } catch (error) {
+        checks.push({
+          name: "appium",
+          status: "failed",
+          message: error instanceof Error ? error.message : String(error)
+        });
+      }
+    } else {
+      checks.push({
+        name: "appium",
+        status: "notRun",
+        message: "Appium probe requires ui.backend=appium-uiautomator2"
+      });
+    }
     let deviceSerial: string | undefined;
     let deviceCheck: DoctorCheck;
     try {
@@ -219,7 +256,7 @@ export class DoctorService {
     const failedCheck = (name: DoctorCheckName): boolean => checks.some(
       (check) => check.name === name && check.status === "failed"
     );
-    const environmentFailed = (["node", "adb", "android", "permissions"] as const)
+    const environmentFailed = (["node", "adb", "android", "appium", "permissions"] as const)
       .some(failedCheck);
     const failureCode = environmentFailed
       ? "ENVIRONMENT_MISSING_TOOL"

@@ -4,6 +4,10 @@ import { Command } from "commander";
 
 import { TapHoundConfigSchema } from "../../domain/config.js";
 import {
+  exitCodeForFailure,
+  failureCodeFromUnknown
+} from "../../domain/failure.js";
+import {
   assertArtifactDirectory,
   CONFIG_PATH
 } from "../../domain/workspace.js";
@@ -55,6 +59,9 @@ export function createRecordCommand(dependencies: CliDependencies): Command {
       try {
         const doctor = await dependencies.doctor.run({
           packageName: config.run.packageName,
+          ...(config.ui?.backend === undefined
+            ? {}
+            : { requestedUiBackend: config.ui.backend }),
           ...(options.device === undefined
             ? {}
             : { requestedDevice: options.device }),
@@ -106,13 +113,15 @@ export function createRecordCommand(dependencies: CliDependencies): Command {
         }
         dependencies.setExitCode(result.status === "failed" ? 1 : 0);
       } catch (error) {
-        const output = failureOutput(4, "INTERNAL_ERROR", errorMessage(error));
+        const code = failureCodeFromUnknown(error) ?? "INTERNAL_ERROR";
+        const exitCode = exitCodeForFailure(code);
+        const output = failureOutput(exitCode, code, errorMessage(error));
         if (options.json === true) {
           writeJson(dependencies.stdout, output);
         } else {
           writeLine(dependencies.stderr, output.failure.message);
         }
-        dependencies.setExitCode(4);
+        dependencies.setExitCode(exitCode);
       }
     });
 }

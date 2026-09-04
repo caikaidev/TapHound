@@ -12,6 +12,24 @@ describe("TapHoundReportSchema", () => {
     expect(TapHoundReportSchema.parse(validReport())).toEqual(validReport());
   });
 
+  it("reads legacy v2 and v3 reports with UI backend provenance", () => {
+    const legacy = validReport();
+    expect(TapHoundReportSchema.parse(legacy)).toEqual(legacy);
+    const current = {
+      ...legacy,
+      schemaVersion: 3,
+      environment: {
+        ...legacy.environment,
+        uiBackend: {
+          id: "system-uiautomator",
+          adapterVersion: "system-uiautomator-v1",
+          configSha256: "a".repeat(64)
+        }
+      }
+    };
+    expect(TapHoundReportSchema.parse(current)).toEqual(current);
+  });
+
   it("requires every result layer", () => {
     const report = validReport();
     Reflect.deleteProperty(report.layers, "collection");

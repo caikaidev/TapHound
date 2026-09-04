@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { z } from "zod";
+import { UiBackendDescriptorSchema } from "./ui-backend.js";
 
 import { JourneyStepSchema } from "./journey.js";
 import { FlowNameSchema } from "./journey-composition.js";
@@ -165,7 +166,8 @@ export const GenerationSessionSchema = z.strictObject({
     projectHash: Sha256Schema,
     configHash: Sha256Schema,
     contextHash: Sha256Schema,
-    snapshotHash: Sha256Schema.nullable()
+    snapshotHash: Sha256Schema.nullable(),
+    uiBackend: UiBackendDescriptorSchema.optional()
   }),
   target: z.strictObject({
     packageName: z.string().regex(
@@ -375,7 +377,8 @@ export const GenerationMetaSchema = z.strictObject({
   bindings: z.strictObject({
     projectHash: Sha256Schema,
     configHash: Sha256Schema,
-    contextHash: Sha256Schema
+    contextHash: Sha256Schema,
+    uiBackend: UiBackendDescriptorSchema.optional()
   }),
   verification: z.strictObject({
     reportPath: BundleRelativePathSchema,
@@ -448,7 +451,7 @@ export interface GenerationCoreIdentity {
   id: GenerationSession["id"];
   bindings: Pick<
     GenerationSession["bindings"],
-    "projectHash" | "configHash" | "contextHash"
+    "projectHash" | "configHash" | "contextHash" | "uiBackend"
   >;
   target: GenerationSession["target"];
   contextSelection: GenerationSession["contextSelection"];
@@ -465,7 +468,10 @@ export function generationCoreIdentity(
     bindings: {
       projectHash: session.bindings.projectHash,
       configHash: session.bindings.configHash,
-      contextHash: session.bindings.contextHash
+      contextHash: session.bindings.contextHash,
+      ...(session.bindings.uiBackend === undefined
+        ? {}
+        : { uiBackend: session.bindings.uiBackend })
     },
     target: session.target,
     contextSelection: session.contextSelection,

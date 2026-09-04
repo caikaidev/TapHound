@@ -1,9 +1,12 @@
 import {
-  BoundsSchema,
   LayoutPointSchema,
   type LayoutElement,
   type LayoutPoint
 } from "../../domain/layout.js";
+import {
+  normalizeBounds,
+  normalizeResourceId
+} from "../ui/layout-normalization.js";
 
 function parseJson(stdout: string, label: string): unknown {
   try {
@@ -59,14 +62,14 @@ function parseBounds(value: unknown): LayoutElement["bounds"] {
     if (match === null) {
       throw new Error("Invalid Android Layout bounds");
     }
-    return BoundsSchema.parse({
+    return normalizeBounds({
       left: Number(match[1]),
       top: Number(match[2]),
       right: Number(match[3]),
       bottom: Number(match[4])
     });
   }
-  return BoundsSchema.parse(value);
+  return normalizeBounds(value);
 }
 
 function parseCenter(value: unknown): LayoutPoint | undefined {
@@ -118,7 +121,9 @@ function parseElement(value: unknown, path: string): LayoutElement | undefined {
     throw new Error("Invalid Android Layout children");
   }
 
-  const resourceId = optionalString(record, "resourceId", "resource-id");
+  const resourceId = normalizeResourceId(
+    optionalString(record, "resourceId", "resource-id")
+  );
   const text = optionalString(record, "text");
   const contentDescription = optionalString(
     record,
@@ -144,10 +149,6 @@ function parseElement(value: unknown, path: string): LayoutElement | undefined {
         x: Math.round((bounds.left + bounds.right) / 2),
         y: Math.round((bounds.top + bounds.bottom) / 2)
       });
-  if (center === undefined) {
-    throw new Error("Android Layout element has no visible center or bounds");
-  }
-
   const children = childrenValue.flatMap((child, index) => {
     const parsed = parseElement(child, `${path}/${String(index)}`);
     return parsed === undefined ? [] : [parsed];
@@ -170,7 +171,7 @@ function parseElement(value: unknown, path: string): LayoutElement | undefined {
     ...(focusable === undefined ? {} : { focusable }),
     ...(focused === undefined ? {} : { focused }),
     enabled: optionalBoolean(record, "enabled") ?? true,
-    center,
+    ...(center === undefined ? {} : { center }),
     ...(bounds === undefined ? {} : { bounds }),
     children
   };

@@ -1,19 +1,24 @@
 import { createHash, randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
 
+import type { Point } from "../../domain/geometry.js";
 import type {
-  AndroidCliPort,
-  CaptureScreenOptions,
-  DeviceCommandOptions,
-  LayoutDiffObservation,
-  Point
-} from "../../ports/android-cli.js";
+  AnnotatedScreenResolverPort
+} from "../../ports/annotated-screen-resolver.js";
 import type {
   CommandResult,
   ProcessRunner
 } from "../../ports/process-runner.js";
+import type {
+  ScreenshotOptions,
+  ScreenshotPort
+} from "../../ports/screenshot.js";
+import type {
+  UiStabilityObservation,
+  UiStabilityProbe,
+  UiStabilitySampleOptions
+} from "../../ports/ui-stability.js";
 import {
-  parseLayout,
   parseLayoutDiff
 } from "./layout-parser.js";
 import { parseUiAutomatorLayout } from "../adb/ui-automator-parser.js";
@@ -100,7 +105,10 @@ function terminalBackendFailure(error: unknown): boolean {
     && error.terminal === true;
 }
 
-export class AndroidCliAdapter implements AndroidCliPort {
+export class AndroidCliAdapter implements
+  ScreenshotPort,
+  AnnotatedScreenResolverPort,
+  UiStabilityProbe {
   private readonly frameSignatures = new Map<string, string>();
   private readonly layoutSignatures = new Map<string, string>();
 
@@ -112,7 +120,11 @@ export class AndroidCliAdapter implements AndroidCliPort {
   ) {}
 
   private async readUiAutomator(
-    options: DeviceCommandOptions
+    options: {
+      deviceSerial: string;
+      signal?: AbortSignal | undefined;
+      timeoutMs?: number | undefined;
+    }
   ): Promise<{
     layout: ReturnType<typeof parseUiAutomatorLayout>;
   }> {
@@ -153,30 +165,14 @@ export class AndroidCliAdapter implements AndroidCliPort {
     }
   }
 
-  public async layout(
-    options: DeviceCommandOptions
-  ): Promise<ReturnType<typeof parseLayout>> {
-    const startedAt = performance.now();
-    try {
-      const current = await this.readUiAutomator(options);
-      return current.layout;
-    } catch (error) {
-      if (terminalBackendFailure(error)) throw error;
-      // Fall back to the Android CLI layout representation below.
-    }
-    const result = await this.runner.run(commandSpec([
-      "layout",
-      `--device=${options.deviceSerial}`
-    ], options.signal, options.timeoutMs === undefined
-      ? undefined
-      : Math.max(1, options.timeoutMs - (performance.now() - startedAt))));
-    assertSuccess(result, "layout");
-    return parseLayout(result.stdout);
+  public reset(): void {
+    this.frameSignatures.clear();
+    this.layoutSignatures.clear();
   }
 
-  public async layoutDiff(
-    options: DeviceCommandOptions
-  ): Promise<LayoutDiffObservation> {
+  public async sample(
+    options: UiStabilitySampleOptions
+  ): Promise<UiStabilityObservation> {
     const startedAt = performance.now();
     if (options.stabilityBackend === "uiautomator") {
       try {
@@ -247,7 +243,7 @@ export class AndroidCliAdapter implements AndroidCliPort {
     };
   }
 
-  public captureScreen(options: CaptureScreenOptions): Promise<CommandResult> {
+  public capture(options: ScreenshotOptions): Promise<CommandResult> {
     return this.runner.run(commandSpec([
       "screen",
       "capture",
@@ -257,7 +253,7 @@ export class AndroidCliAdapter implements AndroidCliPort {
     ], options.signal, options.timeoutMs));
   }
 
-  public async resolveScreen(
+  public async resolve(
     screenshotPath: string,
     label: string,
     signal?: AbortSignal
@@ -279,4 +275,5 @@ export class AndroidCliAdapter implements AndroidCliPort {
     }
     return { x, y };
   }
+
 }

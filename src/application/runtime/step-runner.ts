@@ -8,14 +8,23 @@ import type {
   JourneyStep
 } from "../../domain/journey.js";
 import type { LayoutElement } from "../../domain/layout.js";
+import type { DisplayViewport } from "../../domain/geometry.js";
 import type {
   ReportFailure,
   StepReport
 } from "../../domain/report.js";
 import type { AdbPort, AppIdentity } from "../../ports/adb.js";
-import type { AndroidCliPort } from "../../ports/android-cli.js";
+import type {
+  AnnotatedScreenResolverPort
+} from "../../ports/annotated-screen-resolver.js";
 import type { ArtifactSession } from "../../ports/artifact-store.js";
 import type { Clock } from "../../ports/clock.js";
+import type { ScreenshotPort } from "../../ports/screenshot.js";
+import type { UiStabilityProbe } from "../../ports/ui-stability.js";
+import type {
+  CaptureUiSnapshotOptions,
+  UiSnapshotProvider
+} from "../../ports/ui-snapshot.js";
 import type { LogcatCollector } from "../collector/logcat-collector.js";
 import { ActionExecutor, type ActionTarget } from "../interaction/action-executor.js";
 import { FallbackResolver } from "../interaction/fallback-resolver.js";
@@ -32,7 +41,10 @@ import {
 
 export interface StepRunnerOptions {
   adb: AdbPort;
-  androidCli: AndroidCliPort;
+  screenshots: ScreenshotPort;
+  annotatedScreens: AnnotatedScreenResolverPort;
+  uiStability: UiStabilityProbe;
+  uiSnapshotProvider: UiSnapshotProvider;
   clock: Clock;
   logcat: LogcatCollector;
   artifacts: ArtifactSession;
@@ -72,31 +84,38 @@ export class StepRunner {
   private readonly idleWaiter: IdleWaiter;
   private readonly expectationEvaluator: ExpectationEvaluator;
   private readonly scrollToExecutor: ScrollToExecutor;
+  private currentViewport: DisplayViewport | undefined;
 
   public constructor(private readonly options: StepRunnerOptions) {
-    this.actionExecutor = new ActionExecutor(options.adb, options.deviceSerial);
+    this.actionExecutor = new ActionExecutor(
+      options.adb,
+      options.deviceSerial,
+      (): void => options.uiSnapshotProvider.invalidate?.("beforeAction")
+    );
     this.fallbackResolver = new FallbackResolver(
-      options.androidCli,
+      options.screenshots,
+      options.annotatedScreens,
       options.deviceSerial
     );
     this.idleWaiter = new IdleWaiter(
-      options.androidCli,
+      options.uiStability,
       options.clock,
       options.deviceSerial,
       options.packageName
     );
     this.expectationEvaluator = new ExpectationEvaluator(
       options.adb,
-      options.androidCli,
+      options.uiSnapshotProvider,
       options.logcat,
       options.clock
     );
     this.scrollToExecutor = new ScrollToExecutor({
-      androidCli: options.androidCli,
+      uiSnapshotProvider: options.uiSnapshotProvider,
       actionExecutor: this.actionExecutor,
       idleWaiter: this.idleWaiter,
       deviceSerial: options.deviceSerial,
       idle: options.idle,
+      viewport: (): DisplayViewport | undefined => this.currentViewport,
       ...(options.generatedReplayPolicy === true
         ? {
             readLayout: async (): Promise<readonly LayoutElement[]> => (
@@ -172,6 +191,21 @@ export class StepRunner {
   private currentExpectedActivity = "";
   private currentSignal: AbortSignal | undefined;
 
+  private async captureLayout(
+    reason: CaptureUiSnapshotOptions["reason"],
+    timeoutMs: number,
+    signal?: AbortSignal
+  ): Promise<readonly LayoutElement[]> {
+    const snapshot = await this.options.uiSnapshotProvider.capture({
+      reason,
+      freshness: "sameMutationEpoch",
+      timeoutMs,
+      ...(signal === undefined ? {} : { signal })
+    });
+    this.currentViewport = snapshot.viewport;
+    return snapshot.roots;
+  }
+
   private async observeExpectedActivity(
     expectedActivity: string | undefined,
     expectedPid: number,
@@ -221,7 +255,7 @@ export class StepRunner {
   ): Promise<
     | {
       status: "observed";
-      layout: Awaited<ReturnType<AndroidCliPort["layout"]>>;
+      layout: readonly LayoutElement[];
     }
     | { status: "failed"; message: string }
   > {
@@ -236,11 +270,11 @@ export class StepRunner {
       observationInput()
     );
     if (before.status === "failed") return before;
-    const layout = await this.options.androidCli.layout({
-      deviceSerial: this.options.deviceSerial,
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-      timeoutMs: observationInput().timeoutMs
-    });
+    const layout = await this.captureLayout(
+      "expect",
+      observationInput().timeoutMs,
+      input.signal
+    );
     const after = await this.observeExpectedActivity(
       expectedActivity,
       expectedPid,
@@ -259,11 +293,11 @@ export class StepRunner {
       "ACTIVITY_BEFORE_MISMATCH",
       signal
     );
-    const layout = await this.options.androidCli.layout({
-      deviceSerial: this.options.deviceSerial,
-      ...(signal === undefined ? {} : { signal }),
-      timeoutMs: this.options.idle.timeoutMs
-    });
+    const layout = await this.captureLayout(
+      "locate",
+      this.options.idle.timeoutMs,
+      signal
+    );
     await this.assertGeneratedForeground(
       this.currentExpectedActivity,
       "ACTIVITY_BEFORE_MISMATCH",
@@ -411,7 +445,7 @@ export class StepRunner {
             strategy: scroll.idle.strategy,
             ...(scroll.idle.backend === undefined
               ? {}
-              : { backend: scroll.idle.backend }),
+              : { backendId: scroll.idle.backend }),
             fallbackUsed: scroll.idle.fallbackUsed,
             frameActivityDetected: scroll.idle.frameActivityDetected,
             lastDiff: [...scroll.idle.lastDiff]
@@ -424,15 +458,15 @@ export class StepRunner {
         report.locator = { status: "notRun", fallbackUsed: false };
         return finish("manualRequired");
       }
-      let layout: Awaited<ReturnType<AndroidCliPort["layout"]>>;
+      let layout: readonly LayoutElement[];
       try {
         layout = this.options.generatedReplayPolicy === true
           ? await this.captureGeneratedLayout(signal)
-          : await this.options.androidCli.layout({
-              deviceSerial: this.options.deviceSerial,
-              ...(signal === undefined ? {} : { signal }),
-              timeoutMs: this.options.idle.timeoutMs
-            });
+          : await this.captureLayout(
+              "locate",
+              this.options.idle.timeoutMs,
+              signal
+            );
       } catch (error) {
         if (
           error !== null
@@ -445,7 +479,8 @@ export class StepRunner {
         throw error;
       }
       const triggerResolution = resolveLocator(layout, step.triggerLocator, {
-        requiredCapability: "clickable"
+        requiredCapability: "clickable",
+        viewport: this.currentViewport
       });
       if (triggerResolution.status !== "found") {
         report.locator = {
@@ -540,7 +575,7 @@ export class StepRunner {
             durationMs: idle.durationMs,
             samplingDurationMs: idle.samplingDurationMs,
             strategy: idle.strategy,
-            ...(idle.backend === undefined ? {} : { backend: idle.backend }),
+            ...(idle.backend === undefined ? {} : { backendId: idle.backend }),
             fallbackUsed: idle.fallbackUsed,
             frameActivityDetected: idle.frameActivityDetected,
             lastDiff: [...idle.lastDiff]
@@ -555,7 +590,7 @@ export class StepRunner {
                   samplingDurationMs: idle.samplingDurationMs,
                   ...(idle.backend === undefined
                     ? {}
-                    : { backend: idle.backend }),
+                    : { backendId: idle.backend }),
                   strategy: idle.strategy,
                   fallbackUsed: idle.fallbackUsed,
                   frameActivityDetected: idle.frameActivityDetected
@@ -572,15 +607,15 @@ export class StepRunner {
         return fail(idle.code, "Layout did not become stable after bridge return");
       }
     } else {
-      let layout: Awaited<ReturnType<AndroidCliPort["layout"]>>;
+      let layout: readonly LayoutElement[];
       try {
         layout = this.options.generatedReplayPolicy === true
           ? await this.captureGeneratedLayout(signal)
-          : await this.options.androidCli.layout({
-              deviceSerial: this.options.deviceSerial,
-              ...(signal === undefined ? {} : { signal }),
-              timeoutMs: this.options.idle.timeoutMs
-            });
+          : await this.captureLayout(
+              "locate",
+              this.options.idle.timeoutMs,
+              signal
+            );
       } catch (error) {
         if (
           error !== null
@@ -597,7 +632,9 @@ export class StepRunner {
         || step.action === "longClick"
         || step.action === "swipe"
       ) {
-        const resolution = resolveLocator(layout, step.locator);
+        const resolution = resolveLocator(layout, step.locator, {
+          viewport: this.currentViewport
+        });
         if (resolution.status === "found") {
           target = {
             point: resolution.point,
@@ -692,7 +729,7 @@ export class StepRunner {
             durationMs: idle.durationMs,
             samplingDurationMs: idle.samplingDurationMs,
             strategy: idle.strategy,
-            ...(idle.backend === undefined ? {} : { backend: idle.backend }),
+            ...(idle.backend === undefined ? {} : { backendId: idle.backend }),
             fallbackUsed: idle.fallbackUsed,
             frameActivityDetected: idle.frameActivityDetected,
             lastDiff: [...idle.lastDiff]
@@ -707,7 +744,7 @@ export class StepRunner {
                   samplingDurationMs: idle.samplingDurationMs,
                   ...(idle.backend === undefined
                     ? {}
-                    : { backend: idle.backend }),
+                    : { backendId: idle.backend }),
                   strategy: idle.strategy,
                   fallbackUsed: idle.fallbackUsed,
                   frameActivityDetected: idle.frameActivityDetected
@@ -860,7 +897,7 @@ export class StepRunner {
       return null;
     }
     const externalIdleWaiter = new IdleWaiter(
-      this.options.androidCli,
+      this.options.uiStability,
       this.options.clock,
       this.options.deviceSerial,
       escapedPackageName
@@ -890,11 +927,11 @@ export class StepRunner {
         };
       }
 
-      const layout = await this.options.androidCli.layout({
-        deviceSerial: this.options.deviceSerial,
-        ...(signal === undefined ? {} : { signal }),
-        timeoutMs: this.options.idle.timeoutMs
-      });
+      const layout = await this.captureLayout(
+        "locate",
+        this.options.idle.timeoutMs,
+        signal
+      );
 
       if (externalStep.action === "scrollTo") {
         const journeyStep = externalStepToJourneyStepForReplay(externalStep) as Extract<
@@ -902,11 +939,12 @@ export class StepRunner {
           { action: "scrollTo" }
         >;
         const externalScrollToExecutor = new ScrollToExecutor({
-          androidCli: this.options.androidCli,
+          uiSnapshotProvider: this.options.uiSnapshotProvider,
           actionExecutor: this.actionExecutor,
           idleWaiter: externalIdleWaiter,
           deviceSerial: this.options.deviceSerial,
           idle: this.options.idle,
+          viewport: (): DisplayViewport | undefined => this.currentViewport,
           requireLiveContainerCapability: true
         });
         const scroll = await externalScrollToExecutor.execute(
@@ -932,6 +970,7 @@ export class StepRunner {
           || externalStep.action === "swipe"
         ) {
           const resolution = resolveLocator(layout, externalStep.locator, {
+            viewport: this.currentViewport,
             ...(externalStep.action === "click"
               ? { requiredCapability: "clickable" as const }
               : {}),
@@ -1056,11 +1095,11 @@ export class StepRunner {
         };
       }
     } else if (expect.type === "element") {
-      const layout = await this.options.androidCli.layout({
-        deviceSerial: this.options.deviceSerial,
-        ...(signal === undefined ? {} : { signal }),
-        timeoutMs: expect.timeoutMs
-      });
+      const layout = await this.captureLayout(
+        "expect",
+        expect.timeoutMs,
+        signal
+      );
       const resolution = resolveLocator(layout, expect.locator, {
         requireEnabled: false
       });

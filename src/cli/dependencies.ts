@@ -9,7 +9,23 @@ import { dirname, join, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { AdbAdapter } from "../adapters/adb/adb-adapter.js";
+import {
+  SystemUiAutomatorSnapshotProviderFactory
+} from "../adapters/adb/system-uiautomator-snapshot-provider.js";
 import { AndroidCliAdapter } from "../adapters/android-cli/android-cli-adapter.js";
+import {
+  AndroidCliSnapshotProviderFactory
+} from "../adapters/android-cli/android-cli-snapshot-provider.js";
+import {
+  AppiumUiSnapshotProviderFactory
+} from "../adapters/appium/appium-ui-snapshot-provider.js";
+import { checkAppiumUiAutomator2 } from "../adapters/appium/appium-doctor.js";
+import {
+  AutoUiSnapshotProviderFactory
+} from "../adapters/ui/auto-ui-snapshot-provider.js";
+import {
+  CachedUiSnapshotProviderFactory
+} from "../application/ui/cached-ui-snapshot-provider.js";
 import { CameraProbeAdapter } from "../adapters/camera/camera-probe-adapter.js";
 import { SystemClock } from "../adapters/clock/system-clock.js";
 import { FileSystemArtifactStore } from "../adapters/filesystem/artifact-store.js";
@@ -17,6 +33,7 @@ import { FileSystemContextDocumentWriter } from "../adapters/filesystem/context-
 import { FileSystemGenerationMetaWriter } from "../adapters/filesystem/generation-meta-writer.js";
 import { FileSystemGenerationSessionStore } from "../adapters/filesystem/generation-session-store.js";
 import { FileSystemJourneyWriter } from "../adapters/filesystem/journey-writer.js";
+import { FileSystemUiCacheStore } from "../adapters/filesystem/ui-cache-store.js";
 import {
   FileSystemJourneyCompositionStore
 } from "../adapters/filesystem/journey-composition-store.js";
@@ -98,6 +115,7 @@ import { ReportWriter } from "../application/report/report-writer.js";
 import { VerifyRuntime, type VerifyInput, type VerifyResult } from "../application/runtime/verify-runtime.js";
 import { IdleWaiter } from "../application/wait/idle-waiter.js";
 import type { TapHoundConfig } from "../domain/config.js";
+import type { UiBackendSelection } from "../domain/ui-backend.js";
 import type { InitResult } from "../domain/init.js";
 import type { GenerationSession } from "../domain/generation.js";
 import type { InitPromptPort } from "../ports/init-prompt.js";
@@ -190,10 +208,22 @@ export interface CliDependencies {
       signal?: AbortSignal | undefined;
     }) => Promise<AlignCameraResult>;
   };
-  observer: (layoutTimeoutMs: number) => {
+  observer: (
+    layoutTimeoutMs: number,
+    backend?: UiBackendSelection,
+    cacheEnabled?: boolean
+  ) => {
     observe: (input: ObserveInput) => Promise<ObserveReport>;
   };
   workspaceLayout: WorkspaceLayoutPort;
+  uiCache?: {
+    status: (projectRoot: string) => Promise<{
+      directory: string;
+      entries: number;
+      bytes: number;
+    }>;
+    clear: (projectRoot: string) => Promise<void>;
+  } | undefined;
   readJson: (path: string) => Promise<unknown>;
   cwd: () => string;
   stdout: TextOutput;
@@ -218,6 +248,13 @@ export function createProductionDependencies(
   const runner = new NodeProcessRunner();
   const adb = new AdbAdapter(runner);
   const androidCli = new AndroidCliAdapter(runner);
+  const uiSnapshots = new CachedUiSnapshotProviderFactory(
+    new AutoUiSnapshotProviderFactory(
+      new SystemUiAutomatorSnapshotProviderFactory(runner),
+      new AndroidCliSnapshotProviderFactory(runner),
+      new AppiumUiSnapshotProviderFactory(runner)
+    )
+  );
   const clock = new SystemClock();
   const waitUntilIdle = (
     deviceSerial: string,
@@ -302,7 +339,7 @@ export function createProductionDependencies(
       }> => {
         const directory = await mkdtemp(join(tmpdir(), "taphound-doctor-"));
         try {
-          const result = await androidCli.captureScreen({
+          const result = await androidCli.capture({
             outputPath: join(directory, "screen.png"),
             deviceSerial,
             ...(signal === undefined ? {} : { signal })
@@ -324,17 +361,25 @@ export function createProductionDependencies(
         } finally {
           await rm(directory, { recursive: true, force: true });
         }
-      }
+      },
+      checkAppiumUiAutomator2: async (appiumSignal) => (
+        checkAppiumUiAutomator2(runner, appiumSignal)
+      )
     }),
     recorder: new RecorderService({
-      androidCli,
+      screenshots: androidCli,
+      uiStability: androidCli,
+      uiSnapshots,
       adb,
       clock,
       prompt: new InquirerRecorderPrompt(),
       journeyWriter: new FileSystemJourneyWriter()
     }),
     verifier: new VerifyRuntime({
-      androidCli,
+      screenshots: androidCli,
+      annotatedScreens: androidCli,
+      uiStability: androidCli,
+      uiSnapshots,
       adb,
       clock,
       artifactStore: new FileSystemArtifactStore(),
@@ -364,7 +409,7 @@ export function createProductionDependencies(
       adb,
       probe: new CameraProbeAdapter({
         adb,
-        androidCli,
+        uiSnapshots,
         now: () => Date.now(),
         sleep: async (ms: number): Promise<void> => {
           await new Promise((resolve) => setTimeout(resolve, ms));
@@ -373,25 +418,36 @@ export function createProductionDependencies(
       prompt: new InquirerAlignPrompt(),
       registry: externalFlowRegistry
     }),
-    observer: (layoutTimeoutMs: number): {
+    observer: (
+      layoutTimeoutMs: number,
+      backend?: UiBackendSelection,
+      cacheEnabled?: boolean
+    ): {
       observe: (input: ObserveInput) => Promise<ObserveReport>;
     } => {
       const service = new ObserveService({
         adb,
-        androidCli,
-        layoutTimeoutMs
+        uiSnapshots,
+        layoutTimeoutMs,
+        ...(backend === undefined ? {} : { backend }),
+        ...(cacheEnabled === undefined ? {} : { cacheEnabled })
       });
       return {
         observe: (input): Promise<ObserveReport> => service.observe(input)
       };
     },
     workspaceLayout: new FileSystemWorkspaceLayout(),
+    uiCache: {
+      status: async (projectRoot) => new FileSystemUiCacheStore(projectRoot).status(),
+      clear: async (projectRoot) => new FileSystemUiCacheStore(projectRoot).clear()
+    },
     generationStarter: {
       start: async (input): Promise<
         Awaited<ReturnType<GenerationStarter["start"]>>
       > => new GenerationStarter({
         contextValidator,
         appPreparer: new GenerationAppPreparer(adb, clock),
+        uiSnapshots,
         store: generationStoreFactory(input.projectRoot),
         now: (): Date => new Date(),
         generateId: randomUUID,
@@ -403,7 +459,8 @@ export function createProductionDependencies(
         new RuntimeObserver({
           store: generationStoreFactory(projectRoot),
           adb,
-          androidCli,
+          screenshots: androidCli,
+          uiSnapshots,
           waitUntilIdle,
           now: () => new Date(),
           createAttemptId: randomUUID
@@ -416,16 +473,12 @@ export function createProductionDependencies(
       const observer = new RuntimeObserver({
         store,
         adb,
-        androidCli,
+        screenshots: androidCli,
+        uiSnapshots,
         waitUntilIdle,
         now: (): Date => new Date(),
-        createAttemptId: randomUUID
-      });
-      const freshnessGuard = new SnapshotReobservationGuard({
-        store,
-        adb,
-        androidCli,
-        now: (): Date => new Date()
+        createAttemptId: randomUUID,
+        uiCacheEnabled: config.ui?.cacheEnabled ?? true
       });
       const confirmation = new GenerationConfirmationService({
         store,
@@ -436,9 +489,21 @@ export function createProductionDependencies(
       });
       const executor = new GenerationStepExecutor({
         store,
-        freshnessGuard,
+        createFreshnessGuard: (uiSnapshotProvider): Pick<
+          SnapshotReobservationGuard,
+          "assertFresh"
+        > => (
+          new SnapshotReobservationGuard({
+            store,
+            adb,
+            uiSnapshotProvider,
+            now: (): Date => new Date()
+          })
+        ),
         adb,
-        androidCli,
+        uiStability: androidCli,
+        uiSnapshots,
+        uiCacheEnabled: config.ui?.cacheEnabled ?? true,
         clock,
         idle: config.idle,
         now: (): Date => new Date(),
@@ -452,11 +517,15 @@ export function createProductionDependencies(
           generationId,
           challenge
         }),
-        observeNext: (input): Promise<RuntimeObservation> => observer.observeCollected({
-          generationId: input.generationId,
-          runtime: input.runtime,
-          ...(input.signal === undefined ? {} : { signal: input.signal })
-        })
+        observeNext: (observation): Promise<RuntimeObservation> => (
+          observer.observeCollected({
+            generationId: observation.generationId,
+            runtime: observation.runtime,
+            ...(observation.signal === undefined
+              ? {}
+              : { signal: observation.signal })
+          })
+        )
       });
       const publisher = new GenerationPublisher({
         store,
@@ -467,7 +536,10 @@ export function createProductionDependencies(
         store,
         contextValidator,
         verifyRuntime: new VerifyRuntime({
-          androidCli,
+          screenshots: androidCli,
+          annotatedScreens: androidCli,
+          uiStability: androidCli,
+          uiSnapshots,
           adb,
           clock,
           artifactStore: new FileSystemArtifactStore(),

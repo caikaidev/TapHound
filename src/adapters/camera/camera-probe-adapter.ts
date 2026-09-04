@@ -1,7 +1,8 @@
 import type { ForegroundComponent } from "../../domain/activity.js";
+import type { Point } from "../../domain/geometry.js";
 import type { LayoutElement } from "../../domain/layout.js";
 import type { AdbPort, AppIdentity } from "../../ports/adb.js";
-import type { AndroidCliPort, Point } from "../../ports/android-cli.js";
+import type { UiSnapshotProviderFactory } from "../../ports/ui-snapshot.js";
 import type {
   CameraProbeInput,
   CameraProbePort,
@@ -34,7 +35,7 @@ const AOSP_CAMERA_PACKAGES = ["com.android.camera", "com.android.camera2"];
 
 export interface CameraProbeAdapterDeps {
   adb: AdbPort;
-  androidCli: AndroidCliPort;
+  uiSnapshots: UiSnapshotProviderFactory;
   now: () => number;
   sleep: (ms: number) => Promise<void>;
 }
@@ -191,6 +192,11 @@ export class CameraProbeAdapter implements CameraProbePort {
   public async probe(input: CameraProbeInput): Promise<CameraProbeResult> {
     const { deviceSerial, signal } = input;
     let cameraPackage: string | undefined;
+    const uiSnapshotProvider = await this.deps.uiSnapshots.open({
+      deviceSerial,
+      timeoutMs: CAMERA_FOREGROUND_TIMEOUT_MS,
+      ...(signal === undefined ? {} : { signal })
+    });
 
     try {
       let preForeground = await this.deps.adb.foregroundComponent(
@@ -246,17 +252,17 @@ export class CameraProbeAdapter implements CameraProbePort {
         );
       }
 
-      await this.deps.androidCli.layout({
-        deviceSerial,
-        packageName: cameraPackage,
+      await uiSnapshotProvider.capture({
+        reason: "locate",
+        timeoutMs: CAMERA_FOREGROUND_TIMEOUT_MS,
         ...(signal === undefined ? {} : { signal })
       });
       await this.deps.sleep(LAYOUT_SETTLE_MS);
-      const initialLayout = await this.deps.androidCli.layout({
-        deviceSerial,
-        packageName: cameraPackage,
+      const initialLayout = (await uiSnapshotProvider.capture({
+        reason: "locate",
+        timeoutMs: CAMERA_FOREGROUND_TIMEOUT_MS,
         ...(signal === undefined ? {} : { signal })
-      });
+      })).roots;
       const preShutterForeground = await this.waitForStableForeground(
         deviceSerial,
         signal
@@ -303,17 +309,17 @@ export class CameraProbeAdapter implements CameraProbePort {
         signal
       );
 
-      await this.deps.androidCli.layout({
-        deviceSerial,
-        packageName: cameraPackage,
+      await uiSnapshotProvider.capture({
+        reason: "locate",
+        timeoutMs: CAMERA_FOREGROUND_TIMEOUT_MS,
         ...(signal === undefined ? {} : { signal })
       });
       await this.deps.sleep(LAYOUT_SETTLE_MS);
-      const postShutterLayout = await this.deps.androidCli.layout({
-        deviceSerial,
-        packageName: cameraPackage,
+      const postShutterLayout = (await uiSnapshotProvider.capture({
+        reason: "locate",
+        timeoutMs: CAMERA_FOREGROUND_TIMEOUT_MS,
         ...(signal === undefined ? {} : { signal })
-      });
+      })).roots;
       const postShutterForeground = await this.waitForStableForeground(
         deviceSerial,
         signal
@@ -368,6 +374,11 @@ export class CameraProbeAdapter implements CameraProbePort {
         confirmActivityName: postShutterForeground.activity
       };
     } finally {
+      try {
+        await uiSnapshotProvider.close();
+      } catch {
+        void null;
+      }
       if (cameraPackage !== undefined) {
         try {
           await this.deps.adb.forceStop({

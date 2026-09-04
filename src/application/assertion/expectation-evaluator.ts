@@ -5,8 +5,8 @@ import type {
   Locator
 } from "../../domain/layout.js";
 import type { AdbPort } from "../../ports/adb.js";
-import type { AndroidCliPort } from "../../ports/android-cli.js";
 import type { Clock } from "../../ports/clock.js";
+import type { UiSnapshotProvider } from "../../ports/ui-snapshot.js";
 import type {
   LogcatCollector,
   LogcatLine
@@ -103,7 +103,7 @@ function isAborted(signal?: AbortSignal): boolean {
 export class ExpectationEvaluator {
   public constructor(
     private readonly adb: AdbPort,
-    private readonly androidCli: AndroidCliPort,
+    private readonly uiSnapshotProvider: UiSnapshotProvider,
     private readonly logcat: LogcatCollector,
     private readonly clock: Clock,
     private readonly pollIntervalMs = 100
@@ -187,11 +187,12 @@ export class ExpectationEvaluator {
           const observation = observations.layout === undefined
             ? {
                 status: "observed" as const,
-                layout: await this.androidCli.layout({
-                  deviceSerial: context.deviceSerial,
+                layout: (await this.uiSnapshotProvider.capture({
+                  reason: "expect",
+                  freshness: "sameMutationEpoch",
                   ...(signal === undefined ? {} : { signal }),
                   timeoutMs: commandTimeoutMs
-                })
+                })).roots
               }
             : await observations.layout({
                 timeoutMs: commandTimeoutMs,

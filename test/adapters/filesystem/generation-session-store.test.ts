@@ -352,6 +352,36 @@ describe("FileSystemGenerationSessionStore", () => {
     ), "INVALID_TRANSITION");
   });
 
+  it("allows an evidence-free legacy session to bind its backend with its first snapshot", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    const initial = validSession(0, {
+      bindings: {
+        projectHash: "d".repeat(64),
+        configHash: "e".repeat(64),
+        contextHash: "a".repeat(64),
+        snapshotHash: null
+      }
+    });
+    const backend = {
+      id: "system-uiautomator" as const,
+      adapterVersion: "system-uiautomator-v1",
+      configSha256: "f".repeat(64)
+    };
+    await store.create(initial);
+
+    const committed = validSession(1, {
+      bindings: {
+        ...initial.bindings,
+        snapshotHash: "c".repeat(64),
+        uiBackend: backend
+      }
+    });
+    await store.commitSnapshot("generation-1", 0, committed);
+
+    await expect(store.read("generation-1")).resolves.toEqual(committed);
+  });
+
   it("atomically begins a safe step without changing candidate or Core state", async () => {
     const root = await temporaryRoot();
     const store = new FileSystemGenerationSessionStore(root);
@@ -1292,7 +1322,9 @@ describe("FileSystemGenerationSessionStore", () => {
   it("atomically reaps a lock owned by a dead PID", async () => {
     const root = await temporaryRoot();
     const store = new FileSystemGenerationSessionStore(root, {
-      lockTimeoutMs: 100,
+      // A dead owner must be reaped even when concurrent filesystem tests make
+      // one lock-probe round slower than the old 100ms test-only budget.
+      lockTimeoutMs: 1_000,
       lockRetryMs: 5
     });
     await store.create(validSession());

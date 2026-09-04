@@ -8,7 +8,8 @@ Requirements:
 
 - Node.js 22 or newer
 - npm
-- For device testing, additionally install the Android SDK, ADB, and Android CLI, and start an Emulator or connect a USB Device
+- For device testing, additionally install the Android SDK, ADB, and Android CLI, and connect an API 26+ device
+- For the optional Appium backend, run a loopback-only Appium server with the UiAutomator2 driver; TapHound never sends credentials to or permits a remote endpoint
 
 Clone and install locked dependencies:
 
@@ -134,6 +135,47 @@ TAPHOUND_ACCEPTANCE_DEVICE=1 npm run acceptance:generation
 ```
 
 Both entries are explicit opt-in; passing the normal test suite is not evidence that real-device Replay or Generation acceptance passed. You must run `npm run build` first.
+
+The demo contains XML View, pure Compose, and hybrid View/`ComposeView`
+surfaces. Compose test tags are exported as resource IDs so provider acceptance
+can verify structural capture, live locator resolution, and ADB injection. To
+guarantee that device code matches the checkout, uninstall before reinstalling:
+
+```bash
+adb uninstall dev.taphound.demo
+adb install app/build/outputs/apk/debug/app-debug.apk
+```
+
+Select a backend in `.taphound/config.json` with `ui.backend`. `auto` probes
+System UIAutomator and then Android CLI only while opening the provider; it
+never switches after binding. Appium remains explicit:
+
+```json
+{"ui":{"backend":"appium-uiautomator2","snapshotTimeoutMs":10000,"cacheEnabled":true}}
+```
+
+Set `cacheEnabled` to `false` for cache-equivalence tests. Authoritative
+evidence and post-mutation reads remain fresh in both modes.
+
+The optional persistent screen/flow index is non-authoritative and lives at
+`.taphound/build/cache/ui/`. It stores only resource-ID contracts, semantic
+hashes, and Flow verification receipts; it never stores page source, page
+text, screenshots, or reusable tap coordinates. Inspect or remove it without
+affecting Journeys, reports, or generation evidence:
+
+```bash
+node dist/cli/main.js ui-cache status --project examples/taphound-android-demo --json
+node dist/cli/main.js ui-cache clear --project examples/taphound-android-demo --yes --json
+```
+
+When Appium is explicitly configured, start its local loopback server before
+running `doctor`; doctor reports the detected Appium server/UiAutomator2 driver
+versions and the expected startup command:
+
+```bash
+appium --address 127.0.0.1 --port 4723
+node dist/cli/main.js doctor --project examples/taphound-android-demo --json
+```
 
 When multiple devices are present, specify the serial directly:
 

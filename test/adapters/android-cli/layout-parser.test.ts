@@ -86,6 +86,31 @@ describe("parseLayout", () => {
     });
   });
 
+  it("normalizes full View resource ids and preserves geometry-free structure", () => {
+    const elements = parseLayout(JSON.stringify({
+      resourceId: "com.example:id/container",
+      enabled: true,
+      bounds: "[0,0][0,0]",
+      children: [{
+        resourceId: "compose_raw_tag",
+        enabled: true,
+        children: []
+      }]
+    }));
+
+    expect(elements).toEqual([{
+      id: "0",
+      resourceId: "container",
+      enabled: true,
+      children: [{
+        id: "0/0",
+        resourceId: "compose_raw_tag",
+        enabled: true,
+        children: []
+      }]
+    }]);
+  });
+
   it("parses bracket-format center coordinates from current Android CLI", () => {
     const elements = parseLayout(JSON.stringify([
       {
@@ -133,7 +158,10 @@ describe("parseLayout", () => {
 
   it("rejects malformed Layout JSON", () => {
     expect(() => parseLayout("{")).toThrow(/layout/i);
-    expect(() => parseLayout(JSON.stringify({ enabled: true }))).toThrow(/layout/i);
+    expect(() => parseLayout(JSON.stringify({
+      enabled: true,
+      children: {}
+    }))).toThrow(/layout/i);
   });
 });
 

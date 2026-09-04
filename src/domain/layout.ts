@@ -101,8 +101,5 @@ export const LayoutElementSchema: z.ZodType<LayoutElement> = z.lazy(
     center: LayoutPointSchema.optional(),
     bounds: BoundsSchema.optional(),
     children: z.array(LayoutElementSchema).default([])
-  }).refine(
-    ({ bounds, center }) => bounds !== undefined || center !== undefined,
-    { message: "Layout element requires center or bounds" }
-  )
+  })
 );

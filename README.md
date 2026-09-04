@@ -74,7 +74,7 @@ See the [local testing guide](docs/local-testing.md) for source, npm tarball, an
 
 ## CLI Commands
 
-- `doctor`: checks Node.js, ADB, Android CLI, app installation, permissions, and device.
+- `doctor`: checks Node.js, ADB, Android CLI, app installation, permissions, and device. With `ui.backend=appium-uiautomator2`, it also checks the local Appium server and UiAutomator2 driver.
 - `record`: interactively execute actions and record a Journey.
 - `verify`: deterministically replay a Journey and publish a report.
 - `observe`: capture a point-in-time device snapshot (foreground, activity, layout, optional logcat) without a session or side effects.
@@ -92,6 +92,9 @@ See the [local testing guide](docs/local-testing.md) for source, npm tarball, an
 - `align camera`: probe the device's default camera app and write a deterministic
   `flows/external/camera/photo-capture.json` External Flow. Requires
   `--force` to overwrite an existing flow.
+- `ui-cache status` / `ui-cache clear --yes`: inspect or delete only the
+  rebuildable `.taphound/build/cache/ui/` indexes; Journeys, reports, and
+  Generation evidence are never touched.
 
 ## Configuration
 
@@ -110,11 +113,26 @@ Create `.taphound/config.json` in the Android project. `run.packageName` is requ
     "stablePolls": 2,
     "timeoutMs": 5000
   },
+  "ui": {
+    "backend": "auto",
+    "snapshotTimeoutMs": 5000,
+    "cacheEnabled": true
+  },
   "artifactsDir": ".taphound/build/runs"
 }
 ```
 
 `artifactsDir` is optional and defaults to `.taphound/build/runs`.
+`ui` is optional, so parsing an existing config does not add fields or change
+its Generation binding hash. Runtime defaults to `auto`; explicit backend
+choices are `system-uiautomator`, `android-cli`, and `appium-uiautomator2`.
+Appium remains explicit-only and fails closed when its provider is unavailable.
+`cacheEnabled: false` is the cache-equivalence switch: it disables only the
+run-scoped observation cache, never changes locator rules or action behavior.
+Persistent UI cache files store resource-ID-based screen/flow contracts and
+hashes only—never prior click coordinates, raw page sources, screenshots, or
+page text. A candidate always receives a fresh live snapshot before TapHound
+resolves its current geometry.
 `idle.strategy` defaults to `hybrid`: TapHound uses fast frame counters, then
 confirms a stable Core-owned UIAutomator layout. If frames keep rendering,
 `hybrid` falls back to structural layout stability instead of timing out only

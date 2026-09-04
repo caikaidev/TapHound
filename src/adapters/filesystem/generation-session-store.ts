@@ -449,11 +449,24 @@ function transitionStableState(
 
 function assertCoreIdentityPreserved(
   current: GenerationSession,
-  next: GenerationSession
+  next: GenerationSession,
+  allowInitialUiBackendBinding = false
 ): void {
+  const currentIdentity = generationCoreIdentity(current);
+  const nextIdentity = generationCoreIdentity(next);
   if (
-    JSON.stringify(generationCoreIdentity(current))
-    !== JSON.stringify(generationCoreIdentity(next))
+    allowInitialUiBackendBinding
+    && current.bindings.uiBackend === undefined
+    && next.bindings.uiBackend !== undefined
+  ) {
+    nextIdentity.bindings = {
+      projectHash: nextIdentity.bindings.projectHash,
+      configHash: nextIdentity.bindings.configHash,
+      contextHash: nextIdentity.bindings.contextHash
+    };
+  }
+  if (
+    JSON.stringify(currentIdentity) !== JSON.stringify(nextIdentity)
   ) {
     throw new GenerationSessionStoreError(
       "INVALID_TRANSITION",
@@ -478,11 +491,21 @@ function assertSnapshotTransition(
   current: GenerationSession,
   next: GenerationSession
 ): void {
-  assertCoreIdentityPreserved(current, next);
+  const initialBackendBinding = current.bindings.snapshotHash === null
+    && current.bindings.uiBackend === undefined
+    && next.bindings.uiBackend !== undefined
+    && current.candidateSteps.length === 0
+    && current.candidateSources.length === 0;
+  assertCoreIdentityPreserved(current, next, initialBackendBinding);
   const currentBindings = {
     projectHash: current.bindings.projectHash,
     configHash: current.bindings.configHash,
-    contextHash: current.bindings.contextHash
+    contextHash: current.bindings.contextHash,
+    ...(initialBackendBinding
+      ? { uiBackend: next.bindings.uiBackend }
+      : current.bindings.uiBackend === undefined
+        ? {}
+        : { uiBackend: current.bindings.uiBackend })
   };
   const { snapshotHash: nextSnapshotHash, ...nextBindings } = next.bindings;
   if (

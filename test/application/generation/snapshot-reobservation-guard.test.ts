@@ -7,9 +7,11 @@ import type { GenerationSession } from "../../../src/domain/generation.js";
 import type { ProposalBinding } from "../../../src/domain/proposed-step.js";
 import {
   hashRuntimeSnapshot,
-  type RuntimeSnapshot
+  type RuntimeSnapshot,
+  type RuntimeSnapshotV1
 } from "../../../src/domain/runtime-snapshot.js";
 import { contextSelection } from "../../fixtures/project-context.js";
+import { uiSnapshotProviderFromLayout } from "../../fakes/ui-snapshot.js";
 
 const layout = [{
   id: "root",
@@ -20,7 +22,7 @@ const layout = [{
 }];
 
 function snapshot(
-  overrides: Partial<RuntimeSnapshot> = {}
+  overrides: Partial<RuntimeSnapshotV1> = {}
 ): RuntimeSnapshot {
   return {
     version: 1,
@@ -127,7 +129,7 @@ function harness(): {
     guard: new SnapshotReobservationGuard({
       store: { read },
       adb: { foregroundComponent, appProcesses, windowTopology },
-      androidCli: { layout: readLayout },
+      uiSnapshotProvider: uiSnapshotProviderFromLayout(readLayout),
       now: () => new Date("2026-07-22T12:10:00.000Z")
     })
   };
@@ -157,7 +159,7 @@ describe("SnapshotReobservationGuard", () => {
     expect(observed).toMatchObject({
       generationId: "generation-1",
       baseRevision: 1,
-      capturedAt: "2026-07-22T12:10:00.000Z"
+      capturedAt: "2026-08-30T08:00:00.000Z"
     });
     expect(test.read).toHaveBeenCalledTimes(1);
   });

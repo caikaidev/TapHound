@@ -18,6 +18,7 @@ import {
 } from "../../domain/generation.js";
 import { JourneyStepSchema, type JourneyStep } from "../../domain/journey.js";
 import type { LayoutElement } from "../../domain/layout.js";
+import type { DisplayViewport } from "../../domain/geometry.js";
 import { assessWindowHierarchy } from "../../domain/window-hierarchy.js";
 import {
   ProposedStepSchema,
@@ -30,9 +31,15 @@ import {
   type RuntimeSnapshot
 } from "../../domain/runtime-snapshot.js";
 import type { AdbPort } from "../../ports/adb.js";
-import type { AndroidCliPort } from "../../ports/android-cli.js";
 import type { Clock } from "../../ports/clock.js";
+import type { UiStabilityProbe } from "../../ports/ui-stability.js";
 import type { GenerationSessionStore } from "../../ports/generation-session-store.js";
+import type {
+  CaptureUiSnapshotOptions,
+  UiSnapshot,
+  UiSnapshotProvider,
+  UiSnapshotProviderFactory
+} from "../../ports/ui-snapshot.js";
 import {
   isKnownSystemPackage,
   isSystemScenario
@@ -66,6 +73,7 @@ import { RiskEvaluator } from "./risk-evaluator.js";
 import {
   hasExactlyOneEnabledFocusedElement
 } from "./focused-input.js";
+import { closeUiSnapshotProvider } from "../ui/ui-snapshot-lifecycle.js";
 
 export type GenerationCandidateSource = "planner" | "manualOverride";
 
@@ -126,9 +134,15 @@ export interface GenerationStepExecutorDependencies {
     | "writeEvidence"
     | "writeTextEvidence"
   >;
-  freshnessGuard: Pick<SnapshotReobservationGuard, "assertFresh">;
+  freshnessGuard?: Pick<SnapshotReobservationGuard, "assertFresh"> | undefined;
+  createFreshnessGuard?: ((
+    uiSnapshotProvider: UiSnapshotProvider
+  ) => Pick<SnapshotReobservationGuard, "assertFresh">) | undefined;
   adb: AdbPort;
-  androidCli: AndroidCliPort;
+  uiStability: UiStabilityProbe;
+  uiSnapshotProvider?: UiSnapshotProvider | undefined;
+  uiSnapshots?: UiSnapshotProviderFactory | undefined;
+  uiCacheEnabled?: boolean | undefined;
   clock: Clock;
   idle: IdleConfig;
   now: () => Date;
@@ -157,6 +171,11 @@ interface LiveRuntime {
   pid: number;
   pids: readonly number[];
   layout: readonly LayoutElement[];
+  viewport: DisplayViewport;
+  uiSnapshot: Pick<
+    UiSnapshot,
+    "observationId" | "capturedAt" | "durationMs" | "backend" | "viewport"
+  >;
   windowHierarchy: ReturnType<typeof assessWindowHierarchy>;
 }
 
@@ -364,7 +383,8 @@ function executableStep(
 
 function requireTarget(
   layout: readonly LayoutElement[],
-  step: JourneyStep
+  step: JourneyStep,
+  viewport: DisplayViewport
 ): ActionTarget | undefined {
   if (
     step.action !== "click"
@@ -374,6 +394,7 @@ function requireTarget(
     return undefined;
   }
   const resolution = resolveLocator(layout, step.locator, {
+    viewport,
     ...(step.action === "click" ? { requiredCapability: "clickable" } : {}),
     ...(step.action === "longClick"
       ? { requiredCapability: "longClickable" }
@@ -410,10 +431,12 @@ function requireTarget(
 
 function requireBridgeTrigger(
   layout: readonly LayoutElement[],
-  step: Extract<JourneyStep, { action: "bridge" }>
+  step: Extract<JourneyStep, { action: "bridge" }>,
+  viewport: DisplayViewport
 ): ActionTarget {
   const resolution = resolveLocator(layout, step.triggerLocator, {
-    requiredCapability: "clickable"
+    requiredCapability: "clickable",
+    viewport
   });
   if (resolution.status !== "found") {
     fail(resolution.code, resolution.message);
@@ -442,7 +465,8 @@ function externalStepToJourneyStep(step: ExternalStep): JourneyStep {
 
 function requireExternalTarget(
   layout: readonly LayoutElement[],
-  step: ExternalStep
+  step: ExternalStep,
+  viewport: DisplayViewport
 ): ActionTarget | undefined {
   if (
     step.action !== "click"
@@ -452,6 +476,7 @@ function requireExternalTarget(
     return undefined;
   }
   const resolution = resolveLocator(layout, step.locator, {
+    viewport,
     ...(step.action === "click" ? { requiredCapability: "clickable" } : {}),
     ...(step.action === "longClick"
       ? { requiredCapability: "longClickable" }
@@ -488,14 +513,98 @@ function requireExternalTarget(
 
 export class GenerationStepExecutor {
   private readonly riskEvaluator = new RiskEvaluator();
+  private currentViewport: DisplayViewport | undefined;
+  private currentUiSnapshot: LiveRuntime["uiSnapshot"] | undefined;
 
   public constructor(
     private readonly dependencies: GenerationStepExecutorDependencies
   ) {}
 
+  private boundUiSnapshotProvider(): UiSnapshotProvider {
+    const uiSnapshotProvider = this.dependencies.uiSnapshotProvider;
+    if (uiSnapshotProvider === undefined) {
+      throw new Error("Generation UI snapshot provider is not bound");
+    }
+    return uiSnapshotProvider;
+  }
+
+  private requireCurrentViewport(): DisplayViewport {
+    if (this.currentViewport === undefined) {
+      throw new Error("Generation UI snapshot viewport is unavailable");
+    }
+    return this.currentViewport;
+  }
+
+  private requireCurrentUiSnapshot(): LiveRuntime["uiSnapshot"] {
+    if (this.currentUiSnapshot === undefined) {
+      throw new Error("Generation UI snapshot metadata is unavailable");
+    }
+    return this.currentUiSnapshot;
+  }
+
+  private async captureLayout(
+    reason: CaptureUiSnapshotOptions["reason"],
+    timeoutMs: number,
+    signal?: AbortSignal
+  ): Promise<readonly LayoutElement[]> {
+    const uiSnapshotProvider = this.boundUiSnapshotProvider();
+    const snapshot = await uiSnapshotProvider.capture({
+      reason,
+      freshness: "sameMutationEpoch",
+      timeoutMs,
+      ...(signal === undefined ? {} : { signal })
+    });
+    this.currentViewport = snapshot.viewport;
+    this.currentUiSnapshot = {
+      observationId: snapshot.observationId,
+      capturedAt: snapshot.capturedAt,
+      durationMs: snapshot.durationMs,
+      backend: snapshot.backend,
+      viewport: snapshot.viewport
+    };
+    return snapshot.roots;
+  }
+
   public readonly execute = async (
     input: GenerationStepExecutionInput
   ): Promise<GenerationStepExecutionResult> => {
+    if (this.dependencies.uiSnapshotProvider === undefined) {
+      if (
+        this.dependencies.uiSnapshots === undefined
+        || this.dependencies.createFreshnessGuard === undefined
+      ) {
+        throw new Error("Generation UI snapshot provider factory is unavailable");
+      }
+      const session = GenerationSessionSchema.parse(
+        await this.dependencies.store.read(input.generationId)
+      );
+      const uiSnapshotProvider = await this.dependencies.uiSnapshots.open({
+        deviceSerial: session.target.deviceSerial,
+        timeoutMs: this.dependencies.idle.timeoutMs,
+        ...(session.bindings.uiBackend === undefined
+          ? {}
+          : { backend: session.bindings.uiBackend.id }),
+        ...(this.dependencies.uiCacheEnabled === undefined
+          ? {}
+          : { cacheEnabled: this.dependencies.uiCacheEnabled }),
+        ...(input.signal === undefined ? {} : { signal: input.signal })
+      });
+      try {
+        return await new GenerationStepExecutor({
+          ...this.dependencies,
+          freshnessGuard: this.dependencies.createFreshnessGuard(
+            uiSnapshotProvider
+          ),
+          uiSnapshotProvider
+        }).execute(input);
+      } finally {
+        await closeUiSnapshotProvider(uiSnapshotProvider);
+      }
+    }
+    const freshnessGuard = this.dependencies.freshnessGuard;
+    if (freshnessGuard === undefined) {
+      throw new Error("Generation freshness guard is unavailable");
+    }
     const executionStartedAt = this.dependencies.clock.now();
     const timing: GenerationStepTiming = {
       freshnessCheckMs: 0,
@@ -515,6 +624,16 @@ export class GenerationStepExecutor {
     const session = GenerationSessionSchema.parse(
       await this.dependencies.store.read(input.generationId)
     );
+    if (
+      session.bindings.uiBackend !== undefined
+      && JSON.stringify(session.bindings.uiBackend)
+        !== JSON.stringify(this.boundUiSnapshotProvider().descriptor)
+    ) {
+      throw new GenerationOperationError(
+        "CONFIG_INVALID",
+        "Generation UI backend does not match the authoritative session"
+      );
+    }
     assertBaseAuthorization(session, proposal, snapshot);
     const risk = this.riskEvaluator.evaluate(
       proposal,
@@ -576,7 +695,7 @@ export class GenerationStepExecutor {
     let fresh: RuntimeSnapshot;
     try {
       const freshnessStartedAt = this.dependencies.clock.now();
-      fresh = await this.dependencies.freshnessGuard.assertFresh(
+      fresh = await freshnessGuard.assertFresh(
         proposal.binding,
         input.signal,
         approved
@@ -741,10 +860,11 @@ export class GenerationStepExecutor {
       );
       const actionExecutor = new ActionExecutor(
         this.dependencies.adb,
-        session.target.deviceSerial
+        session.target.deviceSerial,
+        (): void => this.boundUiSnapshotProvider().invalidate?.("beforeAction")
       );
       const idleWaiter = new IdleWaiter(
-        this.dependencies.androidCli,
+        this.dependencies.uiStability,
         this.dependencies.clock,
         session.target.deviceSerial,
         session.target.packageName
@@ -753,11 +873,12 @@ export class GenerationStepExecutor {
       if (provisional.action === "scrollTo") {
         const actionStartedAt = this.dependencies.clock.now();
         const scroll = await new ScrollToExecutor({
-          androidCli: this.dependencies.androidCli,
+          uiSnapshotProvider: this.boundUiSnapshotProvider(),
           actionExecutor,
           idleWaiter,
           deviceSerial: session.target.deviceSerial,
           idle: this.dependencies.idle,
+          viewport: (): DisplayViewport | undefined => this.currentViewport,
           beforeSwipe: async (): Promise<readonly LayoutElement[]> => {
             const guarded = await this.observeLive(
               session,
@@ -811,7 +932,8 @@ export class GenerationStepExecutor {
         throwIfCancelled(input.signal);
         const triggerTarget = requireBridgeTrigger(
           preAction.layout,
-          provisional
+          provisional,
+          preAction.viewport
         );
         const triggerClick = JourneyStepSchema.parse({
           action: "click",
@@ -918,7 +1040,11 @@ export class GenerationStepExecutor {
           }
         }
       } else {
-        const target = requireTarget(preAction.layout, provisional);
+        const target = requireTarget(
+          preAction.layout,
+          provisional,
+          preAction.viewport
+        );
         if (provisional.action === "inputText") {
           if (!hasExactlyOneEnabledFocusedElement(preAction.layout)) {
             fail(
@@ -1023,7 +1149,7 @@ export class GenerationStepExecutor {
           let expectationRuntime: LiveRuntime | undefined;
           const expectation = await new ExpectationEvaluator(
             this.dependencies.adb,
-            this.dependencies.androidCli,
+            this.boundUiSnapshotProvider(),
             logcat,
             this.dependencies.clock
           ).evaluate(finalStep.expect, {
@@ -1269,7 +1395,8 @@ export class GenerationStepExecutor {
             activity: postActionRuntime.activity,
             pid: postActionRuntime.pid,
             layout: postActionRuntime.layout,
-            windowHierarchy: postActionRuntime.windowHierarchy
+            windowHierarchy: postActionRuntime.windowHierarchy,
+            uiSnapshot: postActionRuntime.uiSnapshot
           },
           ...(input.signal === undefined ? {} : { signal: input.signal })
         });
@@ -1343,11 +1470,11 @@ export class GenerationStepExecutor {
     }
     const [layout, topology] = await Promise.all([
       stableLayout === undefined
-        ? this.dependencies.androidCli.layout({
-            deviceSerial: session.target.deviceSerial,
-            ...(signal === undefined ? {} : { signal }),
-            timeoutMs: Math.max(1, deadline - this.dependencies.clock.now())
-          })
+        ? this.captureLayout(
+            "locate",
+            Math.max(1, deadline - this.dependencies.clock.now()),
+            signal
+          )
         : Promise.resolve(stableLayout),
       this.dependencies.adb.windowTopology(identity())
     ]);
@@ -1400,6 +1527,8 @@ export class GenerationStepExecutor {
       pid,
       pids: appProcessPids(processes),
       layout,
+      viewport: this.requireCurrentViewport(),
+      uiSnapshot: this.requireCurrentUiSnapshot(),
       windowHierarchy
     };
   }
@@ -1602,7 +1731,8 @@ export class GenerationStepExecutor {
     }
     const actionExecutor = new ActionExecutor(
       this.dependencies.adb,
-      session.target.deviceSerial
+      session.target.deviceSerial,
+      (): void => this.boundUiSnapshotProvider().invalidate?.("beforeAction")
     );
     for (const externalStep of resolution.flow.steps) {
       throwIfCancelled(signal);
@@ -1648,11 +1778,7 @@ export class GenerationStepExecutor {
         }", got "${foreground.activity}"`
       );
     }
-    const layout = await this.dependencies.androidCli.layout({
-      deviceSerial: session.target.deviceSerial,
-      ...(signal === undefined ? {} : { signal }),
-      timeoutMs: 5000
-    });
+    const layout = await this.captureLayout("locate", 5000, signal);
     throwIfCancelled(signal);
 
     if (step.action === "scrollTo") {
@@ -1661,17 +1787,18 @@ export class GenerationStepExecutor {
         { action: "scrollTo" }
       >;
       const externalIdleWaiter = new IdleWaiter(
-        this.dependencies.androidCli,
+        this.dependencies.uiStability,
         this.dependencies.clock,
         session.target.deviceSerial,
         escapedPackageName
       );
       const scroll = await new ScrollToExecutor({
-        androidCli: this.dependencies.androidCli,
+        uiSnapshotProvider: this.boundUiSnapshotProvider(),
         actionExecutor,
         idleWaiter: externalIdleWaiter,
         deviceSerial: session.target.deviceSerial,
         idle: this.dependencies.idle,
+        viewport: (): DisplayViewport | undefined => this.currentViewport,
         beforeSwipe: async (): Promise<readonly LayoutElement[]> => {
           const guarded = await this.observeExternalLive(
             session,
@@ -1709,7 +1836,11 @@ export class GenerationStepExecutor {
         || step.action === "longClick"
         || step.action === "swipe"
       ) {
-        target = requireExternalTarget(layout, step);
+        target = requireExternalTarget(
+          layout,
+          step,
+          this.requireCurrentViewport()
+        );
       }
       const action = await actionExecutor.execute(
         journeyStep,
@@ -1722,7 +1853,7 @@ export class GenerationStepExecutor {
     }
 
     const externalIdleWaiter = new IdleWaiter(
-      this.dependencies.androidCli,
+      this.dependencies.uiStability,
       this.dependencies.clock,
       session.target.deviceSerial,
       escapedPackageName
@@ -1783,11 +1914,7 @@ export class GenerationStepExecutor {
         }"`
       );
     }
-    const layout = await this.dependencies.androidCli.layout({
-      deviceSerial: session.target.deviceSerial,
-      ...(signal === undefined ? {} : { signal }),
-      timeoutMs: 5000
-    });
+    const layout = await this.captureLayout("locate", 5000, signal);
     return { layout };
   }
 
@@ -1855,11 +1982,11 @@ export class GenerationStepExecutor {
         );
       }
     } else if (expect.type === "element") {
-      const layout = await this.dependencies.androidCli.layout({
-        deviceSerial: session.target.deviceSerial,
-        ...(signal === undefined ? {} : { signal }),
-        timeoutMs: expect.timeoutMs
-      });
+      const layout = await this.captureLayout(
+        "expect",
+        expect.timeoutMs,
+        signal
+      );
       throwIfCancelled(signal);
       const resolution = resolveLocator(layout, expect.locator, {
         requireEnabled: false

@@ -3,6 +3,7 @@ import { realpath } from "node:fs/promises";
 import { basename, extname } from "node:path";
 
 import { z } from "zod";
+import { UiBackendDescriptorSchema } from "../../domain/ui-backend.js";
 
 import {
   normalizeActivity
@@ -78,7 +79,8 @@ const VerificationReceiptSchema = z.strictObject({
     projectHash: Sha256Schema,
     configHash: Sha256Schema,
     contextHash: Sha256Schema,
-    snapshotHash: Sha256Schema.nullable()
+    snapshotHash: Sha256Schema.nullable(),
+    uiBackend: UiBackendDescriptorSchema.optional()
   }),
   tools: z.record(z.string(), z.string()),
   report: z.strictObject({
@@ -763,6 +765,9 @@ export class GenerationFinalizer {
     expected: ExpectedVerification,
     code: "VERIFICATION_FAILED" | "RECOVERY_REQUIRED"
   ): void {
+    const reportUiBackend = report.schemaVersion === 3
+      ? report.environment.uiBackend
+      : undefined;
     if (
       report.status !== "passed"
       || report.fallbackUsed
@@ -775,6 +780,10 @@ export class GenerationFinalizer {
       || report.project.packageName !== expected.project.packageName
       || report.project.launchActivity !== expected.project.launchActivity
       || report.environment.deviceSerial !== expected.deviceSerial
+      || (
+        expected.bindings.uiBackend !== undefined
+        && !sameJson(reportUiBackend, expected.bindings.uiBackend)
+      )
       || !sameJson(canonicalTools(report.environment.tools), expected.tools)
       || report.steps.length !== journey.steps.length
     ) {
@@ -1160,7 +1169,10 @@ export class GenerationFinalizer {
       bindings: {
         projectHash: session.bindings.projectHash,
         configHash: session.bindings.configHash,
-        contextHash: session.bindings.contextHash
+        contextHash: session.bindings.contextHash,
+        ...(session.bindings.uiBackend === undefined
+          ? {}
+          : { uiBackend: session.bindings.uiBackend })
       },
       verification: {
         reportPath: GENERATION_BUNDLE_PATHS.verificationReport,

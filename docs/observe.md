@@ -29,8 +29,10 @@ taphound observe --project <path> [--config <path>] [--device <serial>] \
 it validates the config, checks that ADB, Android CLI, and an online device
 are available, and selects a device. A config validation failure exits with
 code `2` (`CONFIG_INVALID`). A doctor failure exits with code `3`
-(`ENVIRONMENT_MISSING_TOOL` or the specific failing check). An internal error
-during observation exits with code `4` (`INTERNAL_ERROR`). A successful
+(`ENVIRONMENT_MISSING_TOOL` or the specific failing check). Provider
+availability failures use `UI_BACKEND_UNAVAILABLE`/exit `3`; capture or source
+validation failures use `UI_SNAPSHOT_FAILED` or `UI_SNAPSHOT_INVALID`/exit `1`.
+An internal error during observation exits with code `4` (`INTERNAL_ERROR`). A successful
 observation exits with code `0`.
 
 ## Output Schema
@@ -49,6 +51,21 @@ With `--json`, the command emits exactly one JSON value to stdout:
       "packageName": "com.example.app",
       "activity": "com.example.app.SearchActivity"
     },
+    "uiBackend": {
+      "id": "system-uiautomator",
+      "adapterVersion": "system-uiautomator-v1",
+      "engineVersion": "android-api-36",
+      "configSha256": "<sha256>"
+    },
+    "uiCaptureDurationMs": 42,
+    "uiCache": {
+      "hits": 0,
+      "misses": 1,
+      "stale": 0,
+      "relearns": 0,
+      "capturesSaved": 0,
+      "validationDurationMs": 0
+    },
     "layout": [
       {
         "id": "search_input_node",
@@ -65,6 +82,9 @@ With `--json`, the command emits exactly one JSON value to stdout:
 }
 ```
 
+`uiCache` is optional diagnostics for the current command only. It does not
+make a snapshot authoritative and is omitted when `ui.cacheEnabled=false`.
+
 `report` conforms to the `ObserveReport` schema:
 
 - `deviceSerial`: the device TapHound observed.
@@ -75,6 +95,9 @@ With `--json`, the command emits exactly one JSON value to stdout:
 - `foreground`: the actual foreground component at capture time, regardless of
   whether it is the target package. `foreground.packageName` may differ from
   `packageName` when the device is mid-transition or on a system surface.
+- `uiBackend`: the fixed provider descriptor selected when the command opens
+  its device-bound UI session.
+- `uiCaptureDurationMs`: duration of the reported UI capture, in milliseconds.
 - `layout`: the parsed Layout tree for the target package, in the same
   `LayoutElement` shape used by `record`, `verify`, and `generation`.
 - `logcat`: present only when `--logcat-lines` is supplied and greater than

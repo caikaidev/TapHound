@@ -351,6 +351,72 @@ describe("generation JSON process protocol", () => {
     expect(read).toHaveBeenCalledWith("generation-1");
   });
 
+  it("emits a compact contextSelection for generation start --compact", async () => {
+    const test = harness();
+    const moduleSelection = {
+      sha256: "e".repeat(64),
+      projectDir: "app",
+      inventory: {
+        pathSetSha256: "c".repeat(64),
+        categories: ["manifests", "sources", "layouts", "navigation"] as const
+      }
+    };
+    (test.dependencies.generationStarter.start as unknown as Mock)
+      .mockResolvedValueOnce({
+        id: "generation-1",
+        revision: 0,
+        bindings: {
+          projectHash: "a".repeat(64),
+          configHash: "b".repeat(64),
+          contextHash: "c".repeat(64),
+          snapshotHash: null
+        },
+        contextSelection: {
+          bundleVersion: 2 as const,
+          indexHash: "f".repeat(64),
+          modules: [
+            { id: ":app", ...moduleSelection },
+            { id: ":feature:search", ...moduleSelection }
+          ]
+        },
+        variables: {
+          runId: "journey-run-42",
+          timestamp: "2026-07-22T12:00:00.000Z",
+          randomHex: "c0ffee"
+        },
+        target: {
+          packageName: "com.example.app",
+          deviceSerial: "emulator-5554",
+          resetStrategy: "processOnly" as const,
+          interactionPolicy: {
+            allowedActions: ["click", "wait"],
+            confirmationRequiredActions: [],
+            forbiddenActions: []
+          }
+        },
+        externalFlows: []
+      });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "start",
+      "--project", "/project",
+      "--context", ".taphound/context/project-context.json",
+      "--compact",
+      "--json"
+    ]);
+
+    const output = JSON.parse(test.stdout.value) as {
+      contextSelection: Record<string, unknown>;
+    };
+    expect(output.contextSelection).toEqual({
+      bundleVersion: 2,
+      indexHash: "f".repeat(64),
+      moduleIds: [":app", ":feature:search"]
+    });
+    expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
+    expect(test.exitCodes).toEqual([0]);
+  });
+
   it("executes a strict planner envelope and emits exactly one JSON value", async () => {
     const test = harness();
 

@@ -69,6 +69,7 @@ interface GenerationStartOptions {
   allowEvidenceDrift?: boolean | undefined;
   baseFlow?: string | undefined;
   externalFlow?: string[] | undefined;
+  compact?: boolean | undefined;
   json?: boolean | undefined;
 }
 
@@ -500,6 +501,10 @@ function createStartCommand(dependencies: CliDependencies): Command {
       "--allow-evidence-drift",
       "Allow changed source evidence; replay remains mandatory"
     )
+    .option(
+      "--compact",
+      "Summarize contextSelection as indexHash plus module ids instead of per-module binding hashes"
+    )
     .option("--json", "Emit one machine-readable JSON value")
     .action(async (options: GenerationStartOptions): Promise<void> => {
       try {
@@ -659,7 +664,17 @@ function createStartCommand(dependencies: CliDependencies): Command {
           generationId: session.id,
           revision: session.revision,
           bindings: session.bindings,
-          contextSelection: session.contextSelection,
+          ...(options.compact === true
+            ? {
+                contextSelection: {
+                  bundleVersion: session.contextSelection.bundleVersion,
+                  indexHash: session.contextSelection.indexHash,
+                  moduleIds: session.contextSelection.modules.map(
+                    (module) => module.id
+                  )
+                }
+              }
+            : { contextSelection: session.contextSelection }),
           ...(options.allowEvidenceDrift === true
             ? { evidenceDriftAllowed: true }
             : {}),

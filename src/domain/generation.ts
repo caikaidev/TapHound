@@ -124,13 +124,45 @@ const GenerationFailureSchema = z.strictObject({
   message: z.string().trim().min(1)
 });
 
+export const VerificationPhaseSchema = z.discriminatedUnion("stage", [
+  z.strictObject({ stage: z.literal("preparing") }),
+  z.strictObject({
+    stage: z.literal("replaying"),
+    stepIndex: z.number().int().nonnegative(),
+    stepCount: z.number().int().positive()
+  }).superRefine((phase, context) => {
+    if (phase.stepIndex >= phase.stepCount) {
+      context.addIssue({
+        code: "custom",
+        path: ["stepIndex"],
+        message: "Replaying phase step index must stay within the step count"
+      });
+    }
+  }),
+  z.strictObject({ stage: z.literal("collecting") })
+]);
+
+export type VerificationPhase = z.infer<typeof VerificationPhaseSchema>;
+
+export function verificationPhaseLabel(phase: VerificationPhase): string {
+  switch (phase.stage) {
+    case "preparing":
+      return "preparing device replay";
+    case "replaying":
+      return `replaying step ${String(phase.stepIndex + 1)}/${String(phase.stepCount)}`;
+    case "collecting":
+      return "collecting final evidence";
+  }
+}
+
 const VerificationSchema = z.discriminatedUnion("status", [
   z.strictObject({ status: z.literal("notRun") }),
   z.strictObject({
     status: z.literal("running"),
     attemptId: GenerationSessionIdSchema,
     ownerPid: z.number().int().positive().optional(),
-    startedAt: z.iso.datetime().optional()
+    startedAt: z.iso.datetime().optional(),
+    phase: VerificationPhaseSchema.optional()
   }),
   z.strictObject({
     status: z.literal("passed"),

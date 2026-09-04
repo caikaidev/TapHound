@@ -44,7 +44,8 @@ import {
 } from "../../../src/application/generation/generation-starter.js";
 import type { TapHoundConfig } from "../../../src/domain/config.js";
 import type {
-  GenerationSession
+  GenerationSession,
+  VerificationPhase
 } from "../../../src/domain/generation.js";
 import {
   GenerationSessionStoreError
@@ -584,6 +585,136 @@ describe("GenerationFinalizer", () => {
       join(test.root, ".taphound/journeys/generated.meta.json"),
       "utf8"
     )).resolves.toContain('"status": "verified"');
+  });
+
+  it("persists replay progress phases during the owned verification attempt", async () => {
+    const test = await fixture();
+    const phases: VerificationPhase[] = [];
+    const finalize = new GenerationFinalizer({
+      store: test.store,
+      contextValidator: { validate: test.validateContext },
+      verifyRuntime: { verify: test.verify },
+      publisher: new GenerationPublisher({
+        store: test.store,
+        journeyWriter: new FileSystemJourneyWriter(),
+        metaWriter: new FileSystemGenerationMetaWriter()
+      }),
+      generateAttemptId: (): string => "verification-attempt",
+      replayProgress: (phase): void => {
+        phases.push(phase);
+      }
+    });
+    const updatePhase = vi.spyOn(test.store, "updateVerificationPhase");
+    test.verify.mockImplementationOnce((verifyInput) => {
+      verifyInput.progress?.({ stage: "preparing" });
+      verifyInput.progress?.({
+        stage: "replaying",
+        stepIndex: 0,
+        stepCount: 1
+      });
+      verifyInput.progress?.({ stage: "collecting" });
+      return Promise.resolve({
+        status: "passed" as const,
+        exitCode: 0 as const,
+        report: report(test.canonicalRoot),
+        reportPath: "/reports/report.json",
+        summaryPath: "/reports/summary.txt"
+      });
+    });
+
+    const result = await finalize.finalize(input(test.root));
+
+    expect(result.status).toBe("verified");
+    expect(updatePhase).toHaveBeenCalledTimes(3);
+    expect(updatePhase).toHaveBeenNthCalledWith(
+      1,
+      "generation-1",
+      "verification-attempt",
+      { stage: "preparing" }
+    );
+    expect(updatePhase).toHaveBeenNthCalledWith(
+      2,
+      "generation-1",
+      "verification-attempt",
+      { stage: "replaying", stepIndex: 0, stepCount: 1 }
+    );
+    expect(updatePhase).toHaveBeenNthCalledWith(
+      3,
+      "generation-1",
+      "verification-attempt",
+      { stage: "collecting" }
+    );
+    expect(phases).toEqual([
+      { stage: "preparing" },
+      { stage: "replaying", stepIndex: 0, stepCount: 1 },
+      { stage: "collecting" }
+    ]);
+    await expect(test.store.read("generation-1")).resolves.toMatchObject({
+      verification: { status: "passed" },
+      publication: { status: "published" }
+    });
+  });
+
+  it("keeps finalization durable when progress persistence fails", async () => {
+    const test = await fixture();
+    const finalize = new GenerationFinalizer({
+      store: test.store,
+      contextValidator: { validate: test.validateContext },
+      verifyRuntime: { verify: test.verify },
+      publisher: new GenerationPublisher({
+        store: test.store,
+        journeyWriter: new FileSystemJourneyWriter(),
+        metaWriter: new FileSystemGenerationMetaWriter()
+      }),
+      generateAttemptId: (): string => "verification-attempt"
+    });
+    const updatePhase = vi
+      .spyOn(test.store, "updateVerificationPhase")
+      .mockRejectedValue(
+        new GenerationSessionStoreError("LOCK_TIMEOUT", "lock busy")
+      );
+    test.verify.mockImplementationOnce((verifyInput) => {
+      verifyInput.progress?.({ stage: "preparing" });
+      return Promise.resolve({
+        status: "passed" as const,
+        exitCode: 0 as const,
+        report: report(test.canonicalRoot),
+        reportPath: "/reports/report.json",
+        summaryPath: "/reports/summary.txt"
+      });
+    });
+
+    const result = await finalize.finalize(input(test.root));
+
+    expect(result.status).toBe("verified");
+    expect(updatePhase).toHaveBeenCalledOnce();
+    await expect(test.store.read("generation-1")).resolves.toMatchObject({
+      verification: { status: "passed" },
+      publication: { status: "published" }
+    });
+  });
+
+  it("fails verification durably when replay progress races a failing replay", async () => {
+    const test = await fixture();
+    const updatePhase = vi.spyOn(test.store, "updateVerificationPhase");
+    test.verify.mockImplementationOnce((verifyInput) => {
+      verifyInput.progress?.({ stage: "preparing" });
+      verifyInput.progress?.({
+        stage: "replaying",
+        stepIndex: 0,
+        stepCount: 1
+      });
+      return Promise.reject(new Error("replay exploded"));
+    });
+
+    await expect(test.finalize.finalize(input(test.root))).rejects
+      .toMatchObject({
+        code: "VERIFICATION_FAILED"
+      });
+    expect(updatePhase).toHaveBeenCalled();
+    await expect(test.store.read("generation-1")).resolves.toMatchObject({
+      verification: { status: "failed" }
+    });
   });
 
   it("does not create a manifest or publish a racing evidence snapshot", async () => {

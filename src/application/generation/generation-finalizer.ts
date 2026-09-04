@@ -14,7 +14,8 @@ import {
   GenerationSessionSchema,
   type GenerationErrorCode,
   type GenerationMeta,
-  type GenerationSession
+  type GenerationSession,
+  type VerificationPhase
 } from "../../domain/generation.js";
 import {
   DEFAULT_DEVICE_ROLE,
@@ -48,6 +49,7 @@ import type {
 } from "../project/project-describer.js";
 import type {
   VerifyInput,
+  VerifyProgressEvent,
   VerifyResult,
   VerifyRuntime
 } from "../runtime/verify-runtime.js";
@@ -156,6 +158,7 @@ export interface GenerationFinalizerDependencies {
     GenerationSessionStore,
     | "read"
     | "beginVerification"
+    | "updateVerificationPhase"
     | "abortVerification"
     | "completeVerification"
     | "failVerification"
@@ -169,6 +172,7 @@ export interface GenerationFinalizerDependencies {
   generateAttemptId: () => string;
   owner?: { pid: number; now: () => Date } | undefined;
   progress?: ((stage: GenerationFinalizationStage) => void) | undefined;
+  replayProgress?: ((phase: VerificationPhase) => void) | undefined;
 }
 
 export interface GenerationFinalizeResult {
@@ -368,6 +372,10 @@ export class GenerationFinalizer {
             "Generation finalization was cancelled"
           );
         }
+        const replayProgress = this.bridgeReplayProgress(
+          session.id,
+          expected.attemptId
+        );
         const result = await this.dependencies.verifyRuntime.verify({
           config,
           journey,
@@ -382,8 +390,10 @@ export class GenerationFinalizer {
           ...(input.manualReplay === undefined
             ? {}
             : { manualReplay: input.manualReplay }),
-          ...(input.signal === undefined ? {} : { signal: input.signal })
+          ...(input.signal === undefined ? {} : { signal: input.signal }),
+          progress: replayProgress.onEvent
         } satisfies VerifyInput);
+        await replayProgress.settled();
         replayed = true;
         await this.revalidate(input, config, context, project, session);
         this.assertEligible(result, journey, expected);
@@ -612,6 +622,33 @@ export class GenerationFinalizer {
       );
     }
   };
+
+  private bridgeReplayProgress(
+    generationId: string,
+    attemptId: string
+  ): {
+    onEvent: (event: VerifyProgressEvent) => void;
+    settled: () => Promise<void>;
+  } {
+    let pending: Promise<void> = Promise.resolve();
+    const onEvent = (event: VerifyProgressEvent): void => {
+      const phase: VerificationPhase = event;
+      pending = pending
+        .then(async (): Promise<void> => {
+          await this.dependencies.store.updateVerificationPhase(
+            generationId,
+            attemptId,
+            phase
+          );
+          this.dependencies.replayProgress?.(phase);
+        })
+        .catch((): undefined => undefined);
+    };
+    return {
+      onEvent,
+      settled: (): Promise<void> => pending
+    };
+  }
 
   private assertBindings(
     session: GenerationSession,

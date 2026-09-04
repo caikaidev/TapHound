@@ -6,10 +6,12 @@ import {
   GenerationMetaSchema,
   GenerationReportSchema,
   GenerationSessionSchema,
+  VerificationPhaseSchema,
   bindGenerationVariables,
   expandProposedStepVariables,
   generationCoreIdentity,
-  hashGenerationConfirmationEvidence
+  hashGenerationConfirmationEvidence,
+  verificationPhaseLabel
 } from "../../src/domain/generation.js";
 
 const hashes = {
@@ -466,6 +468,80 @@ describe("GenerationSessionSchema", () => {
         attemptId: "verification-attempt"
       }
     })).toThrow(/verification/i);
+  });
+
+  it.each([
+    { stage: "preparing" },
+    { stage: "replaying", stepIndex: 0, stepCount: 3 },
+    { stage: "replaying", stepIndex: 2, stepCount: 3 },
+    { stage: "collecting" }
+  ])("parses running verification phase %j", (phase) => {
+    expect(GenerationSessionSchema.parse({
+      ...(validSession() as object),
+      verification: {
+        status: "running",
+        attemptId: "verification-attempt",
+        phase
+      }
+    })).toMatchObject({ verification: { status: "running", phase } });
+  });
+
+  it("accepts running verification without a phase", () => {
+    expect(GenerationSessionSchema.parse({
+      ...(validSession() as object),
+      verification: {
+        status: "running",
+        attemptId: "verification-attempt"
+      }
+    })).toMatchObject({
+      verification: { status: "running", attemptId: "verification-attempt" }
+    });
+  });
+
+  it.each([
+    { stage: "replaying", stepIndex: 3, stepCount: 3 },
+    { stage: "replaying", stepIndex: 4, stepCount: 3 }
+  ])("rejects replaying phase outside the step count %j", (phase) => {
+    expect(() => VerificationPhaseSchema.parse(phase)).toThrow();
+    expect(() => GenerationSessionSchema.parse({
+      ...(validSession() as object),
+      verification: {
+        status: "running",
+        attemptId: "verification-attempt",
+        phase
+      }
+    })).toThrow(/step index/i);
+  });
+
+  it.each([
+    { stage: "unknown" },
+    { stage: "replaying", stepIndex: 0 },
+    { stage: "replaying", stepIndex: 0, stepCount: 3, extra: true },
+    { stage: "preparing", detail: "launching" }
+  ])("rejects malformed verification phase %j", (phase) => {
+    expect(() => VerificationPhaseSchema.parse(phase)).toThrow();
+  });
+
+  it("rejects a phase on non-running verification states", () => {
+    expect(() => GenerationSessionSchema.parse({
+      ...(validSession() as object),
+      verification: {
+        status: "notRun",
+        phase: { stage: "preparing" }
+      }
+    })).toThrow();
+  });
+
+  it("labels verification phases for humans", () => {
+    expect(verificationPhaseLabel({ stage: "preparing" })).toBe(
+      "preparing device replay"
+    );
+    expect(
+      verificationPhaseLabel({ stage: "replaying", stepIndex: 4, stepCount: 20 })
+    ).toBe("replaying step 5/20");
+    expect(verificationPhaseLabel({ stage: "collecting" })).toBe(
+      "collecting final evidence"
+    );
   });
 
   it("requires active step state to identify the exact next candidate index", () => {

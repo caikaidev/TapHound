@@ -3,7 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   VerifyRuntime,
   type StepRunnerLike,
-  type VerifyInput
+  type VerifyInput,
+  type VerifyProgressEvent
 } from "../../../src/application/runtime/verify-runtime.js";
 import type { StepRunner } from "../../../src/application/runtime/step-runner.js";
 import type { AppProcess } from "../../../src/domain/app-process.js";
@@ -99,6 +100,56 @@ describe("VerifyRuntime", () => {
     ]);
     expect(test.artifacts.session.text.has("logcat-default.txt")).toBe(true);
     expect(test.artifacts.session.published).toBe(true);
+  });
+
+  it("reports replay progress through the progress callback", async () => {
+    const test = runtimeFixture();
+    const events: VerifyProgressEvent[] = [];
+
+    const result = await new VerifyRuntime(test.dependencies).verify({
+      ...input(),
+      progress: (event): void => {
+        events.push(event);
+      }
+    });
+
+    expect(result).toMatchObject({ status: "passed", exitCode: 0 });
+    expect(events).toEqual([
+      { stage: "preparing" },
+      { stage: "replaying", stepIndex: 0, stepCount: 1 },
+      { stage: "collecting" }
+    ]);
+  });
+
+  it("still reports collecting progress when a step fails", async () => {
+    const test = runtimeFixture();
+    vi.mocked(test.androidCli.layout)
+      .mockImplementationOnce(() => {
+        test.order.push("baseline");
+        return Promise.resolve([]);
+      })
+      .mockImplementationOnce(() => {
+        test.order.push("step-layout");
+        return Promise.resolve([]);
+      });
+    const events: VerifyProgressEvent[] = [];
+
+    const result = await new VerifyRuntime(test.dependencies).verify({
+      ...input(),
+      progress: (event): void => {
+        events.push(event);
+      }
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      report: { primaryFailure: { code: "LOCATOR_NOT_FOUND" } }
+    });
+    expect(events).toEqual([
+      { stage: "preparing" },
+      { stage: "replaying", stepIndex: 0, stepCount: 1 },
+      { stage: "collecting" }
+    ]);
   });
 
   it("waits for the first Journey Activity after a launch redirect", async () => {

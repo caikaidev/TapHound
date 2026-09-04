@@ -31,6 +31,7 @@ import { TapHoundConfigSchema } from "../../domain/config.js";
 import type { TapHoundConfig } from "../../domain/config.js";
 import {
   GenerationSessionIdSchema,
+  verificationPhaseLabel,
   type GenerationSession
 } from "../../domain/generation.js";
 import { ProposedStepSchema } from "../../domain/proposed-step.js";
@@ -274,6 +275,10 @@ function generationStatusText(status: GenerationRecoveryStatus): string {
           : status.recovery.ownerAlive ? "alive" : "not alive"
       })`
     : "none";
+  const phase = status.verification.status === "running"
+    && status.verification.phase !== undefined
+    ? verificationPhaseLabel(status.verification.phase)
+    : null;
   const inFlight = status.inFlight === null
     ? "none"
     : `step ${String(status.inFlight.stepIndex)}, attempt ${status.inFlight.attemptId}`;
@@ -298,6 +303,7 @@ function generationStatusText(status: GenerationRecoveryStatus): string {
     `Pending confirmation: ${confirmation}`,
     `Verification: ${status.verification.status} (attempt ${verificationAttempt})`,
     `Verification owner: ${owner}`,
+    ...(phase === null ? [] : [`Verification phase: ${phase}`]),
     `Publication: ${status.publication.status}`,
     `Recovery: ${recovery}`,
     `Action may have executed: ${
@@ -1323,6 +1329,24 @@ function createStatusCommand(dependencies: CliDependencies): Command {
       );
       const deadline = Date.now() + timeoutMs;
       let status = await runtime.recovery.status(generationId);
+      let reportedPhase: string | null = null;
+      const reportPhaseProgress = (current: GenerationRecoveryStatus): void => {
+        if (options.wait !== true) {
+          return;
+        }
+        const phase = current.verification.status === "running"
+          ? current.verification.phase
+          : undefined;
+        if (phase === undefined) {
+          return;
+        }
+        const label = verificationPhaseLabel(phase);
+        if (label !== reportedPhase) {
+          reportedPhase = label;
+          writeLine(dependencies.stderr, `TapHound verification: ${label}`);
+        }
+      };
+      reportPhaseProgress(status);
       while (
         options.wait === true
         && status.publication.status !== "published"
@@ -1349,6 +1373,7 @@ function createStatusCommand(dependencies: CliDependencies): Command {
           setTimeout(resolveWait, Math.min(500, deadline - Date.now()));
         });
         status = await runtime.recovery.status(generationId);
+        reportPhaseProgress(status);
       }
       if (options.json === true) {
         writeJson(dependencies.stdout, {

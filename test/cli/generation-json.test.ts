@@ -1522,6 +1522,114 @@ describe("generation JSON process protocol", () => {
     expect(test.stderr.value).toBe("");
   });
 
+  it("renders the verification phase for human status when present", async () => {
+    const test = harness();
+    test.recoveryStatus.mockResolvedValueOnce({
+      ...(await test.recoveryStatus()),
+      verification: {
+        status: "running",
+        attemptId: "verify-1",
+        ownerPid: 4321,
+        startedAt: "2026-07-23T00:00:00.000Z",
+        phase: { stage: "replaying", stepIndex: 1, stepCount: 3 }
+      }
+    });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "status",
+      "--project", "/project",
+      "--session", "generation-1"
+    ]);
+
+    expect(test.stdout.value).toContain(
+      "Verification phase: replaying step 2/3"
+    );
+    expect(test.stderr.value).toBe("");
+  });
+
+  it("includes the verification phase in JSON status output", async () => {
+    const test = harness();
+    test.recoveryStatus.mockResolvedValueOnce({
+      ...(await test.recoveryStatus()),
+      verification: {
+        status: "running",
+        attemptId: "verify-1",
+        phase: { stage: "collecting" }
+      }
+    });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "status",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "inspected",
+      exitCode: 0,
+      verification: {
+        status: "running",
+        phase: { stage: "collecting" }
+      }
+    });
+  });
+
+  it("reports replay phase progress on stderr while waiting", async () => {
+    const test = harness();
+    const running = (stepIndex: number): GenerationRecoveryStatus => ({
+      generationId: "generation-1",
+      revision: 4,
+      state: "active",
+      candidateStepCount: 2,
+      inFlight: null,
+      pendingConfirmation: null,
+      verification: {
+        status: "running",
+        attemptId: "verify-1",
+        phase: { stage: "replaying", stepIndex, stepCount: 2 }
+      },
+      publication: { status: "notRun" },
+      recovery: {
+        available: false,
+        kind: null,
+        actionMayHaveExecuted: false,
+        attemptOutcome: null,
+        requiredDecision: null,
+        ownerAlive: true
+      }
+    });
+    test.recoveryStatus
+      .mockReset()
+      .mockResolvedValueOnce(running(0))
+      .mockResolvedValueOnce(running(0))
+      .mockResolvedValueOnce(running(1))
+      .mockResolvedValueOnce({
+        ...running(1),
+        verification: { status: "passed", attemptId: "verify-1" },
+        publication: { status: "published" }
+      });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "status",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--wait",
+      "--timeout-ms", "10000",
+      "--json"
+    ]);
+
+    expect(test.recoveryStatus).toHaveBeenCalledTimes(4);
+    expect(test.stderr.value).toBe(
+      "TapHound verification: replaying step 1/2\n"
+      + "TapHound verification: replaying step 2/2\n"
+    );
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "inspected",
+      publication: { status: "published" }
+    });
+  });
+
   it("waits until generation publication is terminal", async () => {
     const test = harness();
     const base: GenerationRecoveryStatus = {

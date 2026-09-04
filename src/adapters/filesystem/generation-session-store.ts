@@ -24,11 +24,13 @@ import {
   GenerationInFlightSchema,
   GenerationSessionSchema,
   PendingConfirmationSchema,
+  VerificationPhaseSchema,
   generationCoreIdentity,
   isGenerationConfirmationExpired,
   type GenerationInFlight,
   type GenerationSession,
-  type PendingConfirmation
+  type PendingConfirmation,
+  type VerificationPhase
 } from "../../domain/generation.js";
 import {
   BUILD_DIR,
@@ -365,6 +367,18 @@ function sessionId(value: GenerationSession): string {
   const id: unknown = value.id;
   assertId(id);
   return id;
+}
+
+function parseVerificationPhase(value: unknown): VerificationPhase {
+  try {
+    return VerificationPhaseSchema.parse(value);
+  } catch (error) {
+    throw new GenerationSessionStoreError(
+      "INVALID_SESSION",
+      "Verification phase is invalid",
+      { cause: error }
+    );
+  }
 }
 
 function validateExpectedRevision(revision: number): void {
@@ -1818,6 +1832,64 @@ implements GenerationSessionStore {
         activeEvidence
       );
       return next;
+    });
+  };
+
+  public readonly updateVerificationPhase = async (
+    id: string,
+    attemptId: string,
+    phase: VerificationPhase
+  ): Promise<void> => {
+    assertId(id);
+    assertId(attemptId);
+    const parsedPhase = parseVerificationPhase(phase);
+    await this.ensureGenerationRoot();
+    await this.withLock(id, async () => {
+      const activeDirectory = this.activeDirectory(id);
+      if (!await pathExists(activeDirectory)) {
+        if (await pathExists(this.finalDirectory(id))) {
+          throw new GenerationSessionStoreError(
+            "SESSION_PUBLISHED",
+            `Published generation session cannot update verification phase: ${id}`
+          );
+        }
+        throw new GenerationSessionStoreError(
+          "SESSION_NOT_FOUND",
+          `Generation session does not exist: ${id}`
+        );
+      }
+      const activeEvidence = await captureStoreDirectory(activeDirectory);
+      const current = await readBoundState(
+        activeDirectory,
+        id,
+        this.hooks.afterStateOpen,
+        activeEvidence
+      );
+      if (
+        current.state !== "active"
+        || current.verification.status !== "running"
+        || current.verification.attemptId !== attemptId
+        || current.publication.status !== "notRun"
+      ) {
+        throw new GenerationSessionStoreError(
+          "INVALID_TRANSITION",
+          "Verification phase updates require the exact active running attempt"
+        );
+      }
+      const next = GenerationSessionSchema.parse({
+        ...current,
+        verification: {
+          ...current.verification,
+          phase: parsedPhase
+        }
+      });
+      await writeStateAtomically(
+        activeDirectory,
+        next,
+        this.syncDirectory,
+        this.hooks.beforeStateRename,
+        activeEvidence
+      );
     });
   };
 

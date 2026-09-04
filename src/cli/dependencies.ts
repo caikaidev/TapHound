@@ -117,7 +117,10 @@ import { IdleWaiter } from "../application/wait/idle-waiter.js";
 import type { TapHoundConfig } from "../domain/config.js";
 import type { UiBackendSelection } from "../domain/ui-backend.js";
 import type { InitResult } from "../domain/init.js";
-import type { GenerationSession } from "../domain/generation.js";
+import {
+  verificationPhaseLabel,
+  type GenerationSession
+} from "../domain/generation.js";
 import type { InitPromptPort } from "../ports/init-prompt.js";
 import type {
   GenerationSessionStore
@@ -553,6 +556,11 @@ export function createProductionDependencies(
         owner: { pid: process.pid, now: (): Date => new Date() },
         progress: (stage): void => {
           process.stderr.write(`TapHound finalize: ${stage}\n`);
+        },
+        replayProgress: (phase): void => {
+          process.stderr.write(
+            `TapHound finalize: ${verificationPhaseLabel(phase)}\n`
+          );
         }
       });
       const recovery = new GenerationRecoveryService({

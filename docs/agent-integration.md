@@ -232,7 +232,13 @@ The generation flow uses the in-repo [`taphound-journey-generator` Skill](../ass
    local prompt. In a non-TTY sandbox, the Agent may pass
    `--decision approve|decline` only after the user explicitly reviews that
    exact challenge; the decision remains bound to Core-owned evidence.
-7. `generation status` exposes durable state. Interrupted work is retried only
+7. `generation status` exposes durable state. While verification is running,
+   `verification.phase` reports live replay progress (`preparing`,
+   `replaying` with 0-based `stepIndex` and `stepCount`, or `collecting`);
+   phase updates are progress annotations and do not consume session
+   revisions. `generation status --wait` prints each observed phase
+   transition to stderr while stdout keeps emitting exactly one final JSON
+   value. Interrupted work is retried only
    after explicit `generation recover --decision retry` acknowledgement.
 8. `generation finalize --detach` survives caller interruption and fully
    Replays from the initial state. The Journey and immutable evidence are
@@ -296,7 +302,11 @@ RuntimeSnapshot behind the proposal binding. The Agent must retain
 must not fabricate or reuse expired bindings; the step envelope may submit
 either the full snapshot or its `snapshotRef`. Step results include phase timing
 for freshness, evidence setup, observation, action, idle wait, expectations,
-Logcat, and optional next observation. Detached finalize progress and stdout
+Logcat, and optional next observation. During finalize replay the running
+verification attempt persists a `phase` (`preparing`, `replaying` with
+`stepIndex`/`stepCount`, or `collecting`) and the finalizer writes each
+phase to stderr; detached jobs capture those lines in the job progress log.
+Detached finalize progress and stdout
 live under `.taphound/build/jobs/<generationId>/`, outside the authoritative
 bundle. For the full protocol, retry rules, and Context update strategy, see
 the Skill's [`GUIDE.md`](../assets/skills/taphound-journey-generator/GUIDE.md).

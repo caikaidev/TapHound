@@ -42,6 +42,11 @@ import {
   type StepRunnerOptions
 } from "./step-runner.js";
 
+export type VerifyProgressEvent =
+  | { stage: "preparing" }
+  | { stage: "replaying"; stepIndex: number; stepCount: number }
+  | { stage: "collecting" };
+
 export interface VerifyInput {
   config: TapHoundConfig;
   journey: Journey;
@@ -52,6 +57,7 @@ export interface VerifyInput {
   generatedReplayPolicy?: boolean | undefined;
   manualReplay?: boolean | undefined;
   signal?: AbortSignal | undefined;
+  progress?: ((event: VerifyProgressEvent) => void) | undefined;
 }
 
 export interface StepRunnerLike {
@@ -222,6 +228,7 @@ export class VerifyRuntime {
     if (input.devices.length === 0) {
       throw new Error("VerifyInput.devices requires at least one device assignment");
     }
+    input.progress?.({ stage: "preparing" });
     const startedAt = this.dependencies.now();
     const runId = this.dependencies.createRunId();
     const launchActivity = normalizeActivity(
@@ -522,6 +529,11 @@ export class VerifyRuntime {
           runtimes.map((runtime) => [runtime.role, runtime])
         );
         for (const [index, step] of input.journey.steps.entries()) {
+          input.progress?.({
+            stage: "replaying",
+            stepIndex: index,
+            stepCount: input.journey.steps.length
+          });
           const role = stepDeviceRole(step, soleRole);
           const runner = runtimeByRole.get(role)?.runner;
           if (runner === undefined) {
@@ -594,6 +606,7 @@ export class VerifyRuntime {
 
     const screenshotEntries: TapHoundReport["artifacts"]["screenshots"] = [];
     const logcatEntries: TapHoundReport["artifacts"]["logcats"] = [];
+    input.progress?.({ stage: "collecting" });
     if (coverage === undefined) {
       for (const runtime of runtimes) {
         const screenshotPath = `screenshot-${runtime.role}.png`;

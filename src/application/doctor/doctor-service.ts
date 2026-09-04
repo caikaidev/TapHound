@@ -2,6 +2,7 @@ import type { FailureCode } from "../../domain/failure.js";
 import type { UiBackendSelection } from "../../domain/ui-backend.js";
 import type { AdbPort } from "../../ports/adb.js";
 import type { ProcessRunner } from "../../ports/process-runner.js";
+import type { DeviceAssignment } from "../devices/resolve-device-assignments.js";
 
 export type DoctorCheckName =
   | "node"
@@ -12,10 +13,21 @@ export type DoctorCheckName =
   | "device"
   | "appium";
 
+export type DoctorCheckStatus = "passed" | "failed" | "notRun";
+
 export interface DoctorCheck {
   name: DoctorCheckName;
-  status: "passed" | "failed" | "notRun";
+  status: DoctorCheckStatus;
   version?: string | undefined;
+  message?: string | undefined;
+}
+
+export interface DoctorDeviceCheck {
+  role: string;
+  deviceSerial: string;
+  online: boolean;
+  app: DoctorCheckStatus;
+  permissions: DoctorCheckStatus;
   message?: string | undefined;
 }
 
@@ -23,6 +35,7 @@ export interface DoctorReport {
   status: "passed" | "failed";
   checks: DoctorCheck[];
   deviceSerial?: string | undefined;
+  devices?: readonly DoctorDeviceCheck[] | undefined;
   failureCode?: Extract<
     FailureCode,
     "ENVIRONMENT_MISSING_TOOL" | "DEVICE_UNAVAILABLE" | "APP_NOT_INSTALLED"
@@ -32,6 +45,7 @@ export interface DoctorReport {
 export interface DoctorRunInput {
   packageName?: string | undefined;
   requestedDevice?: string | undefined;
+  requestedDevices?: readonly DeviceAssignment[] | undefined;
   signal?: AbortSignal | undefined;
   skipPermissionProbe?: boolean | undefined;
   requestedUiBackend?: UiBackendSelection | undefined;
@@ -78,7 +92,15 @@ export class DoctorService {
   public constructor(private readonly dependencies: DoctorDependencies) {}
 
   public async run(input: DoctorRunInput = {}): Promise<DoctorReport> {
-    const { packageName, requestedDevice, signal } = input;
+    const assignments = input.requestedDevices;
+    if (assignments !== undefined && assignments.length > 0) {
+      return this.runForAssignments(input, assignments);
+    }
+    return this.runSingleDevice(input);
+  }
+
+  private async environmentChecks(input: DoctorRunInput): Promise<DoctorCheck[]> {
+    const { signal } = input;
     const checks: DoctorCheck[] = [nodeCheck(this.dependencies.nodeVersion)];
     const tool = async (
       name: Extract<DoctorCheckName, "adb" | "android">,
@@ -150,6 +172,42 @@ export class DoctorService {
         message: "Appium probe requires ui.backend=appium-uiautomator2"
       });
     }
+    return checks;
+  }
+
+  private conclude(
+    checks: DoctorCheck[],
+    identity: {
+      deviceSerial?: string;
+      devices?: readonly DoctorDeviceCheck[];
+    }
+  ): DoctorReport {
+    const failedCheck = (name: DoctorCheckName): boolean => checks.some(
+      (check) => check.name === name && check.status === "failed"
+    );
+    const environmentFailed = (["node", "adb", "android", "appium", "permissions"] as const)
+      .some(failedCheck);
+    const failureCode = environmentFailed
+      ? "ENVIRONMENT_MISSING_TOOL"
+      : failedCheck("device")
+        ? "DEVICE_UNAVAILABLE"
+        : failedCheck("app")
+          ? "APP_NOT_INSTALLED"
+          : undefined;
+    return {
+      status: failureCode === undefined ? "passed" : "failed",
+      checks,
+      ...(identity.deviceSerial === undefined
+        ? {}
+        : { deviceSerial: identity.deviceSerial }),
+      ...(identity.devices === undefined ? {} : { devices: identity.devices }),
+      ...(failureCode === undefined ? {} : { failureCode })
+    };
+  }
+
+  private async runSingleDevice(input: DoctorRunInput): Promise<DoctorReport> {
+    const { packageName, requestedDevice, signal } = input;
+    const checks = await this.environmentChecks(input);
     let deviceSerial: string | undefined;
     let deviceCheck: DoctorCheck;
     try {
@@ -253,30 +311,164 @@ export class DoctorService {
     }
     checks.push(deviceCheck);
 
-    const failedCheck = (name: DoctorCheckName): boolean => checks.some(
-      (check) => check.name === name && check.status === "failed"
-    );
-    const environmentFailed = (["node", "adb", "android", "appium", "permissions"] as const)
-      .some(failedCheck);
-    const failureCode = environmentFailed
-      ? "ENVIRONMENT_MISSING_TOOL"
-      : failedCheck("device")
-        ? "DEVICE_UNAVAILABLE"
-        : failedCheck("app")
-          ? "APP_NOT_INSTALLED"
-          : undefined;
-    if (failureCode !== undefined) {
-      return {
-        status: "failed",
-        checks,
-        ...(deviceSerial === undefined ? {} : { deviceSerial }),
-        failureCode
-      };
-    }
-    return {
-      status: "passed",
-      checks,
+    return this.conclude(checks, {
       ...(deviceSerial === undefined ? {} : { deviceSerial })
-    };
+    });
+  }
+
+  private async runForAssignments(
+    input: DoctorRunInput,
+    assignments: readonly DeviceAssignment[]
+  ): Promise<DoctorReport> {
+    const { packageName, signal } = input;
+    const checks = await this.environmentChecks(input);
+
+    let onlineSerials: Set<string>;
+    let listingError: string | undefined;
+    try {
+      const devices = await this.dependencies.adb.devices(signal);
+      onlineSerials = new Set(
+        devices
+          .filter((device) => device.status === "device")
+          .map((device) => device.serial)
+      );
+    } catch (error) {
+      onlineSerials = new Set();
+      listingError = error instanceof Error ? error.message : String(error);
+    }
+
+    const deviceChecks: DoctorDeviceCheck[] = [];
+    const appFailures: string[] = [];
+    const permissionFailures: string[] = [];
+    for (const assignment of assignments) {
+      const online = onlineSerials.has(assignment.deviceSerial);
+      const problems: string[] = [];
+      if (!online) {
+        problems.push(listingError !== undefined
+          ? `Device listing failed: ${listingError}`
+          : `Requested device is not online: ${assignment.deviceSerial}`);
+      }
+      let app: DoctorCheckStatus = "notRun";
+      if (online && packageName !== undefined) {
+        try {
+          const installed = await this.dependencies.adb.isInstalled({
+            packageName,
+            deviceSerial: assignment.deviceSerial,
+            ...(signal === undefined ? {} : { signal })
+          });
+          app = installed ? "passed" : "failed";
+          if (!installed) {
+            const message
+              = `Package ${packageName} is not installed on ${assignment.deviceSerial}`;
+            appFailures.push(message);
+            problems.push(message);
+          }
+        } catch (error) {
+          app = "failed";
+          const message = error instanceof Error
+            ? error.message
+            : String(error);
+          appFailures.push(message);
+          problems.push(message);
+        }
+      }
+      let permissions: DoctorCheckStatus = "notRun";
+      if (online && input.skipPermissionProbe !== true) {
+        try {
+          const permission = await this.dependencies.checkAndroidPermissions(
+            assignment.deviceSerial,
+            signal
+          );
+          permissions = permission.status;
+          if (permission.status === "failed") {
+            if (permission.message !== undefined) {
+              permissionFailures.push(permission.message);
+              problems.push(permission.message);
+            } else {
+              permissionFailures.push(
+                `Permission probe failed on ${assignment.deviceSerial}`
+              );
+            }
+          }
+        } catch (error) {
+          permissions = "failed";
+          const message = error instanceof Error
+            ? error.message
+            : String(error);
+          permissionFailures.push(message);
+          problems.push(message);
+        }
+      }
+      deviceChecks.push({
+        role: assignment.role,
+        deviceSerial: assignment.deviceSerial,
+        online,
+        app,
+        permissions,
+        ...(problems.length === 0 ? {} : { message: problems.join("; ") })
+      });
+    }
+
+    const offlineDevices = deviceChecks.filter((device) => !device.online);
+    const appRan = deviceChecks.some((device) => device.app !== "notRun");
+    const permissionsRan = deviceChecks.some(
+      (device) => device.permissions !== "notRun"
+    );
+
+    const appStatus: DoctorCheckStatus = appFailures.length > 0
+      ? "failed"
+      : appRan
+        ? "passed"
+        : "notRun";
+    checks.push({
+      name: "app",
+      status: appStatus,
+      ...(appStatus === "failed"
+        ? { message: appFailures.join("; ") }
+        : appStatus === "passed"
+          ? { message: packageName }
+          : {
+              message: packageName === undefined
+                ? "Installed application probe requires a configured package"
+                : "Installed application probe requires an online selected device"
+            })
+    });
+
+    const permissionStatus: DoctorCheckStatus = permissionFailures.length > 0
+      ? "failed"
+      : permissionsRan
+        ? "passed"
+        : "notRun";
+    checks.push({
+      name: "permissions",
+      status: permissionStatus,
+      ...(permissionStatus === "failed"
+        ? { message: permissionFailures.join("; ") }
+        : permissionStatus === "notRun"
+          ? {
+              message: input.skipPermissionProbe === true
+                ? "Permission probe deferred to verification"
+                : "Permission probe requires an online selected device"
+            }
+          : {})
+    });
+
+    checks.push({
+      name: "device",
+      status: offlineDevices.length === 0 ? "passed" : "failed",
+      ...(offlineDevices.length === 0
+        ? {
+            message: deviceChecks
+              .map((device) => `${device.role}=${device.deviceSerial}`)
+              .join(", ")
+          }
+        : {
+            message: `Requested devices are not online: ${
+              offlineDevices.map((device) => device.deviceSerial).join(", ")
+            }`
+          })
+    });
+
+    return this.conclude(checks, { devices: deviceChecks });
   }
 }

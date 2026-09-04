@@ -9,9 +9,12 @@ function fixture(overrides: {
   nodeVersion?: string;
   devices?: Array<{ serial: string; status: string }>;
   installed?: boolean;
+  installedBySerial?: Record<string, boolean>;
   permissions?: boolean;
+  permissionsBySerial?: Record<string, boolean>;
   appium?: boolean;
   failures?: Record<string, string>;
+  devicesError?: boolean;
 } = {}): {
   service: DoctorService;
   checkPermissions: ReturnType<typeof vi.fn>;
@@ -37,12 +40,17 @@ function fixture(overrides: {
     start: vi.fn(() => runningCommand())
   };
   const adb: AdbPort = {
-    devices: vi.fn(() => Promise.resolve(
-      overrides.devices ?? [{ serial: "emulator-5554", status: "device" }]
-    )),
+    devices: vi.fn(() => overrides.devicesError === true
+      ? Promise.reject(new Error("adb listing failed"))
+      : Promise.resolve(
+        overrides.devices ?? [{ serial: "emulator-5554", status: "device" }]
+      )),
     foregroundComponent: vi.fn(),
     currentActivity: vi.fn(),
-    isInstalled: vi.fn(() => Promise.resolve(overrides.installed ?? true)),
+    isInstalled: vi.fn((identity: { deviceSerial: string }) => Promise.resolve(
+      overrides.installedBySerial?.[identity.deviceSerial]
+        ?? overrides.installed ?? true
+    )),
     launchActivity: vi.fn(() => Promise.resolve(commandResult())),
     startActivityByIntent: vi.fn(),
     resolveLauncherActivity: vi.fn(() => Promise.resolve(undefined)),
@@ -59,8 +67,9 @@ function fixture(overrides: {
     startLogcat: vi.fn(),
     dumpLogcat: vi.fn()
   };
-  const checkPermissions = vi.fn(() => Promise.resolve(
-    overrides.permissions === false
+  const checkPermissions = vi.fn((deviceSerial: string) => Promise.resolve(
+    overrides.permissionsBySerial?.[deviceSerial] === false
+      || overrides.permissions === false
       ? { status: "failed" as const, message: "Screen capture denied" }
       : { status: "passed" as const }
   ));
@@ -79,6 +88,16 @@ function fixture(overrides: {
     })
   };
 }
+
+const TWO_DEVICES = [
+  { serial: "emulator-5554", status: "device" },
+  { serial: "emulator-5556", status: "device" }
+];
+
+const TWO_ASSIGNMENTS = [
+  { role: "sender", deviceSerial: "emulator-5554" },
+  { role: "receiver", deviceSerial: "emulator-5556" }
+];
 
 describe("DoctorService", () => {
   it("reports Node, ADB, Android CLI, app, permissions, and one device", async () => {
@@ -188,5 +207,210 @@ describe("DoctorService", () => {
     expect(report.checks).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "permissions", status: "failed" })
     ]));
+  });
+});
+
+describe("DoctorService multi-device", () => {
+  it("checks every assigned device online, installed, and permitted", async () => {
+    const test = fixture({ devices: TWO_DEVICES });
+    const report = await test.service.run({
+      packageName: "com.example.app",
+      requestedDevices: TWO_ASSIGNMENTS
+    });
+
+    expect(report.status).toBe("passed");
+    expect(report.failureCode).toBeUndefined();
+    expect(report.deviceSerial).toBeUndefined();
+    expect(report.devices).toEqual([
+      {
+        role: "sender",
+        deviceSerial: "emulator-5554",
+        online: true,
+        app: "passed",
+        permissions: "passed"
+      },
+      {
+        role: "receiver",
+        deviceSerial: "emulator-5556",
+        online: true,
+        app: "passed",
+        permissions: "passed"
+      }
+    ]);
+    expect(report.checks.map((check) => check.name)).toEqual([
+      "node", "adb", "android", "appium", "app", "permissions", "device"
+    ]);
+    expect(report.checks).toContainEqual(expect.objectContaining({
+      name: "device",
+      status: "passed",
+      message: "sender=emulator-5554, receiver=emulator-5556"
+    }));
+    expect(test.checkPermissions).toHaveBeenCalledTimes(2);
+    expect(test.checkPermissions).toHaveBeenCalledWith(
+      "emulator-5554",
+      undefined
+    );
+    expect(test.checkPermissions).toHaveBeenCalledWith(
+      "emulator-5556",
+      undefined
+    );
+  });
+
+  it("fails with DEVICE_UNAVAILABLE when an assigned device is offline", async () => {
+    const test = fixture({
+      devices: [
+        { serial: "emulator-5554", status: "device" },
+        { serial: "emulator-5556", status: "offline" }
+      ]
+    });
+    const report = await test.service.run({
+      packageName: "com.example.app",
+      requestedDevices: TWO_ASSIGNMENTS
+    });
+
+    expect(report).toMatchObject({
+      status: "failed",
+      failureCode: "DEVICE_UNAVAILABLE"
+    });
+    expect(report.devices).toEqual([
+      expect.objectContaining({
+        role: "sender",
+        online: true,
+        app: "passed",
+        permissions: "passed"
+      }),
+      expect.objectContaining({
+        role: "receiver",
+        online: false,
+        app: "notRun",
+        permissions: "notRun",
+        message: "Requested device is not online: emulator-5556"
+      })
+    ]);
+    expect(report.checks).toContainEqual(expect.objectContaining({
+      name: "device",
+      status: "failed",
+      message: "Requested devices are not online: emulator-5556"
+    }));
+    expect(test.checkPermissions).toHaveBeenCalledTimes(1);
+    expect(test.checkPermissions).toHaveBeenCalledWith(
+      "emulator-5554",
+      undefined
+    );
+  });
+
+  it("fails with APP_NOT_INSTALLED when one device misses the package", async () => {
+    const report = await fixture({
+      devices: TWO_DEVICES,
+      installedBySerial: { "emulator-5556": false }
+    }).service.run({
+      packageName: "com.example.app",
+      requestedDevices: TWO_ASSIGNMENTS
+    });
+
+    expect(report).toMatchObject({
+      status: "failed",
+      failureCode: "APP_NOT_INSTALLED"
+    });
+    expect(report.devices).toEqual([
+      expect.objectContaining({ role: "sender", app: "passed" }),
+      expect.objectContaining({
+        role: "receiver",
+        app: "failed",
+        message: "Package com.example.app is not installed on emulator-5556"
+      })
+    ]);
+    expect(report.checks).toContainEqual(expect.objectContaining({
+      name: "app",
+      status: "failed",
+      message: "Package com.example.app is not installed on emulator-5556"
+    }));
+  });
+
+  it("reports per-device permission failures as an environment failure", async () => {
+    const report = await fixture({
+      devices: TWO_DEVICES,
+      permissionsBySerial: { "emulator-5556": false }
+    }).service.run({
+      packageName: "com.example.app",
+      requestedDevices: TWO_ASSIGNMENTS
+    });
+
+    expect(report).toMatchObject({
+      status: "failed",
+      failureCode: "ENVIRONMENT_MISSING_TOOL"
+    });
+    expect(report.devices).toEqual([
+      expect.objectContaining({ role: "sender", permissions: "passed" }),
+      expect.objectContaining({
+        role: "receiver",
+        permissions: "failed",
+        message: "Screen capture denied"
+      })
+    ]);
+    expect(report.checks).toContainEqual(expect.objectContaining({
+      name: "permissions",
+      status: "failed",
+      message: "Screen capture denied"
+    }));
+  });
+
+  it("skips app and permission probes per device when unconfigured or deferred", async () => {
+    const test = fixture({ devices: TWO_DEVICES });
+    const report = await test.service.run({
+      skipPermissionProbe: true,
+      requestedDevices: TWO_ASSIGNMENTS
+    });
+
+    expect(report.status).toBe("passed");
+    expect(report.devices).toEqual([
+      expect.objectContaining({ app: "notRun", permissions: "notRun" }),
+      expect.objectContaining({ app: "notRun", permissions: "notRun" })
+    ]);
+    expect(report.checks).toContainEqual(expect.objectContaining({
+      name: "app",
+      status: "notRun",
+      message: "Installed application probe requires a configured package"
+    }));
+    expect(report.checks).toContainEqual(expect.objectContaining({
+      name: "permissions",
+      status: "notRun",
+      message: "Permission probe deferred to verification"
+    }));
+    expect(test.checkPermissions).not.toHaveBeenCalled();
+  });
+
+  it("treats an empty requestedDevices list as single-device mode", async () => {
+    const report = await fixture().service.run({
+      packageName: "com.example.app",
+      requestedDevices: []
+    });
+
+    expect(report).toMatchObject({
+      status: "passed",
+      deviceSerial: "emulator-5554"
+    });
+    expect(report.devices).toBeUndefined();
+  });
+
+  it("marks every assignment offline when device listing fails", async () => {
+    const report = await fixture({ devicesError: true }).service.run({
+      packageName: "com.example.app",
+      requestedDevices: [{ role: "sender", deviceSerial: "emulator-5554" }]
+    });
+
+    expect(report).toMatchObject({
+      status: "failed",
+      failureCode: "DEVICE_UNAVAILABLE"
+    });
+    expect(report.devices).toEqual([
+      expect.objectContaining({
+        role: "sender",
+        online: false,
+        app: "notRun",
+        permissions: "notRun",
+        message: "Device listing failed: adb listing failed"
+      })
+    ]);
   });
 });

@@ -41,6 +41,7 @@ import {
   type BridgeScenario
 } from "../../domain/journey.js";
 import { LocatorSchema } from "../../domain/layout.js";
+import type { ResolvedProjectContext } from "../../domain/project-context.js";
 import { RuntimeSnapshotSchema } from "../../domain/runtime-snapshot.js";
 import {
   assertArtifactDirectory,
@@ -110,7 +111,7 @@ interface GenerationBridgeOptions extends GenerationObserveOptions {
 }
 
 interface GenerationFinalizeOptions extends GenerationObserveOptions {
-  context: string;
+  context?: string | undefined;
   output: string;
   name?: string | undefined;
   device?: string | undefined;
@@ -1145,7 +1146,10 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
   return addCommonOptions(
     new Command("finalize")
       .description("Verify and publish a generated Journey")
-      .requiredOption("--context <path>", "Project Context path")
+      .option(
+        "--context <path>",
+        "Project Context path (legacy sessions without a stored snapshot)"
+      )
       .requiredOption("--output <path>", "Project-relative Journey output")
       .option("--name <name>", "Generated Journey name")
       .option("--device <serial>", "Select an online Android device")
@@ -1169,6 +1173,13 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
       const runtime = requireRuntime(dependencies, options.project, config);
       await assertRuntimeConfig(runtime, generationId);
       const session = await runtime.readSession(generationId);
+      const snapshotContext = await runtime.readContextSnapshot(generationId);
+      if (snapshotContext === null && options.context === undefined) {
+        throw new GenerationOperationError(
+          "CONFIG_INVALID",
+          "--context is required for generation sessions without a stored context snapshot"
+        );
+      }
       if (options.detach === true) {
         if (
           dependencies.detachedProcess === undefined
@@ -1192,8 +1203,9 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
           options.config,
           "--session",
           generationId,
-          "--context",
-          options.context,
+          ...(options.context === undefined
+            ? []
+            : ["--context", options.context]),
           "--output",
           options.output,
           ...(options.name === undefined ? [] : ["--name", options.name]),
@@ -1223,12 +1235,37 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
         }, `Generation finalization started: ${generationId}`);
         return;
       }
-      const loaded = await dependencies.contextLoader.load({
-        projectRoot: options.project,
-        contextPath: resolve(options.project, options.context),
-        moduleIds: session.contextSelection.modules.map((module) => module.id)
-      });
-      const context = loaded.context;
+      let context: ResolvedProjectContext;
+      let contextFromSnapshot = false;
+      if (snapshotContext !== null) {
+        context = snapshotContext;
+        contextFromSnapshot = true;
+        const verdict = await dependencies.contextValidator.validate({
+          context,
+          projectRoot: options.project,
+          config
+        });
+        if (verdict.status !== "valid") {
+          writeLine(
+            dependencies.stderr,
+            `TapHound warning: live project context drifted from the session snapshot (${verdict.reason.code}: ${verdict.reason.message}); the session snapshot remains authoritative`
+          );
+        }
+      } else {
+        const contextOption = options.context;
+        if (contextOption === undefined) {
+          throw new GenerationOperationError(
+            "CONFIG_INVALID",
+            "--context is required for generation sessions without a stored context snapshot"
+          );
+        }
+        const loaded = await dependencies.contextLoader.load({
+          projectRoot: options.project,
+          contextPath: resolve(options.project, contextOption),
+          moduleIds: session.contextSelection.modules.map((module) => module.id)
+        });
+        context = loaded.context;
+      }
       const doctor = await dependencies.doctor.run({
         packageName: config.run.packageName,
         skipPermissionProbe: true,
@@ -1276,6 +1313,7 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
         projectRoot: options.project,
         config,
         context,
+        ...(contextFromSnapshot ? { contextFromSnapshot: true } : {}),
         project,
         outputPath,
         ...(name === undefined ? {} : { name }),

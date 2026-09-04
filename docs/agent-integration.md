@@ -240,18 +240,23 @@ The generation flow uses the in-repo [`taphound-journey-generator` Skill](../ass
    transition to stderr while stdout keeps emitting exactly one final JSON
    value. Interrupted work is retried only
    after explicit `generation recover --decision retry` acknowledgement.
-8. `generation finalize --detach` survives caller interruption and fully
-   Replays from the initial state. The Journey and immutable evidence are
-   published only after exact verification passes. Precondition failures
-   (`CONTEXT_STALE` / `CONTEXT_INVALID` from binding or Context validation)
-   never terminally poison the attempt: finalize validates before the attempt
-   is recorded, and a drift detected after replay rolls the running attempt
-   back to `notRun`, so the session stays retryable once the underlying drift
-   is repaired or reverted. Only genuine replay failures durably mark
-   verification `failed`.
-9. `generation list --json` enumerates all sessions in the workspace (active,
-   archived, and published). `generation archive --session <id>` marks an idle
-   active session as archived so it no longer clutters active listings. Archive
+ 8. `generation finalize --detach` survives caller interruption and fully
+    Replays from the initial state. The Journey and immutable evidence are
+    published only after exact verification passes. Finalize resolves the
+    Context from the session's stored snapshot (written at `generation start`
+    as `context/resolved.json` and bound to the session's `contextHash`), so
+    unrelated source edits after start cannot scrap the session. Live Context
+    drift is reported to stderr as a warning; the snapshot remains
+    authoritative. `--context` is only required for legacy sessions created
+    without a snapshot. Precondition failures (`CONTEXT_INVALID` from binding
+    or snapshot integrity) never terminally poison the attempt: finalize
+    validates before the attempt is recorded, and a legacy session's drift
+    detected after replay rolls the running attempt back to `notRun`, so the
+    session stays retryable once the underlying drift is repaired or reverted.
+    Only genuine replay failures durably mark verification `failed`.
+ 9. `generation list --json` enumerates all sessions in the workspace (active,
+    archived, and published). `generation archive --session <id>` marks an idle
+    active session as archived so it no longer clutters active listings. Archive
    is only permitted on sessions with no in-flight step or pending
    confirmation; recoveryRequired sessions must be recovered first.
 
@@ -273,7 +278,7 @@ taphound generation start \
   --json
 ```
 
-The application module is always selected; dependencies declared by selected modules are expanded automatically. Omitting `--module` selects all modules. Selected modules must be `complete` or explicitly `unsupported`; `unsupported` is an analyzed verdict (no journey-relevant surfaces) and a legitimate terminal state. Modules that are `partial` or `notAnalyzed` fail loading with `CONTEXT_MODULE_INCOMPLETE` — finish or re-analyze those shards first. The exact root-index hash and selected shard IDs/hashes are returned as `contextSelection` and bound to the session. Pass `--compact` to summarize `contextSelection` as `bundleVersion`, `indexHash`, and a `moduleIds` list instead of per-module binding hashes; the session still binds the full selection. Modules cannot be added later. The device is bound at `generation start`. `generation observe`, `step`, `confirm`, `manual`, `status`, and `recover` use that binding via `--session` and do not accept `--device`; `generation finalize` reloads exactly the bound module set and may explicitly provide `--device`, but must not change the session identity binding.
+The application module is always selected; dependencies declared by selected modules are expanded automatically. Omitting `--module` selects all modules. Selected modules must be `complete` or explicitly `unsupported`; `unsupported` is an analyzed verdict (no journey-relevant surfaces) and a legitimate terminal state. Modules that are `partial` or `notAnalyzed` fail loading with `CONTEXT_MODULE_INCOMPLETE` — finish or re-analyze those shards first. The exact root-index hash and selected shard IDs/hashes are returned as `contextSelection` and bound to the session. Pass `--compact` to summarize `contextSelection` as `bundleVersion`, `indexHash`, and a `moduleIds` list instead of per-module binding hashes; the session still binds the full selection. Modules cannot be added later. The device is bound at `generation start`. `generation observe`, `step`, `confirm`, `manual`, `status`, and `recover` use that binding via `--session` and do not accept `--device`; `generation finalize` resolves the bound Context from the session's immutable snapshot (`context/resolved.json`, integrity-checked against the session's `contextHash`) and may explicitly provide `--device`, but must not change the session identity binding. Legacy sessions without a snapshot fall back to reloading the bound module set from `--context`.
 
 ### Refreshing Context Evidence Hashes
 
@@ -290,7 +295,7 @@ Refresh never invents semantic knowledge. It stops with `exitCode: 1` and `statu
 
 The per-module file inventory never includes build-output directories (`bin/`, `build/`, `out/`) or VCS/tool caches (`.git/`, `.gradle/`, `.idea/`, `.taphound/`). Context bundles produced by older TapHound versions may still carry evidence entries under those directories; such entries recompile into hash drift and surface as `CONTEXT_STALE` even though no journey-relevant source changed. Re-running `context refresh --accept-source-changes` once removes those now-ineligible evidence entries (each scope reports the count in `droppedIneligible`) and realigns the stored inventory hash, after which normal validation resumes.
 
-By default, changed source evidence stops generation with `CONTEXT_STALE`. For frequent implementation-only edits, an agent may explicitly pass `--allow-evidence-drift` to both `generation start` and `generation finalize`. This does not bypass Context shard integrity, project/config/session bindings, locator safety, or final replay verification. It only allows the validator's evidence-file drift result to proceed; the final replay remains authoritative. JSON output reports `evidenceDriftAllowed: true` when this opt-in is active.
+By default, changed source evidence stops generation with `CONTEXT_STALE`. For frequent implementation-only edits, an agent may explicitly pass `--allow-evidence-drift` to both `generation start` and `generation finalize`. This does not bypass Context shard integrity, project/config/session bindings, locator safety, or final replay verification. It only allows the validator's evidence-file drift result to proceed; the final replay remains authoritative. JSON output reports `evidenceDriftAllowed: true` when this opt-in is active. `generation finalize` itself resolves the Context from the session snapshot, so post-start source edits never fail finalize; when the live Context diverges, finalize prints the drift reason to stderr as a non-fatal warning and the session snapshot stays authoritative.
 
 Generation's `--json` commands likewise write only one machine-readable JSON
 value to stdout and indicate the result with `exitCode`. `observe` always

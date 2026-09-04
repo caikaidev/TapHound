@@ -143,6 +143,7 @@ export interface GenerationFinalizeInput {
   projectRoot: string;
   config: TapHoundConfig;
   context: ResolvedProjectContext;
+  contextFromSnapshot?: boolean | undefined;
   project: ProjectDescription;
   outputPath: string;
   name?: string | undefined;
@@ -692,6 +693,9 @@ export class GenerationFinalizer {
     session: GenerationSession
   ): Promise<void> {
     this.assertBindings(session, input, config, context, project);
+    if (input.contextFromSnapshot === true) {
+      return;
+    }
     const result = await this.dependencies.contextValidator.validate({
       context,
       projectRoot: input.projectRoot,

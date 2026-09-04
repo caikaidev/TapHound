@@ -1106,7 +1106,10 @@ describe("TapHound CLI commands", () => {
       contextValidator: test.value.contextValidator,
       appPreparer: { prepare: vi.fn(() => Promise.resolve()) },
       uiSnapshots: uiSnapshotFactory(uiSnapshotProvider()),
-      store: { create: vi.fn((): Promise<void> => Promise.resolve()) },
+      store: {
+        create: vi.fn((): Promise<void> => Promise.resolve()),
+        writeEvidence: vi.fn((): Promise<void> => Promise.resolve())
+      },
       now: (): Date => new Date("2026-07-22T12:00:00.000Z"),
       generateId: (): string => "unused-id",
       randomBytes: (): Uint8Array => new Uint8Array()

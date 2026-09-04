@@ -10,6 +10,10 @@ import type {
   ResolvedProjectContext
 } from "../../../src/domain/project-context.js";
 import type { GenerationSession } from "../../../src/domain/generation.js";
+import { GENERATION_CONTEXT_SNAPSHOT_PATH } from "../../../src/domain/workspace.js";
+import {
+  GenerationSessionStoreError
+} from "../../../src/ports/generation-session-store.js";
 import { hashJourney } from "../../../src/domain/report.js";
 import { contextSelection } from "../../fixtures/project-context.js";
 import { validReport } from "../../fixtures/report.js";
@@ -63,6 +67,7 @@ const project = {
 function starter(validationStatus: "valid" | "stale" | "invalid" = "valid"): {
   service: GenerationStarter;
   created: GenerationSession[];
+  writeEvidence: ReturnType<typeof vi.fn>;
   prepare: ReturnType<typeof vi.fn>;
   provider: ReturnType<typeof uiSnapshotProvider>;
 } {
@@ -70,8 +75,10 @@ function starter(validationStatus: "valid" | "stale" | "invalid" = "valid"): {
   const ids = ["generation-core-id", "journey-run-id"];
   const prepare = vi.fn(() => Promise.resolve());
   const provider = uiSnapshotProvider();
+  const writeEvidence = vi.fn((): Promise<void> => Promise.resolve());
   return {
     created,
+    writeEvidence,
     prepare,
     provider,
     service: new GenerationStarter({
@@ -96,7 +103,8 @@ function starter(validationStatus: "valid" | "stale" | "invalid" = "valid"): {
         create: vi.fn((session: GenerationSession) => {
           created.push(session);
           return Promise.resolve();
-        })
+        }),
+        writeEvidence
       },
       now: () => new Date("2026-07-22T12:00:00.000Z"),
       generateId: () => ids.shift() ?? "unexpected-id",
@@ -184,6 +192,41 @@ describe("GenerationStarter", () => {
       config,
       deviceSerial: "emulator-5554"
     });
+  });
+
+  it("persists the resolved context as an immutable session snapshot", async () => {
+    const test = starter();
+
+    const session = await test.service.start({
+      projectRoot: "/project",
+      config,
+      context,
+      project,
+      deviceSerial: "emulator-5554"
+    });
+
+    expect(test.writeEvidence).toHaveBeenCalledOnce();
+    expect(test.writeEvidence).toHaveBeenCalledWith(
+      session.id,
+      GENERATION_CONTEXT_SNAPSHOT_PATH,
+      context
+    );
+  });
+
+  it("fails the start when the context snapshot cannot be persisted", async () => {
+    const test = starter();
+    test.writeEvidence.mockRejectedValueOnce(
+      new GenerationSessionStoreError("IO_ERROR", "snapshot write failed")
+    );
+
+    await expect(test.service.start({
+      projectRoot: "/project",
+      config,
+      context,
+      project,
+      deviceSerial: "emulator-5554"
+    })).rejects.toMatchObject({ code: "IO_ERROR" });
+    expect(test.created).toHaveLength(1);
   });
 
   it("computes deterministic canonical input hashes", async () => {

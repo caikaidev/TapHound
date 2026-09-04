@@ -29,6 +29,7 @@ import {
   type JourneyStep
 } from "../../domain/journey.js";
 import { normalizeActivity } from "../../domain/activity.js";
+import { GENERATION_CONTEXT_SNAPSHOT_PATH } from "../../domain/workspace.js";
 import { FlowNameSchema } from "../../domain/journey-composition.js";
 import {
   TapHoundReportSchema,
@@ -90,7 +91,7 @@ export interface GenerationStarterDependencies {
   contextValidator: Pick<ContextValidator, "validate">;
   appPreparer: Pick<GenerationAppPreparer, "prepare">;
   uiSnapshots: UiSnapshotProviderFactory;
-  store: Pick<GenerationSessionStore, "create">;
+  store: Pick<GenerationSessionStore, "create" | "writeEvidence">;
   now: () => Date;
   generateId: () => string;
   randomBytes: (size: number) => Uint8Array;
@@ -391,6 +392,11 @@ export class GenerationStarter {
     });
 
     await this.dependencies.store.create(session);
+    await this.dependencies.store.writeEvidence(
+      session.id,
+      GENERATION_CONTEXT_SNAPSHOT_PATH,
+      context
+    );
     return session;
   };
 }

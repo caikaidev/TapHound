@@ -1113,6 +1113,26 @@ describe("GenerationFinalizer", () => {
     expect(test.verify).toHaveBeenCalledOnce();
   });
 
+  it("skips live context validation when the context comes from the session snapshot", async () => {
+    const test = await fixture();
+    test.validateContext.mockResolvedValueOnce({
+      status: "stale",
+      reason: {
+        code: "EVIDENCE_HASH_MISMATCH",
+        message: "context changed"
+      }
+    });
+
+    const result = await test.finalize.finalize({
+      ...input(test.root),
+      contextFromSnapshot: true
+    });
+
+    expect(result).toMatchObject({ status: "verified", replayed: true });
+    expect(test.verify).toHaveBeenCalledOnce();
+    expect(test.validateContext).not.toHaveBeenCalled();
+  });
+
   it("durably fails when the abort rollback itself is rejected", async () => {
     const test = await fixture();
     test.validateContext

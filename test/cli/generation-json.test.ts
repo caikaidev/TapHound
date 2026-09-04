@@ -87,6 +87,9 @@ interface Harness {
   archive: Mock;
   list: Mock;
   readSession: Mock;
+  readContextSnapshot: Mock;
+  contextValidate: Mock;
+  contextLoad: Mock;
   workspaceLayout: FakeWorkspaceLayout;
 }
 
@@ -182,6 +185,18 @@ function harness(signal?: AbortSignal): Harness {
     candidateSteps: [{}],
     contextSelection
   }));
+  const readContextSnapshot = vi.fn(
+    (): Promise<unknown> => Promise.resolve(null)
+  );
+  const contextValidate = vi.fn(() => Promise.resolve({
+    status: "valid" as const
+  }));
+  const contextLoad = vi.fn(() => Promise.resolve({
+    context: generationContext,
+    binding: generationContext,
+    bundle: projectContextIndex,
+    modules: [projectContextModule]
+  }));
   const dependencies = {
     ...(signal === undefined ? {} : { signal }),
     doctor: {
@@ -204,14 +219,9 @@ function harness(signal?: AbortSignal): Harness {
         launchActivity: "com.example.app.MainActivity"
       }))
     },
-    contextValidator: { validate: vi.fn() },
+    contextValidator: { validate: contextValidate },
     contextLoader: {
-      load: vi.fn(() => Promise.resolve({
-        context: generationContext,
-        binding: generationContext,
-        bundle: projectContextIndex,
-        modules: [projectContextModule]
-      })),
+      load: contextLoad,
       readIndex: vi.fn(() => Promise.resolve({
         bundle: projectContextIndex,
         indexHash: contextSelection.indexHash
@@ -248,6 +258,7 @@ function harness(signal?: AbortSignal): Harness {
       archive,
       list,
       readSession,
+      readContextSnapshot,
       assertConfigIdentity
     })),
     detachedProcess: {
@@ -285,6 +296,9 @@ function harness(signal?: AbortSignal): Harness {
     archive,
     list,
     readSession,
+    readContextSnapshot,
+    contextValidate,
+    contextLoad,
     workspaceLayout
   };
 }
@@ -1456,6 +1470,109 @@ describe("generation JSON process protocol", () => {
     );
   });
 
+  it("finalizes from the stored context snapshot without reading live context", async () => {
+    const test = harness();
+    test.readContextSnapshot.mockResolvedValueOnce(resolvedProjectContext);
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "finalize",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--output", ".taphound/journeys/generated.json",
+      "--json"
+    ]);
+
+    expect(test.contextLoad).not.toHaveBeenCalled();
+    expect(test.contextValidate).toHaveBeenCalledWith(
+      expect.objectContaining({ context: resolvedProjectContext })
+    );
+    expect(test.finalize).toHaveBeenCalledWith(expect.objectContaining({
+      context: resolvedProjectContext,
+      contextFromSnapshot: true
+    }));
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "verified",
+      exitCode: 0
+    });
+    expect(test.stderr.value).toBe("");
+  });
+
+  it("warns on stderr when live context drifted from the session snapshot", async () => {
+    const test = harness();
+    test.readContextSnapshot.mockResolvedValueOnce(resolvedProjectContext);
+    test.contextValidate.mockResolvedValueOnce({
+      status: "stale",
+      reason: {
+        code: "EVIDENCE_HASH_MISMATCH",
+        message: "Evidence file changed"
+      }
+    });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "finalize",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--output", ".taphound/journeys/generated.json",
+      "--json"
+    ]);
+
+    expect(test.stderr.value).toContain(
+      "TapHound warning: live project context drifted from the session snapshot"
+    );
+    expect(test.stderr.value).toContain("EVIDENCE_HASH_MISMATCH");
+    expect(test.finalize).toHaveBeenCalledWith(
+      expect.objectContaining({ contextFromSnapshot: true })
+    );
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "verified",
+      exitCode: 0
+    });
+  });
+
+  it("requires --context for legacy sessions without a stored snapshot", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "finalize",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--output", ".taphound/journeys/generated.json",
+      "--json"
+    ]);
+
+    expect(test.contextLoad).not.toHaveBeenCalled();
+    expect(test.finalize).not.toHaveBeenCalled();
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "error",
+      exitCode: 2,
+      failure: { code: "CONFIG_INVALID" }
+    });
+  });
+
+  it("omits --context in the detached finalize child for snapshot sessions", async () => {
+    const test = harness();
+    test.readContextSnapshot.mockResolvedValueOnce(resolvedProjectContext);
+    const launch = test.dependencies.detachedProcess?.launch as unknown as Mock;
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "finalize",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--output", ".taphound/journeys/generated.json",
+      "--detach",
+      "--json"
+    ]);
+
+    const launched = launch.mock.calls[0]?.[0] as { args: string[] };
+    expect(launched.args).not.toContain("--context");
+    expect(test.contextValidate).not.toHaveBeenCalled();
+    expect(test.finalize).not.toHaveBeenCalled();
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "finalizationStarted",
+      exitCode: 0
+    });
+  });
+
   it("returns durable generation status as one JSON value", async () => {
     const test = harness();
 
@@ -2056,6 +2173,7 @@ describe("generation JSON process protocol", () => {
         contextSelection,
         pendingConfirmation: challenge
       })),
+      readContextSnapshot: vi.fn((): Promise<unknown> => Promise.resolve(null)),
       assertConfigIdentity: test.assertConfigIdentity
     });
 

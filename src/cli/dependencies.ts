@@ -97,6 +97,8 @@ import {
   hashGenerationBinding,
   type GenerationStartInput
 } from "../application/generation/generation-starter.js";
+import { readGenerationContextSnapshot } from "../application/generation/generation-context-snapshot.js";
+import type { ResolvedProjectContext } from "../domain/project-context.js";
 import {
   GenerationStepExecutor
 } from "../application/generation/generation-step-executor.js";
@@ -150,6 +152,9 @@ export interface GenerationCliRuntime {
   archive: (id: string) => Promise<GenerationSession>;
   list: () => Promise<readonly GenerationSession[]>;
   readSession: (id: string) => Promise<GenerationSession>;
+  readContextSnapshot: (
+    id: string
+  ) => Promise<ResolvedProjectContext | null>;
   assertConfigIdentity: (id: string) => Promise<void>;
 }
 
@@ -593,6 +598,9 @@ export function createProductionDependencies(
         },
         list: (): Promise<readonly GenerationSession[]> => store.list(),
         readSession: (id): Promise<GenerationSession> => store.read(id),
+        readContextSnapshot: (id): Promise<ResolvedProjectContext | null> => (
+          readGenerationContextSnapshot({ store }, id)
+        ),
         assertConfigIdentity: async (id): Promise<void> => {
           const session = await store.read(id);
           if (hashGenerationBinding(config) !== session.bindings.configHash) {

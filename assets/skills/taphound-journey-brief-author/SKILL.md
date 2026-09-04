@@ -182,9 +182,10 @@ whenever the run stays on the Context path.
 
 These branches run only when Phase 0 detects Context work. After any
 branch, re-run `taphound context status --json` and `taphound context
-list --json`; proceed only when the Context is `valid` with complete
-modules (or intentionally `partial`/`unsupported` — report coverage gaps
-to the user).
+list --json`; proceed only when the Context is `valid` with `complete` or
+`unsupported` modules (`unsupported` is an analyzed verdict generation
+accepts; `partial`/`notAnalyzed` are coverage gaps — report them to the
+user).
 
 ### L1: Initial Generation (file missing, or explicit `force`)
 
@@ -477,5 +478,6 @@ All edges retain their Phase 1 confidence.
 - Context ensure work does NOT require a connected device. `doctor` may
   report `DEVICE_UNAVAILABLE` — that is acceptable for every `context`
   command; a device is only needed for Brief Phase 2.
-- `partial`, `unsupported`, and `notAnalyzed` modules are coverage gaps,
-  not successful generation. Report them to the user.
+- `partial` and `notAnalyzed` modules are coverage gaps, not successful
+  generation. Report them to the user. `unsupported` is a legitimate
+  analyzed verdict and does not block generation.

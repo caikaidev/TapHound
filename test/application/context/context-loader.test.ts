@@ -208,7 +208,36 @@ describe("ContextLoader", () => {
       .toEqual([":app", ":chat"]);
   });
 
-  it("rejects incomplete selected modules", async () => {
+  it.each(["partial", "notAnalyzed"])(
+    "rejects selected modules that are %s",
+    async (status) => {
+      const test = await fixture();
+      const index = JSON.parse(
+        await import("node:fs/promises").then(({ readFile }) => readFile(
+          join(test.root, test.contextPath),
+          "utf8"
+        ))
+      ) as {
+        modules: Array<{ id: string; status: string }>;
+      };
+      const chat = index.modules.find((module) => module.id === ":chat");
+      if (chat === undefined) {
+        throw new Error("Missing chat fixture module");
+      }
+      chat.status = status;
+      await writeJson(test.root, test.contextPath, index);
+
+      await expect(loader().load({
+        projectRoot: test.root,
+        contextPath: test.contextPath,
+        moduleIds: [":chat"]
+      })).rejects.toEqual(expect.objectContaining<Partial<ContextLoadError>>({
+        code: "CONTEXT_MODULE_INCOMPLETE"
+      }));
+    }
+  );
+
+  it("loads explicitly unsupported selected modules", async () => {
     const test = await fixture();
     const index = JSON.parse(
       await import("node:fs/promises").then(({ readFile }) => readFile(
@@ -216,22 +245,38 @@ describe("ContextLoader", () => {
         "utf8"
       ))
     ) as {
-      modules: Array<{ id: string; status: string }>;
+      modules: Array<{
+        id: string;
+        status: string;
+        contextPath: string;
+        sha256: string;
+      }>;
     };
     const chat = index.modules.find((module) => module.id === ":chat");
     if (chat === undefined) {
       throw new Error("Missing chat fixture module");
     }
-    chat.status = "partial";
+    const shard = JSON.parse(
+      await import("node:fs/promises").then(({ readFile }) => readFile(
+        join(test.root, chat.contextPath),
+        "utf8"
+      ))
+    ) as { status: string };
+    shard.status = "unsupported";
+    chat.status = "unsupported";
+    chat.sha256 = await writeJson(test.root, chat.contextPath, shard);
     await writeJson(test.root, test.contextPath, index);
 
-    await expect(loader().load({
+    const loaded = await loader().load({
       projectRoot: test.root,
       contextPath: test.contextPath,
       moduleIds: [":chat"]
-    })).rejects.toEqual(expect.objectContaining<Partial<ContextLoadError>>({
-      code: "CONTEXT_MODULE_INCOMPLETE"
-    }));
+    });
+
+    expect(loaded.modules.map((module) => module.status)).toEqual([
+      "complete",
+      "unsupported"
+    ]);
   });
 
   it("rejects index routing summaries that diverge from the shard", async () => {

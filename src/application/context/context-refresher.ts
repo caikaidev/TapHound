@@ -410,7 +410,7 @@ export class ContextRefresher {
     manifest: ContextManifest,
     acceptSourceChanges: boolean,
     pruneDeleted: boolean,
-    eligiblePaths?: Set<string> | undefined
+    eligiblePaths?: Set<string>
   ): Promise<ManifestRefresh> => {
     const files: ContextEvidence[] = [];
     const semanticChanged: string[] = [];

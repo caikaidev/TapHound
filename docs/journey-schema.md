@@ -486,7 +486,8 @@ verifies the deterministic UI path.
 
 Each Replay step waits for the screen to stabilize before resolving the next
 Locator and evaluating expectations. The `idle` block in
-`.taphound/config.json` controls that wait:
+`.taphound/config.json` controls that wait (full field reference and
+per-profile recommendations: [config-schema.md](config-schema.md)):
 
 ```json
 "idle": {

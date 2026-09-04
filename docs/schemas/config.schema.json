@@ -1,0 +1,91 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://taphound.dev/schemas/config.schema.json",
+  "title": "TapHound Configuration",
+  "description": "Editor-validation schema for .taphound/config.json. The Zod schema in src/domain/config.ts is the runtime contract; unknown fields are rejected.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "run", "idle"],
+  "properties": {
+    "version": {
+      "const": 1,
+      "description": "Config protocol version. Must be 1."
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["packageName", "activity"],
+      "properties": {
+        "packageName": {
+          "type": "string",
+          "pattern": "^[A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)+$",
+          "description": "Qualified Java package of the target app, e.g. com.example.app. Never guessed; TapHound fails closed on mismatch with the installed package."
+        },
+        "activity": {
+          "type": "string",
+          "pattern": "^(\\.[A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)*|(?:[A-Za-z_$][\\w$]*\\.)+[A-Za-z_$][\\w$]*)$",
+          "description": "Launch Activity: relative with a leading dot (resolved against run.packageName) or fully qualified."
+        }
+      }
+    },
+    "idle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pollIntervalMs", "stablePolls", "timeoutMs"],
+      "properties": {
+        "strategy": {
+          "enum": ["hybrid", "layoutDiff", "frameStats", "structural"],
+          "default": "hybrid",
+          "description": "Idle stability strategy. hybrid: frame counters with structural fallback; layoutDiff: layout-tree comparison only; frameStats: frame counters only (no fallback); structural: layout tree only."
+        },
+        "pollIntervalMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Sleep between polls, not the poll duration."
+        },
+        "stablePolls": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Consecutive stable polls required to declare idle."
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Total wait budget per idle phase. Each poll's own duration is charged against this budget; slow UI dumps require a larger value."
+        }
+      }
+    },
+    "ui": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "backend": {
+          "enum": ["auto", "system-uiautomator", "android-cli", "appium-uiautomator2"],
+          "default": "auto",
+          "description": "UI capture backend. auto is the runtime default; appium is explicit-only and fails closed when unavailable."
+        },
+        "snapshotTimeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Per-capture timeout for one UI snapshot. A single uiautomator dump can exceed 5s on large trees."
+        },
+        "cacheEnabled": {
+          "type": "boolean",
+          "description": "false disables only the run-scoped observation cache; never changes locator rules or action behavior."
+        }
+      }
+    },
+    "artifactsDir": {
+      "type": "string",
+      "minLength": 1,
+      "default": ".taphound/build/runs",
+      "description": "Verify report output directory. May point outside .taphound, but any path inside .taphound must stay under .taphound/build (enforced at runtime).",
+      "not": {
+        "anyOf": [
+          { "pattern": "^\\.taphound$" },
+          { "pattern": "^\\.taphound/(?!build(/|$)).+" }
+        ]
+      }
+    }
+  }
+}

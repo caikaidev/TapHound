@@ -98,7 +98,7 @@ See the [local testing guide](docs/local-testing.md) for source, npm tarball, an
 
 ## Configuration
 
-Create `.taphound/config.json` in the Android project. `run.packageName` is required and never guessed from APK filenames or activities; see [`examples/.taphound/config.json`](examples/.taphound/config.json) for a complete example.
+Create `.taphound/config.json` in the Android project. `run.packageName` is required and never guessed from APK filenames or activities; see [`examples/.taphound/config.json`](examples/.taphound/config.json) for a complete example and [`docs/config-schema.md`](docs/config-schema.md) for the full field reference, per-profile recommendations, and the editor-validation JSON Schema.
 
 ```json
 {

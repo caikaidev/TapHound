@@ -144,6 +144,24 @@ taphound verify \
 
 Do not merely search stdout text for "passed"; first check the process status and `exitCode`, then read the structured fields.
 
+### Environment Noise on stderr
+
+When the calling environment sets `NODE_USE_ENV_PROXY=1` (common on machines
+with corporate proxies), Node.js 22+ prints an experimental
+`[UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental` notice to the
+**stderr of every spawned Node process**, including TapHound and TapHound's
+own child processes. This warning:
+
+- never appears on stdout, so it does not break the one-JSON stdout contract;
+- is emitted by the Node runtime, not by TapHound code;
+- does, however, pollute stderr assertions and any pipeline that merges
+  stderr into the captured output.
+
+Agents that assert on exact stderr content should either unset the variable
+when spawning TapHound (`spawn(..., { env: { ...process.env,
+NODE_USE_ENV_PROXY: undefined } })`) or filter stderr by lines before
+asserting. Tests that spawn the built CLI follow the same rule.
+
 ## Node.js Invocation Example
 
 ```js

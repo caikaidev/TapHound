@@ -291,9 +291,10 @@ value to stdout and indicate the result with `exitCode`. `observe` always
 returns `snapshotRef`; `--compact` omits the duplicate inline snapshot.
 `step`, `confirm`, and `manual` similarly replace `nextSnapshot` with
 `nextSnapshotRef` in compact mode. The referenced file is still the full
-RuntimeSnapshot required by the proposal envelope. The Agent must retain
+RuntimeSnapshot behind the proposal binding. The Agent must retain
 `generationId`, `baseRevision`, `snapshotHash`, and that exact snapshot, and
-must not fabricate or reuse expired bindings. Step results include phase timing
+must not fabricate or reuse expired bindings; the step envelope may submit
+either the full snapshot or its `snapshotRef`. Step results include phase timing
 for freshness, evidence setup, observation, action, idle wait, expectations,
 Logcat, and optional next observation. Detached finalize progress and stdout
 live under `.taphound/build/jobs/<generationId>/`, outside the authoritative
@@ -327,6 +328,24 @@ recent `observe` (or prior step), and `snapshot` must be that exact
 RuntimeSnapshot. `activity.after` and `expect` are optional on a proposal;
 Core records the observed post-action Activity and evaluates any supplied
 expectation.
+
+Instead of copying the full RuntimeSnapshot, the envelope may carry the
+`snapshotRef` (or `nextSnapshotRef`) string emitted by the preceding
+`observe`/`step` output:
+
+```jsonc
+{
+  "version": 1,
+  "proposal": { /* as above */ },
+  "snapshotRef": ".taphound/build/generations/<bundle>/evidence/snapshots/revision-000002/<attempt>/snapshot.json"
+}
+```
+
+Core loads the referenced evidence from the session's authoritative bundle and
+applies the same binding validation as for an inline snapshot; the reference
+must point at the same generation session. Envelopes carrying both `snapshot`
+and `snapshotRef`, or neither, are rejected. An unreadable, foreign, or
+mismatched reference fails as `SNAPSHOT_STALE`: observe again and rebind.
 
 
 When Base Flow verification fails, `generation start --json` returns

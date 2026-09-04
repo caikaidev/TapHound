@@ -138,11 +138,18 @@ type GenerationOptions =
   | GenerationFinalizeOptions
   | GenerationListOptions;
 
-const PlannerEnvelopeSchema = z.strictObject({
-  version: z.literal(1),
-  proposal: ProposedStepSchema,
-  snapshot: RuntimeSnapshotSchema
-});
+const PlannerEnvelopeSchema = z.union([
+  z.strictObject({
+    version: z.literal(1),
+    proposal: ProposedStepSchema,
+    snapshot: RuntimeSnapshotSchema
+  }),
+  z.strictObject({
+    version: z.literal(1),
+    proposal: ProposedStepSchema,
+    snapshotRef: z.string().min(1)
+  })
+]);
 
 const ManualActionSchema = z.enum([
   "click",
@@ -246,7 +253,7 @@ function compactOutput(options: GenerationOptions): boolean {
 
 function envelopeHint(options: GenerationOptions): string {
   if ("input" in options) {
-    return "Planner envelope must be a strict object with exactly three top-level fields: version (1), proposal (object), and snapshot (object). Unknown or missing fields are rejected. See docs/agent-integration.md and assets/skills/taphound-journey-generator/schemas/proposed-step-envelope.json.";
+    return "Planner envelope must be a strict object with exactly three top-level fields: version (1), proposal (object), and either snapshot (the full RuntimeSnapshot object) or snapshotRef (the snapshotRef string from the preceding observe output). Unknown or missing fields are rejected. See docs/agent-integration.md and assets/skills/taphound-journey-generator/schemas/proposed-step-envelope.json.";
   }
   return "TapHound rejected the JSON input. See docs/agent-integration.md for the command contract.";
 }
@@ -820,7 +827,9 @@ function createStepCommand(dependencies: CliDependencies): Command {
       const confirmation = await runtime.confirmation.request({
         generationId,
         proposal: envelope.proposal,
-        snapshot: envelope.snapshot,
+        ...("snapshot" in envelope
+          ? { snapshot: envelope.snapshot }
+          : { snapshotRef: envelope.snapshotRef }),
         source: "planner"
       });
       if (confirmation.status === "confirmationRequired") {
@@ -836,7 +845,7 @@ function createStepCommand(dependencies: CliDependencies): Command {
       await executeApproved(dependencies, options, runtime, {
         generationId,
         proposal: confirmation.proposal,
-        snapshot: envelope.snapshot,
+        snapshot: confirmation.snapshot,
         source: "planner"
       });
     } catch (error) {

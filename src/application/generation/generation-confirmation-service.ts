@@ -26,6 +26,7 @@ import {
 import type {
   GenerationSessionStore
 } from "../../ports/generation-session-store.js";
+import { parseSnapshotEvidenceReference } from "../../domain/workspace.js";
 import { GenerationOperationError } from "./generation-starter.js";
 import { ProposedStepValidator } from "./proposed-step-validator.js";
 import { RiskEvaluator } from "./risk-evaluator.js";
@@ -47,7 +48,8 @@ export interface GenerationConfirmationDependencies {
 export interface ConfirmationRequestInput {
   generationId: string;
   proposal: ProposedStep;
-  snapshot: RuntimeSnapshot;
+  snapshot?: RuntimeSnapshot | undefined;
+  snapshotRef?: string | undefined;
   source?: "planner" | "manualOverride" | undefined;
 }
 
@@ -85,7 +87,11 @@ export interface ConfirmationRequiredResult {
 }
 
 export type ConfirmationRequestResult =
-  | { status: "approved"; proposal: ProposedStep }
+  | {
+      status: "approved";
+      proposal: ProposedStep;
+      snapshot: RuntimeSnapshot;
+    }
   | ConfirmationRequiredResult;
 
 export type StoredConfirmationApproveResult =
@@ -169,13 +175,14 @@ export class GenerationConfirmationService {
   public readonly request = async (
     input: ConfirmationRequestInput
   ): Promise<ConfirmationRequestResult> => {
+    const inputSnapshot = await this.resolveSnapshot(input);
     const session = GenerationSessionSchema.parse(
       await this.dependencies.store.read(input.generationId)
     );
     const submittedEvidence = GenerationConfirmationEvidenceSchema.parse({
       version: 1,
       proposal: input.proposal,
-      snapshot: input.snapshot,
+      snapshot: inputSnapshot,
       source: input.source ?? "planner"
     });
     if (
@@ -230,7 +237,11 @@ export class GenerationConfirmationService {
       );
     }
     if (risk.effectiveRisk === "safe") {
-      return { status: "approved", proposal };
+      return {
+        status: "approved",
+        proposal,
+        snapshot: submittedEvidence.snapshot
+      };
     }
     if (session.revision === Number.MAX_SAFE_INTEGER) {
       throw bindingFailure("Generation revision cannot create a challenge");
@@ -702,5 +713,66 @@ export class GenerationConfirmationService {
           : "Generation confirmation evidence is unavailable"
       );
     }
+  }
+
+  private async resolveSnapshot(
+    input: ConfirmationRequestInput
+  ): Promise<RuntimeSnapshot> {
+    if (
+      (input.snapshot !== undefined) === (input.snapshotRef !== undefined)
+    ) {
+      throw new GenerationOperationError(
+        "SNAPSHOT_STALE",
+        "Provide exactly one of snapshot or snapshotRef"
+      );
+    }
+    if (input.snapshot !== undefined) {
+      return input.snapshot;
+    }
+    const reference = input.snapshotRef ?? "";
+    const evidencePath = parseSnapshotEvidenceReference(
+      reference,
+      input.generationId
+    );
+    if (evidencePath === null) {
+      throw new GenerationOperationError(
+        "SNAPSHOT_STALE",
+        `Snapshot reference is not a valid evidence binding for generation ${
+          input.generationId
+        }: ${reference}`
+      );
+    }
+    let bytes: Buffer;
+    try {
+      bytes = await this.dependencies.store.readEvidence(
+        input.generationId,
+        evidencePath
+      );
+    } catch (error) {
+      throw new GenerationOperationError(
+        "SNAPSHOT_STALE",
+        `Referenced snapshot evidence is unavailable: ${reference} (${
+          error instanceof Error ? error.message : "read failed"
+        })`
+      );
+    }
+    let snapshot: RuntimeSnapshot;
+    try {
+      snapshot = RuntimeSnapshotSchema.parse(
+        JSON.parse(bytes.toString("utf8")) as unknown
+      );
+    } catch {
+      throw new GenerationOperationError(
+        "SNAPSHOT_STALE",
+        `Referenced snapshot evidence is not a valid RuntimeSnapshot: ${reference}`
+      );
+    }
+    if (snapshot.generationId !== input.generationId) {
+      throw new GenerationOperationError(
+        "SNAPSHOT_STALE",
+        `Referenced snapshot belongs to another generation: ${reference}`
+      );
+    }
+    return snapshot;
   }
 }

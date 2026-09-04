@@ -320,6 +320,145 @@ describe("GenerationConfirmationService", () => {
     });
   });
 
+  it("resolves a snapshotRef from stored session evidence", async () => {
+    const runtime = snapshot();
+    const test = harness();
+    test.evidence.set(
+      "evidence/snapshots/revision-000002/attempt-1/snapshot.json",
+      Buffer.from(`${JSON.stringify(runtime)}\n`)
+    );
+
+    const result = await test.service.request({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshotRef: ".taphound/build/generations/.generation-1.work/evidence/snapshots/revision-000002/attempt-1/snapshot.json"
+    });
+
+    expect(result.status).toBe("confirmationRequired");
+    const stored = test.evidence.get(confirmationEvidencePath("challenge-1"));
+    expect(JSON.parse(stored?.toString("utf8") ?? "{}")).toMatchObject({
+      version: 1,
+      proposal: proposal(runtime),
+      snapshot: runtime,
+      source: "planner"
+    });
+  });
+
+  it("approves a safe snapshotRef step with the resolved snapshot", async () => {
+    const runtime = snapshot();
+    const test = harness();
+    test.mutate((current) => ({
+      ...current,
+      target: {
+        ...current.target,
+        interactionPolicy: {
+          allowedActions: ["back"],
+          confirmationRequiredActions: [],
+          forbiddenActions: []
+        }
+      }
+    }));
+    test.evidence.set(
+      "evidence/snapshots/revision-000002/attempt-1/snapshot.json",
+      Buffer.from(`${JSON.stringify(runtime)}\n`)
+    );
+
+    const result = await test.service.request({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshotRef: ".taphound/build/generations/.generation-1.work/evidence/snapshots/revision-000002/attempt-1/snapshot.json"
+    });
+
+    expect(result).toEqual({
+      status: "approved",
+      proposal: proposal(runtime),
+      snapshot: runtime
+    });
+  });
+
+  it.each([
+    [
+      "another generation bundle",
+      ".taphound/build/generations/.generation-2.work/evidence/snapshots/revision-000002/attempt-1/snapshot.json"
+    ],
+    [
+      "a published foreign bundle",
+      ".taphound/build/generations/generation-2/evidence/snapshots/revision-000002/attempt-1/snapshot.json"
+    ],
+    ["a malformed reference", "not-a-snapshot-ref"],
+    [
+      "an escaping path",
+      ".taphound/build/generations/.generation-1.work/evidence/snapshots/revision-000002/attempt-1/../../state.json"
+    ]
+  ])("rejects a snapshotRef pointing at %s", async (_label, snapshotRef) => {
+    const runtime = snapshot();
+    const test = harness();
+    test.evidence.set(
+      "evidence/snapshots/revision-000002/attempt-1/snapshot.json",
+      Buffer.from(`${JSON.stringify(runtime)}\n`)
+    );
+
+    await expect(test.service.request({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshotRef
+    })).rejects.toMatchObject({ code: "SNAPSHOT_STALE" });
+    expect(test.current()).toEqual(session(runtime));
+  });
+
+  it("rejects a snapshotRef whose evidence is missing", async () => {
+    const runtime = snapshot();
+    const test = harness();
+
+    await expect(test.service.request({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshotRef: ".taphound/build/generations/.generation-1.work/evidence/snapshots/revision-000002/attempt-1/snapshot.json"
+    })).rejects.toMatchObject({ code: "SNAPSHOT_STALE" });
+  });
+
+  it("rejects a snapshotRef whose evidence belongs to another generation", async () => {
+    const runtime = snapshot();
+    const foreign = { ...runtime, generationId: "generation-2" };
+    const test = harness();
+    test.evidence.set(
+      "evidence/snapshots/revision-000002/attempt-1/snapshot.json",
+      Buffer.from(`${JSON.stringify(foreign)}\n`)
+    );
+
+    await expect(test.service.request({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshotRef: ".taphound/build/generations/.generation-1.work/evidence/snapshots/revision-000002/attempt-1/snapshot.json"
+    })).rejects.toMatchObject({ code: "SNAPSHOT_STALE" });
+  });
+
+  it("rejects input carrying both snapshot and snapshotRef", async () => {
+    const runtime = snapshot();
+    const test = harness();
+    test.evidence.set(
+      "evidence/snapshots/revision-000002/attempt-1/snapshot.json",
+      Buffer.from(`${JSON.stringify(runtime)}\n`)
+    );
+
+    await expect(test.service.request({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime,
+      snapshotRef: ".taphound/build/generations/.generation-1.work/evidence/snapshots/revision-000002/attempt-1/snapshot.json"
+    })).rejects.toMatchObject({ code: "SNAPSHOT_STALE" });
+  });
+
+  it("rejects input carrying neither snapshot nor snapshotRef", async () => {
+    const runtime = snapshot();
+    const test = harness();
+
+    await expect(test.service.request({
+      generationId: "generation-1",
+      proposal: proposal(runtime)
+    })).rejects.toMatchObject({ code: "SNAPSHOT_STALE" });
+  });
+
   it("propagates the original conflict when pending state was not installed", async () => {
     const runtime = snapshot();
     const test = harness();

@@ -33,7 +33,8 @@ import {
 import {
   BUILD_DIR,
   GENERATIONS_DIR,
-  TAPHOUND_DIR
+  TAPHOUND_DIR,
+  activeGenerationBundleName
 } from "../../domain/workspace.js";
 import {
   GenerationSessionStoreError,
@@ -79,7 +80,7 @@ const DEFAULT_OPTIONS: RequiredStoreOptions = {
 };
 
 function activeBundleName(id: string): string {
-  return `.${id}.work`;
+  return activeGenerationBundleName(id);
 }
 
 const HOOK_NAMES = [

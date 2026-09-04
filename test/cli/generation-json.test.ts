@@ -97,7 +97,8 @@ function harness(signal?: AbortSignal): Harness {
   const workspaceLayout = fakeWorkspaceLayout();
   const request = vi.fn<() => Promise<ConfirmationRequestResult>>(() => Promise.resolve({
     status: "approved" as const,
-    proposal
+    proposal,
+    snapshot
   }));
   const execute = vi.fn(() => Promise.resolve({
     status: "succeeded" as const,
@@ -451,6 +452,72 @@ describe("generation JSON process protocol", () => {
     expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
     expect(test.stderr.value).toBe("");
     expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("executes a snapshotRef planner envelope through stored evidence", async () => {
+    const test = harness();
+    const snapshotRef = ".taphound/build/generations/.generation-1.work/evidence/snapshots/revision-000002/attempt-1/snapshot.json";
+    vi.mocked(test.dependencies.readJson).mockResolvedValueOnce(runtimeConfig)
+      .mockResolvedValueOnce({
+        version: 1,
+        proposal,
+        snapshotRef
+      });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "step",
+      "--project", "/project",
+      "--input", "input.json",
+      "--session", "generation-1",
+      "--json"
+    ]);
+
+    expect(test.request).toHaveBeenCalledWith({
+      generationId: "generation-1",
+      proposal,
+      snapshotRef,
+      source: "planner"
+    });
+    expect(test.execute).toHaveBeenCalledWith({
+      generationId: "generation-1",
+      proposal,
+      snapshot,
+      source: "planner"
+    });
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "succeeded",
+      exitCode: 0,
+      generationId: "generation-1"
+    });
+    expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("rejects a planner envelope carrying both snapshot and snapshotRef", async () => {
+    const test = harness();
+    vi.mocked(test.dependencies.readJson).mockResolvedValueOnce(runtimeConfig)
+      .mockResolvedValueOnce({
+        version: 1,
+        proposal,
+        snapshot,
+        snapshotRef: ".taphound/build/generations/.generation-1.work/evidence/snapshots/revision-000002/attempt-1/snapshot.json"
+      });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "step",
+      "--project", "/project",
+      "--input", "input.json",
+      "--session", "generation-1",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "error",
+      exitCode: 2,
+      failure: { code: "CONTEXT_INVALID" }
+    });
+    expect(test.request).not.toHaveBeenCalled();
+    expect(test.execute).not.toHaveBeenCalled();
+    expect(test.exitCodes).toEqual([2]);
   });
 
   it.each([

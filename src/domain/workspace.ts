@@ -61,6 +61,34 @@ export const LEGACY_WORKSPACE_DIRECTORIES = [
   `${TAPHOUND_DIR}/runs`
 ] as const;
 
+const SNAPSHOT_EVIDENCE_REFERENCE_PATTERN = new RegExp(
+  `^${
+    GENERATIONS_DIR.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  }/([^/]+)/(evidence/snapshots/revision-\\d+/[^/]+/snapshot\\.json)$`
+);
+
+export function activeGenerationBundleName(id: string): string {
+  return `.${id}.work`;
+}
+
+export function parseSnapshotEvidenceReference(
+  reference: string,
+  generationId: string
+): string | null {
+  const match = SNAPSHOT_EVIDENCE_REFERENCE_PATTERN.exec(reference);
+  if (match === null) {
+    return null;
+  }
+  const bundleName = match[1] ?? "";
+  if (
+    bundleName !== generationId
+    && bundleName !== activeGenerationBundleName(generationId)
+  ) {
+    return null;
+  }
+  return match[2] ?? null;
+}
+
 const LEGACY_MOVE_TARGETS: Record<string, string> = {
   [`${TAPHOUND_DIR}/generations`]: GENERATIONS_DIR,
   [`${TAPHOUND_DIR}/jobs`]: JOBS_DIR,

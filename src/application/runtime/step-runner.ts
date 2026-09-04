@@ -35,6 +35,7 @@ import {
   type ExpectationObservationInput
 } from "../assertion/expectation-evaluator.js";
 import { IdleWaiter, type IdleConfig } from "../wait/idle-waiter.js";
+import { withIdleAdvice } from "../wait/idle-advice.js";
 import {
   hasExactlyOneEnabledFocusedElement
 } from "../generation/focused-input.js";
@@ -614,7 +615,13 @@ export class StepRunner {
           stepPath(index, "layout-diff.json"),
           idle.lastDiff
         );
-        return fail(idle.code, "Layout did not become stable after bridge return");
+        return fail(
+          idle.code,
+          withIdleAdvice(
+            "Layout did not become stable after bridge return",
+            idle
+          )
+        );
       }
     } else if (
       step.action === "wait"
@@ -840,7 +847,10 @@ export class StepRunner {
           stepPath(index, "layout-diff.json"),
           idle.lastDiff
         );
-        return fail(idle.code, "Layout did not become stable before timeout");
+        return fail(
+          idle.code,
+          withIdleAdvice("Layout did not become stable before timeout", idle)
+        );
       }
     }
 
@@ -1133,7 +1143,10 @@ export class StepRunner {
         );
         return {
           code: idle.code,
-          message: "External app layout did not become stable after step during replay"
+          message: withIdleAdvice(
+            "External app layout did not become stable after step during replay",
+            idle
+          )
         };
       }
 

@@ -60,6 +60,7 @@ import {
   type IdleConfig,
   type IdleResult
 } from "../wait/idle-waiter.js";
+import { withIdleAdvice } from "../wait/idle-advice.js";
 import {
   summarizeProposedStep
 } from "./generation-confirmation-service.js";
@@ -1032,7 +1033,10 @@ export class GenerationStepExecutor {
           } else if (idle.status === "timeout") {
             fail(
               idle.code,
-              "Layout did not become stable after bridge return",
+              withIdleAdvice(
+                "Layout did not become stable after bridge return",
+                idle
+              ),
               idleTimeoutDetails(idle)
             );
           } else {
@@ -1103,7 +1107,10 @@ export class GenerationStepExecutor {
           } else if (idle.status === "timeout") {
             fail(
               idle.code,
-              "Layout did not become stable before timeout",
+              withIdleAdvice(
+                "Layout did not become stable before timeout",
+                idle
+              ),
               idleTimeoutDetails(idle)
             );
           } else {
@@ -1869,7 +1876,10 @@ export class GenerationStepExecutor {
     if (idle.status === "timeout") {
       fail(
         idle.code,
-        "External app layout did not become stable after step",
+        withIdleAdvice(
+          "External app layout did not become stable after step",
+          idle
+        ),
         idleTimeoutDetails(idle)
       );
     }

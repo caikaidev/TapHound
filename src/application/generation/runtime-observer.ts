@@ -26,6 +26,7 @@ import type {
   UiSnapshotProviderFactory
 } from "../../ports/ui-snapshot.js";
 import type { IdleConfig, IdleResult } from "../wait/idle-waiter.js";
+import { withIdleAdvice } from "../wait/idle-advice.js";
 import type {
   GenerationSessionStore
 } from "../../ports/generation-session-store.js";
@@ -229,7 +230,10 @@ export class RuntimeObserver {
           idle.status === "cancelled" ? "RECOVERY_REQUIRED" : "IDLE_TIMEOUT",
           idle.status === "cancelled"
             ? "Runtime observation was cancelled while waiting for layout stability"
-            : "Layout did not become stable before observation",
+            : withIdleAdvice(
+              "Layout did not become stable before observation",
+              idle
+            ),
           idle.status === "cancelled"
             ? undefined
             : {

@@ -567,6 +567,29 @@ backend, poll duration dominates (uiautomator dump latency), so reducing
 `pollIntervalMs` has limited effect. For `frameStats`, the interval matters
 more, since samples are cheaper than full layout dumps.
 
+### Reading `IDLE_TIMEOUT` Failures
+
+`IDLE_TIMEOUT` failures are self-diagnosing: the failure message ends with a
+parenthesized tuning recommendation derived from the recorded idle telemetry
+(structured fields stay in the step report's `idle` block and the
+`layout-diff.json` artifact):
+
+- **Frame activity never settled** under `hybrid`/`frameStats`: continuous
+  animation keeps frame stats busy. Switch `idle.strategy` to `layoutDiff`.
+- **Layout differences kept appearing** (`lastDiff` non-empty): the screen
+  genuinely churns. Raise `idle.timeoutMs` if the churn settles, or switch to
+  `layoutDiff` if it animates continuously.
+- **UI snapshot captures consumed most of the idle budget**: each poll
+  performs its own capture, so a larger `idle.timeoutMs` is required for
+  `idle.stablePolls` consecutive polls to fit; raise `ui.snapshotTimeoutMs`
+  when individual dumps are slow.
+- **No layout change detected but the budget ended**: the wait was structurally
+  stable yet never accumulated `idle.stablePolls` consecutive stable polls in
+  time. Raise `idle.timeoutMs` or lower `idle.stablePolls`/`pollIntervalMs`.
+
+Follow the recommendation instead of blind-retrying: a timeout caused by
+continuous animation never resolves by waiting longer.
+
 ## Reusable Flow Composition
 
 Journey v2 remains the only runtime Replay protocol. Reuse is an authoring

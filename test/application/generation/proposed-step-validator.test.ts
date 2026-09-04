@@ -8,7 +8,8 @@ import type { LayoutElement } from "../../../src/domain/layout.js";
 import type { ProposedStep } from "../../../src/domain/proposed-step.js";
 import {
   hashRuntimeSnapshot,
-  type RuntimeSnapshot
+  type RuntimeSnapshot,
+  type RuntimeSnapshotV1
 } from "../../../src/domain/runtime-snapshot.js";
 import { contextSelection } from "../../fixtures/project-context.js";
 
@@ -34,7 +35,7 @@ function element(
 
 function snapshot(
   layout: LayoutElement[],
-  overrides: Partial<RuntimeSnapshot> = {}
+  overrides: Partial<RuntimeSnapshotV1> = {}
 ): RuntimeSnapshot {
   return {
     version: 1,

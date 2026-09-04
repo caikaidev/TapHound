@@ -6,11 +6,16 @@ import {
   type StepRunnerOptions
 } from "../../../src/application/runtime/step-runner.js";
 import type { JourneyStep } from "../../../src/domain/journey.js";
+import type { LayoutElement } from "../../../src/domain/layout.js";
 import {
   locatorEvidenceForElement
 } from "../../../src/domain/locator-evidence.js";
 import type { AdbPort } from "../../../src/ports/adb.js";
-import type { AndroidCliPort } from "../../../src/ports/android-cli.js";
+import type {
+  AnnotatedScreenResolverPort
+} from "../../../src/ports/annotated-screen-resolver.js";
+import type { ScreenshotPort } from "../../../src/ports/screenshot.js";
+import type { UiStabilityProbe } from "../../../src/ports/ui-stability.js";
 import type { AppProcess } from "../../../src/domain/app-process.js";
 import { MemoryArtifactSession } from "../../fakes/artifact-store.js";
 import { FakeClock } from "../../fakes/fake-clock.js";
@@ -18,6 +23,7 @@ import {
   commandResult,
   runningCommand
 } from "../../fakes/process-runner.js";
+import { uiSnapshotProviderFromLayout } from "../../fakes/ui-snapshot.js";
 
 const checkpoint = {
   before: "com.example.app.MainActivity",
@@ -52,7 +58,18 @@ function adbPort(): AdbPort {
   };
 }
 
-function androidCli(): AndroidCliPort {
+interface TestDeviceUi {
+  layout: (options: {
+    deviceSerial: string;
+    signal?: AbortSignal | undefined;
+    timeoutMs?: number | undefined;
+  }) => Promise<readonly LayoutElement[]>;
+  layoutDiff: UiStabilityProbe["sample"];
+  captureScreen: ScreenshotPort["capture"];
+  resolveScreen: AnnotatedScreenResolverPort["resolve"];
+}
+
+function androidCli(): TestDeviceUi {
   return {
     layout: vi.fn(() => Promise.resolve([{
       id: "search",
@@ -69,15 +86,21 @@ function androidCli(): AndroidCliPort {
 
 function fixture(overrides: {
   adb?: AdbPort;
-  androidCli?: AndroidCliPort;
+  androidCli?: TestDeviceUi;
   idle?: StepRunnerOptions["idle"];
   requireFocusedInput?: boolean;
   generatedReplayPolicy?: boolean;
   manualReplay?: boolean;
+  viewport?: {
+    width: number;
+    height: number;
+    rotation: 0 | 90 | 180 | 270;
+    coordinateSpace: "physicalDisplayPixels";
+  };
 } = {}): {
   runner: StepRunner;
   adb: AdbPort;
-  androidCli: AndroidCliPort;
+  androidCli: TestDeviceUi;
   clock: FakeClock;
   artifacts: MemoryArtifactSession;
   logcat: LogcatCollector;
@@ -87,12 +110,23 @@ function fixture(overrides: {
   const clock = new FakeClock();
   const artifacts = new MemoryArtifactSession();
   const logcat = new LogcatCollector(adb, clock);
+  const uiStability: UiStabilityProbe = {
+    reset: vi.fn(),
+    sample: (options) => cli.layoutDiff(options)
+  };
   void logcat.start({ deviceSerial: "emulator-5554" });
   logcat.scopeToPids([42]);
   return {
     runner: new StepRunner({
       adb,
-      androidCli: cli,
+      screenshots: { capture: cli.captureScreen },
+      annotatedScreens: { resolve: cli.resolveScreen },
+      uiStability,
+      uiSnapshotProvider: uiSnapshotProviderFromLayout(
+        cli.layout,
+        "emulator-5554",
+        overrides.viewport
+      ),
       clock,
       logcat,
       artifacts,
@@ -129,6 +163,27 @@ function clickStep(): Extract<JourneyStep, { action: "click" }> {
   };
 }
 
+it("does not execute a click whose live geometry is outside the viewport", async () => {
+  const test = fixture({
+    viewport: {
+      width: 80,
+      height: 80,
+      rotation: 0,
+      coordinateSpace: "physicalDisplayPixels"
+    }
+  });
+
+  const result = await test.runner.run(clickStep(), 0);
+
+  expect(result).toMatchObject({
+    status: "failed",
+    failure: { code: "ACTION_FAILED" }
+  });
+  if (result.status !== "failed") throw new Error("Expected failed result");
+  expect(result.failure.message).toContain("viewport");
+  expect(test.adb.tap).not.toHaveBeenCalled();
+});
+
 const scrollStep: JourneyStep = {
   action: "scrollTo",
   locator: { resourceId: "message_bubble", text: "target" },
@@ -151,7 +206,7 @@ function scrollCli(
     | "idleTimeout"
     | "ambiguous"
     | "containerMissing"
-): AndroidCliPort {
+): TestDeviceUi {
   const container = {
     id: "message_list",
     resourceId: "message_list",
@@ -1014,7 +1069,7 @@ describe("scrollTo replay", () => {
     };
   }
 
-  function bridgeCli(): AndroidCliPort {
+  function bridgeCli(): TestDeviceUi {
     const cli = androidCli();
     cli.layout = vi.fn(() => Promise.resolve([{
       id: "camera-button",

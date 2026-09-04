@@ -74,7 +74,7 @@ git diff --exit-code -- assets/brand/png
 
 ## CLI 命令
 
-- `doctor`：检查 Node.js、ADB、Android CLI、应用安装、权限和设备。
+- `doctor`：检查 Node.js、ADB、Android CLI、应用安装、权限和设备；显式使用 `ui.backend=appium-uiautomator2` 时还检查本地 Appium 与 UiAutomator2 driver。
 - `record`：交互式执行操作并录制 Journey。
 - `verify`：确定性重放 Journey 并发布报告。
 - `observe`：捕获设备即时快照（前台组件、Activity、布局、可选 logcat），无 session、无副作用。
@@ -91,6 +91,8 @@ git diff --exit-code -- assets/brand/png
 - `align camera`：探测设备默认相机应用并写入确定性
   `flows/external/camera/photo-capture.json` External Flow。覆盖已存在的 flow 需要
   `--force`。
+- `ui-cache status` / `ui-cache clear --yes`：查看或删除仅用于加速的
+  `.taphound/build/cache/ui/` 索引；不会删除 Journey、报告或 Generation 证据。
 
 ## 配置
 
@@ -109,11 +111,22 @@ git diff --exit-code -- assets/brand/png
     "stablePolls": 2,
     "timeoutMs": 5000
   },
+  "ui": {
+    "backend": "auto",
+    "snapshotTimeoutMs": 5000,
+    "cacheEnabled": true
+  },
   "artifactsDir": ".taphound/build/runs"
 }
 ```
 
 `artifactsDir` 可省略，默认为 `.taphound/build/runs`。
+`ui` 可省略；运行时默认使用 `auto`。可显式选择
+`system-uiautomator`、`android-cli` 或 `appium-uiautomator2`，其中 Appium
+始终是显式选择，后端不可用会失败而不会切换。`cacheEnabled:false` 只关闭本次
+运行的观察缓存，不会改变 Locator 或动作结果。持久缓存只保存 resourceId、页面
+合约与哈希，绝不保存旧坐标、页面源码、截图或文本；命中后仍必须重新采集 live UI
+并从当前元素计算坐标。
 `idle.strategy` 默认为 `hybrid`：TapHound 先使用快速帧计数，再用 Core 自行采集的
 UIAutomator 结构确认稳定。如果页面持续绘制，`hybrid` 会回退到结构稳定性判定，
 不会仅因帧计数持续变化而超时。已知存在持续重绘的应用可使用 `layoutDiff` 完全跳过

@@ -13,5 +13,11 @@ class MainActivity : Activity() {
         findViewById<Button>(R.id.open_search).setOnClickListener {
             startActivity(Intent(this, SearchActivity::class.java))
         }
+        findViewById<Button>(R.id.open_compose).setOnClickListener {
+            startActivity(Intent(this, ComposeActivity::class.java))
+        }
+        findViewById<Button>(R.id.open_hybrid).setOnClickListener {
+            startActivity(Intent(this, HybridActivity::class.java))
+        }
     }
 }

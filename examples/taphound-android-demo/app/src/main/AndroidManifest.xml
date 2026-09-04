@@ -8,6 +8,12 @@
             android:name=".SearchActivity"
             android:exported="false" />
         <activity
+            android:name=".ComposeActivity"
+            android:exported="true" />
+        <activity
+            android:name=".HybridActivity"
+            android:exported="true" />
+        <activity
             android:name=".MainActivity"
             android:exported="true">
             <intent-filter>

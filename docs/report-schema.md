@@ -1,4 +1,4 @@
-# TapHound Report Schema v2
+# TapHound Report Schema v3
 
 TapHound Report is written to `.taphound/build/runs/<runId>/` by default, or to
 the configured `<artifactsDir>/<runId>/`. A custom path may be outside
@@ -19,12 +19,14 @@ Only the optional evidence actually produced appears in `artifacts`. The report 
 
 ## Top-Level Fields
 
-- `schemaVersion`: currently `2`.
+- `schemaVersion`: currently `3`; readers continue to accept historical v2 reports.
 - `runId`, `startedAt`, `finishedAt`, `durationMs`.
 - `status`: `passed`, `failed`, or `error`.
 - `project`: project root directory, Package, and launch Activity.
 - `journey`: name and SHA-256 of the normalized content.
-- `environment`: device serial number and Node, ADB, Android CLI versions.
+- `environment`: device serial number, tool versions, and the bound `uiBackend`
+  descriptor (`id`, adapter/engine versions, and configuration hash). It may
+  also contain `uiCache` counters for the run-scoped observation cache.
 - `layers`: `run`, `structural`, `activityCheckpoint`, `explicitExpect`, `collection`.
 - `steps`: per-step Action, Locator, Idle, Activity, Expect, and log-slice results.
 - `artifacts`: paths to the report, summary, screenshot, full log, and step logs.
@@ -39,6 +41,9 @@ A post-processing failure must not overwrite `primaryFailure`. For example, when
 - `CONFIG_INVALID`
 - `ENVIRONMENT_MISSING_TOOL`
 - `DEVICE_UNAVAILABLE`
+- `UI_BACKEND_UNAVAILABLE`
+- `UI_SNAPSHOT_FAILED`
+- `UI_SNAPSHOT_INVALID`
 - `APP_NOT_INSTALLED`
 - `APP_LAUNCH_FAILED`
 - `APP_CRASHED`
@@ -88,7 +93,7 @@ The JSON `exitCode` of `taphound verify --json` matches the process exit code. S
 
 Each step records monotonic time, duration, and the step Logcat path. Idle
 evidence records poll count and, when available, total wait duration,
-sampling-command duration, requested strategy, final stability backend,
+sampling-command duration, requested strategy, final stability `backendId`,
 whether hybrid structural fallback was used, and whether frame activity was
 detected. The Locator report
 includes matched fields and fallback evidence; on Idle timeout the last Layout

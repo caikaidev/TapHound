@@ -25,7 +25,8 @@ describe("createProgram", () => {
       "journey",
       "generation",
       "init",
-      "align"
+      "align",
+      "ui-cache"
     ]);
     expect(
       createProgram().commands.find((command) => command.name() === "project")
@@ -55,5 +56,9 @@ describe("createProgram", () => {
       "list",
       "finalize"
     ]);
+    expect(
+      createProgram().commands.find((command) => command.name() === "ui-cache")
+        ?.commands.map((command) => command.name())
+    ).toEqual(["status", "clear"]);
   });
 });

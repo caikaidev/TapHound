@@ -10,6 +10,7 @@ function fixture(overrides: {
   devices?: Array<{ serial: string; status: string }>;
   installed?: boolean;
   permissions?: boolean;
+  appium?: boolean;
   failures?: Record<string, string>;
 } = {}): {
   service: DoctorService;
@@ -70,6 +71,11 @@ function fixture(overrides: {
       adb,
       nodeVersion: overrides.nodeVersion ?? "v24.3.0",
       checkAndroidPermissions: checkPermissions
+      ,checkAppiumUiAutomator2: vi.fn(() => Promise.resolve(
+        overrides.appium === false
+          ? { status: "failed" as const, message: "Appium unavailable" }
+          : { status: "passed" as const, version: "3.0.0" }
+      ))
     })
   };
 }
@@ -88,6 +94,7 @@ describe("DoctorService", () => {
         { name: "node", status: "passed", version: "24.3.0" },
         { name: "adb", status: "passed" },
         { name: "android", status: "passed" },
+        { name: "appium", status: "notRun" },
         { name: "app", status: "passed", message: "com.example.app" },
         { name: "permissions", status: "passed" },
         { name: "device", status: "passed" }
@@ -97,6 +104,23 @@ describe("DoctorService", () => {
       "emulator-5554",
       undefined
     );
+  });
+
+  it("checks the locked Appium server and UiAutomator2 driver only when explicit", async () => {
+    const passed = await fixture().service.run({
+      packageName: "com.example.app",
+      requestedUiBackend: "appium-uiautomator2"
+    });
+    const failed = await fixture({ appium: false }).service.run({
+      requestedUiBackend: "appium-uiautomator2"
+    });
+
+    expect(passed.checks).toContainEqual(expect.objectContaining({
+      name: "appium", status: "passed", version: "3.0.0"
+    }));
+    expect(failed).toMatchObject({
+      status: "failed", failureCode: "ENVIRONMENT_MISSING_TOOL"
+    });
   });
 
   it("skips the app probe when no package name is configured", async () => {

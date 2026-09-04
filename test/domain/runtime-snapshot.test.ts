@@ -27,6 +27,27 @@ function validSnapshot(): unknown {
   };
 }
 
+function validV2Snapshot(): Record<string, unknown> {
+  return {
+    ...(validSnapshot() as Record<string, unknown>),
+    version: 2,
+    uiBackend: {
+      id: "system-uiautomator",
+      adapterVersion: "system-uiautomator-v1",
+      engineVersion: "android-api-36",
+      configSha256: "a".repeat(64)
+    },
+    uiObservationId: "observation-1",
+    uiCaptureDurationMs: 42,
+    viewport: {
+      width: 1080,
+      height: 1920,
+      rotation: 0,
+      coordinateSpace: "physicalDisplayPixels"
+    }
+  };
+}
+
 describe("RuntimeSnapshotSchema", () => {
   it("parses a strict runtime snapshot", () => {
     expect(RuntimeSnapshotSchema.parse(validSnapshot())).toEqual(validSnapshot());
@@ -38,6 +59,13 @@ describe("RuntimeSnapshotSchema", () => {
       x: 100,
       y: 200
     })).toThrow();
+  });
+
+  it("reads v2 snapshots with auditable UI provenance while retaining v1", () => {
+    expect(RuntimeSnapshotSchema.parse(validSnapshot())).toEqual(validSnapshot());
+    expect(RuntimeSnapshotSchema.parse(validV2Snapshot())).toEqual(
+      validV2Snapshot()
+    );
   });
 });
 
@@ -65,6 +93,30 @@ describe("hashRuntimeSnapshot", () => {
       ...snapshot,
       capturedAt: "2026-07-22T13:00:00.000Z",
       screenshotPath: "/another/machine/current.png"
+    }));
+  });
+
+  it("v2 binds backend and viewport but excludes observation timing metadata", () => {
+    const snapshot = validV2Snapshot();
+    expect(hashRuntimeSnapshot(snapshot)).toBe(hashRuntimeSnapshot({
+      ...snapshot,
+      capturedAt: "2026-07-22T13:00:00.000Z",
+      uiObservationId: "observation-2",
+      uiCaptureDurationMs: 999
+    }));
+    expect(hashRuntimeSnapshot(snapshot)).not.toBe(hashRuntimeSnapshot({
+      ...snapshot,
+      uiBackend: {
+        ...(snapshot.uiBackend as Record<string, unknown>),
+        adapterVersion: "system-uiautomator-v2"
+      }
+    }));
+    expect(hashRuntimeSnapshot(snapshot)).not.toBe(hashRuntimeSnapshot({
+      ...snapshot,
+      viewport: {
+        ...(snapshot.viewport as Record<string, unknown>),
+        rotation: 90
+      }
     }));
   });
 

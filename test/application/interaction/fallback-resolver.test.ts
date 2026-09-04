@@ -2,8 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import { FallbackResolver } from "../../../src/application/interaction/fallback-resolver.js";
 import type { JourneyStep } from "../../../src/domain/journey.js";
-import type { AndroidCliPort } from "../../../src/ports/android-cli.js";
+import type {
+  AnnotatedScreenResolverPort
+} from "../../../src/ports/annotated-screen-resolver.js";
 import type { CommandResult } from "../../../src/ports/process-runner.js";
+import type { ScreenshotPort } from "../../../src/ports/screenshot.js";
 
 const checkpoint = {
   before: "com.example.app.MainActivity",
@@ -22,12 +25,17 @@ function commandResult(exitCode = 0): CommandResult {
   };
 }
 
-function androidCli(exitCode = 0): AndroidCliPort {
+function screenPorts(exitCode = 0): {
+  screenshots: ScreenshotPort;
+  annotatedScreens: AnnotatedScreenResolverPort;
+} {
   return {
-    layout: vi.fn(),
-    layoutDiff: vi.fn(),
-    captureScreen: vi.fn(() => Promise.resolve(commandResult(exitCode))),
-    resolveScreen: vi.fn(() => Promise.resolve({ x: 120, y: 240 }))
+    screenshots: {
+      capture: vi.fn(() => Promise.resolve(commandResult(exitCode)))
+    },
+    annotatedScreens: {
+      resolve: vi.fn(() => Promise.resolve({ x: 120, y: 240 }))
+    }
   };
 }
 
@@ -35,8 +43,12 @@ describe("FallbackResolver", () => {
   it.each(["click", "longClick"] as const)(
     "resolves the recorded annotated label for %s",
     async (action) => {
-      const cli = androidCli();
-      const resolver = new FallbackResolver(cli, "emulator-5554");
+      const ports = screenPorts();
+      const resolver = new FallbackResolver(
+        ports.screenshots,
+        ports.annotatedScreens,
+        "emulator-5554"
+      );
       const step: JourneyStep = action === "click"
         ? {
             action,
@@ -61,14 +73,14 @@ describe("FallbackResolver", () => {
         label: "#7",
         annotatedScreenshotPath: "/tmp/step-annotated.png"
       });
-      expect(vi.mocked(cli.captureScreen)).toHaveBeenCalledWith(
+      expect(vi.mocked(ports.screenshots.capture)).toHaveBeenCalledWith(
         {
           outputPath: "/tmp/step-annotated.png",
           annotate: true,
           deviceSerial: "emulator-5554"
         }
       );
-      expect(vi.mocked(cli.resolveScreen)).toHaveBeenCalledWith(
+      expect(vi.mocked(ports.annotatedScreens.resolve)).toHaveBeenCalledWith(
         "/tmp/step-annotated.png",
         "#7",
         undefined
@@ -77,8 +89,12 @@ describe("FallbackResolver", () => {
   );
 
   it("reports unavailable when the step has no explicit fallback", async () => {
-    const cli = androidCli();
-    const resolver = new FallbackResolver(cli, "emulator-5554");
+    const ports = screenPorts();
+    const resolver = new FallbackResolver(
+      ports.screenshots,
+      ports.annotatedScreens,
+      "emulator-5554"
+    );
 
     await expect(resolver.resolve({
       action: "click",
@@ -88,11 +104,16 @@ describe("FallbackResolver", () => {
       status: "unavailable"
     });
 
-    expect(vi.mocked(cli.captureScreen)).not.toHaveBeenCalled();
+    expect(vi.mocked(ports.screenshots.capture)).not.toHaveBeenCalled();
   });
 
   it("returns a typed failure when annotated capture fails", async () => {
-    const resolver = new FallbackResolver(androidCli(1), "emulator-5554");
+    const ports = screenPorts(1);
+    const resolver = new FallbackResolver(
+      ports.screenshots,
+      ports.annotatedScreens,
+      "emulator-5554"
+    );
 
     await expect(resolver.resolve({
       action: "click",

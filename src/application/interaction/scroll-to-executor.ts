@@ -1,7 +1,8 @@
 import type { FailureCode } from "../../domain/failure.js";
 import type { JourneyStep } from "../../domain/journey.js";
 import type { LayoutElement } from "../../domain/layout.js";
-import type { AndroidCliPort } from "../../ports/android-cli.js";
+import type { DisplayViewport } from "../../domain/geometry.js";
+import type { UiSnapshotProvider } from "../../ports/ui-snapshot.js";
 import { resolveLocator } from "../locator/locator-resolver.js";
 import type {
   IdleBackend,
@@ -33,7 +34,7 @@ export type ScrollToExecutionResult =
   | { status: "cancelled"; swipesUsed: number; idleDurationMs: number };
 
 export interface ScrollToExecutorOptions {
-  androidCli: Pick<AndroidCliPort, "layout">;
+  uiSnapshotProvider: UiSnapshotProvider;
   actionExecutor: Pick<ActionExecutor, "swipeBounds">;
   idleWaiter: Pick<IdleWaiter, "waitUntilIdle">;
   deviceSerial: string;
@@ -42,6 +43,7 @@ export interface ScrollToExecutorOptions {
   beforeSwipe?: (() => Promise<readonly LayoutElement[]>) | undefined;
   beforeMutation?: (() => Promise<void>) | undefined;
   requireLiveContainerCapability?: boolean | undefined;
+  viewport?: (() => DisplayViewport | undefined) | undefined;
 }
 
 function isCancelled(signal?: AbortSignal): boolean {
@@ -92,11 +94,12 @@ export class ScrollToExecutor {
       }
       try {
         layout ??= this.options.readLayout === undefined
-          ? await this.options.androidCli.layout({
-              deviceSerial: this.options.deviceSerial,
+          ? (await this.options.uiSnapshotProvider.capture({
+              reason: "locate",
+              freshness: "sameMutationEpoch",
               ...(signal === undefined ? {} : { signal }),
               timeoutMs: this.options.idle.timeoutMs
-            })
+            })).roots
           : await this.options.readLayout();
       } catch (error) {
         const failed = callbackFailure(error, swipesUsed, idleDurationMs);
@@ -109,7 +112,7 @@ export class ScrollToExecutor {
       const target = resolveLocator(
         layout,
         step.locator,
-        { requireEnabled: false }
+        { requireEnabled: false, viewport: this.options.viewport?.() }
       );
       if (target.status === "found") {
         return { status: "found", swipesUsed, idleDurationMs };
@@ -135,7 +138,7 @@ export class ScrollToExecutor {
       let container = resolveLocator(
         layout,
         step.container,
-        { requireEnabled: false }
+        { requireEnabled: false, viewport: this.options.viewport?.() }
       );
       if (container.status !== "found") {
         return {
@@ -169,7 +172,7 @@ export class ScrollToExecutor {
         const liveTarget = resolveLocator(
           layout,
           step.locator,
-          { requireEnabled: false }
+          { requireEnabled: false, viewport: this.options.viewport?.() }
         );
         if (liveTarget.status === "found") {
           return { status: "found", swipesUsed, idleDurationMs };
@@ -186,7 +189,7 @@ export class ScrollToExecutor {
         container = resolveLocator(
           layout,
           step.container,
-          { requireEnabled: false }
+          { requireEnabled: false, viewport: this.options.viewport?.() }
         );
         if (container.status !== "found") {
           return {

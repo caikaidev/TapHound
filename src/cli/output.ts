@@ -1,10 +1,13 @@
 import type { DoctorReport } from "../application/doctor/doctor-service.js";
-import type { FailureCode } from "../domain/failure.js";
+import type {
+  FailureCode,
+  TapHoundExitCode
+} from "../domain/failure.js";
 import type { TextOutput } from "./dependencies.js";
 
 export interface CliFailureOutput {
   status: "error";
-  exitCode: 2 | 3 | 4;
+  exitCode: TapHoundExitCode;
   failure: {
     code: FailureCode;
     message: string;
@@ -20,7 +23,7 @@ export function writeLine(output: TextOutput, value: string): void {
 }
 
 export function failureOutput(
-  exitCode: 2 | 3 | 4,
+  exitCode: TapHoundExitCode,
   code: FailureCode,
   message: string
 ): CliFailureOutput {

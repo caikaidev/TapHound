@@ -1,21 +1,21 @@
 import { describe, expect, it } from "vitest";
 
 import { CameraProbeAdapter } from "../../../src/adapters/camera/camera-probe-adapter.js";
+import type { Point } from "../../../src/domain/geometry.js";
 import type {
   AdbPort,
   AppIdentity,
   DeviceInfo
 } from "../../../src/ports/adb.js";
 import type {
-  AndroidCliPort,
-  LayoutDiffResult,
-  Point
-} from "../../../src/ports/android-cli.js";
-import type {
   CommandResult,
   RunningCommand
 } from "../../../src/ports/process-runner.js";
 import { commandResult, runningCommand } from "../../fakes/process-runner.js";
+import {
+  uiSnapshotFactory,
+  uiSnapshotProviderFromLayout
+} from "../../fakes/ui-snapshot.js";
 import type { ForegroundComponent } from "../../../src/domain/activity.js";
 import type { LayoutElement } from "../../../src/domain/layout.js";
 
@@ -82,7 +82,9 @@ function makeAdb(fake: FakeAdb): AdbPort {
   };
 }
 
-function makeAndroidCli(layouts: LayoutElement[][]): AndroidCliPort {
+function makeAndroidCli(layouts: LayoutElement[][]): {
+  layout: () => Promise<readonly LayoutElement[]>;
+} {
   let layoutIndex = 0;
   return {
     layout: (): Promise<readonly LayoutElement[]> => {
@@ -93,10 +95,7 @@ function makeAndroidCli(layouts: LayoutElement[][]): AndroidCliPort {
       const current = layouts[layoutIndex] ?? fallback;
       layoutIndex = Math.min(layoutIndex + 1, layouts.length - 1);
       return Promise.resolve(current);
-    },
-    layoutDiff: (): Promise<LayoutDiffResult> => Promise.resolve([]),
-    captureScreen: (): Promise<CommandResult> => Promise.resolve(commandResult()),
-    resolveScreen: (): Promise<Point> => Promise.resolve({ x: 0, y: 0 })
+    }
   };
 }
 
@@ -174,7 +173,12 @@ describe("CameraProbeAdapter", () => {
     ]);
     const clock = makeFakeClock();
 
-    const probe = new CameraProbeAdapter({ adb, androidCli, now: clock.now, sleep: clock.sleep });
+    const probe = new CameraProbeAdapter({
+      adb,
+      uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
+      now: clock.now,
+      sleep: clock.sleep
+    });
     const result = await probe.probe({ deviceSerial: "DEVICE1" });
 
     expect(result.packageName).toBe("com.android.camera");
@@ -205,7 +209,12 @@ describe("CameraProbeAdapter", () => {
     const androidCli = makeAndroidCli([shutterLayout, shutterLayout, shutterLayout]);
     const clock = makeFakeClock();
 
-    const probe = new CameraProbeAdapter({ adb, androidCli, now: clock.now, sleep: clock.sleep });
+    const probe = new CameraProbeAdapter({
+      adb,
+      uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
+      now: clock.now,
+      sleep: clock.sleep
+    });
     const result = await probe.probe({ deviceSerial: "DEVICE1" });
 
     expect(result.shutterResourceId).toBe("com.android.camera:id/shutter_button");
@@ -247,7 +256,12 @@ describe("CameraProbeAdapter", () => {
     ]);
     const clock = makeFakeClock();
 
-    const probe = new CameraProbeAdapter({ adb, androidCli, now: clock.now, sleep: clock.sleep });
+    const probe = new CameraProbeAdapter({
+      adb,
+      uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
+      now: clock.now,
+      sleep: clock.sleep
+    });
     const result = await probe.probe({ deviceSerial: "DEVICE1" });
 
     expect(result.confirmResourceId).toBe("done_button");
@@ -284,7 +298,12 @@ describe("CameraProbeAdapter", () => {
     ]);
     const clock = makeFakeClock();
 
-    const probe = new CameraProbeAdapter({ adb, androidCli, now: clock.now, sleep: clock.sleep });
+    const probe = new CameraProbeAdapter({
+      adb,
+      uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
+      now: clock.now,
+      sleep: clock.sleep
+    });
     const result = await probe.probe({ deviceSerial: "DEVICE1" });
 
     expect(result.confirmResourceId).toBe("done_button");
@@ -324,7 +343,12 @@ describe("CameraProbeAdapter", () => {
     ]);
     const clock = makeFakeClock();
 
-    const probe = new CameraProbeAdapter({ adb, androidCli, now: clock.now, sleep: clock.sleep });
+    const probe = new CameraProbeAdapter({
+      adb,
+      uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
+      now: clock.now,
+      sleep: clock.sleep
+    });
     await expect(probe.probe({ deviceSerial: "DEVICE1" })).rejects.toMatchObject({
       code: "ALIGN_CONFIRM_NOT_FOUND"
     });
@@ -366,7 +390,12 @@ describe("CameraProbeAdapter", () => {
     ]);
     const clock = makeFakeClock();
 
-    const probe = new CameraProbeAdapter({ adb, androidCli, now: clock.now, sleep: clock.sleep });
+    const probe = new CameraProbeAdapter({
+      adb,
+      uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
+      now: clock.now,
+      sleep: clock.sleep
+    });
     const result = await probe.probe({ deviceSerial: "DEVICE1" });
 
     expect(result.activityName).toBe("com.android.camera.CameraActivity");
@@ -392,7 +421,12 @@ describe("CameraProbeAdapter", () => {
     const androidCli = makeAndroidCli([shutterLayout]);
     const clock = makeFakeClock();
 
-    const probe = new CameraProbeAdapter({ adb, androidCli, now: clock.now, sleep: clock.sleep });
+    const probe = new CameraProbeAdapter({
+      adb,
+      uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
+      now: clock.now,
+      sleep: clock.sleep
+    });
     await expect(probe.probe({ deviceSerial: "DEVICE1" })).rejects.toThrow(/ALIGN_CAMERA_NOT_LAUNCHED/);
   });
 
@@ -412,7 +446,12 @@ describe("CameraProbeAdapter", () => {
     const androidCli = makeAndroidCli([shutterLayout]);
     const clock = makeFakeClock();
 
-    const probe = new CameraProbeAdapter({ adb, androidCli, now: clock.now, sleep: clock.sleep });
+    const probe = new CameraProbeAdapter({
+      adb,
+      uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
+      now: clock.now,
+      sleep: clock.sleep
+    });
     await expect(probe.probe({ deviceSerial: "DEVICE1" })).rejects.toThrow(/ALIGN_CAMERA_INTENT_FAILED/);
   });
 
@@ -438,7 +477,12 @@ describe("CameraProbeAdapter", () => {
     const androidCli = makeAndroidCli([emptyLayout, emptyLayout, emptyLayout]);
     const clock = makeFakeClock();
 
-    const probe = new CameraProbeAdapter({ adb, androidCli, now: clock.now, sleep: clock.sleep });
+    const probe = new CameraProbeAdapter({
+      adb,
+      uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
+      now: clock.now,
+      sleep: clock.sleep
+    });
     await expect(probe.probe({ deviceSerial: "DEVICE1" })).rejects.toThrow(/ALIGN_SHUTTER_NOT_FOUND/);
     expect(fake.forceStopCalls).toEqual(["com.android.camera"]);
   });
@@ -463,7 +507,12 @@ describe("CameraProbeAdapter", () => {
     const androidCli = makeAndroidCli([noIdLayout, noIdLayout, noIdLayout]);
     const clock = makeFakeClock();
 
-    const probe = new CameraProbeAdapter({ adb, androidCli, now: clock.now, sleep: clock.sleep });
+    const probe = new CameraProbeAdapter({
+      adb,
+      uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
+      now: clock.now,
+      sleep: clock.sleep
+    });
     await expect(probe.probe({ deviceSerial: "DEVICE1" })).rejects.toThrow(/ALIGN_SHUTTER_NO_RESOURCE_ID/);
   });
 
@@ -490,7 +539,12 @@ describe("CameraProbeAdapter", () => {
     const androidCli = makeAndroidCli([ambiguousLayout, ambiguousLayout, ambiguousLayout]);
     const clock = makeFakeClock();
 
-    const probe = new CameraProbeAdapter({ adb, androidCli, now: clock.now, sleep: clock.sleep });
+    const probe = new CameraProbeAdapter({
+      adb,
+      uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
+      now: clock.now,
+      sleep: clock.sleep
+    });
     await expect(probe.probe({ deviceSerial: "DEVICE1" })).rejects.toThrow(/ALIGN_SHUTTER_AMBIGUOUS/);
   });
 
@@ -518,7 +572,12 @@ describe("CameraProbeAdapter", () => {
     const androidCli = makeAndroidCli([shutterLayout, confirmAmbiguousLayout, confirmAmbiguousLayout]);
     const clock = makeFakeClock();
 
-    const probe = new CameraProbeAdapter({ adb, androidCli, now: clock.now, sleep: clock.sleep });
+    const probe = new CameraProbeAdapter({
+      adb,
+      uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
+      now: clock.now,
+      sleep: clock.sleep
+    });
     await expect(probe.probe({ deviceSerial: "DEVICE1" })).rejects.toThrow(/ALIGN_CONFIRM_AMBIGUOUS/);
   });
 
@@ -544,7 +603,12 @@ describe("CameraProbeAdapter", () => {
     const androidCli = makeAndroidCli([emptyLayout, emptyLayout, emptyLayout]);
     const clock = makeFakeClock();
 
-    const probe = new CameraProbeAdapter({ adb, androidCli, now: clock.now, sleep: clock.sleep });
+    const probe = new CameraProbeAdapter({
+      adb,
+      uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
+      now: clock.now,
+      sleep: clock.sleep
+    });
     await expect(probe.probe({ deviceSerial: "DEVICE1" })).rejects.toThrow();
     expect(fake.forceStopCalls).toEqual(["com.android.camera"]);
   });
@@ -570,7 +634,12 @@ describe("CameraProbeAdapter", () => {
     const androidCli = makeAndroidCli([shutterLayout, shutterLayout, shutterLayout]);
     const clock = makeFakeClock();
 
-    const probe = new CameraProbeAdapter({ adb, androidCli, now: clock.now, sleep: clock.sleep });
+    const probe = new CameraProbeAdapter({
+      adb,
+      uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
+      now: clock.now,
+      sleep: clock.sleep
+    });
     await probe.probe({ deviceSerial: "DEVICE1" });
     expect(fake.forceStopCalls[0]).toBe("com.android.camera");
   });
@@ -596,7 +665,12 @@ describe("CameraProbeAdapter", () => {
     const androidCli = makeAndroidCli([shutterLayout]);
     const clock = makeFakeClock();
 
-    const probe = new CameraProbeAdapter({ adb, androidCli, now: clock.now, sleep: clock.sleep });
+    const probe = new CameraProbeAdapter({
+      adb,
+      uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
+      now: clock.now,
+      sleep: clock.sleep
+    });
     await expect(probe.probe({ deviceSerial: "DEVICE1" })).rejects.toThrow(
       /ALIGN_CAMERA_INTENT_FAILED: IMAGE_CAPTURE landed on system resolver\/chooser/
     );
@@ -627,7 +701,12 @@ describe("CameraProbeAdapter", () => {
     const androidCli = makeAndroidCli([shutterLayout, confirmLayout, confirmLayout]);
     const clock = makeFakeClock();
 
-    const probe = new CameraProbeAdapter({ adb, androidCli, now: clock.now, sleep: clock.sleep });
+    const probe = new CameraProbeAdapter({
+      adb,
+      uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
+      now: clock.now,
+      sleep: clock.sleep
+    });
     const result = await probe.probe({ deviceSerial: "DEVICE1" });
 
     expect(startActivityActions).toEqual(["android.media.action.IMAGE_CAPTURE"]);
@@ -655,7 +734,12 @@ describe("CameraProbeAdapter", () => {
     const androidCli = makeAndroidCli([shutterLayout]);
     const clock = makeFakeClock();
 
-    const probe = new CameraProbeAdapter({ adb, androidCli, now: clock.now, sleep: clock.sleep });
+    const probe = new CameraProbeAdapter({
+      adb,
+      uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
+      now: clock.now,
+      sleep: clock.sleep
+    });
     await expect(probe.probe({ deviceSerial: "DEVICE1" })).rejects.toThrow(/ALIGN_CAMERA_INTENT_FAILED/);
     expect(fake.launchActivityCalls).toEqual([]);
   });

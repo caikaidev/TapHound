@@ -2,6 +2,9 @@ export const FAILURE_CODES = [
   "CONFIG_INVALID",
   "ENVIRONMENT_MISSING_TOOL",
   "DEVICE_UNAVAILABLE",
+  "UI_BACKEND_UNAVAILABLE",
+  "UI_SNAPSHOT_FAILED",
+  "UI_SNAPSHOT_INVALID",
   "APP_NOT_INSTALLED",
   "APP_LAUNCH_FAILED",
   "APP_CRASHED",
@@ -45,6 +48,9 @@ const EXIT_CODES = {
   CONFIG_INVALID: 2,
   ENVIRONMENT_MISSING_TOOL: 3,
   DEVICE_UNAVAILABLE: 3,
+  UI_BACKEND_UNAVAILABLE: 3,
+  UI_SNAPSHOT_FAILED: 1,
+  UI_SNAPSHOT_INVALID: 1,
   APP_NOT_INSTALLED: 3,
   APP_LAUNCH_FAILED: 1,
   APP_CRASHED: 1,
@@ -83,4 +89,16 @@ const EXIT_CODES = {
 
 export function exitCodeForFailure(failure: FailureCode): TapHoundExitCode {
   return EXIT_CODES[failure];
+}
+
+export function failureCodeFromUnknown(error: unknown): FailureCode | undefined {
+  if (
+    error === null
+    || typeof error !== "object"
+    || !("code" in error)
+    || typeof error.code !== "string"
+  ) {
+    return undefined;
+  }
+  return FAILURE_CODES.find((code) => code === error.code);
 }

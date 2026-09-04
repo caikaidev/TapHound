@@ -63,6 +63,32 @@ if (executable === "adb") {
       "07-19 10:00:00.000  42  42 I TapHound: process fixture ready\n"
     );
     setInterval(() => {}, 1000);
+  } else if (
+    command[0] === "shell"
+    && command[1] === "getprop"
+    && command[2] === "ro.build.version.sdk"
+  ) {
+    process.stdout.write("36\n");
+  } else if (
+    command[0] === "shell"
+    && command[1] === "wm"
+    && command[2] === "size"
+  ) {
+    process.stdout.write("Physical size: 1080x1920\n");
+  } else if (
+    command[0] === "shell"
+    && command[1] === "uiautomator"
+    && command[2] === "dump"
+  ) {
+    process.stdout.write("UI hierarchy dumped to fixture\n");
+  } else if (command[0] === "exec-out" && command[1] === "cat") {
+    process.stdout.write(
+      '<hierarchy><node resource-id="com.example:id/ready" text="Ready" '
+        + 'clickable="true" enabled="true" bounds="[0,0][100,100]" />'
+        + "</hierarchy>\n"
+    );
+  } else if (command[0] === "shell" && command[1] === "rm") {
+    process.stdout.write("");
   } else if (command[0] === "shell" && command[1] === "ps") {
     process.stdout.write(
       "  PID NAME\n"
@@ -92,6 +118,12 @@ if (executable === "adb") {
     && command[1] === "input"
   ) {
     process.stdout.write("");
+  } else if (
+    command[0] === "shell"
+    && command[1] === "dumpsys"
+    && command[2] === "input"
+  ) {
+    process.stdout.write("SurfaceOrientation: 0\n");
   } else if (
     command[0] === "shell"
     && command[1] === "dumpsys"

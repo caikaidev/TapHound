@@ -83,6 +83,9 @@ export function createVerifyCommand(dependencies: CliDependencies): Command {
       try {
         const doctor = await dependencies.doctor.run({
           packageName: config.run.packageName,
+          ...(config.ui?.backend === undefined
+            ? {}
+            : { requestedUiBackend: config.ui.backend }),
           ...(options.device === undefined
             ? {}
             : { requestedDevice: options.device }),

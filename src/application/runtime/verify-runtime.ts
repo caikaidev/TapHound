@@ -2,7 +2,11 @@ import { resolve } from "node:path";
 
 import { normalizeActivity } from "../../domain/activity.js";
 import type { TapHoundConfig } from "../../domain/config.js";
-import { exitCodeForFailure, type FailureCode } from "../../domain/failure.js";
+import {
+  exitCodeForFailure,
+  failureCodeFromUnknown,
+  type FailureCode
+} from "../../domain/failure.js";
 import type { Journey } from "../../domain/journey.js";
 import {
   hashJourney,
@@ -10,9 +14,17 @@ import {
   type ReportFailure
 } from "../../domain/report.js";
 import type { AdbPort } from "../../ports/adb.js";
-import type { AndroidCliPort } from "../../ports/android-cli.js";
+import type {
+  AnnotatedScreenResolverPort
+} from "../../ports/annotated-screen-resolver.js";
 import type { ArtifactStore } from "../../ports/artifact-store.js";
 import type { Clock } from "../../ports/clock.js";
+import type { ScreenshotPort } from "../../ports/screenshot.js";
+import type { UiStabilityProbe } from "../../ports/ui-stability.js";
+import type {
+  UiSnapshotProvider,
+  UiSnapshotProviderFactory
+} from "../../ports/ui-snapshot.js";
 import { LogcatCollector } from "../collector/logcat-collector.js";
 import { logcatStopFailed } from "../collector/logcat-stop.js";
 import type { ReportWriter } from "../report/report-writer.js";
@@ -46,7 +58,10 @@ export interface StepRunnerLike {
 }
 
 export interface VerifyRuntimeDependencies {
-  androidCli: AndroidCliPort;
+  screenshots: ScreenshotPort;
+  annotatedScreens: AnnotatedScreenResolverPort;
+  uiStability: UiStabilityProbe;
+  uiSnapshots: UiSnapshotProviderFactory;
   adb: AdbPort;
   clock: Clock;
   artifactStore: ArtifactStore;
@@ -132,6 +147,7 @@ export class VerifyRuntime {
     let primaryFailure: ReportFailure | undefined;
     const secondaryErrors: ReportFailure[] = [];
     const collectionErrors: ReportFailure[] = [];
+    let uiSnapshotProvider: UiSnapshotProvider | undefined;
     const steps: TapHoundReport["steps"] = [];
     const layers: TapHoundReport["layers"] = {
       run: "notRun",
@@ -169,6 +185,14 @@ export class VerifyRuntime {
     };
 
     try {
+      uiSnapshotProvider = await this.dependencies.uiSnapshots.open({
+        deviceSerial: input.deviceSerial,
+        timeoutMs: input.config.ui?.snapshotTimeoutMs
+          ?? input.config.idle.timeoutMs,
+        backend: input.config.ui?.backend ?? "auto",
+        cacheEnabled: input.config.ui?.cacheEnabled ?? true,
+        ...(input.signal === undefined ? {} : { signal: input.signal })
+      });
       try {
         const installed = await this.dependencies.adb.isInstalled({
           packageName: input.config.run.packageName,
@@ -300,8 +324,8 @@ export class VerifyRuntime {
                       "readiness"
                     );
                   } else {
-                    await this.dependencies.androidCli.layout({
-                      deviceSerial: input.deviceSerial,
+                    await uiSnapshotProvider.capture({
+                      reason: "locate",
                       ...(input.signal === undefined ? {} : { signal: input.signal }),
                       timeoutMs: input.config.idle.timeoutMs
                     });
@@ -313,7 +337,11 @@ export class VerifyRuntime {
                 }
               }
             } catch (error) {
-              setPrimary("APP_LAUNCH_FAILED", errorMessage(error), "readiness");
+              setPrimary(
+                failureCodeFromUnknown(error) ?? "APP_LAUNCH_FAILED",
+                errorMessage(error),
+                "readiness"
+              );
             }
           }
         }
@@ -324,7 +352,10 @@ export class VerifyRuntime {
           ?? ((options: StepRunnerOptions): StepRunnerLike => new StepRunner(options));
         const runner = createStepRunner({
           adb: this.dependencies.adb,
-          androidCli: this.dependencies.androidCli,
+          screenshots: this.dependencies.screenshots,
+          annotatedScreens: this.dependencies.annotatedScreens,
+          uiStability: this.dependencies.uiStability,
+          uiSnapshotProvider,
           clock: this.dependencies.clock,
           logcat,
           artifacts: session,
@@ -374,21 +405,34 @@ export class VerifyRuntime {
         }
       }
     } catch (error) {
+      const errorCode = failureCodeFromUnknown(error) ?? "INTERNAL_ERROR";
       if (primaryFailure === undefined) {
-        setPrimary("INTERNAL_ERROR", errorMessage(error), "runtime");
+        setPrimary(errorCode, errorMessage(error), "runtime");
       } else {
         secondaryErrors.push({
-          code: "INTERNAL_ERROR",
+          code: errorCode,
           message: errorMessage(error),
           phase: "runtime"
         });
+      }
+    } finally {
+      if (uiSnapshotProvider !== undefined) {
+        try {
+          await uiSnapshotProvider.close();
+        } catch (error) {
+          secondaryErrors.push({
+            code: "INTERNAL_ERROR",
+            message: errorMessage(error),
+            phase: "uiSnapshotClose"
+          });
+        }
       }
     }
 
     const screenshotPath = "screenshot.png";
     let screenshotCollected = false;
     try {
-      const screenshot = await this.dependencies.androidCli.captureScreen({
+      const screenshot = await this.dependencies.screenshots.capture({
         outputPath: session.path(screenshotPath),
         deviceSerial: input.deviceSerial,
         ...(input.signal === undefined ? {} : { signal: input.signal })
@@ -442,7 +486,7 @@ export class VerifyRuntime {
         ? "error"
         : "failed";
     const report: TapHoundReport = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       runId,
       status,
       startedAt: startedAt.toISOString(),
@@ -459,7 +503,15 @@ export class VerifyRuntime {
       },
       environment: {
         deviceSerial: input.deviceSerial,
-        tools: input.toolVersions
+        tools: input.toolVersions,
+        ...(uiSnapshotProvider === undefined
+          ? {}
+          : {
+              uiBackend: uiSnapshotProvider.descriptor,
+              ...(uiSnapshotProvider.cacheTelemetry === undefined
+                ? {}
+                : { uiCache: uiSnapshotProvider.cacheTelemetry() })
+            })
       },
       layers,
       steps,

@@ -11,7 +11,7 @@ import type {
 import {
   locatorEvidenceMatches
 } from "../../domain/locator-evidence.js";
-import type { Point } from "../../ports/android-cli.js";
+import type { DisplayViewport, Point } from "../../domain/geometry.js";
 import {
   flattenLayout,
   type LayoutEntry
@@ -39,15 +39,16 @@ export type LocatorResolution = LocatedTarget | LocatorFailure;
 export interface LocatorResolutionOptions {
   requireEnabled?: boolean | undefined;
   requiredCapability?: "clickable" | "longClickable" | undefined;
+  viewport?: DisplayViewport | undefined;
 }
 
-function center(element: LayoutElement): Point {
+function center(element: LayoutElement): Point | undefined {
   if (element.center !== undefined) {
     return element.center;
   }
   const bounds = element.bounds;
   if (bounds === undefined) {
-    throw new Error(`Layout element ${element.id} has no center or bounds`);
+    return undefined;
   }
   return {
     x: Math.round((bounds.left + bounds.right) / 2),
@@ -223,10 +224,35 @@ export function resolveLocator(
       message: `Layout element ${element.id} is disabled`
     };
   }
+  const point = center(element);
+  if (point === undefined) {
+    return {
+      status: "failed",
+      code: "ACTION_FAILED",
+      message: `Layout element ${element.id} has no executable geometry`
+    };
+  }
+  const viewport = options.viewport;
+  if (
+    viewport !== undefined
+    && (
+      point.x >= viewport.width
+      || point.y >= viewport.height
+      || (element.bounds !== undefined
+        && (element.bounds.right > viewport.width
+          || element.bounds.bottom > viewport.height))
+    )
+  ) {
+    return {
+      status: "failed",
+      code: "ACTION_FAILED",
+      message: `Layout element ${element.id} geometry is outside the physical display viewport`
+    };
+  }
   return {
     status: "found",
     element,
-    point: center(element),
+    point,
     matchedBy
   };
 }

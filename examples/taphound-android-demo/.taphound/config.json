@@ -5,7 +5,7 @@
     "activity": ".MainActivity"
   },
   "idle": {
-    "strategy": "hybrid",
+    "strategy": "structural",
     "pollIntervalMs": 200,
     "stablePolls": 2,
     "timeoutMs": 10000

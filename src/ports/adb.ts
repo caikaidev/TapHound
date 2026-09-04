@@ -1,4 +1,4 @@
-import type { Point } from "./android-cli.js";
+import type { Point } from "../domain/geometry.js";
 import type { ForegroundComponent } from "../domain/activity.js";
 import type { AppProcess } from "../domain/app-process.js";
 import type { WindowTopology } from "../domain/window-hierarchy.js";

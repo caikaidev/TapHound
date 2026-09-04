@@ -2,7 +2,7 @@ import type { FailureCode } from "../../domain/failure.js";
 import type { JourneyStep } from "../../domain/journey.js";
 import type { Bounds } from "../../domain/layout.js";
 import type { AdbPort } from "../../ports/adb.js";
-import type { Point } from "../../ports/android-cli.js";
+import type { Point } from "../../domain/geometry.js";
 import type { CommandResult } from "../../ports/process-runner.js";
 
 export interface ActionTarget {
@@ -83,7 +83,8 @@ function swipePoints(
 export class ActionExecutor {
   public constructor(
     private readonly adb: AdbPort,
-    private readonly deviceSerial: string
+    private readonly deviceSerial: string,
+    private readonly beforeMutation?: (() => void) | undefined
   ) {}
 
   public async execute(
@@ -97,12 +98,14 @@ export class ActionExecutor {
         if (target === undefined) {
           return failed("click requires a resolved target");
         }
+        this.beforeMutation?.();
         result = await this.adb.tap(target.point, this.deviceSerial, signal);
         break;
       case "longClick":
         if (target === undefined) {
           return failed("longClick requires a resolved target");
         }
+        this.beforeMutation?.();
         result = await this.adb.longClick(
           target.point,
           step.durationMs,
@@ -111,6 +114,7 @@ export class ActionExecutor {
         );
         break;
       case "inputText":
+        this.beforeMutation?.();
         result = await this.adb.inputText(
           step.text,
           this.deviceSerial,
@@ -129,6 +133,7 @@ export class ActionExecutor {
           step.direction,
           step.distancePercent
         );
+        this.beforeMutation?.();
         result = await this.adb.swipe(
           points.from,
           points.to,
@@ -143,6 +148,7 @@ export class ActionExecutor {
       case "bridge":
         return failed("bridge is not executed via ActionExecutor");
       case "back":
+        this.beforeMutation?.();
         result = await this.adb.back(this.deviceSerial, signal);
         break;
       case "wait":
@@ -160,6 +166,7 @@ export class ActionExecutor {
     signal?: AbortSignal
   ): Promise<ActionExecutionResult> {
     const points = swipePoints(bounds, direction, distancePercent);
+    this.beforeMutation?.();
     const result = await this.adb.swipe(
       points.from,
       points.to,

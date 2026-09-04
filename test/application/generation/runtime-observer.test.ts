@@ -10,6 +10,10 @@ import {
   vi,
   type Mock
 } from "vitest";
+import {
+  uiSnapshotFactory,
+  uiSnapshotProviderFromLayout
+} from "../../fakes/ui-snapshot.js";
 
 import {
   RuntimeObserver
@@ -21,10 +25,11 @@ import type { GenerationSession } from "../../../src/domain/generation.js";
 import type { ForegroundComponent } from "../../../src/domain/activity.js";
 import type { AppProcess } from "../../../src/domain/app-process.js";
 import type {
-  CaptureScreenOptions
-} from "../../../src/ports/android-cli.js";
+  ScreenshotOptions
+} from "../../../src/ports/screenshot.js";
 import type { IdleResult } from "../../../src/application/wait/idle-waiter.js";
 import type { CommandResult } from "../../../src/ports/process-runner.js";
+import type { UiSnapshotProvider } from "../../../src/ports/ui-snapshot.js";
 import {
   GenerationSessionStoreError
 } from "../../../src/ports/generation-session-store.js";
@@ -167,9 +172,9 @@ interface ObserverHarness {
       bounds: { left: number; top: number; right: number; bottom: number };
       children: never[];
     }[]>>;
-    captureScreen: Mock<
-      (options: CaptureScreenOptions) => Promise<CommandResult>
-    >;
+  };
+  screenshots: {
+    capture: Mock<(options: ScreenshotOptions) => Promise<CommandResult>>;
   };
   waitUntilIdle: Mock<
     (
@@ -182,6 +187,7 @@ interface ObserverHarness {
       signal?: AbortSignal
     ) => Promise<IdleResult>
   >;
+  uiSnapshotProvider: UiSnapshotProvider;
   observer: RuntimeObserver;
 }
 
@@ -216,8 +222,10 @@ function harness(): ObserverHarness {
       enabled: true,
       bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
       children: []
-    }])),
-    captureScreen: vi.fn(async ({ outputPath }: CaptureScreenOptions) => {
+    }]))
+  };
+  const screenshots = {
+    capture: vi.fn(async ({ outputPath }: ScreenshotOptions) => {
       await writeFile(outputPath, Buffer.from("png-evidence"));
       return commandResult();
     })
@@ -244,16 +252,20 @@ function harness(): ObserverHarness {
       samplingDurationMs: 50
     });
   });
+  const uiSnapshotProvider = uiSnapshotProviderFromLayout(androidCli.layout);
   return {
     store,
     adb,
     androidCli,
+    screenshots,
     waitUntilIdle,
     identities,
+    uiSnapshotProvider,
     observer: new RuntimeObserver({
       store,
       adb,
-      androidCli,
+      screenshots,
+      uiSnapshots: uiSnapshotFactory(uiSnapshotProvider),
       waitUntilIdle,
       now: (): Date => new Date("2026-07-22T12:05:00.000Z"),
       createAttemptId: () => attemptIds.shift() ?? "unexpected-attempt"
@@ -262,6 +274,52 @@ function harness(): ObserverHarness {
 }
 
 describe("RuntimeObserver", () => {
+  it("drains an in-flight capture before closing after a sibling failure", async () => {
+    const test = harness();
+    let releaseCapture: (() => void) | undefined;
+    let markCaptureStarted: (() => void) | undefined;
+    const captureStarted = new Promise<void>((resolve) => {
+      markCaptureStarted = resolve;
+    });
+    test.androidCli.layout.mockImplementationOnce(() => new Promise((resolve) => {
+      releaseCapture = (): void => {
+        resolve([{
+          id: "root",
+          enabled: true,
+          bounds: { left: 0, top: 0, right: 100, bottom: 200 },
+          children: []
+        }]);
+      };
+      markCaptureStarted?.();
+    }));
+    test.adb.foregroundComponent.mockRejectedValueOnce(
+      new Error("foreground failed")
+    );
+
+    let observationSettled = false;
+    const observation = test.observer.observe({
+      generationId: "generation-1"
+    });
+    const outcome = observation.then(
+      () => new Error("observation unexpectedly succeeded"),
+      (error: unknown) => error
+    ).finally(() => {
+      observationSettled = true;
+    });
+    await captureStarted;
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+
+    expect(observationSettled).toBe(false);
+    expect(test.uiSnapshotProvider.close).not.toHaveBeenCalled();
+    releaseCapture?.();
+    await expect(outcome).resolves.toMatchObject({
+      message: "foreground failed"
+    });
+    expect(test.uiSnapshotProvider.close).toHaveBeenCalledOnce();
+  });
+
   it("reports a pending confirmation as a structured generation failure", async () => {
     const test = harness();
     test.store.current = {
@@ -369,7 +427,7 @@ describe("RuntimeObserver", () => {
       /^\.taphound\/build\/generations\/\.generation-1\.work\/evidence\/snapshots\/revision-000001\/[^/]+\/snapshot\.json$/
     );
     expect(result.snapshot).toMatchObject({
-      version: 1,
+      version: 2,
       generationId: "generation-1",
       baseRevision: 1,
       deviceSerial: "emulator-5554",
@@ -377,7 +435,7 @@ describe("RuntimeObserver", () => {
       foregroundPackageName: "com.android.permissioncontroller",
       activity: "com.android.permissioncontroller.PermissionActivity",
       pid: null,
-      capturedAt: "2026-07-22T12:05:00.000Z",
+      capturedAt: "2026-08-30T08:00:00.000Z",
       layout: [{ id: "root", windowId: "window-1", children: [] }],
       windowHierarchy: {
         status: "complete",
@@ -443,6 +501,18 @@ describe("RuntimeObserver", () => {
           semanticWindowIds: ["window-1"],
           diagnostics: [],
           recovery: []
+        },
+        uiSnapshot: {
+          observationId: "post-action-observation",
+          capturedAt: "2026-07-22T12:00:01.000Z",
+          durationMs: 3,
+          backend: test.uiSnapshotProvider.descriptor,
+          viewport: {
+            width: 1080,
+            height: 1920,
+            rotation: 0,
+            coordinateSpace: "physicalDisplayPixels"
+          }
         }
       }
     });
@@ -457,7 +527,7 @@ describe("RuntimeObserver", () => {
     expect(test.adb.appProcesses).toHaveBeenCalledTimes(1);
     expect(test.adb.windowTopology).not.toHaveBeenCalled();
     expect(test.waitUntilIdle).not.toHaveBeenCalled();
-    expect(test.androidCli.captureScreen).toHaveBeenCalledTimes(1);
+    expect(test.screenshots.capture).toHaveBeenCalledTimes(1);
   });
 
   it("rejects a torn snapshot when runtime identity changes during capture", async () => {
@@ -554,7 +624,7 @@ describe("RuntimeObserver", () => {
       );
     }],
     ["screenshot", (test: ReturnType<typeof harness>): void => {
-      test.androidCli.captureScreen.mockResolvedValueOnce(commandResult(1));
+      test.screenshots.capture.mockResolvedValueOnce(commandResult(1));
     }]
   ])("does not publish state when %s observation fails", async (
     _name,

@@ -38,6 +38,8 @@ import {
 import type {
   GenerationAppPreparer
 } from "./generation-app-preparer.js";
+import type { UiSnapshotProviderFactory } from "../../ports/ui-snapshot.js";
+import { closeUiSnapshotProvider } from "../ui/ui-snapshot-lifecycle.js";
 
 export interface GenerationRecoveryDetails {
   diagnostics: readonly {
@@ -87,6 +89,7 @@ export interface GenerationStartInput {
 export interface GenerationStarterDependencies {
   contextValidator: Pick<ContextValidator, "validate">;
   appPreparer: Pick<GenerationAppPreparer, "prepare">;
+  uiSnapshots: UiSnapshotProviderFactory;
   store: Pick<GenerationSessionStore, "create">;
   now: () => Date;
   generateId: () => string;
@@ -340,6 +343,16 @@ export class GenerationStarter {
         stepCount: entry.stepCount
       }));
 
+    const uiSnapshotProvider = await this.dependencies.uiSnapshots.open({
+      deviceSerial: input.deviceSerial,
+      timeoutMs: config.ui?.snapshotTimeoutMs ?? config.idle.timeoutMs,
+      backend: config.ui?.backend ?? "auto",
+      cacheEnabled: config.ui?.cacheEnabled ?? true,
+      ...(input.signal === undefined ? {} : { signal: input.signal })
+    });
+    const uiBackend = uiSnapshotProvider.descriptor;
+    await closeUiSnapshotProvider(uiSnapshotProvider);
+
     const generationId = this.dependencies.generateId();
     const runId = distinctId(generationId, this.dependencies.generateId);
     const session = GenerationSessionSchema.parse({
@@ -351,7 +364,8 @@ export class GenerationStarter {
         projectHash: hashGenerationBinding(input.project),
         configHash: hashGenerationBinding(config),
         contextHash: hashGenerationBinding(context),
-        snapshotHash: null
+        snapshotHash: null,
+        uiBackend
       },
       target: {
         packageName: config.run.packageName,

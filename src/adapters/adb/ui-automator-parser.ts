@@ -1,8 +1,11 @@
 import {
-  BoundsSchema,
   LayoutElementSchema,
   type LayoutElement
 } from "../../domain/layout.js";
+import {
+  normalizeBounds,
+  normalizeResourceId
+} from "../ui/layout-normalization.js";
 
 function decodeXml(value: string): string {
   return value
@@ -40,18 +43,12 @@ function bounds(value: string | undefined): LayoutElement["bounds"] {
   if (match === null) {
     throw new Error("Invalid UIAutomator bounds");
   }
-  return BoundsSchema.parse({
+  return normalizeBounds({
     left: Number(match[1]),
     top: Number(match[2]),
     right: Number(match[3]),
     bottom: Number(match[4])
   });
-}
-
-function resourceId(value: string | undefined): string | undefined {
-  if (value === undefined || value.length === 0) return undefined;
-  const separator = value.lastIndexOf(":id/");
-  return separator >= 0 ? value.slice(separator + 4) : value;
 }
 
 function node(
@@ -70,9 +67,9 @@ function node(
       };
   return LayoutElementSchema.parse({
     id,
-    ...(resourceId(values["resource-id"]) === undefined
+    ...(normalizeResourceId(values["resource-id"]) === undefined
       ? {}
-      : { resourceId: resourceId(values["resource-id"]) }),
+      : { resourceId: normalizeResourceId(values["resource-id"]) }),
     ...(text === undefined || text.length === 0 ? {} : { text }),
     ...(contentDescription === undefined || contentDescription.length === 0
       ? {}
@@ -99,23 +96,27 @@ function node(
   });
 }
 
-export function parseUiAutomatorLayout(
-  xml: string
+function parseAccessibilityLayout(
+  xml: string,
+  accepts: (tag: string) => boolean
 ): readonly LayoutElement[] {
   const roots: LayoutElement[] = [];
   const stack: Array<{
+    tag: string;
     values: Record<string, string>;
     children: LayoutElement[];
     id: string;
   }> = [];
-  const tokenPattern = /<node\b[^>]*\/>|<node\b[^>]*>|<\/node>/g;
+  const tokenPattern = /<\/?([A-Za-z_][\w:.$-]*)\b[^>]*\/?>/g;
   let token: RegExpExecArray | null;
   let index = 0;
   while ((token = tokenPattern.exec(xml)) !== null) {
     const source = token[0];
-    if (source === "</node>") {
+    const tag = token[1];
+    if (tag === undefined || !accepts(tag)) continue;
+    if (source.startsWith("</")) {
       const current = stack.pop();
-      if (current === undefined) {
+      if (current === undefined || current.tag !== tag) {
         throw new Error("Invalid UIAutomator node nesting");
       }
       const parsed = node(current.values, current.id, current.children);
@@ -126,6 +127,7 @@ export function parseUiAutomatorLayout(
     }
     const selfClosing = source.endsWith("/>");
     const current = {
+      tag,
       values: attributes(source),
       children: [] as LayoutElement[],
       id: `ui-${String(index)}`
@@ -144,4 +146,16 @@ export function parseUiAutomatorLayout(
     throw new Error("Invalid UIAutomator node nesting");
   }
   return roots;
+}
+
+export function parseUiAutomatorLayout(
+  xml: string
+): readonly LayoutElement[] {
+  return parseAccessibilityLayout(xml, (tag) => tag === "node");
+}
+
+export function parseAppiumPageSource(
+  xml: string
+): readonly LayoutElement[] {
+  return parseAccessibilityLayout(xml, (tag) => tag !== "hierarchy");
 }

@@ -19,12 +19,18 @@ import {
 } from "../../domain/runtime-snapshot.js";
 import { assessWindowHierarchy } from "../../domain/window-hierarchy.js";
 import type { AdbPort } from "../../ports/adb.js";
-import type { AndroidCliPort } from "../../ports/android-cli.js";
+import type { ScreenshotPort } from "../../ports/screenshot.js";
+import type {
+  UiSnapshot,
+  UiSnapshotProvider,
+  UiSnapshotProviderFactory
+} from "../../ports/ui-snapshot.js";
 import type { IdleConfig, IdleResult } from "../wait/idle-waiter.js";
 import type {
   GenerationSessionStore
 } from "../../ports/generation-session-store.js";
 import { GenerationOperationError } from "./generation-starter.js";
+import { closeUiSnapshotProvider } from "../ui/ui-snapshot-lifecycle.js";
 
 export type RuntimeObservationBinding = ProposalBinding;
 
@@ -47,6 +53,10 @@ export interface CollectedRuntimeState {
   pid: number | null;
   layout: readonly z.infer<typeof LayoutElementSchema>[];
   windowHierarchy: ReturnType<typeof assessWindowHierarchy>;
+  uiSnapshot: Pick<
+    UiSnapshot,
+    "observationId" | "capturedAt" | "durationMs" | "backend" | "viewport"
+  >;
 }
 
 export interface CollectedRuntimeObserveInput {
@@ -68,7 +78,8 @@ export interface RuntimeObserverDependencies {
     AdbPort,
     "foregroundComponent" | "appProcesses" | "windowTopology"
   >;
-  androidCli: Pick<AndroidCliPort, "layout" | "captureScreen">;
+  screenshots: ScreenshotPort;
+  uiSnapshots: UiSnapshotProviderFactory;
   waitUntilIdle?: (
     deviceSerial: string,
     config: IdleConfig,
@@ -77,6 +88,7 @@ export interface RuntimeObserverDependencies {
   ) => Promise<IdleResult>;
   now: () => Date;
   createAttemptId: () => string;
+  uiCacheEnabled?: boolean | undefined;
 }
 
 export interface SnapshotReobservationGuardDependencies {
@@ -85,7 +97,7 @@ export interface SnapshotReobservationGuardDependencies {
     AdbPort,
     "foregroundComponent" | "appProcesses" | "windowTopology"
   >;
-  androidCli: Pick<AndroidCliPort, "layout">;
+  uiSnapshotProvider: UiSnapshotProvider;
   now: () => Date;
 }
 
@@ -130,41 +142,62 @@ async function collectRuntime(
       AdbPort,
       "foregroundComponent" | "appProcesses" | "windowTopology"
     >;
-    androidCli: Pick<AndroidCliPort, "layout">;
+    uiSnapshotProvider: UiSnapshotProvider;
   },
   session: GenerationSession,
   signal?: AbortSignal,
-  stableLayout?: readonly z.infer<typeof LayoutElementSchema>[]
 ): Promise<{
   foregroundPackageName: string;
   activity: string;
   pid: number | null;
   layout: z.infer<typeof LayoutElementSchema>[];
   windowHierarchy: ReturnType<typeof assessWindowHierarchy>;
+  uiSnapshot: CollectedRuntimeState["uiSnapshot"];
 }> {
   const identity = {
     packageName: session.target.packageName,
     deviceSerial: session.target.deviceSerial,
     ...(signal === undefined ? {} : { signal })
   };
-  const [foreground, processes, topology, observedLayout] = await Promise.all([
+  const [foregroundResult, processesResult, topologyResult, snapshotResult]
+    = await Promise.allSettled([
     dependencies.adb.foregroundComponent(identity),
     dependencies.adb.appProcesses(identity),
     dependencies.adb.windowTopology(identity),
-    stableLayout === undefined
-      ? dependencies.androidCli.layout({
-          deviceSerial: session.target.deviceSerial,
-          ...(signal === undefined ? {} : { signal })
-        })
-      : Promise.resolve(stableLayout)
+    dependencies.uiSnapshotProvider.capture({
+      reason: "evidence",
+      timeoutMs: 5000,
+      ...(signal === undefined ? {} : { signal })
+    })
   ]);
+  const settledValue = <T>(result: PromiseSettledResult<T>): T => {
+    if (result.status === "fulfilled") {
+      return result.value;
+    }
+    const reason: unknown = result.reason;
+    if (reason instanceof Error) {
+      throw reason;
+    }
+    throw new Error("Runtime observation failed");
+  };
+  const foreground = settledValue(foregroundResult);
+  const processes = settledValue(processesResult);
+  const topology = settledValue(topologyResult);
+  const uiSnapshot = settledValue(snapshotResult);
   const pid = primaryAppPid(processes, session.target.packageName);
-  const layout = z.array(LayoutElementSchema).parse(observedLayout);
+  const layout = z.array(LayoutElementSchema).parse(uiSnapshot.roots);
   return {
     foregroundPackageName: foreground.packageName,
     activity: foreground.activity,
     pid,
     layout,
+    uiSnapshot: {
+      observationId: uiSnapshot.observationId,
+      capturedAt: uiSnapshot.capturedAt,
+      durationMs: uiSnapshot.durationMs,
+      backend: uiSnapshot.backend,
+      viewport: uiSnapshot.viewport
+    },
     windowHierarchy: assessWindowHierarchy(topology, layout)
   };
 }
@@ -181,7 +214,6 @@ export class RuntimeObserver {
       await this.dependencies.store.read(input.generationId)
     );
     assertObservable(current);
-    let stableLayout: readonly z.infer<typeof LayoutElementSchema>[] | undefined;
     if (
       input.idle !== undefined
       && this.dependencies.waitUntilIdle !== undefined
@@ -216,14 +248,53 @@ export class RuntimeObserver {
               }
         );
       }
-      stableLayout = idle.layout;
     }
-    const runtime = await collectRuntime(
-      this.dependencies,
-      current,
-      input.signal,
-      stableLayout
-    );
+    const uiSnapshotProvider = await this.dependencies.uiSnapshots.open({
+      deviceSerial: current.target.deviceSerial,
+      timeoutMs: input.idle?.timeoutMs ?? 5000,
+      ...(current.bindings.uiBackend === undefined
+        ? {}
+        : { backend: current.bindings.uiBackend.id }),
+      ...(this.dependencies.uiCacheEnabled === undefined
+        ? {}
+        : { cacheEnabled: this.dependencies.uiCacheEnabled }),
+      ...(input.signal === undefined ? {} : { signal: input.signal })
+    });
+    let runtime: CollectedRuntimeState;
+    try {
+      const bound = current.bindings.uiBackend;
+      if (
+        bound !== undefined
+        && JSON.stringify(bound) !== JSON.stringify(uiSnapshotProvider.descriptor)
+      ) {
+        throw new GenerationOperationError(
+          "CONFIG_INVALID",
+          "Generation UI backend does not match the authoritative session"
+        );
+      }
+      if (
+        bound === undefined
+        && (
+          current.bindings.snapshotHash !== null
+          || current.candidateSteps.length !== 0
+        )
+      ) {
+        throw new GenerationOperationError(
+          "CONFIG_INVALID",
+          "Legacy generation with authoritative evidence has no UI backend binding"
+        );
+      }
+      runtime = await collectRuntime(
+        {
+          adb: this.dependencies.adb,
+          uiSnapshotProvider
+        },
+        current,
+        input.signal
+      );
+    } finally {
+      await closeUiSnapshotProvider(uiSnapshotProvider);
+    }
 
     return this.commit(current, runtime, input.signal);
   };
@@ -263,7 +334,7 @@ export class RuntimeObserver {
       current.id,
       screenshotPath,
       async (temporaryPath) => {
-        const capture = await this.dependencies.androidCli.captureScreen({
+        const capture = await this.dependencies.screenshots.capture({
           outputPath: temporaryPath,
           deviceSerial: current.target.deviceSerial,
           ...(signal === undefined ? {} : { signal })
@@ -302,7 +373,7 @@ export class RuntimeObserver {
     }
 
     const snapshot = RuntimeSnapshotSchema.parse({
-      version: 1,
+      version: 2,
       generationId: current.id,
       baseRevision,
       deviceSerial: current.target.deviceSerial,
@@ -310,10 +381,14 @@ export class RuntimeObserver {
       foregroundPackageName: runtime.foregroundPackageName,
       activity: runtime.activity,
       pid: runtime.pid,
-      capturedAt: this.dependencies.now().toISOString(),
+      capturedAt: runtime.uiSnapshot.capturedAt,
       screenshotPath,
       layout: runtime.layout,
-      windowHierarchy: runtime.windowHierarchy
+      windowHierarchy: runtime.windowHierarchy,
+      uiBackend: runtime.uiSnapshot.backend,
+      uiObservationId: runtime.uiSnapshot.observationId,
+      uiCaptureDurationMs: runtime.uiSnapshot.durationMs,
+      viewport: runtime.uiSnapshot.viewport
     });
     const snapshotHash = hashRuntimeSnapshot(snapshot);
     await this.dependencies.store.writeEvidence(
@@ -326,7 +401,8 @@ export class RuntimeObserver {
       revision: baseRevision,
       bindings: {
         ...current.bindings,
-        snapshotHash
+        snapshotHash,
+        uiBackend: runtime.uiSnapshot.backend
       }
     });
     await this.dependencies.store.commitSnapshot(
@@ -393,13 +469,26 @@ export class SnapshotReobservationGuard {
           "Proposal snapshot binding is no longer authoritative"
         );
       }
+      if (
+        session.bindings.uiBackend !== undefined
+        && JSON.stringify(session.bindings.uiBackend)
+          !== JSON.stringify(this.dependencies.uiSnapshotProvider.descriptor)
+      ) {
+        throw new GenerationOperationError(
+          "SNAPSHOT_STALE",
+          "Generation UI backend changed after snapshot binding"
+        );
+      }
       const runtime = await collectRuntime(
-        this.dependencies,
+        {
+          adb: this.dependencies.adb,
+          uiSnapshotProvider: this.dependencies.uiSnapshotProvider
+        },
         session,
         signal
       );
       const snapshot = RuntimeSnapshotSchema.parse({
-        version: 1,
+        version: session.bindings.uiBackend === undefined ? 1 : 2,
         generationId: session.id,
         baseRevision: binding.baseRevision,
         deviceSerial: session.target.deviceSerial,
@@ -407,10 +496,18 @@ export class SnapshotReobservationGuard {
         foregroundPackageName: runtime.foregroundPackageName,
         activity: runtime.activity,
         pid: runtime.pid,
-        capturedAt: this.dependencies.now().toISOString(),
+        capturedAt: runtime.uiSnapshot.capturedAt,
         screenshotPath: "non-authoritative://runtime-reobservation",
         layout: runtime.layout,
-        windowHierarchy: runtime.windowHierarchy
+        windowHierarchy: runtime.windowHierarchy,
+        ...(session.bindings.uiBackend === undefined
+          ? {}
+          : {
+              uiBackend: runtime.uiSnapshot.backend,
+              uiObservationId: runtime.uiSnapshot.observationId,
+              uiCaptureDurationMs: runtime.uiSnapshot.durationMs,
+              viewport: runtime.uiSnapshot.viewport
+            })
       });
       if (hashRuntimeSnapshot(snapshot) !== binding.snapshotHash) {
         throw new GenerationOperationError(

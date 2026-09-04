@@ -12,11 +12,21 @@ import type {
   AdbPort,
   LogcatOptions
 } from "../../src/ports/adb.js";
-import type { AndroidCliPort } from "../../src/ports/android-cli.js";
+import type {
+  AnnotatedScreenResolverPort
+} from "../../src/ports/annotated-screen-resolver.js";
+import type { UiSnapshotProviderFactory } from "../../src/ports/ui-snapshot.js";
+import type { ScreenshotPort } from "../../src/ports/screenshot.js";
+import type { UiStabilityProbe } from "../../src/ports/ui-stability.js";
+import type { LayoutElement } from "../../src/domain/layout.js";
 import type { ArtifactSession } from "../../src/ports/artifact-store.js";
 import { MemoryArtifactStore } from "./artifact-store.js";
 import { FakeClock } from "./fake-clock.js";
 import { commandResult } from "./process-runner.js";
+import {
+  uiSnapshotFactory,
+  uiSnapshotProviderFromLayout
+} from "./ui-snapshot.js";
 
 export const runtimeConfig: TapHoundConfig = {
   version: 1,
@@ -49,7 +59,15 @@ export const runtimeJourney: Journey = {
 export interface RuntimeFixture {
   order: string[];
   dependencies: VerifyRuntimeDependencies;
-  androidCli: AndroidCliPort;
+  androidCli: UiStabilityProbe & AnnotatedScreenResolverPort & {
+    layout: (options: {
+      deviceSerial: string;
+      signal?: AbortSignal | undefined;
+      timeoutMs?: number | undefined;
+    }) => Promise<readonly LayoutElement[]>;
+  };
+  screenshots: ScreenshotPort;
+  uiSnapshots: UiSnapshotProviderFactory;
   adb: AdbPort;
   artifacts: MemoryArtifactStore;
 }
@@ -63,7 +81,11 @@ export function runtimeFixture(): RuntimeFixture {
     "com.example.app.SearchActivity"
   ];
   let layoutCalls = 0;
-  const androidCli: AndroidCliPort = {
+  const sample: UiStabilityProbe["sample"] = vi.fn(() => {
+    order.push("idle");
+    return Promise.resolve([]);
+  });
+  const androidCli: RuntimeFixture["androidCli"] = {
     layout: vi.fn(() => {
       layoutCalls += 1;
       order.push(layoutCalls === 1 ? "baseline" : "step-layout");
@@ -78,15 +100,9 @@ export function runtimeFixture(): RuntimeFixture {
         children: []
       }]);
     }),
-    layoutDiff: vi.fn(() => {
-      order.push("idle");
-      return Promise.resolve([]);
-    }),
-    captureScreen: vi.fn(() => {
-      order.push("screenshot");
-      return Promise.resolve(commandResult());
-    }),
-    resolveScreen: vi.fn(() => Promise.resolve({ x: 50, y: 25 }))
+    reset: vi.fn(),
+    sample,
+    resolve: vi.fn(() => Promise.resolve({ x: 50, y: 25 }))
   };
   const adb: AdbPort = {
     devices: vi.fn(),
@@ -147,13 +163,27 @@ export function runtimeFixture(): RuntimeFixture {
     dumpLogcat: vi.fn(() => Promise.resolve(commandResult()))
   };
   const writer = new ReportWriter();
+  const screenshots: ScreenshotPort = {
+    capture: vi.fn(() => {
+      order.push("screenshot");
+      return Promise.resolve(commandResult());
+    })
+  };
+  const uiSnapshots = uiSnapshotFactory(
+    uiSnapshotProviderFromLayout(androidCli.layout)
+  );
   return {
     order,
     androidCli,
+    screenshots,
+    uiSnapshots,
     adb,
     artifacts,
     dependencies: {
-      androidCli,
+      screenshots,
+      annotatedScreens: androidCli,
+      uiStability: androidCli,
+      uiSnapshots,
       adb,
       clock: new FakeClock(),
       artifactStore: artifacts,

@@ -295,7 +295,9 @@ taphound generation observe \
 ```
 
 **Note** three binding fields: `generationId`, `baseRevision`,
-`snapshotHash`, plus `snapshotRef`. Read that project-relative authoritative
+`snapshotHash`, plus `snapshotRef`. Runtime Snapshot v2 also binds the exact
+`uiBackend`, physical-display `viewport`, observation ID, and capture duration.
+Do not replace it with a snapshot from another backend. Read that project-relative authoritative
 JSON file as the full `snapshot` object required by the proposed-step
 envelope. Running without `--compact` also includes the same snapshot inline,
 but still returns `snapshotRef`. Active sessions use the Store-owned hidden

@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import { FAILURE_CODES } from "./failure.js";
+import { UiBackendDescriptorSchema } from "./ui-backend.js";
+import { UiCacheTelemetrySchema } from "./ui-cache.js";
 
 const ResultStatusSchema = z.enum(["passed", "failed", "notRun", "manualRequired"]);
 const RunStatusSchema = z.enum(["passed", "failed", "error", "manualRequired"]);
@@ -51,6 +53,7 @@ const IdleReportSchema = z.strictObject({
     "androidCli",
     "gfxFrameStats"
   ]).optional(),
+  backendId: z.string().trim().min(1).optional(),
   fallbackUsed: z.boolean().optional(),
   frameActivityDetected: z.boolean().optional(),
   lastDiff: z.array(z.unknown()).optional()
@@ -117,8 +120,7 @@ const ArtifactsSchema = z.strictObject({
   stepLogs: z.array(z.string().min(1))
 });
 
-export const TapHoundReportSchema = z.strictObject({
-  schemaVersion: z.literal(2),
+const ReportFields = {
   runId: z.string().min(1),
   status: RunStatusSchema,
   startedAt: z.string().min(1),
@@ -133,20 +135,43 @@ export const TapHoundReportSchema = z.strictObject({
     name: z.string().min(1),
     sha256: z.string().regex(/^[a-f\d]{64}$/)
   }),
-  environment: z.strictObject({
-    deviceSerial: z.string().min(1),
-    tools: z.record(z.string(), z.string())
-  }),
   layers: LayersSchema,
   steps: z.array(StepReportSchema),
   artifacts: ArtifactsSchema,
   primaryFailure: ReportFailureSchema.optional(),
   secondaryErrors: z.array(ReportFailureSchema),
   fallbackUsed: z.boolean()
+};
+
+export const TapHoundReportV2Schema = z.strictObject({
+  schemaVersion: z.literal(2),
+  ...ReportFields,
+  environment: z.strictObject({
+    deviceSerial: z.string().min(1),
+    tools: z.record(z.string(), z.string())
+  })
 });
+
+export const TapHoundReportV3Schema = z.strictObject({
+  schemaVersion: z.literal(3),
+  ...ReportFields,
+  environment: z.strictObject({
+    deviceSerial: z.string().min(1),
+    tools: z.record(z.string(), z.string()),
+    uiBackend: UiBackendDescriptorSchema.optional(),
+    uiCache: UiCacheTelemetrySchema.optional()
+  })
+});
+
+export const TapHoundReportSchema = z.discriminatedUnion("schemaVersion", [
+  TapHoundReportV2Schema,
+  TapHoundReportV3Schema
+]);
 
 export type ReportFailure = z.infer<typeof ReportFailureSchema>;
 export type StepReport = z.infer<typeof StepReportSchema>;
+export type TapHoundReportV2 = z.infer<typeof TapHoundReportV2Schema>;
+export type TapHoundReportV3 = z.infer<typeof TapHoundReportV3Schema>;
 export type TapHoundReport = z.infer<typeof TapHoundReportSchema>;
 
 function canonicalize(value: unknown): unknown {

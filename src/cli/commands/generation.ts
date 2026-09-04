@@ -2,6 +2,10 @@ import { resolve } from "node:path";
 
 import { Command } from "commander";
 import { z } from "zod";
+import {
+  exitCodeForFailure,
+  failureCodeFromUnknown
+} from "../../domain/failure.js";
 
 import {
   GenerationFinalizationError,
@@ -380,6 +384,17 @@ function mappedFailure(
     );
     return;
   }
+  const failureCode = failureCodeFromUnknown(error);
+  if (failureCode !== undefined) {
+    writeFailure(
+      dependencies,
+      options,
+      exitCodeForFailure(failureCode),
+      failureCode,
+      error
+    );
+    return;
+  }
   writeFailure(dependencies, options, 4, "INTERNAL_ERROR", error);
 }
 
@@ -496,6 +511,9 @@ function createStartCommand(dependencies: CliDependencies): Command {
         const context = loaded.context;
         const doctor = await dependencies.doctor.run({
           packageName: config.run.packageName,
+          ...(config.ui?.backend === undefined
+            ? {}
+            : { requestedUiBackend: config.ui.backend }),
           ...(options.device === undefined
             ? {}
             : { requestedDevice: options.device }),
@@ -1180,6 +1198,9 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
       const doctor = await dependencies.doctor.run({
         packageName: config.run.packageName,
         skipPermissionProbe: true,
+        ...(config.ui?.backend === undefined
+          ? {}
+          : { requestedUiBackend: config.ui.backend }),
         ...(options.device === undefined
           ? {}
           : { requestedDevice: options.device }),

@@ -1,10 +1,10 @@
 import type { FailureCode } from "../../domain/failure.js";
 import type { LayoutElement } from "../../domain/layout.js";
 import type {
-  AndroidCliPort,
-  LayoutDiffObservation,
-  LayoutDiffResult
-} from "../../ports/android-cli.js";
+  UiStabilityObservation,
+  UiStabilityProbe,
+  UiStabilitySampleResult
+} from "../../ports/ui-stability.js";
 import type { Clock } from "../../ports/clock.js";
 
 export type IdleStrategy = "hybrid" | "layoutDiff" | "frameStats" | "structural";
@@ -63,11 +63,11 @@ function isAborted(signal?: AbortSignal): boolean {
 }
 
 function normalizeObservation(
-  result: LayoutDiffResult
-): LayoutDiffObservation {
+  result: UiStabilitySampleResult
+): UiStabilityObservation {
   return Array.isArray(result)
     ? { changes: result }
-    : result as LayoutDiffObservation;
+    : result as UiStabilityObservation;
 }
 
 function telemetry(
@@ -88,7 +88,7 @@ function telemetry(
 
 export class IdleWaiter {
   public constructor(
-    private readonly androidCli: AndroidCliPort,
+    private readonly stability: UiStabilityProbe,
     private readonly clock: Clock,
     private readonly deviceSerial: string,
     private readonly packageName?: string
@@ -98,6 +98,7 @@ export class IdleWaiter {
     config: IdleConfig,
     signal?: AbortSignal
   ): Promise<IdleResult> {
+    this.stability.reset();
     const strategy = config.strategy ?? "hybrid";
     const startedAt = this.clock.now();
     let polls = 0;
@@ -124,9 +125,9 @@ export class IdleWaiter {
 
       const elapsedBeforePoll = this.clock.now() - startedAt;
       polls += 1;
-      let observation: LayoutDiffObservation;
+      let observation: UiStabilityObservation;
       try {
-        observation = normalizeObservation(await this.androidCli.layoutDiff({
+        observation = normalizeObservation(await this.stability.sample({
           deviceSerial: this.deviceSerial,
           ...(useStructuralBackend
             ? { stabilityBackend: "uiautomator" as const }
@@ -185,7 +186,7 @@ export class IdleWaiter {
       } else if (useStructuralBackend) {
         consecutiveEmpty = diff.length === 0
           ? consecutiveEmpty + 1
-          : 1;
+          : 0;
         if (diff.length > 0) lastDiff = diff;
       } else if (diff.length === 0) {
         consecutiveEmpty += 1;

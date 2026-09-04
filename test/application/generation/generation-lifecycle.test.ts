@@ -3,6 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
+import {
+  uiSnapshotFactory,
+  uiSnapshotProviderFromLayout
+} from "../../fakes/ui-snapshot.js";
 
 import {
   FileSystemGenerationMetaWriter
@@ -193,6 +197,9 @@ async function createLifecycleFixture(): Promise<LifecycleFixture> {
       validate: vi.fn(() => Promise.resolve({ status: "valid" as const }))
     },
     appPreparer: { prepare: vi.fn(() => Promise.resolve()) },
+    uiSnapshots: uiSnapshotFactory(
+      uiSnapshotProviderFromLayout(androidCli.layout)
+    ),
     store,
     now: (): Date => new Date("2026-07-22T12:00:00.000Z"),
     generateId: (): string => ids.shift() ?? "unexpected-id",
@@ -203,7 +210,10 @@ async function createLifecycleFixture(): Promise<LifecycleFixture> {
   const observer = new RuntimeObserver({
     store,
     adb: adb,
-    androidCli: androidCli,
+    screenshots: { capture: androidCli.captureScreen },
+    uiSnapshots: uiSnapshotFactory(
+      uiSnapshotProviderFromLayout(androidCli.layout)
+    ),
     now: (): Date => new Date("2026-07-22T12:00:01.000Z"),
     createAttemptId: (): string => attemptIds.shift() ?? "unexpected-attempt"
   });
@@ -234,7 +244,11 @@ async function createLifecycleFixture(): Promise<LifecycleFixture> {
       )
     },
     adb: adb as never,
-    androidCli: androidCli as never,
+    uiStability: {
+      reset: vi.fn(),
+      sample: androidCli.layoutDiff
+    },
+    uiSnapshotProvider: uiSnapshotProviderFromLayout(androidCli.layout),
     clock: {
       now: (): number => {
         nowCounter += 1;
@@ -335,7 +349,7 @@ function buildPassingReport(
   candidateSteps: readonly JourneyStep[]
 ): TapHoundReport {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     runId: "verify-run",
     status: "passed",
     startedAt: "2026-07-23T00:00:00.000Z",
@@ -349,7 +363,12 @@ function buildPassingReport(
     journey: { name: journey.name, sha256: hashJourney(journey) },
     environment: {
       deviceSerial,
-      tools: { adb: "1" }
+      tools: { adb: "1" },
+      uiBackend: {
+        id: "system-uiautomator",
+        adapterVersion: "test-v1",
+        configSha256: "0".repeat(64)
+      }
     },
     layers: {
       run: "passed",

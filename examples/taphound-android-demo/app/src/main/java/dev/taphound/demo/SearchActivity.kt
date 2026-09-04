@@ -13,6 +13,8 @@ class SearchActivity : Activity() {
         setContentView(R.layout.activity_search)
 
         val input = findViewById<EditText>(R.id.search_input)
+        // Keep device acceptance independent from the user's IME animation and locale.
+        input.showSoftInputOnFocus = false
         val result = findViewById<TextView>(R.id.search_result)
         findViewById<Button>(R.id.submit_search).setOnClickListener {
             val query = input.text.toString()

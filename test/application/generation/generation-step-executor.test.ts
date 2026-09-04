@@ -1,4 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import {
+  uiSnapshotFactory,
+  uiSnapshotProviderFromLayout
+} from "../../fakes/ui-snapshot.js";
 
 import {
   GenerationStepExecutor,
@@ -23,6 +27,8 @@ import {
 import type { CommandResult, RunningCommand } from "../../../src/ports/process-runner.js";
 import { contextSelection } from "../../fixtures/project-context.js";
 import type { ExternalFlow } from "../../../src/domain/external-flow.js";
+import type { UiSnapshotProvider } from "../../../src/ports/ui-snapshot.js";
+import type { DisplayViewport } from "../../../src/domain/geometry.js";
 
 const activity = "com.example.app.MainActivity";
 const afterActivity = "com.example.app.AfterActivity";
@@ -130,7 +136,9 @@ function session(
 
 function harness(
   initial = session(),
-  generateAttemptId: () => string = () => "attempt-1"
+  generateAttemptId: () => string = () => "attempt-1",
+  useSnapshotFactory = false,
+  viewport?: DisplayViewport
 ): {
   execute: GenerationStepExecutor["execute"];
   current: () => GenerationSession;
@@ -153,6 +161,9 @@ function harness(
     layoutDiff: ReturnType<typeof vi.fn>;
   };
   guard: ReturnType<typeof vi.fn>;
+  createFreshnessGuard: ReturnType<typeof vi.fn>;
+  uiSnapshotProvider: UiSnapshotProvider;
+  uiSnapshots: ReturnType<typeof uiSnapshotFactory>;
   evidence: Map<string, unknown>;
   stopLogcat: ReturnType<typeof vi.fn>;
   writeEvidence: ReturnType<typeof vi.fn>;
@@ -290,11 +301,29 @@ function harness(
     resolve: vi.fn(),
     list: vi.fn()
   };
+  const uiSnapshotProvider = uiSnapshotProviderFromLayout(
+    androidCli.layout,
+    "emulator-5554",
+    viewport
+  );
+  const uiSnapshots = uiSnapshotFactory(uiSnapshotProvider);
+  const createFreshnessGuard = vi.fn((provider: UiSnapshotProvider) => {
+    expect(provider).toBe(uiSnapshotProvider);
+    return { assertFresh: guard };
+  });
   const executor = new GenerationStepExecutor({
     store,
-    freshnessGuard: { assertFresh: guard },
     adb: adb as never,
-    androidCli: androidCli as never,
+    uiStability: {
+      reset: vi.fn(),
+      sample: androidCli.layoutDiff
+    },
+    ...(useSnapshotFactory
+      ? { uiSnapshots, createFreshnessGuard }
+      : {
+          freshnessGuard: { assertFresh: guard },
+          uiSnapshotProvider
+        }),
     clock: {
       now: (): number => {
         time += 1;
@@ -316,6 +345,9 @@ function harness(
     adb,
     androidCli,
     guard,
+    createFreshnessGuard,
+    uiSnapshotProvider,
+    uiSnapshots,
     evidence,
     stopLogcat,
     writeEvidence: store.writeEvidence,
@@ -345,6 +377,30 @@ function harness(
 }
 
 describe("GenerationStepExecutor", () => {
+  it("binds and closes one provider through the production factory path", async () => {
+    const runtime = snapshot();
+    const test = harness(session(runtime), () => "attempt-1", true);
+    vi.mocked(test.uiSnapshotProvider.close).mockRejectedValueOnce(
+      new Error("provider close failed")
+    );
+
+    await expect(test.execute({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime,
+      source: "planner"
+    })).resolves.toMatchObject({ status: "succeeded" });
+
+    expect(test.uiSnapshots.open).toHaveBeenCalledOnce();
+    expect(test.uiSnapshots.open).toHaveBeenCalledWith({
+      deviceSerial: "emulator-5554",
+      timeoutMs: 10
+    });
+    expect(test.createFreshnessGuard).toHaveBeenCalledOnce();
+    expect(test.guard).toHaveBeenCalledOnce();
+    expect(test.uiSnapshotProvider.close).toHaveBeenCalledOnce();
+  });
+
   it("durably begins a fresh safe step before ADB action and appends literals with provenance", async () => {
     const runtime = snapshot();
     const test = harness(session(runtime));
@@ -405,6 +461,31 @@ describe("GenerationStepExecutor", () => {
     expect(JSON.stringify(test.evidence.get(
       "evidence/steps/0-attempt-1/result.json"
     ))).toMatch(/"sha256":"[a-f0-9]{64}"/);
+  });
+
+  it("does not execute an action whose live geometry is outside the viewport", async () => {
+    const runtime = snapshot();
+    const test = harness(session(runtime), () => "attempt-1", false, {
+      width: 80,
+      height: 80,
+      rotation: 0,
+      coordinateSpace: "physicalDisplayPixels"
+    });
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { code: "ACTION_FAILED" }
+    });
+    if (result.status !== "failed") throw new Error("Expected failed result");
+    expect(result.failure.message).toContain("viewport");
+    expect(test.adb.tap).not.toHaveBeenCalled();
   });
 
   it("consumes only an exact non-expired approved challenge and rejects replay", async () => {

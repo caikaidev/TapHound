@@ -26,6 +26,43 @@ describe("TapHoundConfigSchema", () => {
     expect(TapHoundConfigSchema.parse(validConfig)).toEqual(validConfig);
   });
 
+  it("keeps ui absent for old configs and accepts explicit backend settings", () => {
+    expect(TapHoundConfigSchema.parse(validConfig)).not.toHaveProperty("ui");
+    expect(TapHoundConfigSchema.parse({
+      ...validConfig,
+      ui: {
+        backend: "system-uiautomator",
+        snapshotTimeoutMs: 2500
+      }
+    }).ui).toEqual({
+      backend: "system-uiautomator",
+      snapshotTimeoutMs: 2500
+    });
+  });
+
+  it.each([
+    "auto",
+    "system-uiautomator",
+    "android-cli",
+    "appium-uiautomator2"
+  ] as const)("accepts the %s UI backend", (backend) => {
+    expect(TapHoundConfigSchema.parse({
+      ...validConfig,
+      ui: { backend }
+    }).ui?.backend).toBe(backend);
+  });
+
+  it("rejects invalid UI settings without adding defaults", () => {
+    expect(() => TapHoundConfigSchema.parse({
+      ...validConfig,
+      ui: { backend: "espresso" }
+    })).toThrow();
+    expect(() => TapHoundConfigSchema.parse({
+      ...validConfig,
+      ui: { backend: "auto", snapshotTimeoutMs: 0 }
+    })).toThrow();
+  });
+
   it("defaults the idle strategy to hybrid", () => {
     const config = structuredClone(validConfig);
     Reflect.deleteProperty(config.idle, "strategy");

@@ -3,8 +3,14 @@ import {
   type ObserveReport
 } from "../../domain/observation.js";
 import type { AdbPort } from "../../ports/adb.js";
-import type { AndroidCliPort } from "../../ports/android-cli.js";
 import type { CommandResult } from "../../ports/process-runner.js";
+import type {
+  UiSnapshot,
+  UiSnapshotProvider,
+  UiSnapshotProviderFactory
+} from "../../ports/ui-snapshot.js";
+import type { UiBackendSelection } from "../../domain/ui-backend.js";
+import { closeUiSnapshotProvider } from "../ui/ui-snapshot-lifecycle.js";
 
 export interface ObserveInput {
   packageName: string;
@@ -15,8 +21,10 @@ export interface ObserveInput {
 
 export interface ObserveDependencies {
   adb: AdbPort;
-  androidCli: AndroidCliPort;
+  uiSnapshots: UiSnapshotProviderFactory;
   layoutTimeoutMs: number;
+  backend?: UiBackendSelection | undefined;
+  cacheEnabled?: boolean | undefined;
 }
 
 function failedCommand(result: CommandResult): boolean {
@@ -53,12 +61,32 @@ export class ObserveService {
       ? foreground.activity
       : undefined;
 
-    const layout = await this.dependencies.androidCli.layout({
+    const uiSnapshotProvider = await this.dependencies.uiSnapshots.open({
       deviceSerial,
-      packageName,
       timeoutMs: this.dependencies.layoutTimeoutMs,
+      ...(this.dependencies.backend === undefined
+        ? {}
+        : { backend: this.dependencies.backend }),
+      ...(this.dependencies.cacheEnabled === undefined
+        ? {}
+        : { cacheEnabled: this.dependencies.cacheEnabled }),
       ...(signal === undefined ? {} : { signal })
     });
+    let uiCache: ReturnType<NonNullable<
+      UiSnapshotProvider["cacheTelemetry"]
+    >> | undefined;
+    const uiSnapshot = await (async (): Promise<UiSnapshot> => {
+      try {
+        return await uiSnapshotProvider.capture({
+          reason: "observe",
+          timeoutMs: this.dependencies.layoutTimeoutMs,
+          ...(signal === undefined ? {} : { signal })
+        });
+      } finally {
+        uiCache = uiSnapshotProvider.cacheTelemetry?.();
+        await closeUiSnapshotProvider(uiSnapshotProvider);
+      }
+    })();
 
     let logcat: string[] | undefined;
     if (logcatLines !== undefined && logcatLines > 0) {
@@ -82,7 +110,10 @@ export class ObserveService {
       packageName,
       ...(activity === undefined ? {} : { activity }),
       foreground,
-      layout,
+      uiBackend: uiSnapshot.backend,
+      uiCaptureDurationMs: uiSnapshot.durationMs,
+      ...(uiCache === undefined ? {} : { uiCache }),
+      layout: uiSnapshot.roots,
       ...(logcat === undefined ? {} : { logcat })
     });
   }

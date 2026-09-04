@@ -14,6 +14,10 @@ import { hashJourney } from "../../../src/domain/report.js";
 import { contextSelection } from "../../fixtures/project-context.js";
 import { validReport } from "../../fixtures/report.js";
 import { runtimeJourney } from "../../fakes/runtime-fixture.js";
+import {
+  uiSnapshotFactory,
+  uiSnapshotProvider
+} from "../../fakes/ui-snapshot.js";
 
 const config: TapHoundConfig = {
   version: 1,
@@ -60,13 +64,16 @@ function starter(validationStatus: "valid" | "stale" | "invalid" = "valid"): {
   service: GenerationStarter;
   created: GenerationSession[];
   prepare: ReturnType<typeof vi.fn>;
+  provider: ReturnType<typeof uiSnapshotProvider>;
 } {
   const created: GenerationSession[] = [];
   const ids = ["generation-core-id", "journey-run-id"];
   const prepare = vi.fn(() => Promise.resolve());
+  const provider = uiSnapshotProvider();
   return {
     created,
     prepare,
+    provider,
     service: new GenerationStarter({
       contextValidator: {
         validate: vi.fn(() => Promise.resolve(
@@ -84,6 +91,7 @@ function starter(validationStatus: "valid" | "stale" | "invalid" = "valid"): {
         ))
       },
       appPreparer: { prepare },
+      uiSnapshots: uiSnapshotFactory(provider),
       store: {
         create: vi.fn((session: GenerationSession) => {
           created.push(session);
@@ -165,6 +173,12 @@ describe("GenerationStarter", () => {
     expect(session.bindings.configHash).toMatch(/^[a-f\d]{64}$/);
     expect(session.bindings.contextHash).toMatch(/^[a-f\d]{64}$/);
     expect(session.bindings.snapshotHash).toBeNull();
+    expect(session.bindings.uiBackend).toEqual({
+      id: "system-uiautomator",
+      adapterVersion: "test-v1",
+      configSha256: "0".repeat(64)
+    });
+    expect(test.provider.close).toHaveBeenCalledOnce();
     expect(test.prepare).toHaveBeenCalledOnce();
     expect(test.prepare).toHaveBeenCalledWith({
       config,

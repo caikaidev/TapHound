@@ -1,6 +1,10 @@
 import type { FailureCode } from "../../domain/failure.js";
 import type { JourneyStep } from "../../domain/journey.js";
-import type { AndroidCliPort, Point } from "../../ports/android-cli.js";
+import type { Point } from "../../domain/geometry.js";
+import type {
+  AnnotatedScreenResolverPort
+} from "../../ports/annotated-screen-resolver.js";
+import type { ScreenshotPort } from "../../ports/screenshot.js";
 
 export type FallbackResolution =
   | { status: "unavailable" }
@@ -21,7 +25,8 @@ export type FallbackResolution =
 
 export class FallbackResolver {
   public constructor(
-    private readonly androidCli: AndroidCliPort,
+    private readonly screenshots: ScreenshotPort,
+    private readonly annotatedScreens: AnnotatedScreenResolverPort,
     private readonly deviceSerial: string
   ) {}
 
@@ -37,7 +42,7 @@ export class FallbackResolver {
       return { status: "unavailable" };
     }
 
-    const capture = await this.androidCli.captureScreen({
+    const capture = await this.screenshots.capture({
       outputPath: annotatedScreenshotPath,
       annotate: true,
       deviceSerial: this.deviceSerial,
@@ -52,7 +57,7 @@ export class FallbackResolver {
     }
 
     try {
-      const point = await this.androidCli.resolveScreen(
+      const point = await this.annotatedScreens.resolve(
         annotatedScreenshotPath,
         step.fallback.label,
         signal

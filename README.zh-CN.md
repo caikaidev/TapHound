@@ -89,8 +89,10 @@ git diff --exit-code -- assets/brand/png
   `no-meta` 或 `invalid`。`--strict` 在存在非 fresh Journey 时以非零码退出，
   可用于 CI 门禁。
 - `generation start` / `observe` / `step` / `confirm` / `manual` / `bridge` /
-  `status` / `recover` / `archive` / `list` / `finalize`：管理确定性 Journey 生成会话。
+  `status` / `recover` / `config idle` / `archive` / `list` / `finalize`：管理确定性 Journey 生成会话。
   `bridge` 通过已绑定的 External Flow 记录跨应用流程（如相机、选择器、分享）。
+  `config idle` 无需重启会话即可热调整 idle 策略；`step --replace <index>`
+  通过确定性重放已存储前缀并绑定全新 snapshot，回退活动会话。
 - `init`：为 AI Agent 安装 TapHound 两个内置 Skill（`taphound-journey-brief-author`、`taphound-journey-generator`）。
 - `align camera`：探测设备默认相机应用并写入确定性
   `flows/external/camera/photo-capture.json` External Flow。覆盖已存在的 flow 需要
@@ -247,7 +249,10 @@ Base Flow 重放失败时，`generation start --json` 会返回
 
 `generation manual` 会交互式构建、执行并记录一个确定性 Journey step。Generation
 step JSON 会分别报告 freshness、证据准备、观察、action、idle 等待、expect、Logcat
-收集及可选后续观察的耗时。
+收集及可选后续观察的耗时。当某个 locator 或 step 需要修正时，
+`generation step --replace <index>` 会重放已存储的候选前缀 `[0, index)`，将会话
+截断到该前缀并绑定全新 snapshot，使重新提案从已存储前缀继续而无需重启会话；
+落在绑定的 Base Flow 前缀内的索引会被拒绝。
 
 ### 为外部 AI Agent 安装 TapHound 测试技能 (Installing the Skills)
 

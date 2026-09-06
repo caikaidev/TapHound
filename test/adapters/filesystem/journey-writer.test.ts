@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { FileSystemGenerationMetaWriter } from "../../../src/adapters/filesystem/generation-meta-writer.js";
 import { FileSystemJourneyWriter } from "../../../src/adapters/filesystem/journey-writer.js";
 import { runtimeJourney } from "../../fakes/runtime-fixture.js";
+import { contextSelection } from "../../fixtures/project-context.js";
 
 const roots: string[] = [];
 
@@ -145,6 +146,7 @@ describe("FileSystemJourneyWriter", () => {
           configHash: "b".repeat(64),
           contextHash: "c".repeat(64)
         },
+        contextSelection,
         verification: {
           reportPath: "verification/report.json",
           reportSha256: "d".repeat(64),

@@ -1261,6 +1261,7 @@ export class GenerationFinalizer {
           ? {}
           : { uiBackend: session.bindings.uiBackend })
       },
+      contextSelection: session.contextSelection,
       verification: {
         reportPath: GENERATION_BUNDLE_PATHS.verificationReport,
         reportSha256: session.verification.reportSha256,

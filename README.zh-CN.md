@@ -84,6 +84,10 @@ git diff --exit-code -- assets/brand/png
 - `journey list-flows` / `journey resolve`：校验可复用 Flow，并将组合式 Journey
   Source 解析为扁平 Journey v2。`list-flows --include-external` 还会列出供
   `generation bridge --flow` 使用的 External Flow。
+- `journey check`：将 `.taphound/journeys` 下的每个已提交 Journey 按其 meta
+  边界（项目、配置、Context 模块选择）与当前项目比对，分类为 `fresh`、`stale`、
+  `no-meta` 或 `invalid`。`--strict` 在存在非 fresh Journey 时以非零码退出，
+  可用于 CI 门禁。
 - `generation start` / `observe` / `step` / `confirm` / `manual` / `bridge` /
   `status` / `recover` / `archive` / `list` / `finalize`：管理确定性 Journey 生成会话。
   `bridge` 通过已绑定的 External Flow 记录跨应用流程（如相机、选择器、分享）。

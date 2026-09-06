@@ -559,6 +559,7 @@ describe("GenerationFinalizer", () => {
     expect(result.replayed).toBe(true);
     expect(result.journey.name).toBe("generated");
     expect(result.meta.manualOverrideStepIndexes).toEqual([0]);
+    expect(result.meta.contextSelection).toEqual(contextSelection);
     expect(test.forceStop).not.toHaveBeenCalled();
     expect(test.verify).toHaveBeenCalledOnce();
     expect(test.verify).toHaveBeenCalledWith(expect.objectContaining({

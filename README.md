@@ -84,6 +84,10 @@ See the [local testing guide](docs/local-testing.md) for source, npm tarball, an
 - `journey list-flows` / `journey resolve`: validate reusable Flows and resolve
   composed Journey Sources into flat Journey v2 files. `list-flows --include-external`
   also lists External Flows used by `generation bridge --flow`.
+- `journey check`: classify every committed Journey under `.taphound/journeys`
+  as `fresh`, `stale`, `no-meta`, or `invalid` by comparing its meta sidecar
+  bindings (project, config, Context module selection) against the live
+  project. `--strict` exits non-zero for CI when any Journey is not fresh.
 - `generation start` / `observe` / `step` / `confirm` / `manual` / `bridge` /
   `status` / `recover` / `config idle` / `archive` / `list` / `finalize`:
   manage deterministic Journey generation sessions. `bridge` records cross-app

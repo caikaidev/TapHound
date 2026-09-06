@@ -14,7 +14,8 @@ import {
 } from "../../src/application/context/context-refresher.js";
 import {
   GenerationOperationError,
-  GenerationStarter
+  GenerationStarter,
+  hashGenerationBinding
 } from "../../src/application/generation/generation-starter.js";
 import { createProgram } from "../../src/cli/program.js";
 import type { CliDependencies, TextOutput } from "../../src/cli/dependencies.js";
@@ -259,7 +260,7 @@ describe("TapHound CLI commands", () => {
       )
     );
 
-    expect(configOptions).toHaveLength(19);
+    expect(configOptions).toHaveLength(20);
     expect(configOptions.every(
       (option) => option.defaultValue === CONFIG_PATH
     )).toBe(true);
@@ -810,6 +811,9 @@ describe("TapHound CLI commands", () => {
       listFlows: vi.fn()
     };
     test.value.journeyCompositionStore = {
+      read: vi.fn(),
+      listJourneyPaths: vi.fn(),
+      readJourneyMeta: vi.fn(),
       writeText: vi.fn((input: {
         relativePath: string;
         content: string;
@@ -863,7 +867,12 @@ describe("TapHound CLI commands", () => {
         resolutionSha256: "3".repeat(64)
       }]))
     };
-    test.value.journeyCompositionStore = { writeText: vi.fn() };
+    test.value.journeyCompositionStore = {
+      read: vi.fn(),
+      listJourneyPaths: vi.fn(),
+      readJourneyMeta: vi.fn(),
+      writeText: vi.fn()
+    };
 
     await createProgram(test.value).parseAsync([
       "node", "taphound", "journey", "list-flows",
@@ -895,7 +904,12 @@ describe("TapHound CLI commands", () => {
         resolutionSha256: "3".repeat(64)
       }]))
     };
-    test.value.journeyCompositionStore = { writeText: vi.fn() };
+    test.value.journeyCompositionStore = {
+      read: vi.fn(),
+      listJourneyPaths: vi.fn(),
+      readJourneyMeta: vi.fn(),
+      writeText: vi.fn()
+    };
     test.value.externalFlowResolver = {
       resolve: vi.fn(),
       list: vi.fn(() => Promise.resolve([{
@@ -930,6 +944,244 @@ describe("TapHound CLI commands", () => {
     expect(parsed.externalFlows[0]?.source).toBe("builtin");
     expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
     expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("checks Journeys with one exact JSON result", async () => {
+    const test = dependencies();
+    const projectHash = hashGenerationBinding({
+      projectRoot: "/project",
+      packageName: "com.example.app",
+      launchActivity: "com.example.app.MainActivity"
+    });
+    const meta = `${JSON.stringify({
+      version: 1,
+      status: "verified",
+      generationId: "generation-1",
+      journeyPath: ".taphound/journeys/search.json",
+      bindings: {
+        projectHash,
+        configHash: hashGenerationBinding(runtimeConfig),
+        contextHash: "c".repeat(64)
+      },
+      contextSelection,
+      verification: {
+        reportPath: "verification/report.json",
+        reportSha256: "d".repeat(64),
+        runId: "verify-run",
+        runs: 1
+      },
+      manualOverrideStepIndexes: []
+    })}\n`;
+    test.value.journeyResolver = {
+      resolve: vi.fn(),
+      resolveFlow: vi.fn(),
+      listFlows: vi.fn()
+    };
+    test.value.journeyCompositionStore = {
+      read: vi.fn(() => Promise.resolve(
+        Buffer.from(`${JSON.stringify(runtimeJourney)}\n`, "utf8")
+      )),
+      listJourneyPaths: vi.fn(() => Promise.resolve([
+        ".taphound/journeys/search.json"
+      ])),
+      readJourneyMeta: vi.fn(() => Promise.resolve(Buffer.from(meta, "utf8"))),
+      writeText: vi.fn()
+    };
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "journey", "check",
+      "--project", "/project",
+      "--context", ".taphound/context/project-context.json",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toEqual({
+      status: "checked",
+      exitCode: 0,
+      strict: false,
+      summary: { total: 1, fresh: 1, stale: 0, noMeta: 0, invalid: 0 },
+      journeys: [{
+        name: "search",
+        journeyPath: ".taphound/journeys/search.json",
+        metaPath: ".taphound/journeys/search.meta.json",
+        status: "fresh",
+        reasons: [],
+        driftedModules: []
+      }]
+    });
+    expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
+    expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("exits non-zero for drifted Journeys only under --strict", async () => {
+    const test = dependencies();
+    const projectHash = hashGenerationBinding({
+      projectRoot: "/project",
+      packageName: "com.example.app",
+      launchActivity: "com.example.app.MainActivity"
+    });
+    const meta = `${JSON.stringify({
+      version: 1,
+      status: "verified",
+      generationId: "generation-1",
+      journeyPath: ".taphound/journeys/search.json",
+      bindings: {
+        projectHash,
+        configHash: hashGenerationBinding(runtimeConfig),
+        contextHash: "c".repeat(64)
+      },
+      contextSelection: {
+        ...contextSelection,
+        modules: [{
+          ...contextSelection.modules[0],
+          sha256: "9".repeat(64)
+        }]
+      },
+      verification: {
+        reportPath: "verification/report.json",
+        reportSha256: "d".repeat(64),
+        runId: "verify-run",
+        runs: 1
+      },
+      manualOverrideStepIndexes: []
+    })}\n`;
+    test.value.journeyResolver = {
+      resolve: vi.fn(),
+      resolveFlow: vi.fn(),
+      listFlows: vi.fn()
+    };
+    test.value.journeyCompositionStore = {
+      read: vi.fn(() => Promise.resolve(
+        Buffer.from(`${JSON.stringify(runtimeJourney)}\n`, "utf8")
+      )),
+      listJourneyPaths: vi.fn(() => Promise.resolve([
+        ".taphound/journeys/search.json"
+      ])),
+      readJourneyMeta: vi.fn(() => Promise.resolve(Buffer.from(meta, "utf8"))),
+      writeText: vi.fn()
+    };
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "journey", "check",
+      "--project", "/project",
+      "--context", ".taphound/context/project-context.json",
+      "--json"
+    ]);
+    expect(test.exitCodes).toEqual([0]);
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "journey", "check",
+      "--project", "/project",
+      "--context", ".taphound/context/project-context.json",
+      "--json",
+      "--strict"
+    ]);
+    const parsed = JSON.parse(test.stdout.value.split("\n")[1] ?? "{}") as {
+      exitCode: number;
+      journeys: { reasons: string[]; driftedModules: unknown[] }[];
+    };
+    expect(parsed.exitCode).toBe(1);
+    expect(parsed.journeys[0]?.reasons).toEqual(["module-drift"]);
+    expect(parsed.journeys[0]?.driftedModules).toEqual([
+      { id: ":app", reason: "sha256" }
+    ]);
+    expect(test.exitCodes).toEqual([0, 1]);
+  });
+
+  it("prints a human-readable Journey check report", async () => {
+    const test = dependencies();
+    test.value.journeyResolver = {
+      resolve: vi.fn(),
+      resolveFlow: vi.fn(),
+      listFlows: vi.fn()
+    };
+    test.value.journeyCompositionStore = {
+      read: vi.fn(() => Promise.resolve(
+        Buffer.from(`${JSON.stringify(runtimeJourney)}\n`, "utf8")
+      )),
+      listJourneyPaths: vi.fn(() => Promise.resolve([
+        ".taphound/journeys/recorded.json"
+      ])),
+      readJourneyMeta: vi.fn(() => Promise.resolve(null)),
+      writeText: vi.fn()
+    };
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "journey", "check",
+      "--project", "/project",
+      "--context", ".taphound/context/project-context.json"
+    ]);
+
+    expect(test.stdout.value).toBe(
+      "recorded: no-meta\n"
+      + "Checked 1 Journeys: 0 fresh, 0 stale, 1 no-meta, 0 invalid\n"
+    );
+    expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("maps Journey check failures to CONFIG_INVALID and context codes", async () => {
+    const configFailure = dependencies();
+    configFailure.value.readJson = vi.fn(() => Promise.reject(
+      new Error("config.json does not exist")
+    ));
+    configFailure.value.journeyResolver = {
+      resolve: vi.fn(),
+      resolveFlow: vi.fn(),
+      listFlows: vi.fn()
+    };
+    configFailure.value.journeyCompositionStore = {
+      read: vi.fn(),
+      listJourneyPaths: vi.fn(),
+      readJourneyMeta: vi.fn(),
+      writeText: vi.fn()
+    };
+
+    await createProgram(configFailure.value).parseAsync([
+      "node", "taphound", "journey", "check",
+      "--project", "/project",
+      "--context", ".taphound/context/project-context.json",
+      "--json"
+    ]);
+
+    expect(JSON.parse(configFailure.stdout.value)).toMatchObject({
+      status: "error",
+      exitCode: 2,
+      failure: { code: "CONFIG_INVALID" }
+    });
+    expect(configFailure.exitCodes).toEqual([2]);
+
+    const contextFailure = dependencies();
+    contextFailure.value.contextLoader = {
+      load: vi.fn(),
+      readIndex: vi.fn(() => Promise.reject(
+        new ContextLoadError("CONTEXT_INVALID", "Project Context is unreadable")
+      ))
+    };
+    contextFailure.value.journeyResolver = {
+      resolve: vi.fn(),
+      resolveFlow: vi.fn(),
+      listFlows: vi.fn()
+    };
+    contextFailure.value.journeyCompositionStore = {
+      read: vi.fn(),
+      listJourneyPaths: vi.fn(),
+      readJourneyMeta: vi.fn(),
+      writeText: vi.fn()
+    };
+
+    await createProgram(contextFailure.value).parseAsync([
+      "node", "taphound", "journey", "check",
+      "--project", "/project",
+      "--context", ".taphound/context/project-context.json",
+      "--json"
+    ]);
+
+    expect(JSON.parse(contextFailure.stdout.value)).toMatchObject({
+      status: "error",
+      exitCode: 2,
+      failure: { code: "CONTEXT_INVALID" }
+    });
+    expect(contextFailure.exitCodes).toEqual([2]);
   });
 
   it("observes a generation with one exact JSON result", async () => {

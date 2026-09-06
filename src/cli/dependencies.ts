@@ -202,7 +202,7 @@ export interface CliDependencies {
   > | undefined;
   journeyCompositionStore?: Pick<
     JourneyCompositionStore,
-    "writeText"
+    "writeText" | "read" | "listJourneyPaths" | "readJourneyMeta"
   > | undefined;
   externalFlowResolver?: Pick<
     ExternalFlowResolver,

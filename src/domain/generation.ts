@@ -414,6 +414,7 @@ export const GenerationMetaSchema = z.strictObject({
     contextHash: Sha256Schema,
     uiBackend: UiBackendDescriptorSchema.optional()
   }),
+  contextSelection: ContextSelectionSchema.optional(),
   verification: z.strictObject({
     reportPath: BundleRelativePathSchema,
     reportSha256: Sha256Schema,

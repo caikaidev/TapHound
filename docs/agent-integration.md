@@ -133,6 +133,48 @@ taphound verify \
   --json
 ```
 
+## Checking Committed Journeys
+
+`journey check` audits every committed Journey under `.taphound/journeys/`
+without a device. It pairs each Journey with its `<name>.meta.json` sidecar
+(written by `generation finalize`) and classifies each entry as `fresh`,
+`stale`, `no-meta`, or `invalid`:
+
+- `fresh` — the Journey parses and every sidecar binding still matches the
+  live project: `projectHash`/`configHash` against `project describe` and the
+  normalized config, the recorded `journeyPath`, and every
+  `contextSelection` module's `sha256` against the live Context index.
+- `stale` — the Journey is structurally valid but a binding drifted:
+  `project-hash`, `config-hash`, `journey-path-mismatch`, `module-drift`
+  (a selected module shard's `sha256` changed), `module-missing` (a selected
+  module no longer exists in the live bundle; both list module ids in
+  `driftedModules`), or `meta-legacy`.
+- `no-meta` — the Journey has no sidecar, so freshness cannot be proven (for
+  example a hand-resolved or recorded Journey).
+- `invalid` — the Journey or sidecar is unreadable or fails its schema
+  (`journey-unreadable`, `journey-schema`, `meta-unreadable`, `meta-schema`).
+
+`meta-legacy` marks sidecars published before `contextSelection` was
+recorded. They classify as `stale` (fail-closed) because module drift can no
+longer be evaluated; re-run `generation finalize` to republish the Journey
+with the field.
+
+```bash
+taphound journey check \
+  --project /workspace/android-app \
+  --context .taphound/context/project-context.json \
+  --json
+```
+
+`--context` is required and names the live Project Context index; the command
+reads `.taphound/config.json` by default (override with `--config`). With
+`--json` it emits exactly one JSON value containing a `summary`
+(`total`/`fresh`/`stale`/`noMeta`/`invalid`) and per-Journey `journeys`
+entries, and the JSON `exitCode` matches the process exit code. Exit `0` means
+the check completed — findings or not; `2` reports config or Context errors;
+`4` is internal. `--strict` turns any non-fresh entry (stale, invalid, or
+no-meta) into exit `1` for CI gates.
+
 ## Machine Contract
 
 - The stdout of `verify --json` contains exactly one JSON value and a trailing newline, with no progress text.

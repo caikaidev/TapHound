@@ -205,6 +205,55 @@ describe("generation finalization evidence schemas", () => {
     }).steps).toHaveLength(2);
   });
 
+  it("parses verified meta with a Context selection and rejects drifted shapes", () => {
+    const meta = {
+      version: 1,
+      status: "verified",
+      generationId: "generation-1",
+      journeyPath: ".taphound/journeys/generated.json",
+      bindings: {
+        projectHash: "a".repeat(64),
+        configHash: "b".repeat(64),
+        contextHash: "c".repeat(64)
+      },
+      contextSelection: {
+        bundleVersion: 2,
+        indexHash: "f".repeat(64),
+        modules: [{
+          id: ":app",
+          sha256: "e".repeat(64),
+          projectDir: "app",
+          inventory: {
+            pathSetSha256: "1".repeat(64),
+            categories: ["manifests", "sources"]
+          }
+        }]
+      },
+      verification: {
+        reportPath: "verification/report.json",
+        reportSha256: "d".repeat(64),
+        runId: "verify-run",
+        runs: 1
+      },
+      manualOverrideStepIndexes: []
+    };
+    expect(GenerationMetaSchema.parse(meta)).toMatchObject({
+      contextSelection: { indexHash: "f".repeat(64) }
+    });
+    expect(GenerationMetaSchema.parse({
+      ...meta,
+      contextSelection: undefined
+    }).contextSelection).toBeUndefined();
+    expect(() => GenerationMetaSchema.parse({
+      ...meta,
+      contextSelection: { ...meta.contextSelection, bundleVersion: 3 }
+    })).toThrow();
+    expect(() => GenerationMetaSchema.parse({
+      ...meta,
+      contextSelection: { ...meta.contextSelection, modules: [] }
+    })).toThrow();
+  });
+
   it("rejects duplicate, escaped, and self-referential manifest paths", () => {
     const entry = {
       path: "verified/journey.json",

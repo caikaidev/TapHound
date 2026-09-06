@@ -423,8 +423,8 @@ All edges retain their Phase 1 confidence.
 
 - Use ONLY read-only commands: `observe`, `context generate`, `context
   refresh`, `context rehash`, `context validate`, `context status`,
-  `context list`, `doctor`, `project describe`. NEVER use `generation`,
-  `verify`, `record`, `align`.
+  `context list`, `journey check`, `doctor`, `project describe`. NEVER use
+  `generation`, `verify`, `record`, `align`.
 - Do NOT modify device state (no clicks, no input, no swipes).
 - The agent NEVER computes SHA-256 hashes manually. Core does all Context
   hashing via `context generate`, `context rehash`, and `context refresh`.
@@ -481,3 +481,8 @@ All edges retain their Phase 1 confidence.
 - `partial` and `notAnalyzed` modules are coverage gaps, not successful
   generation. Report them to the user. `unsupported` is a legitimate
   analyzed verdict and does not block generation.
+- After any Context refresh, rehash, or regeneration, committed Journeys may
+  no longer match the live bundle. Run `taphound journey check --project
+  <project> --context <context> --json` (read-only, no device) to surface
+  drifted Journeys (`module-drift`, `module-missing`, `meta-legacy`); the
+  `taphound-journey-generator` Skill re-finalizes them from their sessions.

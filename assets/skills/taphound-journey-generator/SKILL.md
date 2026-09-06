@@ -369,6 +369,53 @@ with manual replay — bind an External Flow or use a TTY).
 
 A successful bridge returns `nextBinding` and `nextSnapshotRef` like any step.
 
+### Knowledge-Planned Sessions (Goal-Bound Generation)
+
+When the project has a committed Knowledge Registry, a session can plan and
+execute known Transitions deterministically instead of agent-authored step
+proposals. See `docs/knowledge-planning.md` for the full protocol.
+
+1. Seed and inspect the Registry (fail-closed; bootstrap requires a fully
+   validated Context):
+   ```bash
+   taphound knowledge bootstrap --project <project> --json
+   taphound knowledge status --project <project> --json
+   ```
+2. Write a strict Goal Spec JSON (`version: 1`, `id`, `targetScreen`,
+   `parameters`, `limits.{maxSteps,maxReplans}`) and start a v2 session:
+   ```bash
+   taphound generation start ... --goal <goal.json>
+   ```
+   The session binds the Knowledge and Goal hashes immutably.
+3. Drive it with `generation next` (observe → recognize → route → resolve →
+   existing risk/confirmation flow) until `status: "goalReached"`, then
+   finalize normally. Final Replay never consults the planner.
+
+Offline dry run: `knowledge plan --goal <goal.json> --snapshot <snapshot.json>
+--json` recognizes the Screen and computes the Route without device mutation.
+The `--snapshot` input must be a Core-owned RuntimeSnapshot from a generation
+session (the `snapshotRef` file). A plain `taphound observe --json` report is
+a device report, not a RuntimeSnapshot, and fails schema parsing.
+
+**Fixing `SCREEN_UNKNOWN` from conditional anchors.** Bootstrap promotes
+static Context evidence to required Screen anchors. Elements that render only
+conditionally (a clear button while a search field is empty, collapsible
+containers) then fail recognition at runtime even though the Activity anchors
+matched. Do not hand-edit `.taphound/knowledge/`. Capture the failing
+detection receipt (the error's `details.receiptPath`), build a promotion JSON
+that binds `expectedKnowledgeHash`, cites the receipt in `receiptIds`, moves
+only the proven-conditional anchor ids from `requiredAnchors` to
+`optionalAnchors`, and includes the complete `anchors`, `screens`, and
+`transitions` arrays (promotion replaces the Registry, it does not merge):
+
+```bash
+taphound knowledge promote --project <project> --input <promotion.json> --json
+```
+
+A promotion bumps the Registry revision and `knowledgeHash`; the current
+session keeps its old binding. Reach a natural stopping point, then start a
+new `--goal` session to continue planning under the promoted Registry.
+
 ## Phase 4: Finalize
 
 1. Start finalize as a detached job so the replay survives agent or terminal
@@ -444,6 +491,8 @@ A successful bridge returns `nextBinding` and `nextSnapshotRef` like any step.
 | Confirmation required      | Present to user, wait for approval              |
 | Recovery required          | Ask before retry; re-observe after              |
 | Config changed             | Start new session; only idle policy is hot-adjustable |
+| Knowledge `SCREEN_UNKNOWN` | Conditional anchors: receipt-backed `knowledge promote`, then a new `--goal` session |
+| `knowledge plan` rejects the snapshot | Pass a session `snapshotRef` file, not `observe --json` output |
 | Max steps exceeded         | Stop, report incomplete Goal                    |
 | Finalize not verified      | Report failure detail, do not claim success     |
 | Journey check reports stale/invalid | Inspect `reasons`; refresh Context or regenerate the Journey |
@@ -502,3 +551,17 @@ A successful bridge returns `nextBinding` and `nextSnapshotRef` like any step.
   session's selected module shards, stop and report a Context coverage gap.
   Do not add modules after start because `contextSelection` is bound to the
   authoritative session.
+- Repeated `UI_SNAPSHOT_FAILED` ("UIAutomator dump failed") on a slow or
+  busy device usually means the dump deadline is too tight, not that the
+  device is broken. Raise `ui.snapshotTimeoutMs` in `.taphound/config.json`
+  (for example 10000 → 60000) and start a new session; config changes after
+  start invalidate the session.
+- Source evidence drifts while you work (branch switches, concurrent edits).
+  `generation start` fail-closes with `CONTEXT_STALE` naming one file. Run
+  `context refresh` (add `--accept-source-changes`/`--prune-deleted` after
+  reviewing the named changes), re-run `knowledge bootstrap` if the Registry
+  must track the Context, then retry. Never pass
+  `--allow-evidence-drift` to "save time".
+- A `knowledge promote` bumps the Registry `knowledgeHash`. Sessions bind
+  that hash at start, so planning verification after a promotion requires a
+  new `--goal` session; existing sessions keep their old binding by design.

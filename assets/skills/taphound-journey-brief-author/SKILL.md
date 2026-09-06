@@ -486,3 +486,10 @@ All edges retain their Phase 1 confidence.
   <project> --context <context> --json` (read-only, no device) to surface
   drifted Journeys (`module-drift`, `module-missing`, `meta-legacy`); the
   `taphound-journey-generator` Skill re-finalizes them from their sessions.
+- Conditionally rendered elements (a clear button that only appears once a
+  search field has text, collapsed containers) are still valid Context
+  evidence — record them — but flag them in the shard `summary` as
+  conditional. Knowledge bootstrap promotes static evidence to required
+  Screen anchors, so unflagged conditional elements cause runtime
+  `SCREEN_UNKNOWN`; the generator fixes this through a receipt-backed
+  `knowledge promote`, and your flags tell it which anchors to expect.

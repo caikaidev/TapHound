@@ -1,10 +1,18 @@
 {
-  "version": 1,
+  "version": 2,
   "name": "open-message-menu",
+  "devices": [
+    {
+      "role": "default"
+    }
+  ],
   "steps": [
     {
       "action": "click",
-      "locator": { "resourceId": "conversation_item", "text": "Alice" },
+      "locator": {
+        "resourceId": "conversation_item",
+        "text": "Alice"
+      },
       "activity": {
         "before": "com.example.chat.HomeActivity",
         "after": "com.example.chat.ChatActivity"
@@ -12,8 +20,13 @@
     },
     {
       "action": "scrollTo",
-      "locator": { "resourceId": "message_bubble", "text": "shared a photo" },
-      "container": { "resourceId": "message_list" },
+      "locator": {
+        "resourceId": "message_bubble",
+        "text": "shared a photo"
+      },
+      "container": {
+        "resourceId": "message_list"
+      },
       "direction": "up",
       "maxSwipes": 12,
       "activity": {
@@ -23,7 +36,10 @@
     },
     {
       "action": "longClick",
-      "locator": { "resourceId": "message_bubble", "text": "shared a photo" },
+      "locator": {
+        "resourceId": "message_bubble",
+        "text": "shared a photo"
+      },
       "durationMs": 800,
       "activity": {
         "before": "com.example.chat.ChatActivity",
@@ -32,7 +48,9 @@
     },
     {
       "action": "click",
-      "locator": { "text": "Delete" },
+      "locator": {
+        "text": "Delete"
+      },
       "activity": {
         "before": "com.example.chat.ChatActivity",
         "after": "com.example.chat.ChatActivity"

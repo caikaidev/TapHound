@@ -87,6 +87,11 @@ interface Harness {
   archive: Mock;
   list: Mock;
   readSession: Mock;
+  readContextSnapshot: Mock;
+  updateIdlePolicy: Mock;
+  replace: Mock;
+  contextValidate: Mock;
+  contextLoad: Mock;
   workspaceLayout: FakeWorkspaceLayout;
 }
 
@@ -97,7 +102,8 @@ function harness(signal?: AbortSignal): Harness {
   const workspaceLayout = fakeWorkspaceLayout();
   const request = vi.fn<() => Promise<ConfirmationRequestResult>>(() => Promise.resolve({
     status: "approved" as const,
-    proposal
+    proposal,
+    snapshot
   }));
   const execute = vi.fn(() => Promise.resolve({
     status: "succeeded" as const,
@@ -179,7 +185,50 @@ function harness(signal?: AbortSignal): Harness {
   const readSession = vi.fn(() => Promise.resolve({
     revision: 4,
     candidateSteps: [{}],
-    contextSelection
+    contextSelection,
+    target: {
+      packageName: "com.example.app",
+      deviceSerial: "emulator-5554",
+      resetStrategy: "processOnly" as const,
+      interactionPolicy: {
+        allowedActions: ["click", "wait"],
+        confirmationRequiredActions: [],
+        forbiddenActions: []
+      }
+    }
+  }));
+  const readContextSnapshot = vi.fn(
+    (): Promise<unknown> => Promise.resolve(null)
+  );
+  const updateIdlePolicy = vi.fn(() => Promise.resolve({
+    revision: 5,
+    idlePolicy: {
+      strategy: "hybrid" as const,
+      pollIntervalMs: 500,
+      stablePolls: 3,
+      timeoutMs: 30000
+    }
+  }));
+  const replace = vi.fn(() => Promise.resolve({
+    status: "replaced" as const,
+    stepIndex: 1,
+    remainingStepCount: 1,
+    truncatedStepCount: 2,
+    observation: {
+      binding: proposal.binding,
+      snapshot,
+      snapshotHash: proposal.binding.snapshotHash,
+      snapshotRef: "evidence://generation-1/snapshots/rev-5.json"
+    }
+  }));
+  const contextValidate = vi.fn(() => Promise.resolve({
+    status: "valid" as const
+  }));
+  const contextLoad = vi.fn(() => Promise.resolve({
+    context: generationContext,
+    binding: generationContext,
+    bundle: projectContextIndex,
+    modules: [projectContextModule]
   }));
   const dependencies = {
     ...(signal === undefined ? {} : { signal }),
@@ -203,14 +252,9 @@ function harness(signal?: AbortSignal): Harness {
         launchActivity: "com.example.app.MainActivity"
       }))
     },
-    contextValidator: { validate: vi.fn() },
+    contextValidator: { validate: contextValidate },
     contextLoader: {
-      load: vi.fn(() => Promise.resolve({
-        context: generationContext,
-        binding: generationContext,
-        bundle: projectContextIndex,
-        modules: [projectContextModule]
-      })),
+      load: contextLoad,
       readIndex: vi.fn(() => Promise.resolve({
         bundle: projectContextIndex,
         indexHash: contextSelection.indexHash
@@ -247,6 +291,9 @@ function harness(signal?: AbortSignal): Harness {
       archive,
       list,
       readSession,
+      readContextSnapshot,
+      updateIdlePolicy,
+      replace,
       assertConfigIdentity
     })),
     detachedProcess: {
@@ -284,6 +331,11 @@ function harness(signal?: AbortSignal): Harness {
     archive,
     list,
     readSession,
+    readContextSnapshot,
+    updateIdlePolicy,
+    replace,
+    contextValidate,
+    contextLoad,
     workspaceLayout
   };
 }
@@ -351,6 +403,72 @@ describe("generation JSON process protocol", () => {
     expect(read).toHaveBeenCalledWith("generation-1");
   });
 
+  it("emits a compact contextSelection for generation start --compact", async () => {
+    const test = harness();
+    const moduleSelection = {
+      sha256: "e".repeat(64),
+      projectDir: "app",
+      inventory: {
+        pathSetSha256: "c".repeat(64),
+        categories: ["manifests", "sources", "layouts", "navigation"] as const
+      }
+    };
+    (test.dependencies.generationStarter.start as unknown as Mock)
+      .mockResolvedValueOnce({
+        id: "generation-1",
+        revision: 0,
+        bindings: {
+          projectHash: "a".repeat(64),
+          configHash: "b".repeat(64),
+          contextHash: "c".repeat(64),
+          snapshotHash: null
+        },
+        contextSelection: {
+          bundleVersion: 2 as const,
+          indexHash: "f".repeat(64),
+          modules: [
+            { id: ":app", ...moduleSelection },
+            { id: ":feature:search", ...moduleSelection }
+          ]
+        },
+        variables: {
+          runId: "journey-run-42",
+          timestamp: "2026-07-22T12:00:00.000Z",
+          randomHex: "c0ffee"
+        },
+        target: {
+          packageName: "com.example.app",
+          deviceSerial: "emulator-5554",
+          resetStrategy: "processOnly" as const,
+          interactionPolicy: {
+            allowedActions: ["click", "wait"],
+            confirmationRequiredActions: [],
+            forbiddenActions: []
+          }
+        },
+        externalFlows: []
+      });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "start",
+      "--project", "/project",
+      "--context", ".taphound/context/project-context.json",
+      "--compact",
+      "--json"
+    ]);
+
+    const output = JSON.parse(test.stdout.value) as {
+      contextSelection: Record<string, unknown>;
+    };
+    expect(output.contextSelection).toEqual({
+      bundleVersion: 2,
+      indexHash: "f".repeat(64),
+      moduleIds: [":app", ":feature:search"]
+    });
+    expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
+    expect(test.exitCodes).toEqual([0]);
+  });
+
   it("executes a strict planner envelope and emits exactly one JSON value", async () => {
     const test = harness();
 
@@ -385,6 +503,72 @@ describe("generation JSON process protocol", () => {
     expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
     expect(test.stderr.value).toBe("");
     expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("executes a snapshotRef planner envelope through stored evidence", async () => {
+    const test = harness();
+    const snapshotRef = ".taphound/build/generations/.generation-1.work/evidence/snapshots/revision-000002/attempt-1/snapshot.json";
+    vi.mocked(test.dependencies.readJson).mockResolvedValueOnce(runtimeConfig)
+      .mockResolvedValueOnce({
+        version: 1,
+        proposal,
+        snapshotRef
+      });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "step",
+      "--project", "/project",
+      "--input", "input.json",
+      "--session", "generation-1",
+      "--json"
+    ]);
+
+    expect(test.request).toHaveBeenCalledWith({
+      generationId: "generation-1",
+      proposal,
+      snapshotRef,
+      source: "planner"
+    });
+    expect(test.execute).toHaveBeenCalledWith({
+      generationId: "generation-1",
+      proposal,
+      snapshot,
+      source: "planner"
+    });
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "succeeded",
+      exitCode: 0,
+      generationId: "generation-1"
+    });
+    expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("rejects a planner envelope carrying both snapshot and snapshotRef", async () => {
+    const test = harness();
+    vi.mocked(test.dependencies.readJson).mockResolvedValueOnce(runtimeConfig)
+      .mockResolvedValueOnce({
+        version: 1,
+        proposal,
+        snapshot,
+        snapshotRef: ".taphound/build/generations/.generation-1.work/evidence/snapshots/revision-000002/attempt-1/snapshot.json"
+      });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "step",
+      "--project", "/project",
+      "--input", "input.json",
+      "--session", "generation-1",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "error",
+      exitCode: 2,
+      failure: { code: "CONTEXT_INVALID" }
+    });
+    expect(test.request).not.toHaveBeenCalled();
+    expect(test.execute).not.toHaveBeenCalled();
+    expect(test.exitCodes).toEqual([2]);
   });
 
   it.each([
@@ -1323,6 +1507,109 @@ describe("generation JSON process protocol", () => {
     );
   });
 
+  it("finalizes from the stored context snapshot without reading live context", async () => {
+    const test = harness();
+    test.readContextSnapshot.mockResolvedValueOnce(resolvedProjectContext);
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "finalize",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--output", ".taphound/journeys/generated.json",
+      "--json"
+    ]);
+
+    expect(test.contextLoad).not.toHaveBeenCalled();
+    expect(test.contextValidate).toHaveBeenCalledWith(
+      expect.objectContaining({ context: resolvedProjectContext })
+    );
+    expect(test.finalize).toHaveBeenCalledWith(expect.objectContaining({
+      context: resolvedProjectContext,
+      contextFromSnapshot: true
+    }));
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "verified",
+      exitCode: 0
+    });
+    expect(test.stderr.value).toBe("");
+  });
+
+  it("warns on stderr when live context drifted from the session snapshot", async () => {
+    const test = harness();
+    test.readContextSnapshot.mockResolvedValueOnce(resolvedProjectContext);
+    test.contextValidate.mockResolvedValueOnce({
+      status: "stale",
+      reason: {
+        code: "EVIDENCE_HASH_MISMATCH",
+        message: "Evidence file changed"
+      }
+    });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "finalize",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--output", ".taphound/journeys/generated.json",
+      "--json"
+    ]);
+
+    expect(test.stderr.value).toContain(
+      "TapHound warning: live project context drifted from the session snapshot"
+    );
+    expect(test.stderr.value).toContain("EVIDENCE_HASH_MISMATCH");
+    expect(test.finalize).toHaveBeenCalledWith(
+      expect.objectContaining({ contextFromSnapshot: true })
+    );
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "verified",
+      exitCode: 0
+    });
+  });
+
+  it("requires --context for legacy sessions without a stored snapshot", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "finalize",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--output", ".taphound/journeys/generated.json",
+      "--json"
+    ]);
+
+    expect(test.contextLoad).not.toHaveBeenCalled();
+    expect(test.finalize).not.toHaveBeenCalled();
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "error",
+      exitCode: 2,
+      failure: { code: "CONFIG_INVALID" }
+    });
+  });
+
+  it("omits --context in the detached finalize child for snapshot sessions", async () => {
+    const test = harness();
+    test.readContextSnapshot.mockResolvedValueOnce(resolvedProjectContext);
+    const launch = test.dependencies.detachedProcess?.launch as unknown as Mock;
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "finalize",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--output", ".taphound/journeys/generated.json",
+      "--detach",
+      "--json"
+    ]);
+
+    const launched = launch.mock.calls[0]?.[0] as { args: string[] };
+    expect(launched.args).not.toContain("--context");
+    expect(test.contextValidate).not.toHaveBeenCalled();
+    expect(test.finalize).not.toHaveBeenCalled();
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "finalizationStarted",
+      exitCode: 0
+    });
+  });
+
   it("returns durable generation status as one JSON value", async () => {
     const test = harness();
 
@@ -1387,6 +1674,114 @@ describe("generation JSON process protocol", () => {
     expect(test.stdout.value).toContain("Recovery: unavailable");
     expect(test.stdout.value).toContain("Action may have executed: yes");
     expect(test.stderr.value).toBe("");
+  });
+
+  it("renders the verification phase for human status when present", async () => {
+    const test = harness();
+    test.recoveryStatus.mockResolvedValueOnce({
+      ...(await test.recoveryStatus()),
+      verification: {
+        status: "running",
+        attemptId: "verify-1",
+        ownerPid: 4321,
+        startedAt: "2026-07-23T00:00:00.000Z",
+        phase: { stage: "replaying", stepIndex: 1, stepCount: 3 }
+      }
+    });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "status",
+      "--project", "/project",
+      "--session", "generation-1"
+    ]);
+
+    expect(test.stdout.value).toContain(
+      "Verification phase: replaying step 2/3"
+    );
+    expect(test.stderr.value).toBe("");
+  });
+
+  it("includes the verification phase in JSON status output", async () => {
+    const test = harness();
+    test.recoveryStatus.mockResolvedValueOnce({
+      ...(await test.recoveryStatus()),
+      verification: {
+        status: "running",
+        attemptId: "verify-1",
+        phase: { stage: "collecting" }
+      }
+    });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "status",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "inspected",
+      exitCode: 0,
+      verification: {
+        status: "running",
+        phase: { stage: "collecting" }
+      }
+    });
+  });
+
+  it("reports replay phase progress on stderr while waiting", async () => {
+    const test = harness();
+    const running = (stepIndex: number): GenerationRecoveryStatus => ({
+      generationId: "generation-1",
+      revision: 4,
+      state: "active",
+      candidateStepCount: 2,
+      inFlight: null,
+      pendingConfirmation: null,
+      verification: {
+        status: "running",
+        attemptId: "verify-1",
+        phase: { stage: "replaying", stepIndex, stepCount: 2 }
+      },
+      publication: { status: "notRun" },
+      recovery: {
+        available: false,
+        kind: null,
+        actionMayHaveExecuted: false,
+        attemptOutcome: null,
+        requiredDecision: null,
+        ownerAlive: true
+      }
+    });
+    test.recoveryStatus
+      .mockReset()
+      .mockResolvedValueOnce(running(0))
+      .mockResolvedValueOnce(running(0))
+      .mockResolvedValueOnce(running(1))
+      .mockResolvedValueOnce({
+        ...running(1),
+        verification: { status: "passed", attemptId: "verify-1" },
+        publication: { status: "published" }
+      });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "status",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--wait",
+      "--timeout-ms", "10000",
+      "--json"
+    ]);
+
+    expect(test.recoveryStatus).toHaveBeenCalledTimes(4);
+    expect(test.stderr.value).toBe(
+      "TapHound verification: replaying step 1/2\n"
+      + "TapHound verification: replaying step 2/2\n"
+    );
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "inspected",
+      publication: { status: "published" }
+    });
   });
 
   it("waits until generation publication is terminal", async () => {
@@ -1642,6 +2037,324 @@ describe("generation JSON process protocol", () => {
     expect(test.stdout.value).toContain("generation-1");
   });
 
+  it("updates the session idle policy as one JSON value", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "config", "idle",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--strategy", "structural",
+      "--poll-interval-ms", "250",
+      "--stable-polls", "4",
+      "--timeout-ms", "30000",
+      "--json"
+    ]);
+
+    expect(test.updateIdlePolicy).toHaveBeenCalledWith("generation-1", {
+      strategy: "structural",
+      pollIntervalMs: 250,
+      stablePolls: 4,
+      timeoutMs: 30000
+    });
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "updated",
+      exitCode: 0,
+      generationId: "generation-1",
+      revision: 5,
+      idlePolicy: {
+        strategy: "hybrid",
+        pollIntervalMs: 500,
+        stablePolls: 3,
+        timeoutMs: 30000
+      }
+    });
+  });
+
+  it("renders the idle policy update for human output", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "config", "idle",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--timeout-ms", "30000"
+    ]);
+
+    expect(test.updateIdlePolicy).toHaveBeenCalledWith("generation-1", {
+      timeoutMs: 30000
+    });
+    expect(test.exitCodes[0]).toBe(0);
+    expect(test.stdout.value).toContain("revision 5");
+    expect(test.stdout.value).toContain("timeout 30000ms");
+  });
+
+  it("rejects an idle policy update without any setting", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "config", "idle",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--json"
+    ]);
+
+    expect(test.updateIdlePolicy).not.toHaveBeenCalled();
+    const output = JSON.parse(test.stdout.value) as {
+      status: string;
+      exitCode: number;
+      failure: { code: string };
+    };
+    expect(output.exitCode).toBe(2);
+    expect(output.failure.code).toBe("CONFIG_INVALID");
+    expect(test.exitCodes[0]).toBe(2);
+  });
+
+  it("rejects an idle policy update with an invalid strategy", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "config", "idle",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--strategy", "guessing",
+      "--json"
+    ]);
+
+    expect(test.updateIdlePolicy).not.toHaveBeenCalled();
+    expect(test.exitCodes[0]).toBe(2);
+  });
+
+  it("renders the session idle policy in status text", async () => {
+    const test = harness();
+    test.recoveryStatus.mockReturnValueOnce(Promise.resolve({
+      generationId: "generation-1",
+      revision: 4,
+      state: "active" as const,
+      candidateStepCount: 1,
+      idlePolicy: {
+        strategy: "structural" as const,
+        pollIntervalMs: 250,
+        stablePolls: 4,
+        timeoutMs: 30000
+      },
+      inFlight: null,
+      pendingConfirmation: null,
+      verification: { status: "notRun" as const },
+      publication: { status: "notRun" as const },
+      recovery: {
+        available: false,
+        kind: null,
+        actionMayHaveExecuted: false,
+        attemptOutcome: null,
+        requiredDecision: null,
+        ownerAlive: null
+      }
+    }));
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "status",
+      "--project", "/project",
+      "--session", "generation-1"
+    ]);
+
+    expect(test.stdout.value).toContain(
+      "Idle policy: strategy structural, poll 250ms x4, timeout 30000ms"
+    );
+  });
+
+  it("replaces candidate steps as one JSON value", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "step",
+      "--project", "/project",
+      "--replace", "1",
+      "--session", "generation-1",
+      "--json"
+    ]);
+
+    expect(test.replace).toHaveBeenCalledWith(expect.objectContaining({
+      generationId: "generation-1",
+      stepIndex: 1,
+      projectRoot: "/project",
+      toolVersions: { node: "24.1.0", adb: "1.0.41", android: "0.2.0" }
+    }));
+    const output = JSON.parse(test.stdout.value) as {
+      status: string;
+      exitCode: number;
+      stepIndex: number;
+      remainingStepCount: number;
+      truncatedStepCount: number;
+      snapshotRef: string;
+      snapshot: Record<string, unknown>;
+    };
+    expect(output).toMatchObject({
+      status: "replaced",
+      exitCode: 0,
+      generationId: "generation-1",
+      baseRevision: 2,
+      stepIndex: 1,
+      remainingStepCount: 1,
+      truncatedStepCount: 2,
+      snapshotRef: "evidence://generation-1/snapshots/rev-5.json"
+    });
+    expect(output.snapshot).toBeDefined();
+    expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
+    expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("omits the full snapshot for step replacement --compact", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "step",
+      "--project", "/project",
+      "--replace", "1",
+      "--compact",
+      "--session", "generation-1",
+      "--json"
+    ]);
+
+    const output = JSON.parse(test.stdout.value) as {
+      snapshot?: unknown;
+      snapshotRef: string;
+    };
+    expect(output.snapshot).toBeUndefined();
+    expect(output.snapshotRef).toBe(
+      "evidence://generation-1/snapshots/rev-5.json"
+    );
+    expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("renders step replacement for human output", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "step",
+      "--project", "/project",
+      "--replace", "1",
+      "--session", "generation-1"
+    ]);
+
+    expect(test.exitCodes[0]).toBe(0);
+    expect(test.stdout.value).toContain("truncated");
+    expect(test.stdout.value).toContain("index 1");
+  });
+
+  it("preflights the session device before step replacement", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "step",
+      "--project", "/project",
+      "--replace", "1",
+      "--session", "generation-1",
+      "--json"
+    ]);
+
+    expect(test.dependencies.doctor.run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        packageName: "com.example.app",
+        skipPermissionProbe: true,
+        requestedDevice: "emulator-5554"
+      })
+    );
+  });
+
+  it("rejects step replacement when doctor fails", async () => {
+    const test = harness();
+    (test.dependencies.doctor.run as Mock).mockResolvedValueOnce({
+      status: "failed" as const,
+      failureCode: "DEVICE_UNAVAILABLE" as const,
+      checks: [
+        { name: "device" as const, status: "failed" as const, message: "Requested device is not online" }
+      ]
+    });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "step",
+      "--project", "/project",
+      "--replace", "1",
+      "--session", "generation-1",
+      "--json"
+    ]);
+
+    expect(test.replace).not.toHaveBeenCalled();
+    const output = JSON.parse(test.stdout.value) as {
+      status: string;
+      exitCode: number;
+      failure: { code: string };
+    };
+    expect(output.exitCode).toBe(3);
+    expect(output.failure.code).toBe("DEVICE_UNAVAILABLE");
+    expect(test.exitCodes[0]).toBe(3);
+  });
+
+  it("rejects step replacement with both --input and --replace", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "step",
+      "--project", "/project",
+      "--input", "input.json",
+      "--replace", "1",
+      "--session", "generation-1",
+      "--json"
+    ]);
+
+    expect(test.replace).not.toHaveBeenCalled();
+    expect(test.request).not.toHaveBeenCalled();
+    const output = JSON.parse(test.stdout.value) as {
+      exitCode: number;
+      failure: { code: string };
+    };
+    expect(output.exitCode).toBe(2);
+    expect(output.failure.code).toBe("CONFIG_INVALID");
+    expect(test.exitCodes[0]).toBe(2);
+  });
+
+  it("rejects step without --input or --replace", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "step",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--json"
+    ]);
+
+    expect(test.replace).not.toHaveBeenCalled();
+    expect(test.request).not.toHaveBeenCalled();
+    const output = JSON.parse(test.stdout.value) as {
+      exitCode: number;
+      failure: { code: string };
+    };
+    expect(output.exitCode).toBe(2);
+    expect(output.failure.code).toBe("CONFIG_INVALID");
+    expect(test.exitCodes[0]).toBe(2);
+  });
+
+  it("rejects step replacement with an invalid index", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "step",
+      "--project", "/project",
+      "--replace", "-1",
+      "--session", "generation-1",
+      "--json"
+    ]);
+
+    expect(test.replace).not.toHaveBeenCalled();
+    const output = JSON.parse(test.stdout.value) as {
+      exitCode: number;
+      failure: { code: string };
+    };
+    expect(output.exitCode).toBe(2);
+    expect(test.exitCodes[0]).toBe(2);
+  });
+
   it("lists generation sessions as one JSON value", async () => {
     const test = harness();
 
@@ -1815,6 +2528,9 @@ describe("generation JSON process protocol", () => {
         contextSelection,
         pendingConfirmation: challenge
       })),
+      readContextSnapshot: vi.fn((): Promise<unknown> => Promise.resolve(null)),
+      updateIdlePolicy: test.updateIdlePolicy,
+      replace: test.replace,
       assertConfigIdentity: test.assertConfigIdentity
     });
 

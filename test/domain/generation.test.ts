@@ -6,10 +6,12 @@ import {
   GenerationMetaSchema,
   GenerationReportSchema,
   GenerationSessionSchema,
+  VerificationPhaseSchema,
   bindGenerationVariables,
   expandProposedStepVariables,
   generationCoreIdentity,
-  hashGenerationConfirmationEvidence
+  hashGenerationConfirmationEvidence,
+  verificationPhaseLabel
 } from "../../src/domain/generation.js";
 
 const hashes = {
@@ -203,6 +205,55 @@ describe("generation finalization evidence schemas", () => {
     }).steps).toHaveLength(2);
   });
 
+  it("parses verified meta with a Context selection and rejects drifted shapes", () => {
+    const meta = {
+      version: 1,
+      status: "verified",
+      generationId: "generation-1",
+      journeyPath: ".taphound/journeys/generated.json",
+      bindings: {
+        projectHash: "a".repeat(64),
+        configHash: "b".repeat(64),
+        contextHash: "c".repeat(64)
+      },
+      contextSelection: {
+        bundleVersion: 2,
+        indexHash: "f".repeat(64),
+        modules: [{
+          id: ":app",
+          sha256: "e".repeat(64),
+          projectDir: "app",
+          inventory: {
+            pathSetSha256: "1".repeat(64),
+            categories: ["manifests", "sources"]
+          }
+        }]
+      },
+      verification: {
+        reportPath: "verification/report.json",
+        reportSha256: "d".repeat(64),
+        runId: "verify-run",
+        runs: 1
+      },
+      manualOverrideStepIndexes: []
+    };
+    expect(GenerationMetaSchema.parse(meta)).toMatchObject({
+      contextSelection: { indexHash: "f".repeat(64) }
+    });
+    expect(GenerationMetaSchema.parse({
+      ...meta,
+      contextSelection: undefined
+    }).contextSelection).toBeUndefined();
+    expect(() => GenerationMetaSchema.parse({
+      ...meta,
+      contextSelection: { ...meta.contextSelection, bundleVersion: 3 }
+    })).toThrow();
+    expect(() => GenerationMetaSchema.parse({
+      ...meta,
+      contextSelection: { ...meta.contextSelection, modules: [] }
+    })).toThrow();
+  });
+
   it("rejects duplicate, escaped, and self-referential manifest paths", () => {
     const entry = {
       path: "verified/journey.json",
@@ -349,6 +400,49 @@ describe("GenerationSessionSchema", () => {
     })).toThrow(/unique/i);
   });
 
+  it("accepts an optional session idle policy override", () => {
+    const parsed = GenerationSessionSchema.parse({
+      ...(validSession() as object),
+      idlePolicy: {
+        strategy: "structural",
+        pollIntervalMs: 250,
+        stablePolls: 4,
+        timeoutMs: 30000
+      }
+    });
+    expect(parsed.idlePolicy).toEqual({
+      strategy: "structural",
+      pollIntervalMs: 250,
+      stablePolls: 4,
+      timeoutMs: 30000
+    });
+
+    expect(GenerationSessionSchema.parse(validSession()).idlePolicy)
+      .toBeUndefined();
+  });
+
+  it("rejects an invalid session idle policy override", () => {
+    expect(() => GenerationSessionSchema.parse({
+      ...(validSession() as object),
+      idlePolicy: {
+        strategy: "structural",
+        pollIntervalMs: 250,
+        stablePolls: 4,
+        timeoutMs: -1
+      }
+    })).toThrow();
+
+    expect(() => GenerationSessionSchema.parse({
+      ...(validSession() as object),
+      idlePolicy: {
+        strategy: "unknown",
+        pollIntervalMs: 250,
+        stablePolls: 4,
+        timeoutMs: 30000
+      }
+    })).toThrow();
+  });
+
   it("projects every immutable Core-owned identity field", () => {
     const session = GenerationSessionSchema.parse(validSession());
 
@@ -466,6 +560,80 @@ describe("GenerationSessionSchema", () => {
         attemptId: "verification-attempt"
       }
     })).toThrow(/verification/i);
+  });
+
+  it.each([
+    { stage: "preparing" },
+    { stage: "replaying", stepIndex: 0, stepCount: 3 },
+    { stage: "replaying", stepIndex: 2, stepCount: 3 },
+    { stage: "collecting" }
+  ])("parses running verification phase %j", (phase) => {
+    expect(GenerationSessionSchema.parse({
+      ...(validSession() as object),
+      verification: {
+        status: "running",
+        attemptId: "verification-attempt",
+        phase
+      }
+    })).toMatchObject({ verification: { status: "running", phase } });
+  });
+
+  it("accepts running verification without a phase", () => {
+    expect(GenerationSessionSchema.parse({
+      ...(validSession() as object),
+      verification: {
+        status: "running",
+        attemptId: "verification-attempt"
+      }
+    })).toMatchObject({
+      verification: { status: "running", attemptId: "verification-attempt" }
+    });
+  });
+
+  it.each([
+    { stage: "replaying", stepIndex: 3, stepCount: 3 },
+    { stage: "replaying", stepIndex: 4, stepCount: 3 }
+  ])("rejects replaying phase outside the step count %j", (phase) => {
+    expect(() => VerificationPhaseSchema.parse(phase)).toThrow();
+    expect(() => GenerationSessionSchema.parse({
+      ...(validSession() as object),
+      verification: {
+        status: "running",
+        attemptId: "verification-attempt",
+        phase
+      }
+    })).toThrow(/step index/i);
+  });
+
+  it.each([
+    { stage: "unknown" },
+    { stage: "replaying", stepIndex: 0 },
+    { stage: "replaying", stepIndex: 0, stepCount: 3, extra: true },
+    { stage: "preparing", detail: "launching" }
+  ])("rejects malformed verification phase %j", (phase) => {
+    expect(() => VerificationPhaseSchema.parse(phase)).toThrow();
+  });
+
+  it("rejects a phase on non-running verification states", () => {
+    expect(() => GenerationSessionSchema.parse({
+      ...(validSession() as object),
+      verification: {
+        status: "notRun",
+        phase: { stage: "preparing" }
+      }
+    })).toThrow();
+  });
+
+  it("labels verification phases for humans", () => {
+    expect(verificationPhaseLabel({ stage: "preparing" })).toBe(
+      "preparing device replay"
+    );
+    expect(
+      verificationPhaseLabel({ stage: "replaying", stepIndex: 4, stepCount: 20 })
+    ).toBe("replaying step 5/20");
+    expect(verificationPhaseLabel({ stage: "collecting" })).toBe(
+      "collecting final evidence"
+    );
   });
 
   it("requires active step state to identify the exact next candidate index", () => {

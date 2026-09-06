@@ -31,14 +31,17 @@ import { TapHoundConfigSchema } from "../../domain/config.js";
 import type { TapHoundConfig } from "../../domain/config.js";
 import {
   GenerationSessionIdSchema,
+  verificationPhaseLabel,
   type GenerationSession
 } from "../../domain/generation.js";
 import { ProposedStepSchema } from "../../domain/proposed-step.js";
 import {
   BridgeScenarioSchema,
+  DEFAULT_DEVICE_ROLE,
   type BridgeScenario
 } from "../../domain/journey.js";
 import { LocatorSchema } from "../../domain/layout.js";
+import type { ResolvedProjectContext } from "../../domain/project-context.js";
 import { RuntimeSnapshotSchema } from "../../domain/runtime-snapshot.js";
 import {
   assertArtifactDirectory,
@@ -68,6 +71,7 @@ interface GenerationStartOptions {
   allowEvidenceDrift?: boolean | undefined;
   baseFlow?: string | undefined;
   externalFlow?: string[] | undefined;
+  compact?: boolean | undefined;
   json?: boolean | undefined;
 }
 
@@ -85,7 +89,8 @@ interface GenerationStatusOptions extends GenerationObserveOptions {
 }
 
 interface GenerationStepOptions extends GenerationObserveOptions {
-  input: string;
+  input?: string | undefined;
+  replace?: string | undefined;
 }
 
 interface GenerationConfirmOptions extends GenerationObserveOptions {
@@ -107,7 +112,7 @@ interface GenerationBridgeOptions extends GenerationObserveOptions {
 }
 
 interface GenerationFinalizeOptions extends GenerationObserveOptions {
-  context: string;
+  context?: string | undefined;
   output: string;
   name?: string | undefined;
   device?: string | undefined;
@@ -117,6 +122,13 @@ interface GenerationFinalizeOptions extends GenerationObserveOptions {
 
 interface GenerationRecoverOptions extends GenerationObserveOptions {
   decision: string;
+}
+
+interface GenerationConfigIdleOptions extends GenerationObserveOptions {
+  strategy?: string | undefined;
+  pollIntervalMs?: string | undefined;
+  stablePolls?: string | undefined;
+  timeoutMs?: string | undefined;
 }
 
 interface GenerationListOptions {
@@ -134,13 +146,21 @@ type GenerationOptions =
   | GenerationBridgeOptions
   | GenerationRecoverOptions
   | GenerationFinalizeOptions
+  | GenerationConfigIdleOptions
   | GenerationListOptions;
 
-const PlannerEnvelopeSchema = z.strictObject({
-  version: z.literal(1),
-  proposal: ProposedStepSchema,
-  snapshot: RuntimeSnapshotSchema
-});
+const PlannerEnvelopeSchema = z.union([
+  z.strictObject({
+    version: z.literal(1),
+    proposal: ProposedStepSchema,
+    snapshot: RuntimeSnapshotSchema
+  }),
+  z.strictObject({
+    version: z.literal(1),
+    proposal: ProposedStepSchema,
+    snapshotRef: z.string().min(1)
+  })
+]);
 
 const ManualActionSchema = z.enum([
   "click",
@@ -243,8 +263,8 @@ function compactOutput(options: GenerationOptions): boolean {
 }
 
 function envelopeHint(options: GenerationOptions): string {
-  if ("input" in options) {
-    return "Planner envelope must be a strict object with exactly three top-level fields: version (1), proposal (object), and snapshot (object). Unknown or missing fields are rejected. See docs/agent-integration.md and assets/skills/taphound-journey-generator/schemas/proposed-step-envelope.json.";
+  if ("input" in options && options.input !== undefined) {
+    return "Planner envelope must be a strict object with exactly three top-level fields: version (1), proposal (object), and either snapshot (the full RuntimeSnapshot object) or snapshotRef (the snapshotRef string from the preceding observe output). Unknown or missing fields are rejected. See docs/agent-integration.md and assets/skills/taphound-journey-generator/schemas/proposed-step-envelope.json.";
   }
   return "TapHound rejected the JSON input. See docs/agent-integration.md for the command contract.";
 }
@@ -265,6 +285,10 @@ function generationStatusText(status: GenerationRecoveryStatus): string {
           : status.recovery.ownerAlive ? "alive" : "not alive"
       })`
     : "none";
+  const phase = status.verification.status === "running"
+    && status.verification.phase !== undefined
+    ? verificationPhaseLabel(status.verification.phase)
+    : null;
   const inFlight = status.inFlight === null
     ? "none"
     : `step ${String(status.inFlight.stepIndex)}, attempt ${status.inFlight.attemptId}`;
@@ -285,10 +309,14 @@ function generationStatusText(status: GenerationRecoveryStatus): string {
     `State: ${status.state}`,
     `Revision: ${String(status.revision)}`,
     `Candidate steps: ${String(status.candidateStepCount)}`,
+    ...(status.idlePolicy === undefined
+      ? []
+      : [`Idle policy: ${idlePolicyText(status.idlePolicy)}`]),
     `In flight: ${inFlight}`,
     `Pending confirmation: ${confirmation}`,
     `Verification: ${status.verification.status} (attempt ${verificationAttempt})`,
     `Verification owner: ${owner}`,
+    ...(phase === null ? [] : [`Verification phase: ${phase}`]),
     `Publication: ${status.publication.status}`,
     `Recovery: ${recovery}`,
     `Action may have executed: ${
@@ -499,6 +527,10 @@ function createStartCommand(dependencies: CliDependencies): Command {
       "--allow-evidence-drift",
       "Allow changed source evidence; replay remains mandatory"
     )
+    .option(
+      "--compact",
+      "Summarize contextSelection as indexHash plus module ids instead of per-module binding hashes"
+    )
     .option("--json", "Emit one machine-readable JSON value")
     .action(async (options: GenerationStartOptions): Promise<void> => {
       try {
@@ -571,7 +603,10 @@ function createStartCommand(dependencies: CliDependencies): Command {
                 config,
                 journey: resolution.journey,
                 projectRoot: options.project,
-                deviceSerial,
+                devices: [{
+                  role: resolution.journey.devices[0]?.role ?? DEFAULT_DEVICE_ROLE,
+                  deviceSerial
+                }],
                 toolVersions: tools(doctor.checks),
                 requireFocusedInput: true,
                 generatedReplayPolicy: true,
@@ -655,7 +690,17 @@ function createStartCommand(dependencies: CliDependencies): Command {
           generationId: session.id,
           revision: session.revision,
           bindings: session.bindings,
-          contextSelection: session.contextSelection,
+          ...(options.compact === true
+            ? {
+                contextSelection: {
+                  bundleVersion: session.contextSelection.bundleVersion,
+                  indexHash: session.contextSelection.indexHash,
+                  moduleIds: session.contextSelection.modules.map(
+                    (module) => module.id
+                  )
+                }
+              }
+            : { contextSelection: session.contextSelection }),
           ...(options.allowEvidenceDrift === true
             ? { evidenceDriftAllowed: true }
             : {}),
@@ -787,7 +832,11 @@ function createStepCommand(dependencies: CliDependencies): Command {
         "--compact",
         "Return authoritative nextSnapshotRef instead of the full next snapshot"
       )
-      .requiredOption("--input <path>", "Strict proposal envelope path"),
+      .option("--input <path>", "Strict proposal envelope path")
+      .option(
+        "--replace <index>",
+        "Truncate candidate steps at <index>, replay the stored prefix, and bind a fresh snapshot"
+      ),
     dependencies
   ).action(async (options: GenerationStepOptions): Promise<void> => {
     try {
@@ -795,13 +844,81 @@ function createStepCommand(dependencies: CliDependencies): Command {
       const config = await loadConfig(dependencies, options);
       const runtime = requireRuntime(dependencies, options.project, config);
       await assertRuntimeConfig(runtime, generationId);
+      if (options.replace !== undefined) {
+        if (options.input !== undefined) {
+          throw new GenerationOperationError(
+            "CONFIG_INVALID",
+            "generation step accepts either --input or --replace, not both"
+          );
+        }
+        const stepIndex = z.coerce.number().int().nonnegative().parse(
+          options.replace
+        );
+        const session = await runtime.readSession(generationId);
+        const doctor = await dependencies.doctor.run({
+          packageName: config.run.packageName,
+          skipPermissionProbe: true,
+          requestedDevice: session.target.deviceSerial,
+          ...(config.ui?.backend === undefined
+            ? {}
+            : { requestedUiBackend: config.ui.backend }),
+          ...(dependencies.signal === undefined
+            ? {}
+            : { signal: dependencies.signal })
+        });
+        if (doctor.status === "failed") {
+          writeFailure(
+            dependencies,
+            options,
+            3,
+            doctor.failureCode ?? "ENVIRONMENT_MISSING_TOOL",
+            doctor.checks.find((check) => check.status === "failed")?.message
+              ?? "TapHound environment preflight failed"
+          );
+          return;
+        }
+        const result = await runtime.replace({
+          generationId,
+          stepIndex,
+          projectRoot: options.project,
+          config,
+          toolVersions: tools(doctor.checks),
+          manualReplay: process.stdin.isTTY,
+          ...(dependencies.signal === undefined
+            ? {}
+            : { signal: dependencies.signal })
+        });
+        writeSuccess(dependencies, options, {
+          status: "replaced",
+          exitCode: 0,
+          stepIndex: result.stepIndex,
+          remainingStepCount: result.remainingStepCount,
+          truncatedStepCount: result.truncatedStepCount,
+          ...result.observation.binding,
+          snapshotRef: result.observation.snapshotRef,
+          ...(options.compact === true
+            ? {}
+            : { snapshot: result.observation.snapshot })
+        }, `Generation truncated to ${
+          String(result.remainingStepCount)
+        } step(s) at index ${String(result.stepIndex)} and re-observed`);
+        return;
+      }
+      if (options.input === undefined) {
+        throw new GenerationOperationError(
+          "CONFIG_INVALID",
+          "generation step requires either --input <envelope> or --replace <index>"
+        );
+      }
       const envelope: z.infer<typeof PlannerEnvelopeSchema> = PlannerEnvelopeSchema.parse(
         await dependencies.readJson(resolve(options.project, options.input))
       );
       const confirmation = await runtime.confirmation.request({
         generationId,
         proposal: envelope.proposal,
-        snapshot: envelope.snapshot,
+        ...("snapshot" in envelope
+          ? { snapshot: envelope.snapshot }
+          : { snapshotRef: envelope.snapshotRef }),
         source: "planner"
       });
       if (confirmation.status === "confirmationRequired") {
@@ -817,7 +934,7 @@ function createStepCommand(dependencies: CliDependencies): Command {
       await executeApproved(dependencies, options, runtime, {
         generationId,
         proposal: confirmation.proposal,
-        snapshot: envelope.snapshot,
+        snapshot: confirmation.snapshot,
         source: "planner"
       });
     } catch (error) {
@@ -1111,7 +1228,10 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
   return addCommonOptions(
     new Command("finalize")
       .description("Verify and publish a generated Journey")
-      .requiredOption("--context <path>", "Project Context path")
+      .option(
+        "--context <path>",
+        "Project Context path (legacy sessions without a stored snapshot)"
+      )
       .requiredOption("--output <path>", "Project-relative Journey output")
       .option("--name <name>", "Generated Journey name")
       .option("--device <serial>", "Select an online Android device")
@@ -1135,6 +1255,13 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
       const runtime = requireRuntime(dependencies, options.project, config);
       await assertRuntimeConfig(runtime, generationId);
       const session = await runtime.readSession(generationId);
+      const snapshotContext = await runtime.readContextSnapshot(generationId);
+      if (snapshotContext === null && options.context === undefined) {
+        throw new GenerationOperationError(
+          "CONFIG_INVALID",
+          "--context is required for generation sessions without a stored context snapshot"
+        );
+      }
       if (options.detach === true) {
         if (
           dependencies.detachedProcess === undefined
@@ -1158,8 +1285,9 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
           options.config,
           "--session",
           generationId,
-          "--context",
-          options.context,
+          ...(options.context === undefined
+            ? []
+            : ["--context", options.context]),
           "--output",
           options.output,
           ...(options.name === undefined ? [] : ["--name", options.name]),
@@ -1189,12 +1317,37 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
         }, `Generation finalization started: ${generationId}`);
         return;
       }
-      const loaded = await dependencies.contextLoader.load({
-        projectRoot: options.project,
-        contextPath: resolve(options.project, options.context),
-        moduleIds: session.contextSelection.modules.map((module) => module.id)
-      });
-      const context = loaded.context;
+      let context: ResolvedProjectContext;
+      let contextFromSnapshot = false;
+      if (snapshotContext !== null) {
+        context = snapshotContext;
+        contextFromSnapshot = true;
+        const verdict = await dependencies.contextValidator.validate({
+          context,
+          projectRoot: options.project,
+          config
+        });
+        if (verdict.status !== "valid") {
+          writeLine(
+            dependencies.stderr,
+            `TapHound warning: live project context drifted from the session snapshot (${verdict.reason.code}: ${verdict.reason.message}); the session snapshot remains authoritative`
+          );
+        }
+      } else {
+        const contextOption = options.context;
+        if (contextOption === undefined) {
+          throw new GenerationOperationError(
+            "CONFIG_INVALID",
+            "--context is required for generation sessions without a stored context snapshot"
+          );
+        }
+        const loaded = await dependencies.contextLoader.load({
+          projectRoot: options.project,
+          contextPath: resolve(options.project, contextOption),
+          moduleIds: session.contextSelection.modules.map((module) => module.id)
+        });
+        context = loaded.context;
+      }
       const doctor = await dependencies.doctor.run({
         packageName: config.run.packageName,
         skipPermissionProbe: true,
@@ -1242,6 +1395,7 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
         projectRoot: options.project,
         config,
         context,
+        ...(contextFromSnapshot ? { contextFromSnapshot: true } : {}),
         project,
         outputPath,
         ...(name === undefined ? {} : { name }),
@@ -1295,6 +1449,24 @@ function createStatusCommand(dependencies: CliDependencies): Command {
       );
       const deadline = Date.now() + timeoutMs;
       let status = await runtime.recovery.status(generationId);
+      let reportedPhase: string | null = null;
+      const reportPhaseProgress = (current: GenerationRecoveryStatus): void => {
+        if (options.wait !== true) {
+          return;
+        }
+        const phase = current.verification.status === "running"
+          ? current.verification.phase
+          : undefined;
+        if (phase === undefined) {
+          return;
+        }
+        const label = verificationPhaseLabel(phase);
+        if (label !== reportedPhase) {
+          reportedPhase = label;
+          writeLine(dependencies.stderr, `TapHound verification: ${label}`);
+        }
+      };
+      reportPhaseProgress(status);
       while (
         options.wait === true
         && status.publication.status !== "published"
@@ -1321,6 +1493,7 @@ function createStatusCommand(dependencies: CliDependencies): Command {
           setTimeout(resolveWait, Math.min(500, deadline - Date.now()));
         });
         status = await runtime.recovery.status(generationId);
+        reportPhaseProgress(status);
       }
       if (options.json === true) {
         writeJson(dependencies.stdout, {
@@ -1405,6 +1578,90 @@ function createArchiveCommand(dependencies: CliDependencies): Command {
   });
 }
 
+function idlePolicyText(policy: NonNullable<GenerationSession["idlePolicy"]>): string {
+  return `strategy ${policy.strategy}, poll ${String(policy.pollIntervalMs)}ms x${
+    String(policy.stablePolls)
+  }, timeout ${String(policy.timeoutMs)}ms`;
+}
+
+function createConfigCommand(dependencies: CliDependencies): Command {
+  return new Command("config")
+    .description("Adjust session-scoped generation settings")
+    .addCommand(addCommonOptions(
+      new Command("idle")
+        .description(
+          "Hot-adjust the idle policy bound to a generation session"
+        )
+        .option(
+          "--strategy <strategy>",
+          "Idle strategy: hybrid, layoutDiff, frameStats, or structural"
+        )
+        .option(
+          "--poll-interval-ms <milliseconds>",
+          "Idle poll interval in milliseconds"
+        )
+        .option(
+          "--stable-polls <count>",
+          "Consecutive stable polls required before idle"
+        )
+        .option(
+          "--timeout-ms <milliseconds>",
+          "Idle timeout in milliseconds"
+        ),
+      dependencies
+    ).action(async (options: GenerationConfigIdleOptions): Promise<void> => {
+      try {
+        const generationId = GenerationSessionIdSchema.parse(options.session);
+        const config = await loadConfig(dependencies, options);
+        const runtime = requireRuntime(dependencies, options.project, config);
+        await assertRuntimeConfig(runtime, generationId);
+        const strategy = options.strategy === undefined
+          ? undefined
+          : z
+            .enum(["hybrid", "layoutDiff", "frameStats", "structural"])
+            .parse(options.strategy);
+        const pollIntervalMs = options.pollIntervalMs === undefined
+          ? undefined
+          : z.coerce.number().int().positive().parse(options.pollIntervalMs);
+        const stablePolls = options.stablePolls === undefined
+          ? undefined
+          : z.coerce.number().int().positive().parse(options.stablePolls);
+        const timeoutMs = options.timeoutMs === undefined
+          ? undefined
+          : z.coerce.number().int().positive().parse(options.timeoutMs);
+        if (
+          strategy === undefined
+          && pollIntervalMs === undefined
+          && stablePolls === undefined
+          && timeoutMs === undefined
+        ) {
+          throw new GenerationOperationError(
+            "CONFIG_INVALID",
+            "Generation idle policy update requires at least one setting"
+          );
+        }
+        const session = await runtime.updateIdlePolicy(generationId, {
+          ...(strategy === undefined ? {} : { strategy }),
+          ...(pollIntervalMs === undefined ? {} : { pollIntervalMs }),
+          ...(stablePolls === undefined ? {} : { stablePolls }),
+          ...(timeoutMs === undefined ? {} : { timeoutMs })
+        });
+        const policy = session.idlePolicy;
+        writeSuccess(dependencies, options, {
+          status: "updated",
+          exitCode: 0,
+          generationId,
+          revision: session.revision,
+          ...(policy === undefined ? {} : { idlePolicy: policy })
+        }, policy === undefined
+          ? `Generation idle policy updated (revision ${String(session.revision)})`
+          : `Generation idle policy updated (revision ${String(session.revision)}): ${idlePolicyText(policy)}`);
+      } catch (error) {
+        mappedFailure(dependencies, options, error);
+      }
+    }));
+}
+
 function generationListText(sessions: readonly GenerationSession[]): string {
   if (sessions.length === 0) {
     return "No generation sessions found.";
@@ -1459,6 +1716,7 @@ export function createGenerationCommand(
     .addCommand(createStatusCommand(dependencies))
     .addCommand(createRecoverCommand(dependencies))
     .addCommand(createArchiveCommand(dependencies))
+    .addCommand(createConfigCommand(dependencies))
     .addCommand(createListCommand(dependencies))
     .addCommand(createFinalizeCommand(dependencies));
 }

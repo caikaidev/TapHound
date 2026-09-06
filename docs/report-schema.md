@@ -1,4 +1,4 @@
-# TapHound Report Schema v3
+# TapHound Report Schema v4
 
 TapHound Report is written to `.taphound/build/runs/<runId>/` by default, or to
 the configured `<artifactsDir>/<runId>/`. A custom path may be outside
@@ -8,8 +8,8 @@ the configured `<artifactsDir>/<runId>/`. A custom path may be outside
 ```text
 report.json
 summary.txt
-screenshot.png
-logcat.txt
+screenshot-<role>.png
+logcat-<role>.txt
 steps/001-logcat.txt
 steps/001-layout-diff.json
 steps/001-fallback-annotated.png
@@ -19,17 +19,22 @@ Only the optional evidence actually produced appears in `artifacts`. The report 
 
 ## Top-Level Fields
 
-- `schemaVersion`: currently `3`; readers continue to accept historical v2 reports.
+- `schemaVersion`: currently `4`. Historical v2/v3 reports are not read.
 - `runId`, `startedAt`, `finishedAt`, `durationMs`.
-- `status`: `passed`, `failed`, or `error`.
+- `status`: `passed`, `failed`, `error`, or `manualRequired`.
 - `project`: project root directory, Package, and launch Activity.
 - `journey`: name and SHA-256 of the normalized content.
-- `environment`: device serial number, tool versions, and the bound `uiBackend`
-  descriptor (`id`, adapter/engine versions, and configuration hash). It may
-  also contain `uiCache` counters for the run-scoped observation cache.
+- `environment`: `devices` plus `tools`. Each device entry carries the Journey
+  `role`, the resolved `deviceSerial`, the bound `uiBackend` descriptor
+  (`id`, adapter/engine versions, and configuration hash), and optional
+  `uiCache` counters for the run-scoped observation cache. Roles are unique,
+  at least one device is present, and artifact roles must reference a declared
+  device.
 - `layers`: `run`, `structural`, `activityCheckpoint`, `explicitExpect`, `collection`.
-- `steps`: per-step Action, Locator, Idle, Activity, Expect, and log-slice results.
-- `artifacts`: paths to the report, summary, screenshot, full log, and step logs.
+- `steps`: per-step Action, Locator, Idle, Activity, Expect, and log-slice
+  results. Each step records the `device` role that executed it.
+- `artifacts`: paths to the report, summary, per-device screenshots and logs
+  (`screenshots`/`logcats` arrays of `{role, path}`), and step logs.
 - `fallbackUsed`: whether any step used an explicit annotated fallback.
 - `primaryFailure`: the first primary failure.
 - `secondaryErrors`: collection or internal secondary errors that occurred after the primary failure.
@@ -59,6 +64,8 @@ A post-processing failure must not overwrite `primaryFailure`. For example, when
 - `EXPECT_LOGCAT_FAILED`
 - `BRIDGE_NO_ESCAPE`
 - `BRIDGE_NOT_RETURNED`
+- `WAIT_TIMEOUT`
+- `DEVICE_ROLE_UNMAPPED`
 - `EXTERNAL_FLOW_NOT_FOUND`
 - `EXTERNAL_FLOW_STALE`
 - `EXTERNAL_LOCATOR_STRICTNESS`

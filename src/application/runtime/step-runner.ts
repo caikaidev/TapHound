@@ -35,6 +35,7 @@ import {
   type ExpectationObservationInput
 } from "../assertion/expectation-evaluator.js";
 import { IdleWaiter, type IdleConfig } from "../wait/idle-waiter.js";
+import { withIdleAdvice } from "../wait/idle-advice.js";
 import {
   hasExactlyOneEnabledFocusedElement
 } from "../generation/focused-input.js";
@@ -50,10 +51,17 @@ export interface StepRunnerOptions {
   artifacts: ArtifactSession;
   packageName: string;
   deviceSerial: string;
+  deviceRole?: string | undefined;
   idle: IdleConfig;
   requireFocusedInput?: boolean;
   generatedReplayPolicy?: boolean | undefined;
   manualReplay?: boolean | undefined;
+}
+
+const WAIT_UNTIL_POLL_INTERVAL_MS = 100;
+
+function isAborted(signal?: AbortSignal): boolean {
+  return signal?.aborted === true;
 }
 
 export type StepRunResult =
@@ -332,6 +340,9 @@ export class StepRunner {
       durationMs: 0,
       activity: activityReport,
       logcatPath,
+      ...(this.options.deviceRole === undefined
+        ? {}
+        : { device: this.options.deviceRole }),
       ...(step.replayMode !== undefined ? { replayMode: step.replayMode } : {})
     };
 
@@ -604,7 +615,85 @@ export class StepRunner {
           stepPath(index, "layout-diff.json"),
           idle.lastDiff
         );
-        return fail(idle.code, "Layout did not become stable after bridge return");
+        return fail(
+          idle.code,
+          withIdleAdvice(
+            "Layout did not become stable after bridge return",
+            idle
+          )
+        );
+      }
+    } else if (
+      step.action === "wait"
+      && step.until !== undefined
+      && step.timeoutMs !== undefined
+    ) {
+      const deadline = startedAt + step.timeoutMs;
+      for (;;) {
+        if (isAborted(signal)) {
+          return finish("cancelled");
+        }
+        let layout: readonly LayoutElement[];
+        try {
+          layout = this.options.generatedReplayPolicy === true
+            ? await this.captureGeneratedLayout(signal)
+            : await this.captureLayout(
+                "expect",
+                Math.max(
+                  1,
+                  Math.min(
+                    this.options.idle.timeoutMs,
+                    deadline - this.options.clock.now()
+                  )
+                ),
+                signal
+              );
+        } catch (error) {
+          if (
+            error !== null
+            && typeof error === "object"
+            && "code" in error
+            && error.code === "ACTIVITY_BEFORE_MISMATCH"
+          ) {
+            return fail("ACTIVITY_BEFORE_MISMATCH", errorMessage(error));
+          }
+          throw error;
+        }
+        const resolution = resolveLocator(
+          layout,
+          step.until.element,
+          { requireEnabled: false }
+        );
+        if (resolution.status === "found") {
+          report.locator = {
+            status: "found",
+            matchedBy: resolution.matchedBy,
+            fallbackUsed: false
+          };
+          break;
+        }
+        if (this.options.clock.now() >= deadline) {
+          report.locator = {
+            status: "failed",
+            fallbackUsed: false,
+            message: resolution.message
+          };
+          return fail(
+            "WAIT_TIMEOUT",
+            `Wait condition did not match before timeout: ${resolution.message}`
+          );
+        }
+        try {
+          await this.options.clock.sleep(
+            WAIT_UNTIL_POLL_INTERVAL_MS,
+            signal
+          );
+        } catch (error) {
+          if (isAborted(signal)) {
+            return finish("cancelled");
+          }
+          throw error;
+        }
       }
     } else {
       let layout: readonly LayoutElement[];
@@ -758,7 +847,10 @@ export class StepRunner {
           stepPath(index, "layout-diff.json"),
           idle.lastDiff
         );
-        return fail(idle.code, "Layout did not become stable before timeout");
+        return fail(
+          idle.code,
+          withIdleAdvice("Layout did not become stable before timeout", idle)
+        );
       }
     }
 
@@ -1051,7 +1143,10 @@ export class StepRunner {
         );
         return {
           code: idle.code,
-          message: "External app layout did not become stable after step during replay"
+          message: withIdleAdvice(
+            "External app layout did not become stable after step during replay",
+            idle
+          )
         };
       }
 

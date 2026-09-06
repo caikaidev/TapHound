@@ -77,10 +77,19 @@ describe("NodeProjectInventoryInspector", () => {
     ]);
   });
 
-  it("excludes build, .git, .gradle, .idea, and .taphound directories", async () => {
+  it("excludes build, bin, out, .git, .gradle, .idea, and .taphound directories", async () => {
     const root = await temporaryRoot();
     const moduleDir = join(root, "lib");
-    for (const excluded of [".git", ".gradle", ".idea", ".taphound", "build"]) {
+    const excludedNames = [
+      ".git",
+      ".gradle",
+      ".idea",
+      ".taphound",
+      "bin",
+      "build",
+      "out"
+    ];
+    for (const excluded of excludedNames) {
       await mkdir(join(moduleDir, excluded, "src"), { recursive: true });
       await writeFile(
         join(moduleDir, excluded, "src", "Excluded.kt"),

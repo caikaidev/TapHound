@@ -14,9 +14,14 @@ import {
   GenerationSessionSchema,
   type GenerationErrorCode,
   type GenerationMeta,
-  type GenerationSession
+  type GenerationSession,
+  type VerificationPhase
 } from "../../domain/generation.js";
-import { JourneySchema, type Journey } from "../../domain/journey.js";
+import {
+  DEFAULT_DEVICE_ROLE,
+  JourneySchema,
+  type Journey
+} from "../../domain/journey.js";
 import {
   ProjectRelativePathSchema,
   ResolvedProjectContextSchema,
@@ -44,6 +49,7 @@ import type {
 } from "../project/project-describer.js";
 import type {
   VerifyInput,
+  VerifyProgressEvent,
   VerifyResult,
   VerifyRuntime
 } from "../runtime/verify-runtime.js";
@@ -137,6 +143,7 @@ export interface GenerationFinalizeInput {
   projectRoot: string;
   config: TapHoundConfig;
   context: ResolvedProjectContext;
+  contextFromSnapshot?: boolean | undefined;
   project: ProjectDescription;
   outputPath: string;
   name?: string | undefined;
@@ -152,6 +159,8 @@ export interface GenerationFinalizerDependencies {
     GenerationSessionStore,
     | "read"
     | "beginVerification"
+    | "updateVerificationPhase"
+    | "abortVerification"
     | "completeVerification"
     | "failVerification"
     | "markBundlePublishable"
@@ -164,6 +173,7 @@ export interface GenerationFinalizerDependencies {
   generateAttemptId: () => string;
   owner?: { pid: number; now: () => Date } | undefined;
   progress?: ((stage: GenerationFinalizationStage) => void) | undefined;
+  replayProgress?: ((phase: VerificationPhase) => void) | undefined;
 }
 
 export interface GenerationFinalizeResult {
@@ -268,8 +278,9 @@ export class GenerationFinalizer {
     this.assertBindings(session, input, config, context, project);
 
     const journey = JourneySchema.parse({
-      version: 1,
+      version: 2,
       name,
+      devices: [{ role: DEFAULT_DEVICE_ROLE }],
       steps: session.candidateSteps
     });
     if (
@@ -287,6 +298,7 @@ export class GenerationFinalizer {
     let verificationReport: TapHoundReport | undefined;
 
     if (session.verification.status === "notRun") {
+      await this.revalidate(input, config, context, project, session);
       this.dependencies.progress?.("verification");
       const begun = await this.beginVerification(session);
       session = begun.session;
@@ -354,7 +366,6 @@ export class GenerationFinalizer {
       }
       if (begun.owned) {
         try {
-        await this.revalidate(input, config, context, project, session);
         if (input.signal?.aborted === true) {
           throw failure(
             "VERIFICATION_FAILED",
@@ -362,19 +373,31 @@ export class GenerationFinalizer {
             "Generation finalization was cancelled"
           );
         }
+        const replayProgress = this.bridgeReplayProgress(
+          session.id,
+          expected.attemptId
+        );
+        const replayConfig = session.idlePolicy === undefined
+          ? config
+          : { ...config, idle: session.idlePolicy };
         const result = await this.dependencies.verifyRuntime.verify({
-          config,
+          config: replayConfig,
           journey,
           projectRoot: canonicalProjectRoot,
-          deviceSerial: input.deviceSerial,
+          devices: [{
+            role: journey.devices[0]?.role ?? DEFAULT_DEVICE_ROLE,
+            deviceSerial: input.deviceSerial
+          }],
           toolVersions: input.toolVersions,
           requireFocusedInput: true,
           generatedReplayPolicy: true,
           ...(input.manualReplay === undefined
             ? {}
             : { manualReplay: input.manualReplay }),
-          ...(input.signal === undefined ? {} : { signal: input.signal })
+          ...(input.signal === undefined ? {} : { signal: input.signal }),
+          progress: replayProgress.onEvent
         } satisfies VerifyInput);
+        await replayProgress.settled();
         replayed = true;
         await this.revalidate(input, config, context, project, session);
         this.assertEligible(result, journey, expected);
@@ -390,7 +413,12 @@ export class GenerationFinalizer {
             && !(error instanceof GenerationFinalizationError
               && error.code === "FINALIZATION_IN_PROGRESS")
           ) {
-            await this.persistFailedVerification(session, error);
+            const aborted = error instanceof GenerationFinalizationError
+              && error.stage === "precondition"
+              && await this.tryAbortVerification(session);
+            if (!aborted) {
+              await this.persistFailedVerification(session, error);
+            }
           }
           throw error instanceof GenerationFinalizationError
             ? error
@@ -599,6 +627,33 @@ export class GenerationFinalizer {
     }
   };
 
+  private bridgeReplayProgress(
+    generationId: string,
+    attemptId: string
+  ): {
+    onEvent: (event: VerifyProgressEvent) => void;
+    settled: () => Promise<void>;
+  } {
+    let pending: Promise<void> = Promise.resolve();
+    const onEvent = (event: VerifyProgressEvent): void => {
+      const phase: VerificationPhase = event;
+      pending = pending
+        .then(async (): Promise<void> => {
+          await this.dependencies.store.updateVerificationPhase(
+            generationId,
+            attemptId,
+            phase
+          );
+          this.dependencies.replayProgress?.(phase);
+        })
+        .catch((): undefined => undefined);
+    };
+    return {
+      onEvent,
+      settled: (): Promise<void> => pending
+    };
+  }
+
   private assertBindings(
     session: GenerationSession,
     input: GenerationFinalizeInput,
@@ -641,6 +696,9 @@ export class GenerationFinalizer {
     session: GenerationSession
   ): Promise<void> {
     this.assertBindings(session, input, config, context, project);
+    if (input.contextFromSnapshot === true) {
+      return;
+    }
     const result = await this.dependencies.contextValidator.validate({
       context,
       projectRoot: input.projectRoot,
@@ -765,9 +823,11 @@ export class GenerationFinalizer {
     expected: ExpectedVerification,
     code: "VERIFICATION_FAILED" | "RECOVERY_REQUIRED"
   ): void {
-    const reportUiBackend = report.schemaVersion === 3
-      ? report.environment.uiBackend
-      : undefined;
+    const reportDevice = report.environment.devices[0];
+    const singleDefaultDevice = report.environment.devices.length === 1
+      && reportDevice?.role === DEFAULT_DEVICE_ROLE
+      && reportDevice.deviceSerial === expected.deviceSerial;
+    const reportUiBackend = reportDevice?.uiBackend;
     if (
       report.status !== "passed"
       || report.fallbackUsed
@@ -779,7 +839,7 @@ export class GenerationFinalizer {
       || report.project.root !== expected.project.root
       || report.project.packageName !== expected.project.packageName
       || report.project.launchActivity !== expected.project.launchActivity
-      || report.environment.deviceSerial !== expected.deviceSerial
+      || !singleDefaultDevice
       || (
         expected.bindings.uiBackend !== undefined
         && !sameJson(reportUiBackend, expected.bindings.uiBackend)
@@ -999,8 +1059,9 @@ export class GenerationFinalizer {
       this.assertReport(
         report,
         {
-          version: 1,
+          version: 2,
           name: expected.journey.name,
+          devices: [{ role: DEFAULT_DEVICE_ROLE }],
           steps: running.candidateSteps
         },
         expected,
@@ -1022,6 +1083,31 @@ export class GenerationFinalizer {
       session: await this.persistPassedVerification(running, report, expected),
       report
     };
+  }
+
+  private async tryAbortVerification(
+    running: GenerationSession
+  ): Promise<boolean> {
+    const latest = GenerationSessionSchema.parse(
+      await this.dependencies.store.read(running.id)
+    );
+    if (
+      running.verification.status !== "running"
+      || latest.verification.status !== "running"
+      || latest.revision !== running.revision
+      || latest.verification.attemptId !== running.verification.attemptId
+    ) {
+      return false;
+    }
+    try {
+      await this.dependencies.store.abortVerification(
+        latest.id,
+        latest.revision
+      );
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private async persistFailedVerification(
@@ -1137,8 +1223,9 @@ export class GenerationFinalizer {
     this.assertReport(
       report,
       {
-        version: 1,
+        version: 2,
         name: expected.journey.name,
+        devices: [{ role: DEFAULT_DEVICE_ROLE }],
         steps: session.candidateSteps
       },
       expected,
@@ -1174,6 +1261,7 @@ export class GenerationFinalizer {
           ? {}
           : { uiBackend: session.bindings.uiBackend })
       },
+      contextSelection: session.contextSelection,
       verification: {
         reportPath: GENERATION_BUNDLE_PATHS.verificationReport,
         reportSha256: session.verification.reportSha256,

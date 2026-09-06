@@ -17,7 +17,9 @@ function renderSummary(report: TapHoundReport): string {
     `TapHound run ${report.runId}: ${report.status.toUpperCase()}`,
     `Journey: ${report.journey.name}`,
     `Package: ${report.project.packageName}`,
-    `Device: ${report.environment.deviceSerial}`,
+    ...report.environment.devices.map(
+      (device) => `Device[${device.role}]: ${device.deviceSerial}`
+    ),
     "",
     "Layers:",
     ...Object.entries(report.layers).map(

@@ -280,7 +280,10 @@ export class ContextLoader {
     const { bundle, indexHash } = await this.readIndex(input);
     const references = selectedReferences(bundle, input.moduleIds);
     if (input.allowIncomplete !== true) {
-      const incomplete = references.find((module) => module.status !== "complete");
+      const incomplete = references.find(
+        (module) => module.status === "partial"
+          || module.status === "notAnalyzed"
+      );
       if (incomplete !== undefined) {
         throw new ContextLoadError(
           "CONTEXT_MODULE_INCOMPLETE",

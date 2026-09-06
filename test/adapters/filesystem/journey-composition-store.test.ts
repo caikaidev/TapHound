@@ -91,4 +91,73 @@ describe("FileSystemJourneyCompositionStore", () => {
     expect(paths).toEqual([".taphound/flows/core/home.json"]);
     expect(paths.some((p) => p.includes("external"))).toBe(false);
   });
+
+  it("lists nested Journeys without meta or resolve sidecars", async () => {
+    const projectRoot = await root();
+    const journeysRoot = join(projectRoot, ".taphound/journeys");
+    await mkdir(join(journeysRoot, "chat"), { recursive: true });
+    await writeFile(join(journeysRoot, "search.json"), "{\"version\":2}\n");
+    await writeFile(join(journeysRoot, "search.meta.json"), "{\"version\":1}\n");
+    await writeFile(
+      join(journeysRoot, "search.resolve.json"),
+      "{\"version\":1}\n"
+    );
+    await writeFile(join(journeysRoot, "chat", "send.json"), "{\"version\":2}\n");
+    await writeFile(join(journeysRoot, "chat", "send.meta.json"), "{\"version\":1}\n");
+    await writeFile(join(journeysRoot, "notes.txt"), "not a journey\n");
+
+    const paths = await new FileSystemJourneyCompositionStore()
+      .listJourneyPaths(projectRoot);
+
+    expect(paths).toEqual([
+      ".taphound/journeys/chat/send.json",
+      ".taphound/journeys/search.json"
+    ]);
+  });
+
+  it("returns no Journeys when the directory is absent", async () => {
+    const projectRoot = await root();
+
+    await expect(
+      new FileSystemJourneyCompositionStore().listJourneyPaths(projectRoot)
+    ).resolves.toEqual([]);
+  });
+
+  it("rejects symlinked Journey catalogs", async () => {
+    const projectRoot = await root();
+    const outside = await root();
+    await mkdir(join(projectRoot, ".taphound"), { recursive: true });
+    await symlink(outside, join(projectRoot, ".taphound/journeys"));
+
+    await expect(
+      new FileSystemJourneyCompositionStore().listJourneyPaths(projectRoot)
+    ).rejects.toThrow(/escape|safe directory/i);
+  });
+
+  it("reads Journey meta sidecars and returns null when absent", async () => {
+    const projectRoot = await root();
+    const journeysRoot = join(projectRoot, ".taphound/journeys");
+    await mkdir(journeysRoot, { recursive: true });
+    await writeFile(join(journeysRoot, "search.json"), "{\"version\":2}\n");
+    await writeFile(
+      join(journeysRoot, "search.meta.json"),
+      "{\"version\":1,\"status\":\"verified\"}\n"
+    );
+    const store = new FileSystemJourneyCompositionStore();
+
+    await expect(store.readJourneyMeta({
+      projectRoot,
+      journeyPath: ".taphound/journeys/search.json"
+    })).resolves.toEqual(
+      Buffer.from("{\"version\":1,\"status\":\"verified\"}\n")
+    );
+    await expect(store.readJourneyMeta({
+      projectRoot,
+      journeyPath: ".taphound/journeys/missing.json"
+    })).resolves.toBeNull();
+    await expect(store.readJourneyMeta({
+      projectRoot,
+      journeyPath: ".taphound/journeys/search.meta.json"
+    })).rejects.toThrow(/normalized JSON file/i);
+  });
 });

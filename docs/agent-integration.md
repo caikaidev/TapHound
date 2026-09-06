@@ -133,6 +133,48 @@ taphound verify \
   --json
 ```
 
+## Checking Committed Journeys
+
+`journey check` audits every committed Journey under `.taphound/journeys/`
+without a device. It pairs each Journey with its `<name>.meta.json` sidecar
+(written by `generation finalize`) and classifies each entry as `fresh`,
+`stale`, `no-meta`, or `invalid`:
+
+- `fresh` — the Journey parses and every sidecar binding still matches the
+  live project: `projectHash`/`configHash` against `project describe` and the
+  normalized config, the recorded `journeyPath`, and every
+  `contextSelection` module's `sha256` against the live Context index.
+- `stale` — the Journey is structurally valid but a binding drifted:
+  `project-hash`, `config-hash`, `journey-path-mismatch`, `module-drift`
+  (a selected module shard's `sha256` changed), `module-missing` (a selected
+  module no longer exists in the live bundle; both list module ids in
+  `driftedModules`), or `meta-legacy`.
+- `no-meta` — the Journey has no sidecar, so freshness cannot be proven (for
+  example a hand-resolved or recorded Journey).
+- `invalid` — the Journey or sidecar is unreadable or fails its schema
+  (`journey-unreadable`, `journey-schema`, `meta-unreadable`, `meta-schema`).
+
+`meta-legacy` marks sidecars published before `contextSelection` was
+recorded. They classify as `stale` (fail-closed) because module drift can no
+longer be evaluated; re-run `generation finalize` to republish the Journey
+with the field.
+
+```bash
+taphound journey check \
+  --project /workspace/android-app \
+  --context .taphound/context/project-context.json \
+  --json
+```
+
+`--context` is required and names the live Project Context index; the command
+reads `.taphound/config.json` by default (override with `--config`). With
+`--json` it emits exactly one JSON value containing a `summary`
+(`total`/`fresh`/`stale`/`noMeta`/`invalid`) and per-Journey `journeys`
+entries, and the JSON `exitCode` matches the process exit code. Exit `0` means
+the check completed — findings or not; `2` reports config or Context errors;
+`4` is internal. `--strict` turns any non-fresh entry (stale, invalid, or
+no-meta) into exit `1` for CI gates.
+
 ## Machine Contract
 
 - The stdout of `verify --json` contains exactly one JSON value and a trailing newline, with no progress text.
@@ -143,6 +185,24 @@ taphound verify \
 - When no report exists, read the top-level `failure.code` and `failure.message`.
 
 Do not merely search stdout text for "passed"; first check the process status and `exitCode`, then read the structured fields.
+
+### Environment Noise on stderr
+
+When the calling environment sets `NODE_USE_ENV_PROXY=1` (common on machines
+with corporate proxies), Node.js 22+ prints an experimental
+`[UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental` notice to the
+**stderr of every spawned Node process**, including TapHound and TapHound's
+own child processes. This warning:
+
+- never appears on stdout, so it does not break the one-JSON stdout contract;
+- is emitted by the Node runtime, not by TapHound code;
+- does, however, pollute stderr assertions and any pipeline that merges
+  stderr into the captured output.
+
+Agents that assert on exact stderr content should either unset the variable
+when spawning TapHound (`spawn(..., { env: { ...process.env,
+NODE_USE_ENV_PROXY: undefined } })`) or filter stderr by lines before
+asserting. Tests that spawn the built CLI follow the same rule.
 
 ## Node.js Invocation Example
 
@@ -214,16 +274,66 @@ The generation flow uses the in-repo [`taphound-journey-generator` Skill](../ass
    local prompt. In a non-TTY sandbox, the Agent may pass
    `--decision approve|decline` only after the user explicitly reviews that
    exact challenge; the decision remains bound to Core-owned evidence.
-7. `generation status` exposes durable state. Interrupted work is retried only
+7. `generation status` exposes durable state. While verification is running,
+   `verification.phase` reports live replay progress (`preparing`,
+   `replaying` with 0-based `stepIndex` and `stepCount`, or `collecting`);
+   phase updates are progress annotations and do not consume session
+   revisions. `generation status --wait` prints each observed phase
+   transition to stderr while stdout keeps emitting exactly one final JSON
+   value. Interrupted work is retried only
    after explicit `generation recover --decision retry` acknowledgement.
-8. `generation finalize --detach` survives caller interruption and fully
-   Replays from the initial state. The Journey and immutable evidence are
-   published only after exact verification passes.
-9. `generation list --json` enumerates all sessions in the workspace (active,
-   archived, and published). `generation archive --session <id>` marks an idle
-   active session as archived so it no longer clutters active listings. Archive
-   is only permitted on sessions with no in-flight step or pending
-   confirmation; recoveryRequired sessions must be recovered first.
+ 8. `generation finalize --detach` survives caller interruption and fully
+    Replays from the initial state. The Journey and immutable evidence are
+    published only after exact verification passes. Finalize resolves the
+    Context from the session's stored snapshot (written at `generation start`
+    as `context/resolved.json` and bound to the session's `contextHash`), so
+    unrelated source edits after start cannot scrap the session. Live Context
+    drift is reported to stderr as a warning; the snapshot remains
+    authoritative. `--context` is only required for legacy sessions created
+    without a snapshot. Precondition failures (`CONTEXT_INVALID` from binding
+    or snapshot integrity) never terminally poison the attempt: finalize
+    validates before the attempt is recorded, and a legacy session's drift
+    detected after replay rolls the running attempt back to `notRun`, so the
+    session stays retryable once the underlying drift is repaired or reverted.
+    Only genuine replay failures durably mark verification `failed`.
+ 9. `generation list --json` enumerates all sessions in the workspace (active,
+     archived, and published). `generation archive --session <id>` marks an idle
+     active session as archived so it no longer clutters active listings. Archive
+    is only permitted on sessions with no in-flight step or pending
+    confirmation; recoveryRequired sessions must be recovered first.
+ 10. `generation config idle --session <id> [--strategy <s>]
+     [--poll-interval-ms <n>] [--stable-polls <n>] [--timeout-ms <n>]`
+     hot-adjusts the session's idle policy without restarting the session or
+     invalidating the config binding. At least one setting is required; the patch
+     merges onto the session's current policy (initially the bound config's
+     `idle`) and advances the session revision, so the next proposal must bind
+     the new revision. Updates are rejected with `CONFIG_INVALID` unless the
+     session is `active` with no in-flight step, no pending confirmation, and
+     verification and publication both `notRun`. Subsequent observe, step, and
+     finalize replay all honor the stored session policy; `generation status`
+     reports it as `idlePolicy`.
+ 11. `generation step --replace <index> --session <id>` rewinds an active
+     session instead of accepting a proposal: TapHound replays the stored
+     candidate prefix `[0, index)` through the same cold-launch replay engine
+     as finalize (honoring the session's stored idle policy), truncates the
+     candidate steps to that prefix by advancing the session revision, and
+     binds a fresh post-replay snapshot, so the agent can re-propose from the
+     stored prefix without restarting the session. The index must be an
+     integer in `[0, candidateStepCount]`; an index inside the bound Base
+     Flow prefix fails with `FLOW_INVALID`. Index `0` cold-resets the app
+     without replay. Replace is rejected with `CONFIG_INVALID` unless the
+     session is `active` with no in-flight step, no pending confirmation, and
+     verification and publication both `notRun`. A prefix replay failure fails
+     with `VERIFICATION_FAILED` and leaves the session untouched. Superseded
+     step evidence stays in the generation bundle as an audit trail; the
+     published manifest is rebuilt from the surviving evidence at finalize.
+     The output matches `generation observe` (binding plus `snapshotRef`,
+     full snapshot unless `--compact`) plus `status: "replaced"`,
+     `stepIndex`, `remainingStepCount`, and `truncatedStepCount`; the next
+     proposal must bind the returned revision and snapshot. `--input` and
+     `--replace` are mutually exclusive, and the replace preflight pins the
+     session's bound device, so no `--device` flag exists.
+
 
 ```bash
 taphound project describe --project /workspace/android-app --json
@@ -243,7 +353,7 @@ taphound generation start \
   --json
 ```
 
-The application module is always selected; dependencies declared by selected modules are expanded automatically. Omitting `--module` selects all modules. The exact root-index hash and selected shard IDs/hashes are returned as `contextSelection` and bound to the session. Modules cannot be added later. The device is bound at `generation start`. `generation observe`, `step`, `confirm`, `manual`, `status`, and `recover` use that binding via `--session` and do not accept `--device`; `generation finalize` reloads exactly the bound module set and may explicitly provide `--device`, but must not change the session identity binding.
+The application module is always selected; dependencies declared by selected modules are expanded automatically. Omitting `--module` selects all modules. Selected modules must be `complete` or explicitly `unsupported`; `unsupported` is an analyzed verdict (no journey-relevant surfaces) and a legitimate terminal state. Modules that are `partial` or `notAnalyzed` fail loading with `CONTEXT_MODULE_INCOMPLETE` — finish or re-analyze those shards first. The exact root-index hash and selected shard IDs/hashes are returned as `contextSelection` and bound to the session. Pass `--compact` to summarize `contextSelection` as `bundleVersion`, `indexHash`, and a `moduleIds` list instead of per-module binding hashes; the session still binds the full selection. Modules cannot be added later. The device is bound at `generation start`. `generation observe`, `step`, `confirm`, `manual`, `status`, `recover`, and `config idle` use that binding via `--session` and do not accept `--device`; `generation finalize` resolves the bound Context from the session's immutable snapshot (`context/resolved.json`, integrity-checked against the session's `contextHash`) and may explicitly provide `--device`, but must not change the session identity binding. Legacy sessions without a snapshot fall back to reloading the bound module set from `--context`.
 
 ### Refreshing Context Evidence Hashes
 
@@ -258,18 +368,26 @@ taphound context refresh \
 
 Refresh never invents semantic knowledge. It stops with `exitCode: 1` and `status: "blocked"` when evidence changed semantically, when a module's file inventory changed, or when an evidence file is missing or unreadable, because those cases need module re-analysis. `--module <id...>` limits refresh to selected modules. `--accept-source-changes` additionally rehashes semantically changed evidence and inventory drift; use it only when the recorded module summary is still accurate, since the summary itself is not updated. Missing or unreadable evidence always blocks.
 
-By default, changed source evidence stops generation with `CONTEXT_STALE`. For frequent implementation-only edits, an agent may explicitly pass `--allow-evidence-drift` to both `generation start` and `generation finalize`. This does not bypass Context shard integrity, project/config/session bindings, locator safety, or final replay verification. It only allows the validator's evidence-file drift result to proceed; the final replay remains authoritative. JSON output reports `evidenceDriftAllowed: true` when this opt-in is active.
+The per-module file inventory never includes build-output directories (`bin/`, `build/`, `out/`) or VCS/tool caches (`.git/`, `.gradle/`, `.idea/`, `.taphound/`). Context bundles produced by older TapHound versions may still carry evidence entries under those directories; such entries recompile into hash drift and surface as `CONTEXT_STALE` even though no journey-relevant source changed. Re-running `context refresh --accept-source-changes` once removes those now-ineligible evidence entries (each scope reports the count in `droppedIneligible`) and realigns the stored inventory hash, after which normal validation resumes.
+
+By default, changed source evidence stops generation with `CONTEXT_STALE`. For frequent implementation-only edits, an agent may explicitly pass `--allow-evidence-drift` to both `generation start` and `generation finalize`. This does not bypass Context shard integrity, project/config/session bindings, locator safety, or final replay verification. It only allows the validator's evidence-file drift result to proceed; the final replay remains authoritative. JSON output reports `evidenceDriftAllowed: true` when this opt-in is active. `generation finalize` itself resolves the Context from the session snapshot, so post-start source edits never fail finalize; when the live Context diverges, finalize prints the drift reason to stderr as a non-fatal warning and the session snapshot stays authoritative.
 
 Generation's `--json` commands likewise write only one machine-readable JSON
 value to stdout and indicate the result with `exitCode`. `observe` always
 returns `snapshotRef`; `--compact` omits the duplicate inline snapshot.
 `step`, `confirm`, and `manual` similarly replace `nextSnapshot` with
-`nextSnapshotRef` in compact mode. The referenced file is still the full
-RuntimeSnapshot required by the proposal envelope. The Agent must retain
+`nextSnapshotRef` in compact mode, and `step --replace` returns the same
+binding plus `snapshotRef` shape as `observe`. The referenced file is still the full
+RuntimeSnapshot behind the proposal binding. The Agent must retain
 `generationId`, `baseRevision`, `snapshotHash`, and that exact snapshot, and
-must not fabricate or reuse expired bindings. Step results include phase timing
+must not fabricate or reuse expired bindings; the step envelope may submit
+either the full snapshot or its `snapshotRef`. Step results include phase timing
 for freshness, evidence setup, observation, action, idle wait, expectations,
-Logcat, and optional next observation. Detached finalize progress and stdout
+Logcat, and optional next observation. During finalize replay the running
+verification attempt persists a `phase` (`preparing`, `replaying` with
+`stepIndex`/`stepCount`, or `collecting`) and the finalizer writes each
+phase to stderr; detached jobs capture those lines in the job progress log.
+Detached finalize progress and stdout
 live under `.taphound/build/jobs/<generationId>/`, outside the authoritative
 bundle. For the full protocol, retry rules, and Context update strategy, see
 the Skill's [`GUIDE.md`](../assets/skills/taphound-journey-generator/GUIDE.md).
@@ -301,6 +419,24 @@ recent `observe` (or prior step), and `snapshot` must be that exact
 RuntimeSnapshot. `activity.after` and `expect` are optional on a proposal;
 Core records the observed post-action Activity and evaluates any supplied
 expectation.
+
+Instead of copying the full RuntimeSnapshot, the envelope may carry the
+`snapshotRef` (or `nextSnapshotRef`) string emitted by the preceding
+`observe`/`step` output:
+
+```jsonc
+{
+  "version": 1,
+  "proposal": { /* as above */ },
+  "snapshotRef": ".taphound/build/generations/<bundle>/evidence/snapshots/revision-000002/<attempt>/snapshot.json"
+}
+```
+
+Core loads the referenced evidence from the session's authoritative bundle and
+applies the same binding validation as for an inline snapshot; the reference
+must point at the same generation session. Envelopes carrying both `snapshot`
+and `snapshotRef`, or neither, are rejected. An unreadable, foreign, or
+mismatched reference fails as `SNAPSHOT_STALE`: observe again and rebind.
 
 
 When Base Flow verification fails, `generation start --json` returns
@@ -373,13 +509,67 @@ Do not modify the Journey to mask implementation defects.
 TapHound Replay never invokes AI. The Agent may select an existing Journey or propose new steps in a generation session, but the final judgment of Locator, Activity, Layout Diff, risk policy, and Expect is performed by deterministic code. The Agent must not automatically loosen assertions, swap the Package, delete steps, or bypass confirmation after a failure.
 
 Generation binds the normalized config for the lifetime of the session. Agents
-must choose `idle.strategy` before `generation start` and must start a new
-session after any config change. `hybrid` falls back from active frame counters
-to Core-owned UIAutomator layout hashes; `layoutDiff` selects structural
-stability directly. An action attempt that returns
+must choose `idle.strategy` before `generation start`; after start, any config
+change other than the idle policy requires a new session. The idle policy alone
+can be hot-adjusted mid-session through `generation config idle`, which stores a
+session-scoped override that observe, step, and finalize replay honor while the
+original `configHash` binding stays authoritative. When a step needs correction,
+`generation step --replace <index>` rewinds the session to its stored prefix
+through the same deterministic replay engine as finalize; if the prefix no
+longer replays exactly, the replace fails and the session is left untouched.
+`hybrid` falls back from
+active frame counters to Core-owned UIAutomator layout hashes; `layoutDiff`
+selects structural stability directly. An action attempt that returns
 `status: "recoveryRequired"` may already have executed. Inspect
 `generation status`, obtain explicit user approval before `recover`, and never
 assume that recovery committed the interrupted action or returned a snapshot.
+
+## Verification Cost Model
+
+Generation finalizes a Journey with exactly one uninterrupted cold-start
+replay of the complete step list. This is a deliberate design decision, not an
+implementation shortcut: the published report is self-contained proof that the
+exact Journey, launched from a reset process, replays step by step without
+relying on any session-time execution history.
+
+The cost consequence is equally deliberate: finalize replay time grows
+linearly with the step count, and a Journey that fails verification late must
+be corrected and re-verified in full. Two alternatives were evaluated and
+rejected:
+
+- **Trusting session-time execution as partial verification.** Steps executed
+  during generation run in a warm process: the activity stack, caches, and
+  process state carry over between steps. Accepting that history as evidence
+  would publish Journeys whose cold-start determinism was never proven by
+  Core; the first full replay would effectively be the user's, not TapHound's.
+- **Verified-prefix caching.** Reusing a previously replayed prefix would
+  require binding cached replay results to an exact prefix hash, environment,
+  and device state, and silently invalidating them on any `step --replace`,
+  app reinstall, or tool change. The bookkeeping would duplicate the session
+  revision protocol without adding any guarantee that the cached prefix still
+  reproduces from a cold start.
+
+The shipped mitigations keep full replay authoritative while bounding its
+cost:
+
+1. `generation step --replace <index>` localizes corrections. A locator or
+   step fix replays only the stored prefix through the same cold-launch
+   engine, truncates the session, and re-binds a fresh snapshot; subsequent
+   steps are not re-executed because they no longer exist. Without replace,
+   every late correction would otherwise force re-recording the entire
+   suffix.
+2. `generation finalize --detach` plus the persisted verification `phase`
+   (with per-step `stepIndex`/`stepCount` progress) make long replays
+   observable without holding a terminal open; `generation status --wait`
+   polls to completion.
+3. Finalize refuses redundant work: it validates all bindings before
+   starting, and only a genuine replay failure durably marks verification
+   `failed`, so precondition mistakes do not consume a replay cycle.
+
+Agents should therefore budget one full-replay duration per finalize attempt,
+prefer `step --replace` over restarting a session after a mid-journey
+correction, and treat finalize replay time as an expected, one-time cost of
+publishing proof rather than a retry penalty.
 
 ## Cross-Application Flows
 

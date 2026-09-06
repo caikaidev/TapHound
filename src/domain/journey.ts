@@ -17,6 +17,18 @@ export const ActivityCheckpointSchema = z.strictObject({
   after: QualifiedActivitySchema
 });
 
+export const DeviceRoleSchema = z.string().regex(
+  /^[a-z][a-zA-Z\d]*$/,
+  "Device role must start with a lowercase letter and contain only letters and digits"
+);
+
+export const DeviceDeclarationSchema = z.strictObject({
+  role: DeviceRoleSchema,
+  description: z.string().trim().min(1).optional()
+});
+
+export const DEFAULT_DEVICE_ROLE = "default";
+
 const ActivityExpectSchema = z.strictObject({
   type: z.literal("activity"),
   value: QualifiedActivitySchema,
@@ -156,6 +168,7 @@ export const ExternalStepSchema = z.discriminatedUnion("action", [
 });
 
 const CommonStepShape = {
+  device: DeviceRoleSchema.optional(),
   activity: ActivityCheckpointSchema,
   expect: ExpectSchema.optional(),
   replayMode: z.enum(["auto", "manual"]).optional()
@@ -221,7 +234,17 @@ const BackStepSchema = z.strictObject({
 
 const WaitStepSchema = z.strictObject({
   action: z.literal("wait"),
+  until: z.strictObject({ element: LocatorSchema }).optional(),
+  timeoutMs: z.number().int().positive().optional(),
   ...CommonStepShape
+}).superRefine((step, context) => {
+  if ((step.until === undefined) !== (step.timeoutMs === undefined)) {
+    context.addIssue({
+      code: "custom",
+      path: [step.until === undefined ? "until" : "timeoutMs"],
+      message: "wait until and timeoutMs must be provided together"
+    });
+  }
 });
 
 const BridgeStepSchema = z.strictObject({
@@ -280,9 +303,58 @@ export const JourneyStepSchema = z.discriminatedUnion("action", [
 ]);
 
 export const JourneySchema = z.strictObject({
-  version: z.literal(1),
+  version: z.literal(2),
   name: z.string().trim().min(1),
+  devices: z.array(DeviceDeclarationSchema).min(1),
   steps: z.array(JourneyStepSchema).min(1)
+}).superRefine((journey, context) => {
+  const roles = new Set<string>();
+  for (const [index, device] of journey.devices.entries()) {
+    if (roles.has(device.role)) {
+      context.addIssue({
+        code: "custom",
+        path: ["devices", index, "role"],
+        message: "Device roles must be unique"
+      });
+    }
+    roles.add(device.role);
+  }
+  const multiDevice = journey.devices.length > 1;
+  const usedRoles = new Set<string>();
+  const soleRole = journey.devices[0]?.role ?? DEFAULT_DEVICE_ROLE;
+  for (const [index, step] of journey.steps.entries()) {
+    const device = (step as { device?: string }).device;
+    if (device === undefined) {
+      if (multiDevice) {
+        context.addIssue({
+          code: "custom",
+          path: ["steps", index],
+          message: "Every step must declare its device when multiple devices are declared"
+        });
+      } else {
+        usedRoles.add(soleRole);
+      }
+      continue;
+    }
+    if (!roles.has(device)) {
+      context.addIssue({
+        code: "custom",
+        path: ["steps", index, "device"],
+        message: "Step references an undeclared device role"
+      });
+      continue;
+    }
+    usedRoles.add(device);
+  }
+  for (const [index, device] of journey.devices.entries()) {
+    if (!usedRoles.has(device.role)) {
+      context.addIssue({
+        code: "custom",
+        path: ["devices", index, "role"],
+        message: "Device role is declared but never used"
+      });
+    }
+  }
 });
 
 export type ActivityCheckpoint = z.infer<typeof ActivityCheckpointSchema>;
@@ -290,6 +362,8 @@ export type AnnotatedLabelFallback = z.infer<
   typeof AnnotatedLabelFallbackSchema
 >;
 export type BridgeScenario = z.infer<typeof BridgeScenarioSchema>;
+export type DeviceDeclaration = z.infer<typeof DeviceDeclarationSchema>;
+export type DeviceRole = z.infer<typeof DeviceRoleSchema>;
 export type Expectation = z.infer<typeof ExpectSchema>;
 export type ExternalStep = z.infer<typeof ExternalStepSchema>;
 export type JourneyStep = z.infer<typeof JourneyStepSchema>;

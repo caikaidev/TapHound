@@ -42,9 +42,11 @@ describe("ReportWriter", () => {
 
     expect(result.directory).toBe(join(root, "run-123"));
     await expect(readFile(join(result.directory, "report.json"), "utf8"))
-      .resolves.toContain('"schemaVersion": 2');
+      .resolves.toContain('"schemaVersion": 4');
     await expect(readFile(join(result.directory, "summary.txt"), "utf8"))
       .resolves.toContain("TapHound run run-123: PASSED");
+    await expect(readFile(join(result.directory, "summary.txt"), "utf8"))
+      .resolves.toContain("Device[default]: emulator-5554");
   });
 
   it("includes primary and secondary failures in the summary", async () => {

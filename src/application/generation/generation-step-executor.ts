@@ -60,6 +60,7 @@ import {
   type IdleConfig,
   type IdleResult
 } from "../wait/idle-waiter.js";
+import { withIdleAdvice } from "../wait/idle-advice.js";
 import {
   summarizeProposedStep
 } from "./generation-confirmation-service.js";
@@ -578,9 +579,12 @@ export class GenerationStepExecutor {
       const session = GenerationSessionSchema.parse(
         await this.dependencies.store.read(input.generationId)
       );
+      const idle = session.idlePolicy === undefined
+        ? this.dependencies.idle
+        : session.idlePolicy;
       const uiSnapshotProvider = await this.dependencies.uiSnapshots.open({
         deviceSerial: session.target.deviceSerial,
-        timeoutMs: this.dependencies.idle.timeoutMs,
+        timeoutMs: idle.timeoutMs,
         ...(session.bindings.uiBackend === undefined
           ? {}
           : { backend: session.bindings.uiBackend.id }),
@@ -592,6 +596,7 @@ export class GenerationStepExecutor {
       try {
         return await new GenerationStepExecutor({
           ...this.dependencies,
+          idle,
           freshnessGuard: this.dependencies.createFreshnessGuard(
             uiSnapshotProvider
           ),
@@ -1032,7 +1037,10 @@ export class GenerationStepExecutor {
           } else if (idle.status === "timeout") {
             fail(
               idle.code,
-              "Layout did not become stable after bridge return",
+              withIdleAdvice(
+                "Layout did not become stable after bridge return",
+                idle
+              ),
               idleTimeoutDetails(idle)
             );
           } else {
@@ -1103,7 +1111,10 @@ export class GenerationStepExecutor {
           } else if (idle.status === "timeout") {
             fail(
               idle.code,
-              "Layout did not become stable before timeout",
+              withIdleAdvice(
+                "Layout did not become stable before timeout",
+                idle
+              ),
               idleTimeoutDetails(idle)
             );
           } else {
@@ -1869,7 +1880,10 @@ export class GenerationStepExecutor {
     if (idle.status === "timeout") {
       fail(
         idle.code,
-        "External app layout did not become stable after step",
+        withIdleAdvice(
+          "External app layout did not become stable after step",
+          idle
+        ),
         idleTimeoutDetails(idle)
       );
     }

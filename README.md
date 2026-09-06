@@ -82,12 +82,19 @@ See the [local testing guide](docs/local-testing.md) for source, npm tarball, an
 - `context list` / `validate` / `status`: inspect or validate a Project Context index and module shards.
 - `context refresh`: recompute Context evidence hashes, including semantic hashes, without re-analyzing source.
 - `journey list-flows` / `journey resolve`: validate reusable Flows and resolve
-  composed Journey Sources into flat Journey v1 files. `list-flows --include-external`
+  composed Journey Sources into flat Journey v2 files. `list-flows --include-external`
   also lists External Flows used by `generation bridge --flow`.
+- `journey check`: classify every committed Journey under `.taphound/journeys`
+  as `fresh`, `stale`, `no-meta`, or `invalid` by comparing its meta sidecar
+  bindings (project, config, Context module selection) against the live
+  project. `--strict` exits non-zero for CI when any Journey is not fresh.
 - `generation start` / `observe` / `step` / `confirm` / `manual` / `bridge` /
-  `status` / `recover` / `archive` / `list` / `finalize`: manage deterministic
-  Journey generation sessions. `bridge` records cross-app flows (e.g. camera,
-  picker, share) through a bound External Flow.
+  `status` / `recover` / `config idle` / `archive` / `list` / `finalize`:
+  manage deterministic Journey generation sessions. `bridge` records cross-app
+  flows (e.g. camera, picker, share) through a bound External Flow.
+  `config idle` hot-adjusts the session's idle policy without restarting, and
+  `step --replace <index>` rewinds an active session by deterministically
+  replaying the stored prefix and binding a fresh snapshot.
 - `init`: install TapHound's two built-in Skills (`taphound-journey-brief-author`, `taphound-journey-generator`) for AI agents.
 - `align camera`: probe the device's default camera app and write a deterministic
   `flows/external/camera/photo-capture.json` External Flow. Requires
@@ -98,7 +105,7 @@ See the [local testing guide](docs/local-testing.md) for source, npm tarball, an
 
 ## Configuration
 
-Create `.taphound/config.json` in the Android project. `run.packageName` is required and never guessed from APK filenames or activities; see [`examples/.taphound/config.json`](examples/.taphound/config.json) for a complete example.
+Create `.taphound/config.json` in the Android project. `run.packageName` is required and never guessed from APK filenames or activities; see [`examples/.taphound/config.json`](examples/.taphound/config.json) for a complete example and [`docs/config-schema.md`](docs/config-schema.md) for the full field reference, per-profile recommendations, and the editor-validation JSON Schema.
 
 ```json
 {
@@ -141,8 +148,11 @@ entirely for apps with known continuous rendering, or `frameStats` only when
 pixel-level frame quiescence is required.
 
 Generation binds the normalized configuration when a session starts. Choose
-the idle strategy and timeout before `generation start`; changing the config
-requires a new session.
+the idle strategy and timeout before `generation start`; after start, any config
+change except the idle policy requires a new session. The idle policy can be
+hot-adjusted mid-session with
+`generation config idle --session <id> ...` when no step is in flight, no
+confirmation is pending, and verification has not run.
 
 ## Workspace Layout
 
@@ -267,7 +277,12 @@ explicitly chooses to bypass reuse.
 `generation manual` interactively builds, executes, and records a deterministic
 Journey step. Generation step JSON includes phase timing for freshness,
 evidence setup, observation, action, idle waiting, expectations, Logcat
-collection, and the optional next observation.
+collection, and the optional next observation. When a locator or step needs
+correction, `generation step --replace <index>` replays the stored candidate
+prefix `[0, index)`, truncates the session to that prefix, and binds a fresh
+snapshot, so re-proposals continue from the stored prefix instead of
+restarting the session; indices inside the bound Base Flow prefix are
+rejected.
 
 ### Installing the TapHound Testing Skills for Other AI Agents
 

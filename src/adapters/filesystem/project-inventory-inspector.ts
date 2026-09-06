@@ -16,7 +16,9 @@ const EXCLUDED_DIRECTORIES = new Set([
   ".gradle",
   ".idea",
   ".taphound",
-  "build"
+  "bin",
+  "build",
+  "out"
 ]);
 
 function matches(

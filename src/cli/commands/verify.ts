@@ -3,7 +3,10 @@ import { resolve } from "node:path";
 import { Command } from "commander";
 
 import { TapHoundConfigSchema } from "../../domain/config.js";
-import { JourneySchema } from "../../domain/journey.js";
+import {
+  DEFAULT_DEVICE_ROLE,
+  JourneySchema
+} from "../../domain/journey.js";
 import {
   assertArtifactDirectory,
   CONFIG_PATH
@@ -112,12 +115,29 @@ export function createVerifyCommand(dependencies: CliDependencies): Command {
         if (deviceSerial === undefined) {
           throw new Error("Doctor did not select a device");
         }
+        if (journey.devices.length > 1) {
+          const output = failureOutput(
+            3,
+            "DEVICE_ROLE_UNMAPPED",
+            `Journey declares multiple devices; map each role with --device <role>=<serial> for: ${journey.devices.map((device) => device.role).join(", ")}`
+          );
+          if (options.json === true) {
+            writeJson(dependencies.stdout, output);
+          } else {
+            writeLine(dependencies.stderr, output.failure.message);
+          }
+          dependencies.setExitCode(3);
+          return;
+        }
         writeLine(dependencies.stderr, `TapHound: verifying ${journey.name}`);
         const result = await dependencies.verifier.verify({
           config,
           journey,
           projectRoot: options.project,
-          deviceSerial,
+          devices: [{
+            role: journey.devices[0]?.role ?? DEFAULT_DEVICE_ROLE,
+            deviceSerial
+          }],
           toolVersions: toolVersions(doctor.checks),
           manualReplay: process.stdin.isTTY,
           ...(dependencies.signal === undefined

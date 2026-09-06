@@ -4,6 +4,7 @@ import { normalizeActivity } from "../../domain/activity.js";
 import { primaryAppPid } from "../../domain/app-process.js";
 import type { TapHoundConfig } from "../../domain/config.js";
 import {
+  DEFAULT_DEVICE_ROLE,
   ExternalStepSchema,
   JourneySchema,
   JourneyStepSchema,
@@ -267,8 +268,9 @@ export class RecorderService {
           };
         }
         const journey = JourneySchema.parse({
-          version: 1,
+          version: 2,
           name: input.journeyName,
+          devices: [{ role: DEFAULT_DEVICE_ROLE }],
           steps
         });
         await this.dependencies.journeyWriter.write(input.outputPath, journey);

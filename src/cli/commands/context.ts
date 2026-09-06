@@ -253,6 +253,7 @@ function writeRefreshText(
       && scope.semanticChanged.length === 0
       && scope.unresolved.length === 0
       && scope.pruned === 0
+      && scope.droppedIneligible === 0
       && !scope.inventoryChanged
     ) {
       continue;
@@ -264,6 +265,7 @@ function writeRefreshText(
       + `, changed ${String(scope.semanticChanged.length)}`
       + `, unresolved ${String(scope.unresolved.length)}`
       + `, pruned ${String(scope.pruned)}`
+      + `, dropped ${String(scope.droppedIneligible)}`
       + (scope.inventoryChanged ? ", inventory changed" : "")
     );
   }

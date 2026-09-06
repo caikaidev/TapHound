@@ -39,7 +39,7 @@ describe("createProgram", () => {
     expect(
       createProgram().commands.find((command) => command.name() === "journey")
         ?.commands.map((command) => command.name())
-    ).toEqual(["resolve", "list-flows"]);
+    ).toEqual(["resolve", "list-flows", "check"]);
     expect(
       createProgram().commands.find((command) => command.name() === "generation")
         ?.commands.map((command) => command.name())
@@ -53,6 +53,7 @@ describe("createProgram", () => {
       "status",
       "recover",
       "archive",
+      "config",
       "list",
       "finalize"
     ]);

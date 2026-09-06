@@ -24,16 +24,19 @@ import {
   GenerationInFlightSchema,
   GenerationSessionSchema,
   PendingConfirmationSchema,
+  VerificationPhaseSchema,
   generationCoreIdentity,
   isGenerationConfirmationExpired,
   type GenerationInFlight,
   type GenerationSession,
-  type PendingConfirmation
+  type PendingConfirmation,
+  type VerificationPhase
 } from "../../domain/generation.js";
 import {
   BUILD_DIR,
   GENERATIONS_DIR,
-  TAPHOUND_DIR
+  TAPHOUND_DIR,
+  activeGenerationBundleName
 } from "../../domain/workspace.js";
 import {
   GenerationSessionStoreError,
@@ -79,7 +82,7 @@ const DEFAULT_OPTIONS: RequiredStoreOptions = {
 };
 
 function activeBundleName(id: string): string {
-  return `.${id}.work`;
+  return activeGenerationBundleName(id);
 }
 
 const HOOK_NAMES = [
@@ -364,6 +367,18 @@ function sessionId(value: GenerationSession): string {
   const id: unknown = value.id;
   assertId(id);
   return id;
+}
+
+function parseVerificationPhase(value: unknown): VerificationPhase {
+  try {
+    return VerificationPhaseSchema.parse(value);
+  } catch (error) {
+    throw new GenerationSessionStoreError(
+      "INVALID_SESSION",
+      "Verification phase is invalid",
+      { cause: error }
+    );
+  }
 }
 
 function validateExpectedRevision(revision: number): void {
@@ -1808,6 +1823,139 @@ implements GenerationSessionStore {
             ? {}
             : { ownerPid: owner.pid, startedAt: owner.startedAt })
         }
+      });
+      await writeStateAtomically(
+        activeDirectory,
+        next,
+        this.syncDirectory,
+        this.hooks.beforeStateRename,
+        activeEvidence
+      );
+      return next;
+    });
+  };
+
+  public readonly updateVerificationPhase = async (
+    id: string,
+    attemptId: string,
+    phase: VerificationPhase
+  ): Promise<void> => {
+    assertId(id);
+    assertId(attemptId);
+    const parsedPhase = parseVerificationPhase(phase);
+    await this.ensureGenerationRoot();
+    await this.withLock(id, async () => {
+      const activeDirectory = this.activeDirectory(id);
+      if (!await pathExists(activeDirectory)) {
+        if (await pathExists(this.finalDirectory(id))) {
+          throw new GenerationSessionStoreError(
+            "SESSION_PUBLISHED",
+            `Published generation session cannot update verification phase: ${id}`
+          );
+        }
+        throw new GenerationSessionStoreError(
+          "SESSION_NOT_FOUND",
+          `Generation session does not exist: ${id}`
+        );
+      }
+      const activeEvidence = await captureStoreDirectory(activeDirectory);
+      const current = await readBoundState(
+        activeDirectory,
+        id,
+        this.hooks.afterStateOpen,
+        activeEvidence
+      );
+      if (
+        current.state !== "active"
+        || current.verification.status !== "running"
+        || current.verification.attemptId !== attemptId
+        || current.publication.status !== "notRun"
+      ) {
+        throw new GenerationSessionStoreError(
+          "INVALID_TRANSITION",
+          "Verification phase updates require the exact active running attempt"
+        );
+      }
+      const next = GenerationSessionSchema.parse({
+        ...current,
+        verification: {
+          ...current.verification,
+          phase: parsedPhase
+        }
+      });
+      await writeStateAtomically(
+        activeDirectory,
+        next,
+        this.syncDirectory,
+        this.hooks.beforeStateRename,
+        activeEvidence
+      );
+    });
+  };
+
+  public readonly abortVerification = async (
+    id: string,
+    expectedRevision: number
+  ): Promise<GenerationSession> => {
+    assertId(id);
+    validateExpectedRevision(expectedRevision);
+    await this.ensureGenerationRoot();
+    return this.withLock(id, async () => {
+      const activeDirectory = this.activeDirectory(id);
+      if (!await pathExists(activeDirectory)) {
+        if (await pathExists(this.finalDirectory(id))) {
+          throw new GenerationSessionStoreError(
+            "SESSION_PUBLISHED",
+            `Published generation session cannot abort verification: ${id}`
+          );
+        }
+        throw new GenerationSessionStoreError(
+          "SESSION_NOT_FOUND",
+          `Generation session does not exist: ${id}`
+        );
+      }
+      const activeEvidence = await captureStoreDirectory(activeDirectory);
+      const current = await readBoundState(
+        activeDirectory,
+        id,
+        this.hooks.afterStateOpen,
+        activeEvidence
+      );
+      if (current.revision !== expectedRevision) {
+        throw new GenerationSessionStoreError(
+          "REVISION_CONFLICT",
+          `Expected generation revision ${String(expectedRevision)}, found ${
+            String(current.revision)
+          }`
+        );
+      }
+      if (
+        current.state !== "active"
+        || current.inFlight !== null
+        || current.pendingConfirmation !== null
+        || current.verification.status !== "running"
+        || current.publication.status !== "notRun"
+      ) {
+        throw new GenerationSessionStoreError(
+          "INVALID_TRANSITION",
+          "Verification abort requires an active running attempt"
+        );
+      }
+      if (
+        await pathExists(join(activeDirectory, "verification", "receipt.json"))
+        || await pathExists(
+          join(activeDirectory, "verification", "report.json")
+        )
+      ) {
+        throw new GenerationSessionStoreError(
+          "INVALID_TRANSITION",
+          "Verification abort is forbidden after immutable evidence exists"
+        );
+      }
+      const next = GenerationSessionSchema.parse({
+        ...current,
+        revision: current.revision + 1,
+        verification: { status: "notRun" }
       });
       await writeStateAtomically(
         activeDirectory,

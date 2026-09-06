@@ -643,6 +643,70 @@ External Flow steps must use `resourceId`-only locators (v1 restricts external
 steps to XML-only resource IDs; Compose UI is not supported). List available
 flows with `taphound journey list-flows --include-external --json`.
 
+### 3.7.2 Adjust the Idle Policy Mid-Session
+
+The `idle` policy is bound at session start, but it alone can be hot-adjusted
+without restarting the session — any other config change still requires a new
+session:
+
+```bash
+taphound generation config idle \
+  --project /path/to/android-project \
+  --session <generationId> \
+  --strategy layoutDiff \
+  --timeout-ms 20000 \
+  --json
+```
+
+At least one of `--strategy` (`hybrid`, `layoutDiff`, `frameStats`,
+`structural`), `--poll-interval-ms`, `--stable-polls`, or `--timeout-ms` is
+required. The patch merges onto the session's current policy (initially the
+bound config's `idle`) and advances the session revision, so the next
+proposal must bind the new revision. Updates are rejected with
+`CONFIG_INVALID` unless the session is `active` with no in-flight step, no
+pending confirmation, and verification and publication both `notRun`.
+Subsequent observe, step, and finalize replay all honor the stored policy;
+`generation status` reports it as `idlePolicy`.
+
+### 3.7.3 Correct a Committed Step
+
+When a committed step turns out wrong (bad locator, wrong target, missing
+expectation), rewind the session instead of restarting it or building
+workarounds on top of the mistake:
+
+```bash
+taphound generation step \
+  --project /path/to/android-project \
+  --session <generationId> \
+  --replace 2 \
+  --compact \
+  --json
+```
+
+Core replays the stored candidate prefix `[0, index)` through the same
+cold-launch replay engine as finalize (honoring the session's current idle
+policy), truncates the candidate steps to that prefix by advancing the
+session revision, and binds a fresh post-replay snapshot, so the agent can
+re-propose from the stored prefix. The response matches `observe` (binding
+plus `snapshotRef`) plus `status: "replaced"`, `stepIndex`,
+`remainingStepCount`, and `truncatedStepCount`; the next proposal must bind
+the returned revision and snapshot.
+
+Rules:
+
+- The index must be an integer in `[0, candidateStepCount]`; index `0`
+  cold-resets the app without replay.
+- An index inside the bound Base Flow prefix fails with `FLOW_INVALID`.
+- `--input` and `--replace` are mutually exclusive.
+- Replace is rejected with `CONFIG_INVALID` unless the session is `active`
+  with no in-flight step, no pending confirmation, and verification and
+  publication both `notRun`.
+- A prefix replay failure returns `VERIFICATION_FAILED` and leaves the
+  session untouched.
+- Superseded step evidence stays in the generation bundle as an audit
+  trail; the published manifest is rebuilt from the surviving evidence at
+  finalize.
+
 ### 3.8 Step 6 — Finalize and Verify
 
 After all steps are complete, start finalize detached:
@@ -651,12 +715,17 @@ After all steps are complete, start finalize detached:
 taphound generation finalize \
   --project /path/to/android-project \
   --session <generationId> \
-  --context .taphound/context/project-context.json \
   --output .taphound/journeys/generated-search.json \
-  --device emulator-5554 \
   --detach \
   --json
 ```
+
+Finalize resolves the Context from the session's stored snapshot (written at
+`generation start` as `context/resolved.json`, integrity-bound to the
+session's `contextHash`), so unrelated source edits after start cannot scrap
+the session; live Context drift is printed to stderr as a warning while the
+snapshot stays authoritative. Pass `--context` only for legacy sessions
+created without a stored snapshot.
 
 The start result contains `ownerPid`, `outputPath`, and `progressPath`. Wait
 without owning the replay process:
@@ -693,7 +762,7 @@ Finalize performs:
 3. Verify no fallback, no crash, all assertions pass
 4. Atomically publish the authoritative bundle to
    `.taphound/build/generations/<id>/`
-5. Export Journey v1 and sidecar meta to the `--output` path
+5. Export Journey v2 and sidecar meta to the `--output` path
 
 **Failure**: troubleshoot by `failure.code`. Common:
 
@@ -707,10 +776,10 @@ Finalize performs:
 ### 3.9 Verify Artifacts
 
 ```bash
-# Exported Journey (standard Journey v1, can be replayed with verify)
+# Exported Journey (standard Journey v2, can be replayed with verify)
 cat /path/to/project/.taphound/journeys/generated-search.json
 
-# Sidecar meta (verification status, binding hashes, manual override records)
+# Sidecar meta (verification status, binding hashes, contextSelection, manual override records)
 cat /path/to/project/.taphound/journeys/generated-search.meta.json
 
 # Authoritative bundle (full evidence: per-step proposal/snapshot/logcat/result)
@@ -744,7 +813,7 @@ Authoritative bundle directory structure:
 
 ### 3.10 Re-verify with Standard verify (Optional)
 
-The generated Journey is a standard Journey v1 and can be independently
+The generated Journey is a standard Journey v2 and can be independently
 replayed with the regular verify command:
 
 ```bash
@@ -757,6 +826,36 @@ taphound verify \
 
 This proves the AI-generated Journey behaves identically to a manually
 recorded Journey.
+
+### 3.11 Check Committed Journey Freshness
+
+`journey check` audits every committed Journey under `.taphound/journeys`
+without a device. It pairs each Journey with its `<name>.meta.json` sidecar
+and classifies each entry:
+
+| Status | Meaning |
+|--------|---------|
+| `fresh` | Journey parses and every sidecar binding matches the live project (project/config hashes, journey path, and each `contextSelection` module's `sha256` against the live Context index) |
+| `stale` | Structurally valid but a binding drifted: `project-hash`, `config-hash`, `journey-path-mismatch`, `module-drift`, `module-missing`, or `meta-legacy` |
+| `no-meta` | No sidecar exists, so freshness cannot be proven |
+| `invalid` | Journey or sidecar is unreadable or fails its schema |
+
+```bash
+taphound journey check \
+  --project /path/to/android-project \
+  --context .taphound/context/project-context.json \
+  --json
+```
+
+`--context` (the live Project Context index) is required. Exit `0` means the
+check completed — findings or not; `--strict` exits `1` when any Journey is
+stale, invalid, or missing its sidecar, suitable for CI gates.
+
+Sidecars published before `contextSelection` was recorded classify as
+`stale` with reason `meta-legacy` (fail-closed). Re-running
+`generation finalize` on the original session with the same `--output`
+re-exports the sidecar with the field; publication to the same path is
+idempotent and does not repeat the verification replay.
 
 ---
 
@@ -881,7 +980,8 @@ Each Goal is an independent generation session and does not affect others.
 | `ALIGN_CONFIRM_AMBIGUOUS` | Multiple confirm controls cannot be selected deterministically | Disambiguate the camera UI before generating |
 | `MANUAL_STEP_REQUIRED` | Non-interactive finalize encountered a `replayMode: "manual"` step | Bind an External Flow (`--flow`) or run finalize in a TTY |
 | `APP_CRASHED` | App process crashed | Check Logcat, restart app |
-| `IDLE_TIMEOUT` | Configured idle strategy did not stabilize | Inspect `failure.details.idle`; use a new session for config changes |
+| `IDLE_TIMEOUT` | Configured idle strategy did not stabilize | Inspect `failure.details.idle`; hot-adjust with `generation config idle`, then re-observe |
+| `VERIFICATION_FAILED` from `step --replace` | The stored prefix no longer replays exactly | Session is untouched; inspect the failure, fix the root cause, or continue without replace |
 | `RISK_CONFIRMATION_REQUIRED` | Action requires user confirmation or a pending challenge blocks progress | Inspect `generation status`, present the exact challenge, and apply only the user's explicit decision |
 | `ACTION_FORBIDDEN` | Action is forbidden by policy | Use a different action or adjust policy |
 | `RECOVERY_REQUIRED` | Session entered recovery state | Inspect status and ask before explicit retry |
@@ -924,10 +1024,12 @@ does not commit the previous action, capture a post-action snapshot, or return
 action already took effect, stop rather than continuing with a candidate that
 omits it or automatically repeating it.
 
-The config, including `idle.strategy`, is bound when the session starts.
-Changing it requires a new session. For continuously rendering screens use
-`layoutDiff`, or retain the default `hybrid`, which falls back from frame
-activity to Core-owned structural layout hashing.
+The config, including `idle.strategy`, is bound when the session starts. The
+idle policy alone can be hot-adjusted mid-session through
+`generation config idle` (see 3.7.2); every other config change requires a
+new session. For continuously rendering screens use `layoutDiff`, or retain
+the default `hybrid`, which falls back from frame activity to Core-owned
+structural layout hashing.
 
 ---
 
@@ -940,7 +1042,7 @@ activity to Core-owned structural layout hashing.
   policy, locator uniqueness).
 - SHA-256 hashes are ALWAYS computed via shell; the AI never guesses hash
   values.
-- The generated Journey is a standard Journey v1 and can be independently
+- The generated Journey is a standard Journey v2 and can be independently
   replayed with the regular `verify` command.
 - Real-device acceptance is fully separate from the normal test suite and
   does NOT run in `npm test`.

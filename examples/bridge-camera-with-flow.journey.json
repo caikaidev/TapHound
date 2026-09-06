@@ -1,10 +1,17 @@
 {
-  "version": 1,
+  "version": 2,
   "name": "update-avatar-via-camera-auto",
+  "devices": [
+    {
+      "role": "default"
+    }
+  ],
   "steps": [
     {
       "action": "click",
-      "locator": { "resourceId": "profile_avatar" },
+      "locator": {
+        "resourceId": "profile_avatar"
+      },
       "activity": {
         "before": "com.example.app.HomeActivity",
         "after": "com.example.app.ProfileActivity"
@@ -14,7 +21,9 @@
       "action": "bridge",
       "scenario": "photoCapture",
       "description": "Capture photo via system camera (auto replay using camera/photo-capture flow)",
-      "triggerLocator": { "resourceId": "change_avatar_button" },
+      "triggerLocator": {
+        "resourceId": "change_avatar_button"
+      },
       "returnTimeoutMs": 60000,
       "replayMode": "auto",
       "escapedPackageName": "com.android.camera2",
@@ -39,7 +48,9 @@
     },
     {
       "action": "click",
-      "locator": { "resourceId": "save_profile_button" },
+      "locator": {
+        "resourceId": "save_profile_button"
+      },
       "activity": {
         "before": "com.example.app.ProfileActivity",
         "after": "com.example.app.HomeActivity"

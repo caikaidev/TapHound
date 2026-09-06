@@ -13,6 +13,8 @@ import { join } from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { childSpawnEnv } from "./spawn-env.js";
+
 const repositoryRoot = process.cwd();
 const cli = join(repositoryRoot, "dist", "cli", "main.js");
 let projectRoot = "";
@@ -39,7 +41,8 @@ afterAll(async () => {
 function run(args: readonly string[]): SpawnSyncReturns<string> {
   return spawnSync(process.execPath, [cli, ...args], {
     cwd: repositoryRoot,
-    encoding: "utf8"
+    encoding: "utf8",
+    env: childSpawnEnv()
   });
 }
 

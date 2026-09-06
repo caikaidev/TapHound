@@ -304,15 +304,17 @@ Module inventory path-set hashes include manifest, source, layout, and
 navigation paths. `context status` therefore detects files added or removed
 inside an existing module. Root project evidence detects changes to the
 Gradle module catalog. Also run `context list --json` and ensure every module
-is explicitly `complete`; `partial`, `unsupported`, and `notAnalyzed` are
-coverage gaps, not successful full generation.
+is explicitly `complete` or `unsupported` — `unsupported` is an analyzed
+verdict ("no UI-relevant surfaces") and a legitimate terminal state that
+generation accepts. `partial` and `notAnalyzed` are coverage gaps, not
+successful full generation.
 
 **Decision matrix:**
 
 | `context status` | Module catalog | Action |
 |------------------|----------------|--------|
-| `valid` | All selected modules complete | Context is current. Proceed. |
-| `valid` | Any module incomplete | Complete that module shard |
+| `valid` | All selected modules `complete` or `unsupported` | Context is current. Proceed. |
+| `valid` | Any module `partial` or `notAnalyzed` | Complete that module shard |
 | `stale` | Existing module changed | Run `context refresh --json`, then act on each block's `resolution` (see 5.2) |
 | `stale` | Module catalog changed | Update index and generate new shards (Section 3) |
 | `invalid` | — | Repair or regenerate Bundle (Section 3) |

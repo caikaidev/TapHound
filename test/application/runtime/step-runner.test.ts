@@ -6,7 +6,10 @@ import {
   type StepRunnerOptions
 } from "../../../src/application/runtime/step-runner.js";
 import type { JourneyStep } from "../../../src/domain/journey.js";
-import type { LayoutElement } from "../../../src/domain/layout.js";
+import type {
+  LayoutElement,
+  Locator
+} from "../../../src/domain/layout.js";
 import {
   locatorEvidenceForElement
 } from "../../../src/domain/locator-evidence.js";
@@ -91,6 +94,7 @@ function fixture(overrides: {
   requireFocusedInput?: boolean;
   generatedReplayPolicy?: boolean;
   manualReplay?: boolean;
+  deviceRole?: string;
   viewport?: {
     width: number;
     height: number;
@@ -145,7 +149,10 @@ function fixture(overrides: {
         : { generatedReplayPolicy: overrides.generatedReplayPolicy }),
       ...(overrides.manualReplay === undefined
         ? {}
-        : { manualReplay: overrides.manualReplay })
+        : { manualReplay: overrides.manualReplay }),
+      ...(overrides.deviceRole === undefined
+        ? {}
+        : { deviceRole: overrides.deviceRole })
     }),
     adb,
     androidCli: cli,
@@ -1464,5 +1471,177 @@ describe("scrollTo replay", () => {
     }), 0);
 
     expect(result).toMatchObject({ status: "passed" });
+  });
+});
+
+describe("StepRunner wait until", () => {
+  const waitCheckpoint = {
+    before: "com.example.app.MainActivity",
+    after: "com.example.app.MainActivity"
+  };
+
+  function waitUntilStep(
+    locator: Locator = { resourceId: "message_bubble" },
+    timeoutMs = 1000
+  ): Extract<JourneyStep, { action: "wait" }> {
+    return {
+      action: "wait",
+      until: { element: locator },
+      timeoutMs,
+      activity: waitCheckpoint
+    };
+  }
+
+  function waitUntilCli(
+    target: "immediate" | "afterTwoPolls" | "never" | "disabled" | "ambiguous"
+  ): TestDeviceUi {
+    const bubble = {
+      id: "message_bubble",
+      resourceId: "message_bubble",
+      enabled: true,
+      bounds: { left: 0, top: 100, right: 100, bottom: 150 },
+      children: []
+    };
+    let reads = 0;
+    return {
+      layout: vi.fn((): Promise<readonly LayoutElement[]> => {
+        reads += 1;
+        if (target === "immediate") return Promise.resolve([bubble]);
+        if (target === "never") return Promise.resolve([]);
+        if (target === "disabled") {
+          return Promise.resolve([{ ...bubble, enabled: false }]);
+        }
+        if (target === "ambiguous") {
+          return Promise.resolve([
+            bubble,
+            { ...bubble, id: "message_bubble_2" }
+          ]);
+        }
+        return Promise.resolve(reads >= 3 ? [bubble] : []);
+      }),
+      layoutDiff: vi.fn(() => Promise.resolve([])),
+      captureScreen: vi.fn(() => Promise.resolve(commandResult())),
+      resolveScreen: vi.fn(() => Promise.resolve({ x: 50, y: 25 }))
+    };
+  }
+
+  it("polls at a 100ms cadence until the element appears", async () => {
+    const test = fixture({
+      adb: mainActivityAdb(),
+      androidCli: waitUntilCli("afterTwoPolls")
+    });
+
+    const result = await test.runner.run(waitUntilStep(), 0);
+
+    expect(result).toMatchObject({
+      status: "passed",
+      report: {
+        action: "wait",
+        status: "passed",
+        locator: {
+          status: "found",
+          matchedBy: "resourceId",
+          fallbackUsed: false
+        },
+        activity: {
+          before: { status: "passed" },
+          after: { status: "passed" }
+        }
+      }
+    });
+    expect(vi.mocked(test.androidCli.layout)).toHaveBeenCalledTimes(3);
+    expect(test.clock.sleeps).toEqual([100, 100]);
+  });
+
+  it("does not run the idle waiter after the element resolves", async () => {
+    const test = fixture({
+      adb: mainActivityAdb(),
+      androidCli: waitUntilCli("immediate")
+    });
+
+    const result = await test.runner.run(waitUntilStep(), 0);
+
+    if (result.status !== "passed") {
+      throw new Error("Expected passed result");
+    }
+    expect(result.report.idle).toBeUndefined();
+    expect(test.androidCli.layoutDiff).not.toHaveBeenCalled();
+  });
+
+  it("resolves a disabled element because requireEnabled is false", async () => {
+    const test = fixture({
+      adb: mainActivityAdb(),
+      androidCli: waitUntilCli("disabled")
+    });
+
+    const result = await test.runner.run(waitUntilStep(), 0);
+
+    expect(result).toMatchObject({
+      status: "passed",
+      report: { locator: { status: "found", fallbackUsed: false } }
+    });
+  });
+
+  it("fails with WAIT_TIMEOUT when the element never appears", async () => {
+    const test = fixture({
+      adb: mainActivityAdb(),
+      androidCli: waitUntilCli("never")
+    });
+
+    const result = await test.runner.run(waitUntilStep(
+      { resourceId: "message_bubble" },
+      500
+    ), 0);
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: {
+        code: "WAIT_TIMEOUT",
+        phase: "replay",
+        stepIndex: 0
+      }
+    });
+    if (result.status !== "failed") {
+      throw new Error("Expected failed result");
+    }
+    expect(result.failure.message).toContain("timeout");
+    expect(result.report.locator).toMatchObject({
+      status: "failed",
+      fallbackUsed: false
+    });
+  });
+
+  it("keeps polling an ambiguous locator until the timeout", async () => {
+    const test = fixture({
+      adb: mainActivityAdb(),
+      androidCli: waitUntilCli("ambiguous")
+    });
+
+    const result = await test.runner.run(waitUntilStep(
+      { resourceId: "message_bubble" },
+      300
+    ), 0);
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { code: "WAIT_TIMEOUT" }
+    });
+    expect(result.status === "failed"
+      && result.failure.message).toContain("matches 2 Layout elements");
+  });
+
+  it("stamps the configured device role into the step report", async () => {
+    const test = fixture({
+      adb: mainActivityAdb(),
+      androidCli: waitUntilCli("immediate"),
+      deviceRole: "sender"
+    });
+
+    const result = await test.runner.run(waitUntilStep(), 0);
+
+    if (result.status !== "passed") {
+      throw new Error("Expected passed result");
+    }
+    expect(result.report.device).toBe("sender");
   });
 });

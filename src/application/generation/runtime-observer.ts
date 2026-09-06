@@ -26,6 +26,7 @@ import type {
   UiSnapshotProviderFactory
 } from "../../ports/ui-snapshot.js";
 import type { IdleConfig, IdleResult } from "../wait/idle-waiter.js";
+import { withIdleAdvice } from "../wait/idle-advice.js";
 import type {
   GenerationSessionStore
 } from "../../ports/generation-session-store.js";
@@ -214,36 +215,42 @@ export class RuntimeObserver {
       await this.dependencies.store.read(input.generationId)
     );
     assertObservable(current);
+    const idle = current.idlePolicy === undefined
+      ? input.idle
+      : current.idlePolicy;
     if (
-      input.idle !== undefined
+      idle !== undefined
       && this.dependencies.waitUntilIdle !== undefined
     ) {
-      const idle = await this.dependencies.waitUntilIdle(
+      const idleResult = await this.dependencies.waitUntilIdle(
         current.target.deviceSerial,
-        input.idle,
+        idle,
         input.signal,
         current.target.packageName
       );
-      if (idle.status !== "stable") {
+      if (idleResult.status !== "stable") {
         throw new GenerationOperationError(
-          idle.status === "cancelled" ? "RECOVERY_REQUIRED" : "IDLE_TIMEOUT",
-          idle.status === "cancelled"
+          idleResult.status === "cancelled" ? "RECOVERY_REQUIRED" : "IDLE_TIMEOUT",
+          idleResult.status === "cancelled"
             ? "Runtime observation was cancelled while waiting for layout stability"
-            : "Layout did not become stable before observation",
-          idle.status === "cancelled"
+            : withIdleAdvice(
+              "Layout did not become stable before observation",
+              idleResult
+            ),
+          idleResult.status === "cancelled"
             ? undefined
             : {
                 idle: {
-                  strategy: idle.strategy,
-                  ...(idle.backend === undefined
+                  strategy: idleResult.strategy,
+                  ...(idleResult.backend === undefined
                     ? {}
-                    : { backend: idle.backend }),
-                  polls: idle.polls,
-                  durationMs: idle.durationMs,
-                  samplingDurationMs: idle.samplingDurationMs,
-                  fallbackUsed: idle.fallbackUsed,
-                  frameActivityDetected: idle.frameActivityDetected,
-                  lastDiff: idle.lastDiff
+                    : { backend: idleResult.backend }),
+                  polls: idleResult.polls,
+                  durationMs: idleResult.durationMs,
+                  samplingDurationMs: idleResult.samplingDurationMs,
+                  fallbackUsed: idleResult.fallbackUsed,
+                  frameActivityDetected: idleResult.frameActivityDetected,
+                  lastDiff: idleResult.lastDiff
                 }
               }
         );
@@ -251,7 +258,7 @@ export class RuntimeObserver {
     }
     const uiSnapshotProvider = await this.dependencies.uiSnapshots.open({
       deviceSerial: current.target.deviceSerial,
-      timeoutMs: input.idle?.timeoutMs ?? 5000,
+      timeoutMs: idle?.timeoutMs ?? 5000,
       ...(current.bindings.uiBackend === undefined
         ? {}
         : { backend: current.bindings.uiBackend.id }),

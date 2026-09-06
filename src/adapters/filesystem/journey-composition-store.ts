@@ -14,7 +14,8 @@ import {
 import {
   BUILD_DIR,
   EXTERNAL_FLOWS_DIR,
-  FLOWS_DIR
+  FLOWS_DIR,
+  JOURNEYS_DIR
 } from "../../domain/workspace.js";
 import type {
   JourneyCompositionStore
@@ -105,6 +106,85 @@ implements JourneyCompositionStore {
     };
     await visit(flowRoot);
     return paths.sort();
+  };
+
+  public readonly listJourneyPaths = async (
+    projectRoot: string
+  ): Promise<readonly string[]> => {
+    const canonicalRoot = await realpath(projectRoot);
+    const journeyRoot = resolve(canonicalRoot, JOURNEYS_DIR);
+    try {
+      const canonicalJourneyRoot = await realpath(journeyRoot);
+      if (!contained(canonicalRoot, canonicalJourneyRoot)) {
+        throw new Error("Journey directory escapes the project root");
+      }
+      const rootStats = await lstat(journeyRoot);
+      if (!rootStats.isDirectory() || rootStats.isSymbolicLink()) {
+        throw new Error("Journey path is not a safe directory");
+      }
+    } catch (error) {
+      if (
+        error instanceof Error
+        && "code" in error
+        && (error as NodeJS.ErrnoException).code === "ENOENT"
+      ) {
+        return [];
+      }
+      throw error;
+    }
+
+    const paths: string[] = [];
+    const visit = async (directory: string): Promise<void> => {
+      const entries = await readdir(directory, { withFileTypes: true });
+      for (const entry of entries) {
+        const path = join(directory, entry.name);
+        if (entry.isSymbolicLink()) {
+          throw new Error(`Journey catalog cannot contain symlinks: ${path}`);
+        }
+        if (entry.isDirectory()) {
+          await visit(path);
+        } else if (
+          entry.isFile()
+          && entry.name.endsWith(".json")
+          && !entry.name.endsWith(".meta.json")
+          && !entry.name.endsWith(".resolve.json")
+        ) {
+          paths.push(relative(canonicalRoot, path).replaceAll("\\", "/"));
+        }
+      }
+    };
+    await visit(journeyRoot);
+    return paths.sort();
+  };
+
+  public readonly readJourneyMeta = async (input: {
+    projectRoot: string;
+    journeyPath: string;
+  }): Promise<Buffer | null> => {
+    if (
+      !input.journeyPath.endsWith(".json")
+      || input.journeyPath.endsWith(".meta.json")
+      || input.journeyPath.endsWith(".resolve.json")
+    ) {
+      throw new Error(
+        `Journey path must be a normalized JSON file: ${input.journeyPath}`
+      );
+    }
+    const metaPath = `${input.journeyPath.slice(0, -".json".length)}.meta.json`;
+    const inspected = await this.inspector.inspectProjectFile({
+      projectRoot: input.projectRoot,
+      relativePath: metaPath,
+      maximumBytes: MAX_COMPOSITION_BYTES
+    });
+    if (inspected.status === "notFound") {
+      return null;
+    }
+    if (inspected.status !== "inspected" || inspected.bytes === undefined) {
+      throw new Error(
+        `Unable to safely read ${metaPath}: ${inspected.status}`
+      );
+    }
+    return inspected.bytes;
   };
 
   public readonly writeText = async (input: {

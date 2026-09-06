@@ -180,8 +180,9 @@ describe("RecorderService", () => {
 
     expect(result).toMatchObject({ status: "completed", stepsRecorded: 1 });
     expect(journeyWriter.journeys).toEqual([{
-      version: 1,
+      version: 2,
       name: "Recorded search",
+      devices: [{ role: "default" }],
       steps: [{
         action: "click",
         locator: { resourceId: "search" },

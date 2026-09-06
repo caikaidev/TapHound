@@ -544,4 +544,115 @@ describe("ContextRefresher", () => {
     expect(result.status).toBe("refreshed");
     expect(await validate(test.root)).toBe("valid");
   });
+
+  it("drops build-output evidence that is no longer inventory-eligible", async () => {
+    const root = await mkdtemp(join(tmpdir(), "taphound-context-refresh-"));
+    roots.push(root);
+    await mkdir(join(root, dirname(APP_SOURCE)), { recursive: true });
+    await writeFile(join(root, "settings.gradle.kts"), SETTINGS_CONTENT, "utf8");
+    await writeFile(join(root, APP_SOURCE), APP_SOURCE_CONTENT, "utf8");
+    const binSource = "app/bin/main/com/example/app/Generated.kt";
+    const binContent = "class Generated\n";
+    await mkdir(join(root, dirname(binSource)), { recursive: true });
+    await writeFile(join(root, binSource), binContent, "utf8");
+
+    const legacyInventoryPaths = [APP_SOURCE, binSource].sort();
+    const shard: ProjectContextModule = {
+      version: 2,
+      moduleId: ":app",
+      projectDir: "app",
+      status: "complete",
+      inventory: {
+        version: 2,
+        pathSetSha256: sha256(legacyInventoryPaths.join("\n")),
+        categories: ["sources"]
+      },
+      manifest: {
+        version: 1,
+        files: [
+          {
+            path: APP_SOURCE,
+            sha256: sha256(APP_SOURCE_CONTENT),
+            confidence: "sourceConfirmed"
+          },
+          {
+            path: binSource,
+            sha256: sha256(binContent),
+            confidence: "sourceConfirmed"
+          }
+        ]
+      },
+      summary: {
+        features: ["launch"],
+        activities: [{
+          name: "com.example.app.MainActivity",
+          entryPoints: [],
+          screens: ["home"]
+        }],
+        elements: [],
+        transitions: [],
+        logcat: []
+      }
+    };
+    const shardHash = await writeJson(root, SHARD_PATH, shard);
+    await writeJson(root, CONTEXT_PATH, {
+      version: 2,
+      packageName: "com.example.app",
+      launchActivity: "com.example.app.MainActivity",
+      manifest: {
+        version: 1,
+        files: [{
+          path: "settings.gradle.kts",
+          sha256: sha256(SETTINGS_CONTENT),
+          confidence: "sourceConfirmed"
+        }]
+      },
+      interactionPolicy: {
+        allowedActions: ["click", "wait"],
+        confirmationRequiredActions: [],
+        forbiddenActions: []
+      },
+      modules: [{
+        id: ":app",
+        projectDir: "app",
+        kind: "application",
+        contextPath: SHARD_PATH,
+        sha256: shardHash,
+        features: ["launch"],
+        activities: ["com.example.app.MainActivity"],
+        dependsOn: [],
+        status: "complete"
+      }]
+    });
+
+    const blocked = await refresher().refresh({
+      projectRoot: root,
+      contextPath: join(root, CONTEXT_PATH)
+    });
+    expect(blocked.status).toBe("blocked");
+    expect(blocked.blocked).toContainEqual(expect.objectContaining({
+      code: "MODULE_INVENTORY_CHANGED",
+      resolution: "acceptSourceChanges"
+    }));
+
+    const accepted = await refresher().refresh({
+      projectRoot: root,
+      contextPath: join(root, CONTEXT_PATH),
+      acceptSourceChanges: true
+    });
+    expect(accepted.status).toBe("refreshed");
+    expect(accepted.scopes).toContainEqual(expect.objectContaining({
+      id: ":app",
+      droppedIneligible: 1,
+      inventoryChanged: true
+    }));
+    const refreshedShard = await readJson(root, SHARD_PATH) as {
+      manifest: { files: Array<{ path: string }> };
+      inventory: { pathSetSha256: string };
+    };
+    expect(refreshedShard.manifest.files.map((file) => file.path))
+      .toEqual([APP_SOURCE]);
+    expect(refreshedShard.inventory.pathSetSha256).toBe(sha256(APP_SOURCE));
+    expect(await validate(root)).toBe("valid");
+  });
 });

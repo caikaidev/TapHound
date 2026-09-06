@@ -11,6 +11,7 @@ import {
   type JourneySource
 } from "../../domain/journey-composition.js";
 import {
+  DEFAULT_DEVICE_ROLE,
   JourneySchema,
   type Journey,
   type JourneyStep
@@ -320,8 +321,9 @@ export class JourneyResolver {
 
     assertActivityBoundaries(steps);
     const journey = JourneySchema.parse({
-      version: 1,
+      version: 2,
       name: source.name,
+      devices: [{ role: DEFAULT_DEVICE_ROLE }],
       steps
     });
     const unsignedManifest = {

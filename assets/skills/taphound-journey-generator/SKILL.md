@@ -216,8 +216,10 @@ them with `MANUAL_STEP_REQUIRED`.
    `confirm`, and `manual` commands do not accept `--device`.
    Choose `idle.strategy` before starting: `hybrid` (default), `layoutDiff`
    (structural stability, good for continuous animation), or `frameStats`
-   (requires frame quiescence). If the config changes, discard and start a
-   new session. Cross-package flows use the `bridge` action via
+   (requires frame quiescence). Any config change after start requires a new
+   session, except the idle policy, which can be hot-adjusted mid-session
+   with `generation config idle` (see Correcting and Adjusting below).
+   Cross-package flows use the `bridge` action via
    `generation bridge`, not a regular `step` proposal.
 
 3. Initialize `completedSteps` (empty). When `baseFlow` is present, treat its
@@ -274,16 +276,62 @@ them with `MANUAL_STEP_REQUIRED`.
       - **`confirmationRequired`**: Present the challenge to the user. After
         explicit approval, run `generation confirm --decision approve` with
         the challenge ID. If declined, `--decision decline` and stop.
-      - **`error`**: Decrement retry budget. `IDLE_TIMEOUT` → start a new
-        session with a different idle strategy. `WINDOW_HIERARCHY_INCOMPLETE`
-        → re-observe once; if it persists, report. `PACKAGE_ESCAPE` → switch
-        to `generation bridge`. If retries exhausted, stop and report.
+       - **`error`**: Decrement retry budget. `IDLE_TIMEOUT` → hot-adjust the
+         session idle policy with `generation config idle` (no restart), then
+         re-observe. `WINDOW_HIERARCHY_INCOMPLETE`
+         → re-observe once; if it persists, report. `PACKAGE_ESCAPE` → switch
+         to `generation bridge`. If retries exhausted, stop and report.
       - **`recoveryRequired`**: Run `generation status`, report
         `actionMayHaveExecuted`. Stop for the user's explicit retry decision.
         Only after approval run `generation recover --decision retry`.
         Re-observe after recovery.
 
    f. Clean up the temp envelope file after each iteration.
+
+### Correcting and Adjusting Mid-Session
+
+**Rewind a wrong committed step** with `step --replace` instead of restarting
+the session or building workarounds on top of a mistake:
+
+```bash
+taphound generation step \
+  --project <project> --session <generationId> \
+  --replace <index> \
+  --compact --json
+```
+
+Core replays the stored candidate prefix `[0, index)` through the same
+cold-launch replay engine as finalize (honoring the session's current idle
+policy), truncates the candidate to that prefix, and binds a fresh
+post-replay snapshot. The response matches `observe` plus `status:
+"replaced"`, `stepIndex`, `remainingStepCount`, and `truncatedStepCount`;
+the next proposal must bind the returned revision and snapshot. The index
+must be an integer in `[0, candidateStepCount]` (`0` cold-resets without
+replay); an index inside the bound Base Flow prefix fails with
+`FLOW_INVALID`; `--input` and `--replace` are mutually exclusive. Replace is
+rejected with `CONFIG_INVALID` unless the session is `active` with no
+in-flight step, no pending confirmation, and verification and publication
+both `notRun`. A prefix replay failure returns `VERIFICATION_FAILED` and
+leaves the session untouched; superseded step evidence stays in the bundle
+as an audit trail.
+
+**Hot-adjust the idle policy** when `IDLE_TIMEOUT` recurs or the screen
+needs a different stability strategy:
+
+```bash
+taphound generation config idle \
+  --project <project> --session <generationId> \
+  --strategy layoutDiff --timeout-ms 20000 \
+  --json
+```
+
+At least one of `--strategy`, `--poll-interval-ms`, `--stable-polls`,
+`--timeout-ms` is required; the patch merges onto the session's current
+policy and advances the session revision, so the next proposal must bind
+the new revision. Rejected with `CONFIG_INVALID` unless the session is
+`active` with no in-flight step, no pending confirmation, and verification
+and publication both `notRun`. Subsequent observe, step, and finalize replay
+honor the stored policy; `generation status` reports it as `idlePolicy`.
 
 ### Cross-Application Bridge
 
@@ -327,14 +375,17 @@ A successful bridge returns `nextBinding` and `nextSnapshotRef` like any step.
    interruption:
    ```bash
    taphound generation finalize \
-     --project <project> \
-     --session <generationId> \
-     --context .taphound/context/project-context.json \
-     --output <output> \
-     --device <serial> \
-     --detach \
-     --json
+      --project <project> \
+      --session <generationId> \
+      --output <output> \
+      --detach \
+      --json
    ```
+   Finalize resolves the Context from the session's stored snapshot
+   (written at `generation start`, integrity-bound to the session's
+   `contextHash`), so unrelated source edits after start cannot scrap the
+   session; live Context drift is reported to stderr as a warning. Pass
+   `--context` only for legacy sessions created without a stored snapshot.
 
 2. Wait for durable completion, then read the detached job's `outputPath`
    returned by the start command:
@@ -349,14 +400,32 @@ A successful bridge returns `nextBinding` and `nextSnapshotRef` like any step.
 
 3. Check the detached result `status`:
    - **`"verified"`**: Success. Report to the user:
-     - `bundlePath` (authoritative generation bundle)
-     - `journeyPath` (exported Journey v1)
-     - `metaPath` (sidecar meta with verification evidence)
-     - `replayed` (should be `true`)
+      - `bundlePath` (authoritative generation bundle)
+       - `journeyPath` (exported Journey v2)
+      - `metaPath` (sidecar meta with verification evidence and the bound
+        `contextSelection` module set)
+      - `replayed` (should be `true`)
    - **Any other status**: Failure. Report the failure detail and session
      ID. Do NOT claim success. The session may still be recoverable.
 
-4. Clean up any remaining temp files.
+4. Confirm the published Journey is fresh against the live project:
+   ```bash
+   taphound journey check \
+     --project <project> \
+     --context .taphound/context/project-context.json \
+     --json
+   ```
+   The newly published Journey must classify as `fresh`. `journey check`
+   audits every committed Journey under `.taphound/journeys` by comparing
+   its sidecar bindings (project, config, and `contextSelection` module
+   hashes) against the live project. `--strict` exits `1` when any Journey
+   is stale, invalid, or missing its sidecar — suitable for CI. Sidecars
+   published before `contextSelection` was recorded classify as `stale`
+   with reason `meta-legacy`; re-running `generation finalize` on the
+   original session with the same `--output` re-exports the sidecar with
+   the field.
+
+5. Clean up any remaining temp files.
 
 ## Error Handling Summary
 
@@ -366,15 +435,18 @@ A successful bridge returns `nextBinding` and `nextSnapshotRef` like any step.
 | Context stale/invalid/missing | Stop, run `taphound-journey-brief-author` skill first |
 | Context validation fails   | Stop, run `taphound-journey-brief-author` skill first |
 | Step rejected              | Re-observe + re-generate (up to retryCount)     |
+| Committed step is wrong    | Rewind with `generation step --replace <index>` |
+| IDLE_TIMEOUT persists      | Hot-adjust via `generation config idle`         |
 | PACKAGE_ESCAPE             | Use `generation bridge` (`--flow` for auto)     |
 | Bridge failure             | Check trigger, scenario, timeout; retry or `custom` |
 | External flow stale/missing| Re-bind at `generation start --external-flow`   |
 | Manual step in non-TTY finalize | Bind External Flow (`--flow`) or use TTY   |
 | Confirmation required      | Present to user, wait for approval              |
 | Recovery required          | Ask before retry; re-observe after              |
-| Config changed             | Start new session; never rebind in place        |
+| Config changed             | Start new session; only idle policy is hot-adjustable |
 | Max steps exceeded         | Stop, report incomplete Goal                    |
 | Finalize not verified      | Report failure detail, do not claim success     |
+| Journey check reports stale/invalid | Inspect `reasons`; refresh Context or regenerate the Journey |
 
 ## Key Rules
 

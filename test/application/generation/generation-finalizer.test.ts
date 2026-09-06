@@ -44,7 +44,8 @@ import {
 } from "../../../src/application/generation/generation-starter.js";
 import type { TapHoundConfig } from "../../../src/domain/config.js";
 import type {
-  GenerationSession
+  GenerationSession,
+  VerificationPhase
 } from "../../../src/domain/generation.js";
 import {
   GenerationSessionStoreError
@@ -133,8 +134,9 @@ function project(root: string): {
 
 function report(root: string, fallbackUsed = false): TapHoundReport {
   const journey = {
-    version: 1 as const,
+    version: 2 as const,
     name: "generated",
+    devices: [{ role: "default" }],
     steps: [{
       action: "wait" as const,
       activity: {
@@ -149,7 +151,7 @@ function report(root: string, fallbackUsed = false): TapHoundReport {
     }]
   };
   return {
-    schemaVersion: 2,
+    schemaVersion: 4,
     runId: "verify-run",
     status: "passed",
     startedAt: "2026-07-23T00:00:00.000Z",
@@ -162,7 +164,7 @@ function report(root: string, fallbackUsed = false): TapHoundReport {
     },
     journey: { name: "generated", sha256: hashJourney(journey) },
     environment: {
-      deviceSerial: "emulator-5554",
+      devices: [{ role: "default", deviceSerial: "emulator-5554" }],
       tools: { adb: "1" }
     },
     layers: {
@@ -204,6 +206,8 @@ function report(root: string, fallbackUsed = false): TapHoundReport {
       directory: "/reports/verify-run",
       report: "report.json",
       summary: "summary.txt",
+      screenshots: [],
+      logcats: [],
       stepLogs: []
     },
     secondaryErrors: [],
@@ -213,8 +217,9 @@ function report(root: string, fallbackUsed = false): TapHoundReport {
 
 function bridgeReport(root: string): TapHoundReport {
   const journey = {
-    version: 1 as const,
+    version: 2 as const,
     name: "generated",
+    devices: [{ role: "default" }],
     steps: [{
       action: "bridge" as const,
       scenario: "photoCapture" as const,
@@ -229,7 +234,7 @@ function bridgeReport(root: string): TapHoundReport {
     }]
   };
   return {
-    schemaVersion: 2,
+    schemaVersion: 4,
     runId: "verify-run",
     status: "passed",
     startedAt: "2026-07-23T00:00:00.000Z",
@@ -242,7 +247,7 @@ function bridgeReport(root: string): TapHoundReport {
     },
     journey: { name: "generated", sha256: hashJourney(journey) },
     environment: {
-      deviceSerial: "emulator-5554",
+      devices: [{ role: "default", deviceSerial: "emulator-5554" }],
       tools: { adb: "1" }
     },
     layers: {
@@ -286,6 +291,8 @@ function bridgeReport(root: string): TapHoundReport {
       directory: "/reports/verify-run",
       report: "report.json",
       summary: "summary.txt",
+      screenshots: [],
+      logcats: [],
       stepLogs: []
     },
     secondaryErrors: [],
@@ -552,6 +559,7 @@ describe("GenerationFinalizer", () => {
     expect(result.replayed).toBe(true);
     expect(result.journey.name).toBe("generated");
     expect(result.meta.manualOverrideStepIndexes).toEqual([0]);
+    expect(result.meta.contextSelection).toEqual(contextSelection);
     expect(test.forceStop).not.toHaveBeenCalled();
     expect(test.verify).toHaveBeenCalledOnce();
     expect(test.verify).toHaveBeenCalledWith(expect.objectContaining({
@@ -573,11 +581,164 @@ describe("GenerationFinalizer", () => {
     await expect(readFile(
       join(test.root, ".taphound/journeys/generated.json"),
       "utf8"
-    )).resolves.toContain('"version": 1');
+    )).resolves.toContain('"version": 2');
     await expect(readFile(
       join(test.root, ".taphound/journeys/generated.meta.json"),
       "utf8"
     )).resolves.toContain('"status": "verified"');
+  });
+
+  it("replays with the session idle policy override applied to the config", async () => {
+    const test = await fixture();
+    const current = await test.store.read("generation-1");
+    const idlePolicy = {
+      strategy: "structural" as const,
+      pollIntervalMs: 250,
+      stablePolls: 4,
+      timeoutMs: 45000
+    };
+    await test.store.update("generation-1", current.revision, {
+      ...current,
+      revision: current.revision + 1,
+      idlePolicy
+    });
+
+    const result = await test.finalize.finalize(input(test.root));
+
+    expect(result.status).toBe("verified");
+    expect(test.verify).toHaveBeenCalledOnce();
+    const verifyInput = test.verify.mock.calls[0]?.[0];
+    expect(verifyInput?.config.idle).toEqual(idlePolicy);
+  });
+
+  it("persists replay progress phases during the owned verification attempt", async () => {
+    const test = await fixture();
+    const phases: VerificationPhase[] = [];
+    const finalize = new GenerationFinalizer({
+      store: test.store,
+      contextValidator: { validate: test.validateContext },
+      verifyRuntime: { verify: test.verify },
+      publisher: new GenerationPublisher({
+        store: test.store,
+        journeyWriter: new FileSystemJourneyWriter(),
+        metaWriter: new FileSystemGenerationMetaWriter()
+      }),
+      generateAttemptId: (): string => "verification-attempt",
+      replayProgress: (phase): void => {
+        phases.push(phase);
+      }
+    });
+    const updatePhase = vi.spyOn(test.store, "updateVerificationPhase");
+    test.verify.mockImplementationOnce((verifyInput) => {
+      verifyInput.progress?.({ stage: "preparing" });
+      verifyInput.progress?.({
+        stage: "replaying",
+        stepIndex: 0,
+        stepCount: 1
+      });
+      verifyInput.progress?.({ stage: "collecting" });
+      return Promise.resolve({
+        status: "passed" as const,
+        exitCode: 0 as const,
+        report: report(test.canonicalRoot),
+        reportPath: "/reports/report.json",
+        summaryPath: "/reports/summary.txt"
+      });
+    });
+
+    const result = await finalize.finalize(input(test.root));
+
+    expect(result.status).toBe("verified");
+    expect(updatePhase).toHaveBeenCalledTimes(3);
+    expect(updatePhase).toHaveBeenNthCalledWith(
+      1,
+      "generation-1",
+      "verification-attempt",
+      { stage: "preparing" }
+    );
+    expect(updatePhase).toHaveBeenNthCalledWith(
+      2,
+      "generation-1",
+      "verification-attempt",
+      { stage: "replaying", stepIndex: 0, stepCount: 1 }
+    );
+    expect(updatePhase).toHaveBeenNthCalledWith(
+      3,
+      "generation-1",
+      "verification-attempt",
+      { stage: "collecting" }
+    );
+    expect(phases).toEqual([
+      { stage: "preparing" },
+      { stage: "replaying", stepIndex: 0, stepCount: 1 },
+      { stage: "collecting" }
+    ]);
+    await expect(test.store.read("generation-1")).resolves.toMatchObject({
+      verification: { status: "passed" },
+      publication: { status: "published" }
+    });
+  });
+
+  it("keeps finalization durable when progress persistence fails", async () => {
+    const test = await fixture();
+    const finalize = new GenerationFinalizer({
+      store: test.store,
+      contextValidator: { validate: test.validateContext },
+      verifyRuntime: { verify: test.verify },
+      publisher: new GenerationPublisher({
+        store: test.store,
+        journeyWriter: new FileSystemJourneyWriter(),
+        metaWriter: new FileSystemGenerationMetaWriter()
+      }),
+      generateAttemptId: (): string => "verification-attempt"
+    });
+    const updatePhase = vi
+      .spyOn(test.store, "updateVerificationPhase")
+      .mockRejectedValue(
+        new GenerationSessionStoreError("LOCK_TIMEOUT", "lock busy")
+      );
+    test.verify.mockImplementationOnce((verifyInput) => {
+      verifyInput.progress?.({ stage: "preparing" });
+      return Promise.resolve({
+        status: "passed" as const,
+        exitCode: 0 as const,
+        report: report(test.canonicalRoot),
+        reportPath: "/reports/report.json",
+        summaryPath: "/reports/summary.txt"
+      });
+    });
+
+    const result = await finalize.finalize(input(test.root));
+
+    expect(result.status).toBe("verified");
+    expect(updatePhase).toHaveBeenCalledOnce();
+    await expect(test.store.read("generation-1")).resolves.toMatchObject({
+      verification: { status: "passed" },
+      publication: { status: "published" }
+    });
+  });
+
+  it("fails verification durably when replay progress races a failing replay", async () => {
+    const test = await fixture();
+    const updatePhase = vi.spyOn(test.store, "updateVerificationPhase");
+    test.verify.mockImplementationOnce((verifyInput) => {
+      verifyInput.progress?.({ stage: "preparing" });
+      verifyInput.progress?.({
+        stage: "replaying",
+        stepIndex: 0,
+        stepCount: 1
+      });
+      return Promise.reject(new Error("replay exploded"));
+    });
+
+    await expect(test.finalize.finalize(input(test.root))).rejects
+      .toMatchObject({
+        code: "VERIFICATION_FAILED"
+      });
+    expect(updatePhase).toHaveBeenCalled();
+    await expect(test.store.read("generation-1")).resolves.toMatchObject({
+      verification: { status: "failed" }
+    });
   });
 
   it("does not create a manifest or publish a racing evidence snapshot", async () => {
@@ -929,7 +1090,7 @@ describe("GenerationFinalizer", () => {
     expect(test.verify).not.toHaveBeenCalled();
   });
 
-  it("fails verification when Context changes after replay", async () => {
+  it("rolls back the attempt when Context changes after replay", async () => {
     const test = await fixture();
     test.validateContext
       .mockResolvedValueOnce({ status: "valid" })
@@ -945,7 +1106,83 @@ describe("GenerationFinalizer", () => {
       code: "CONTEXT_STALE"
     });
     await expect(test.store.read("generation-1")).resolves.toMatchObject({
-      verification: { status: "failed" }
+      verification: { status: "notRun" }
+    });
+    expect(test.verify).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the session retryable when Context drifts before replay", async () => {
+    const test = await fixture();
+    test.validateContext.mockResolvedValueOnce({
+      status: "stale",
+      reason: {
+        code: "EVIDENCE_HASH_MISMATCH",
+        message: "context changed"
+      }
+    });
+
+    await expect(test.finalize.finalize(input(test.root))).rejects.toMatchObject({
+      code: "CONTEXT_STALE",
+      stage: "precondition"
+    });
+    await expect(test.store.read("generation-1")).resolves.toMatchObject({
+      verification: { status: "notRun" }
+    });
+    expect(test.verify).not.toHaveBeenCalled();
+    expect(test.validateContext).toHaveBeenCalledOnce();
+
+    const result = await test.finalize.finalize(input(test.root));
+
+    expect(result).toMatchObject({ status: "verified", replayed: true });
+    expect(test.verify).toHaveBeenCalledOnce();
+  });
+
+  it("skips live context validation when the context comes from the session snapshot", async () => {
+    const test = await fixture();
+    test.validateContext.mockResolvedValueOnce({
+      status: "stale",
+      reason: {
+        code: "EVIDENCE_HASH_MISMATCH",
+        message: "context changed"
+      }
+    });
+
+    const result = await test.finalize.finalize({
+      ...input(test.root),
+      contextFromSnapshot: true
+    });
+
+    expect(result).toMatchObject({ status: "verified", replayed: true });
+    expect(test.verify).toHaveBeenCalledOnce();
+    expect(test.validateContext).not.toHaveBeenCalled();
+  });
+
+  it("durably fails when the abort rollback itself is rejected", async () => {
+    const test = await fixture();
+    test.validateContext
+      .mockResolvedValueOnce({ status: "valid" })
+      .mockResolvedValueOnce({
+        status: "stale",
+        reason: {
+          code: "EVIDENCE_HASH_MISMATCH",
+          message: "context changed"
+        }
+      });
+    vi.spyOn(test.store, "abortVerification").mockRejectedValueOnce(
+      new GenerationSessionStoreError(
+        "IO_ERROR",
+        "abort rejected"
+      )
+    );
+
+    await expect(test.finalize.finalize(input(test.root))).rejects.toMatchObject({
+      code: "CONTEXT_STALE"
+    });
+    await expect(test.store.read("generation-1")).resolves.toMatchObject({
+      verification: {
+        status: "failed",
+        failure: { code: "CONTEXT_STALE" }
+      }
     });
   });
   it("allows post-replay evidence drift only with explicit opt-in", async () => {
@@ -983,7 +1220,18 @@ describe("GenerationFinalizer", () => {
       value.project.launchActivity = "com.example.app.OtherActivity";
     }],
     ["device", (value: TapHoundReport): void => {
-      value.environment.deviceSerial = "other-device";
+      const device = value.environment.devices[0];
+      if (device !== undefined) device.deviceSerial = "other-device";
+    }],
+    ["device role", (value: TapHoundReport): void => {
+      const device = value.environment.devices[0];
+      if (device !== undefined) device.role = "sender";
+    }],
+    ["device count", (value: TapHoundReport): void => {
+      value.environment.devices.push({
+        role: "peer",
+        deviceSerial: "emulator-5556"
+      });
     }],
     ["tools", (value: TapHoundReport): void => {
       value.environment.tools = { adb: "different" };
@@ -1150,7 +1398,7 @@ describe("GenerationFinalizer", () => {
     await expect(readFile(
       join(test.root, ".taphound/journeys/generated.json"),
       "utf8"
-    )).resolves.toContain('"version": 1');
+    )).resolves.toContain('"version": 2');
   });
 
   it("detects authority mutation immediately after Journey export", async () => {

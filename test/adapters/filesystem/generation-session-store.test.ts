@@ -18,7 +18,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   FileSystemGenerationSessionStore
 } from "../../../src/adapters/filesystem/generation-session-store.js";
-import type { GenerationSession } from "../../../src/domain/generation.js";
+import type {
+  GenerationSession,
+  VerificationPhase
+} from "../../../src/domain/generation.js";
 import {
   GenerationSessionStoreError
 } from "../../../src/ports/generation-session-store.js";
@@ -312,6 +315,52 @@ describe("FileSystemGenerationSessionStore", () => {
       }),
       "INVALID_ID"
     );
+  });
+
+  it("allows ordinary idle updates to adjust the session idle policy", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(validSession());
+
+    const idlePolicy = {
+      strategy: "structural" as const,
+      pollIntervalMs: 250,
+      stablePolls: 4,
+      timeoutMs: 30000
+    };
+    const next = validSession(1, { idlePolicy });
+    await store.update("generation-1", 0, next);
+    await expect(store.read("generation-1")).resolves.toEqual(next);
+
+    const retuned = validSession(2, {
+      idlePolicy: { ...idlePolicy, timeoutMs: 60000 }
+    });
+    await store.update("generation-1", 1, retuned);
+    await expect(store.read("generation-1")).resolves.toEqual(retuned);
+  });
+
+  it("allows ordinary idle updates to truncate candidate steps", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    const candidate = validSession(0, {
+      candidateSteps: [successfulWaitStep(), successfulWaitStep()],
+      candidateSources: ["planner", "planner"]
+    });
+    await store.create(candidate);
+
+    const truncated = validSession(1, {
+      candidateSteps: [candidate.candidateSteps[0] ?? successfulWaitStep()],
+      candidateSources: ["planner"]
+    });
+    await store.update("generation-1", 0, truncated);
+    await expect(store.read("generation-1")).resolves.toEqual(truncated);
+
+    const emptied = validSession(2, {
+      candidateSteps: [],
+      candidateSources: []
+    });
+    await store.update("generation-1", 1, emptied);
+    await expect(store.read("generation-1")).resolves.toEqual(emptied);
   });
 
   it("CAS-commits only the authoritative snapshot binding", async () => {
@@ -789,6 +838,279 @@ describe("FileSystemGenerationSessionStore", () => {
         }
       ),
       "INVALID_TRANSITION"
+    );
+  });
+
+  it("aborts a running verification attempt back to notRun", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(verificationCandidate());
+    const running = await store.beginVerification(
+      "generation-1",
+      0,
+      "verification-attempt",
+      { pid: 1234, startedAt: "2026-08-20T00:00:00.000Z" }
+    );
+
+    const aborted = await store.abortVerification(
+      "generation-1",
+      running.revision
+    );
+
+    expect(aborted).toEqual({
+      ...running,
+      revision: running.revision + 1,
+      verification: { status: "notRun" }
+    });
+    await expect(store.read("generation-1")).resolves.toEqual(aborted);
+    const restarted = await store.beginVerification(
+      "generation-1",
+      aborted.revision,
+      "verification-retry"
+    );
+    expect(restarted.verification).toMatchObject({
+      status: "running",
+      attemptId: "verification-retry"
+    });
+  });
+
+  it.each([
+    ["notRun", (candidate: GenerationSession): GenerationSession => candidate],
+    ["passed", (candidate: GenerationSession): GenerationSession => ({
+      ...candidate,
+      verification: {
+        status: "passed",
+        attemptId: "verification-attempt",
+        reportPath: "verification/report.json",
+        reportSha256: "f".repeat(64),
+        runId: "verification-run"
+      }
+    })],
+    ["failed", (candidate: GenerationSession): GenerationSession => ({
+      ...candidate,
+      verification: {
+        status: "failed",
+        failure: { code: "VERIFICATION_FAILED", message: "replay failed" }
+      }
+    })]
+  ] as const)("rejects aborting a %s verification", async (
+    _status,
+    mutate
+  ) => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(mutate(verificationCandidate()));
+
+    await expectStoreError(
+      store.abortVerification("generation-1", 0),
+      "INVALID_TRANSITION"
+    );
+  });
+
+  it("rejects verification abort after immutable evidence exists", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(verificationCandidate());
+    const running = await store.beginVerification(
+      "generation-1",
+      0,
+      "verification-attempt",
+      { pid: 1234, startedAt: "2026-08-20T00:00:00.000Z" }
+    );
+    await store.writeEvidence(
+      "generation-1",
+      "verification/receipt.json",
+      { status: "passed" }
+    );
+
+    await expectStoreError(
+      store.abortVerification("generation-1", running.revision),
+      "INVALID_TRANSITION"
+    );
+    await expect(store.read("generation-1")).resolves.toMatchObject({
+      verification: { status: "running" }
+    });
+  });
+
+  it("rejects verification abort on revision conflict", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(verificationCandidate());
+    await store.beginVerification(
+      "generation-1",
+      0,
+      "verification-attempt"
+    );
+
+    await expectStoreError(
+      store.abortVerification("generation-1", 0),
+      "REVISION_CONFLICT"
+    );
+  });
+
+  it("rejects aborting verification of a published session", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(verificationCandidate());
+    await markPublishable(store, verificationCandidate());
+    await store.publish("generation-1");
+
+    await expectStoreError(
+      store.abortVerification("generation-1", 3),
+      "SESSION_PUBLISHED"
+    );
+  });
+
+  it("annotates a running verification phase without consuming a revision", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(verificationCandidate());
+    const running = await store.beginVerification(
+      "generation-1",
+      0,
+      "verification-attempt",
+      { pid: 1234, startedAt: "2026-08-20T00:00:00.000Z" }
+    );
+
+    await store.updateVerificationPhase("generation-1", "verification-attempt", {
+      stage: "preparing"
+    });
+    await expect(store.read("generation-1")).resolves.toEqual({
+      ...running,
+      verification: {
+        ...running.verification,
+        phase: { stage: "preparing" }
+      }
+    });
+
+    await store.updateVerificationPhase("generation-1", "verification-attempt", {
+      stage: "replaying",
+      stepIndex: 0,
+      stepCount: 1
+    });
+    await expect(store.read("generation-1")).resolves.toEqual({
+      ...running,
+      verification: {
+        ...running.verification,
+        phase: { stage: "replaying", stepIndex: 0, stepCount: 1 }
+      }
+    });
+
+    const passed = {
+      ...running,
+      revision: running.revision + 1,
+      verification: {
+        status: "passed" as const,
+        attemptId: "verification-attempt",
+        reportPath: "verification/report.json",
+        reportSha256: "f".repeat(64),
+        runId: "verification-run"
+      }
+    };
+    await store.completeVerification("generation-1", running.revision, passed);
+    await expect(store.read("generation-1")).resolves.toEqual(passed);
+  });
+
+  it("rejects phase updates for a foreign verification attempt", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(verificationCandidate());
+    await store.beginVerification(
+      "generation-1",
+      0,
+      "verification-attempt"
+    );
+
+    await expectStoreError(
+      store.updateVerificationPhase(
+        "generation-1",
+        "verification-other",
+        { stage: "preparing" }
+      ),
+      "INVALID_TRANSITION"
+    );
+  });
+
+  it.each([
+    ["notRun", (candidate: GenerationSession): GenerationSession => candidate],
+    ["passed", (candidate: GenerationSession): GenerationSession => ({
+      ...candidate,
+      verification: {
+        status: "passed",
+        attemptId: "verification-attempt",
+        reportPath: "verification/report.json",
+        reportSha256: "f".repeat(64),
+        runId: "verification-run"
+      }
+    })]
+  ] as const)("rejects phase updates for a %s verification", async (
+    _status,
+    mutate
+  ) => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(mutate(verificationCandidate()));
+
+    await expectStoreError(
+      store.updateVerificationPhase(
+        "generation-1",
+        "verification-attempt",
+        { stage: "collecting" }
+      ),
+      "INVALID_TRANSITION"
+    );
+  });
+
+  it("rejects phase updates for a missing or published session", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(verificationCandidate());
+    await markPublishable(store, verificationCandidate());
+    await store.publish("generation-1");
+
+    await expectStoreError(
+      store.updateVerificationPhase(
+        "generation-1",
+        "verification-attempt",
+        { stage: "preparing" }
+      ),
+      "SESSION_PUBLISHED"
+    );
+    await expectStoreError(
+      store.updateVerificationPhase(
+        "generation-missing",
+        "verification-attempt",
+        { stage: "preparing" }
+      ),
+      "SESSION_NOT_FOUND"
+    );
+  });
+
+  it("rejects malformed verification phase payloads", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(verificationCandidate());
+    await store.beginVerification(
+      "generation-1",
+      0,
+      "verification-attempt"
+    );
+
+    await expectStoreError(
+      store.updateVerificationPhase(
+        "generation-1",
+        "verification-attempt",
+        { stage: "replaying", stepIndex: 3, stepCount: 3 }
+      ),
+      "INVALID_SESSION"
+    );
+    await expectStoreError(
+      store.updateVerificationPhase(
+        "generation-1",
+        "verification-attempt",
+        { stage: "unknown" } as unknown as VerificationPhase
+      ),
+      "INVALID_SESSION"
     );
   });
 

@@ -2,10 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://taphound.dev/schemas/proposed-step-envelope.json",
   "title": "TapHound Proposed Step Envelope",
-  "description": "The input envelope for `generation step --input`. The proposal field is a ProposedStep; the snapshot field is the full RuntimeSnapshot from the preceding observe call. The `bridge` action is NOT submitted via this envelope; it is handled by the separate `generation bridge` CLI command which builds the proposal internally.",
+  "description": "The input envelope for `generation step --input`. The proposal field is a ProposedStep. The snapshot context may be provided either inline (snapshot: the full RuntimeSnapshot from the preceding observe call) or by reference (snapshotRef: the snapshotRef string emitted by that observe call). Exactly one of snapshot or snapshotRef must be present. The `bridge` action is NOT submitted via this envelope; it is handled by the separate `generation bridge` CLI command which builds the proposal internally.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "proposal", "snapshot"],
+  "required": ["version", "proposal"],
+  "oneOf": [
+    { "required": ["snapshot"] },
+    { "required": ["snapshotRef"] }
+  ],
   "properties": {
     "version": { "const": 1 },
     "proposal": {
@@ -13,6 +17,11 @@
     },
     "snapshot": {
       "$ref": "#/$defs/RuntimeSnapshot"
+    },
+    "snapshotRef": {
+      "type": "string",
+      "pattern": "^\\.taphound/build/generations/(?:\\.[^/]+\\.work|[^/]+)/evidence/snapshots/revision-\\d+/[^/]+/snapshot\\.json$",
+      "description": "Store-owned evidence reference returned as snapshotRef (observe) or nextSnapshotRef (step) output. Must reference the same generation session as proposal.binding.generationId."
     }
   },
   "$defs": {

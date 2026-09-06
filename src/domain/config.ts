@@ -19,18 +19,20 @@ const ActivityNameSchema = z.string().refine(
   "activity must be relative with a leading dot or fully qualified"
 );
 
+export const IdlePolicySchema = z.strictObject({
+  strategy: z.enum(["hybrid", "layoutDiff", "frameStats", "structural"]).default("hybrid"),
+  pollIntervalMs: z.number().int().positive(),
+  stablePolls: z.number().int().positive(),
+  timeoutMs: z.number().int().positive()
+});
+
 export const TapHoundConfigSchema = z.strictObject({
   version: z.literal(1),
   run: z.strictObject({
     packageName: PackageNameSchema,
     activity: ActivityNameSchema
   }),
-  idle: z.strictObject({
-    strategy: z.enum(["hybrid", "layoutDiff", "frameStats", "structural"]).default("hybrid"),
-    pollIntervalMs: z.number().int().positive(),
-    stablePolls: z.number().int().positive(),
-    timeoutMs: z.number().int().positive()
-  }),
+  idle: IdlePolicySchema,
   ui: z.strictObject({
     backend: UiBackendSelectionSchema,
     snapshotTimeoutMs: z.number().int().positive().optional(),

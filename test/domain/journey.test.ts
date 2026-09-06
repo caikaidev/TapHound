@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { JourneySchema, JourneyStepSchema } from "../../src/domain/journey.js";
+import {
+  DEFAULT_DEVICE_ROLE,
+  JourneySchema,
+  JourneyStepSchema
+} from "../../src/domain/journey.js";
 import searchJourney from "../fixtures/journeys/search.json" with { type: "json" };
 
 const activity = {
@@ -8,12 +12,25 @@ const activity = {
   after: "com.example.app.MainActivity"
 };
 
+const singleDevice = [{ role: DEFAULT_DEVICE_ROLE }];
+
+function journey(steps: unknown[], devices: unknown = singleDevice): {
+  version: number;
+  name: string;
+  devices: unknown;
+  steps: unknown[];
+} {
+  return { version: 2, name: "Journey", devices, steps };
+}
+
 describe("JourneySchema", () => {
   it("parses a valid TapHound Journey fixture", () => {
-    const journey = JourneySchema.parse(searchJourney);
+    const parsed = JourneySchema.parse(searchJourney);
 
-    expect(journey.name).toBe("Search");
-    expect(journey.steps).toHaveLength(6);
+    expect(parsed.name).toBe("Search");
+    expect(parsed.steps).toHaveLength(6);
+    expect(parsed.version).toBe(2);
+    expect(parsed.devices).toEqual([{ role: DEFAULT_DEVICE_ROLE }]);
   });
 
   it.each([
@@ -50,11 +67,7 @@ describe("JourneySchema", () => {
       activity
     }
   ])("accepts the $action Action", (step) => {
-    expect(() => JourneySchema.parse({
-      version: 1,
-      name: "Action",
-      steps: [step]
-    })).not.toThrow();
+    expect(() => JourneySchema.parse(journey([step]))).not.toThrow();
   });
 
   it.each([
@@ -77,139 +90,109 @@ describe("JourneySchema", () => {
       timeoutMs: 3000
     }
   ])("accepts the $type explicit Expect", (expectation) => {
-    expect(() => JourneySchema.parse({
-      version: 1,
-      name: "Expect",
-      steps: [{
-        action: "wait",
-        activity,
-        expect: expectation
-      }]
-    })).not.toThrow();
+    expect(() => JourneySchema.parse(journey([{
+      action: "wait",
+      activity,
+      expect: expectation
+    }]))).not.toThrow();
   });
 
   it("accepts ordinal and scoped Locators for scroll targets, containers, and expectations", () => {
-    expect(() => JourneySchema.parse({
-      version: 1,
-      name: "Repeated elements",
-      steps: [{
-        action: "scrollTo",
-        locator: {
-          text: "Item",
-          index: 2,
-          within: { resourceId: "results" }
-        },
-        container: {
-          resourceId: "results",
-          index: 0,
-          within: { contentDescription: "Main panel" }
-        },
-        direction: "up",
-        activity,
-        expect: {
-          type: "element",
-          locator: { text: "Ready", index: 1 },
-          timeoutMs: 3000
-        }
-      }]
-    })).not.toThrow();
+    expect(() => JourneySchema.parse(journey([{
+      action: "scrollTo",
+      locator: {
+        text: "Item",
+        index: 2,
+        within: { resourceId: "results" }
+      },
+      container: {
+        resourceId: "results",
+        index: 0,
+        within: { contentDescription: "Main panel" }
+      },
+      direction: "up",
+      activity,
+      expect: {
+        type: "element",
+        locator: { text: "Ready", index: 1 },
+        timeoutMs: 3000
+      }
+    }]))).not.toThrow();
   });
 
   it("requires Activity before and after checkpoints", () => {
-    expect(() => JourneySchema.parse({
-      version: 1,
-      name: "Missing checkpoint",
-      steps: [{
-        action: "click",
-        locator: { resourceId: "toolbar_search" }
-      }]
-    })).toThrow();
+    expect(() => JourneySchema.parse(journey([{
+      action: "click",
+      locator: { resourceId: "toolbar_search" }
+    }]))).toThrow();
   });
 
   it.each(["click", "longClick"] as const)(
     "accepts an explicit annotated-label fallback for %s",
     (action) => {
-      expect(() => JourneySchema.parse({
-        version: 1,
-        name: "Fallback",
-        steps: [{
-          action,
-          locator: { resourceId: "toolbar_search" },
-          fallback: {
-            type: "annotatedLabel",
-            label: "#7"
-          },
-          activity
-        }]
-      })).not.toThrow();
-    }
-  );
-
-  it("rejects annotated-label fallback for unsupported Actions", () => {
-    expect(() => JourneySchema.parse({
-      version: 1,
-      name: "Invalid fallback",
-      steps: [{
-        action: "swipe",
-        locator: { resourceId: "results" },
-        direction: "up",
+      expect(() => JourneySchema.parse(journey([{
+        action,
+        locator: { resourceId: "toolbar_search" },
         fallback: {
           type: "annotatedLabel",
           label: "#7"
         },
         activity
-      }]
-    })).toThrow();
+      }]))).not.toThrow();
+    }
+  );
+
+  it("rejects annotated-label fallback for unsupported Actions", () => {
+    expect(() => JourneySchema.parse(journey([{
+      action: "swipe",
+      locator: { resourceId: "results" },
+      direction: "up",
+      fallback: {
+        type: "annotatedLabel",
+        label: "#7"
+      },
+      activity
+    }]))).toThrow();
   });
 
   it("requires an Android CLI annotation label", () => {
-    expect(() => JourneySchema.parse({
-      version: 1,
-      name: "Invalid label",
-      steps: [{
-        action: "click",
-        locator: { resourceId: "toolbar_search" },
-        fallback: {
-          type: "annotatedLabel",
-          label: "search"
-        },
-        activity
-      }]
-    })).toThrow();
+    expect(() => JourneySchema.parse(journey([{
+      action: "click",
+      locator: { resourceId: "toolbar_search" },
+      fallback: {
+        type: "annotatedLabel",
+        label: "search"
+      },
+      activity
+    }]))).toThrow();
   });
 
   it("requires text for inputText", () => {
-    expect(() => JourneySchema.parse({
-      version: 1,
-      name: "Missing text",
-      steps: [{ action: "inputText", activity }]
-    })).toThrow();
+    expect(() => JourneySchema.parse(journey([{
+      action: "inputText",
+      activity
+    }]))).toThrow();
   });
 
   it("requires a locator and direction for swipe", () => {
-    expect(() => JourneySchema.parse({
-      version: 1,
-      name: "Missing swipe data",
-      steps: [{ action: "swipe", activity }]
-    })).toThrow();
+    expect(() => JourneySchema.parse(journey([{
+      action: "swipe",
+      activity
+    }]))).toThrow();
   });
 
   it("rejects an invalid regular-expression Logcat Expect", () => {
-    expect(() => JourneySchema.parse({
-      version: 1,
-      name: "Invalid regular expression",
-      steps: [{
-        action: "wait",
-        activity,
-        expect: {
-          type: "logcat",
-          tag: "SearchViewModel",
-          pattern: "[",
-          match: "regex",
-          timeoutMs: 3000
-        }
-      }]
-    })).toThrow(/regular expression/i);
+    expect(() => JourneySchema.parse(journey([{
+      action: "wait",
+      activity,
+      expect: {
+        type: "logcat",
+        tag: "SearchViewModel",
+        pattern: "[",
+        match: "regex",
+        timeoutMs: 3000
+      }
+    }]))).toThrow(/regular expression/i);
   });
 
   it("rejects a natural-language official Journey shape", () => {
@@ -220,19 +203,184 @@ describe("JourneySchema", () => {
   });
 
   it("requires at least one step", () => {
+    expect(() => JourneySchema.parse(journey([]))).toThrow();
+  });
+
+  it("requires a non-empty devices declaration", () => {
     expect(() => JourneySchema.parse({
-      version: 1,
-      name: "Empty",
-      steps: []
+      version: 2,
+      name: "No devices",
+      devices: [],
+      steps: [{ action: "wait", activity }]
     })).toThrow();
   });
 
   it("rejects unsupported Journey versions", () => {
     expect(() => JourneySchema.parse({
-      version: 2,
-      name: "Future",
+      version: 1,
+      name: "Legacy",
+      devices: singleDevice,
       steps: [{ action: "wait", activity }]
     })).toThrow();
+    expect(() => JourneySchema.parse({
+      version: 3,
+      name: "Future",
+      devices: singleDevice,
+      steps: [{ action: "wait", activity }]
+    })).toThrow();
+  });
+});
+
+describe("Journey device declaration", () => {
+  const senderStep = {
+    action: "click",
+    device: "sender",
+    locator: { resourceId: "send_button" },
+    activity
+  };
+  const receiverStep = {
+    action: "click",
+    device: "receiver",
+    locator: { resourceId: "conversation_item" },
+    activity
+  };
+
+  it("accepts a multi-device Journey with fully bound steps", () => {
+    const parsed = JourneySchema.parse(journey(
+      [senderStep, receiverStep],
+      [{ role: "sender" }, { role: "receiver" }]
+    ));
+    expect(parsed.devices).toEqual([{ role: "sender" }, { role: "receiver" }]);
+  });
+
+  it("accepts an optional description per device", () => {
+    expect(() => JourneySchema.parse(journey(
+      [{ ...senderStep, device: "sender" }],
+      [{ role: "sender", description: "Account A" }]
+    ))).not.toThrow();
+  });
+
+  it("rejects duplicate device roles", () => {
+    expect(() => JourneySchema.parse(journey(
+      [{ ...senderStep }],
+      [{ role: "sender" }, { role: "sender" }]
+    ))).toThrow(/unique/i);
+  });
+
+  it("requires every step to declare its device on a multi-device Journey", () => {
+    expect(() => JourneySchema.parse(journey(
+      [senderStep, { action: "wait", activity }],
+      [{ role: "sender" }, { role: "receiver" }]
+    ))).toThrow(/declare its device/i);
+  });
+
+  it("rejects a step that references an undeclared device role", () => {
+    expect(() => JourneySchema.parse(journey(
+      [senderStep, receiverStep, {
+        action: "wait",
+        device: "ghost",
+        activity
+      }],
+      [{ role: "sender" }, { role: "receiver" }]
+    ))).toThrow(/undeclared device role/i);
+  });
+
+  it("rejects a declared role that no step uses", () => {
+    expect(() => JourneySchema.parse(journey(
+      [senderStep, receiverStep],
+      [{ role: "sender" }, { role: "receiver" }, { role: "observer" }]
+    ))).toThrow(/never used/i);
+  });
+
+  it("allows omitting device on a single-device Journey", () => {
+    expect(() => JourneySchema.parse(journey([{
+      action: "wait",
+      activity
+    }]))).not.toThrow();
+  });
+
+  it("allows an explicit device matching the single declared role", () => {
+    expect(() => JourneySchema.parse(journey([{
+      action: "wait",
+      device: DEFAULT_DEVICE_ROLE,
+      activity
+    }]))).not.toThrow();
+  });
+
+  it("rejects a role that does not match the single declared role", () => {
+    expect(() => JourneySchema.parse(journey([{
+      action: "wait",
+      device: "sender",
+      activity
+    }]))).toThrow(/undeclared device role/i);
+  });
+
+  it("rejects malformed device roles", () => {
+    expect(() => JourneySchema.parse(journey(
+      [senderStep],
+      [{ role: "Sender" }]
+    ))).toThrow(/role/i);
+    expect(() => JourneySchema.parse(journey(
+      [{ ...senderStep, device: "2nd" }],
+      [{ role: "2nd" }]
+    ))).toThrow();
+  });
+});
+
+describe("wait until step", () => {
+  it("accepts wait with until and timeoutMs together", () => {
+    const parsed = JourneySchema.parse(journey([{
+      action: "wait",
+      until: { element: { resourceId: "conversation_item_new" } },
+      timeoutMs: 15000,
+      activity
+    }]));
+    expect(parsed.steps[0]).toMatchObject({
+      action: "wait",
+      until: { element: { resourceId: "conversation_item_new" } },
+      timeoutMs: 15000
+    });
+  });
+
+  it("accepts a plain wait without until or timeoutMs", () => {
+    expect(() => JourneySchema.parse(journey([{
+      action: "wait",
+      activity
+    }]))).not.toThrow();
+  });
+
+  it("rejects until without timeoutMs", () => {
+    expect(() => JourneySchema.parse(journey([{
+      action: "wait",
+      until: { element: { resourceId: "conversation_item_new" } },
+      activity
+    }]))).toThrow(/together/i);
+  });
+
+  it("rejects timeoutMs without until", () => {
+    expect(() => JourneySchema.parse(journey([{
+      action: "wait",
+      timeoutMs: 5000,
+      activity
+    }]))).toThrow(/together/i);
+  });
+
+  it("requires a Locator inside until", () => {
+    expect(() => JourneySchema.parse(journey([{
+      action: "wait",
+      until: {},
+      timeoutMs: 5000,
+      activity
+    }]))).toThrow();
+  });
+
+  it("keeps the step-level schema standalone", () => {
+    expect(() => JourneyStepSchema.parse({
+      action: "wait",
+      until: { element: { resourceId: "ready" } },
+      timeoutMs: 1000,
+      activity
+    })).not.toThrow();
   });
 });
 

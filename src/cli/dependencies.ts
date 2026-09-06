@@ -92,11 +92,21 @@ import {
   GenerationRecoveryService
 } from "../application/generation/generation-recovery-service.js";
 import {
+  GenerationConfigService,
+  type GenerationIdlePolicyPatch
+} from "../application/generation/generation-config-service.js";
+import {
+  GenerationReplaceService,
+  type GenerationReplaceResult
+} from "../application/generation/generation-replace-service.js";
+import {
   GenerationStarter,
   GenerationOperationError,
   hashGenerationBinding,
   type GenerationStartInput
 } from "../application/generation/generation-starter.js";
+import { readGenerationContextSnapshot } from "../application/generation/generation-context-snapshot.js";
+import type { ResolvedProjectContext } from "../domain/project-context.js";
 import {
   GenerationStepExecutor
 } from "../application/generation/generation-step-executor.js";
@@ -117,7 +127,10 @@ import { IdleWaiter } from "../application/wait/idle-waiter.js";
 import type { TapHoundConfig } from "../domain/config.js";
 import type { UiBackendSelection } from "../domain/ui-backend.js";
 import type { InitResult } from "../domain/init.js";
-import type { GenerationSession } from "../domain/generation.js";
+import {
+  verificationPhaseLabel,
+  type GenerationSession
+} from "../domain/generation.js";
 import type { InitPromptPort } from "../ports/init-prompt.js";
 import type {
   GenerationSessionStore
@@ -129,6 +142,7 @@ import type { WorkspaceLayoutPort } from "../ports/workspace-layout.js";
 import type {
   JourneyCompositionStore
 } from "../ports/journey-composition-store.js";
+import { isErrnoException } from "../shared/errors.js";
 
 export interface TextOutput {
   write: (content: string) => void;
@@ -146,7 +160,23 @@ export interface GenerationCliRuntime {
   archive: (id: string) => Promise<GenerationSession>;
   list: () => Promise<readonly GenerationSession[]>;
   readSession: (id: string) => Promise<GenerationSession>;
+  readContextSnapshot: (
+    id: string
+  ) => Promise<ResolvedProjectContext | null>;
   assertConfigIdentity: (id: string) => Promise<void>;
+  updateIdlePolicy: (
+    id: string,
+    patch: GenerationIdlePolicyPatch
+  ) => Promise<GenerationSession>;
+  replace: (input: {
+    generationId: string;
+    stepIndex: number;
+    projectRoot: string;
+    config: TapHoundConfig;
+    toolVersions: Record<string, string>;
+    manualReplay?: boolean | undefined;
+    signal?: AbortSignal | undefined;
+  }) => Promise<GenerationReplaceResult>;
 }
 
 export interface CliDependencies {
@@ -172,7 +202,7 @@ export interface CliDependencies {
   > | undefined;
   journeyCompositionStore?: Pick<
     JourneyCompositionStore,
-    "writeText"
+    "writeText" | "read" | "listJourneyPaths" | "readJourneyMeta"
   > | undefined;
   externalFlowResolver?: Pick<
     ExternalFlowResolver,
@@ -532,26 +562,32 @@ export function createProductionDependencies(
         journeyWriter: new FileSystemJourneyWriter(),
         metaWriter: new FileSystemGenerationMetaWriter()
       });
+      const verifyRuntime = new VerifyRuntime({
+        screenshots: androidCli,
+        annotatedScreens: androidCli,
+        uiStability: androidCli,
+        uiSnapshots,
+        adb,
+        clock,
+        artifactStore: new FileSystemArtifactStore(),
+        reportWriter: new ReportWriter(),
+        now: (): Date => new Date(),
+        createRunId: runId
+      });
       const finalizer = new GenerationFinalizer({
         store,
         contextValidator,
-        verifyRuntime: new VerifyRuntime({
-          screenshots: androidCli,
-          annotatedScreens: androidCli,
-          uiStability: androidCli,
-          uiSnapshots,
-          adb,
-          clock,
-          artifactStore: new FileSystemArtifactStore(),
-          reportWriter: new ReportWriter(),
-          now: (): Date => new Date(),
-          createRunId: runId
-        }),
+        verifyRuntime,
         publisher,
         generateAttemptId: randomUUID,
         owner: { pid: process.pid, now: (): Date => new Date() },
         progress: (stage): void => {
           process.stderr.write(`TapHound finalize: ${stage}\n`);
+        },
+        replayProgress: (phase): void => {
+          process.stderr.write(
+            `TapHound finalize: ${verificationPhaseLabel(phase)}\n`
+          );
         }
       });
       const recovery = new GenerationRecoveryService({
@@ -561,8 +597,8 @@ export function createProductionDependencies(
           try {
             process.kill(pid, 0);
             return true;
-          } catch {
-            return false;
+          } catch (error) {
+            return !isErrnoException(error) || error.code !== "ESRCH";
           }
         }
       });
@@ -584,6 +620,9 @@ export function createProductionDependencies(
         },
         list: (): Promise<readonly GenerationSession[]> => store.list(),
         readSession: (id): Promise<GenerationSession> => store.read(id),
+        readContextSnapshot: (id): Promise<ResolvedProjectContext | null> => (
+          readGenerationContextSnapshot({ store }, id)
+        ),
         assertConfigIdentity: async (id): Promise<void> => {
           const session = await store.read(id);
           if (hashGenerationBinding(config) !== session.bindings.configHash) {
@@ -592,7 +631,25 @@ export function createProductionDependencies(
               "Generation configuration does not match the authoritative session"
             );
           }
-        }
+        },
+        updateIdlePolicy: async (
+          id: string,
+          patch: GenerationIdlePolicyPatch
+        ): Promise<GenerationSession> => (
+          new GenerationConfigService({ store }).updateIdlePolicy({
+            generationId: id,
+            config,
+            patch
+          })
+        ),
+        replace: (input): Promise<GenerationReplaceResult> => (
+          new GenerationReplaceService({
+            store,
+            observer,
+            verifyRuntime,
+            appPreparer: new GenerationAppPreparer(adb, clock)
+          }).replace(input)
+        )
       };
     },
     detachedProcess: new NodeDetachedProcessLauncher(),

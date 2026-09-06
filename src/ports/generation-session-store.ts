@@ -1,7 +1,8 @@
 import type {
   GenerationInFlight,
   GenerationSession,
-  PendingConfirmation
+  PendingConfirmation,
+  VerificationPhase
 } from "../domain/generation.js";
 
 export const GENERATION_SESSION_STORE_ERROR_CODES = [
@@ -83,6 +84,15 @@ export interface GenerationSessionStore {
     expectedRevision: number,
     attemptId: string,
     owner?: { pid: number; startedAt: string }
+  ) => Promise<GenerationSession>;
+  updateVerificationPhase: (
+    id: string,
+    attemptId: string,
+    phase: VerificationPhase
+  ) => Promise<void>;
+  abortVerification: (
+    id: string,
+    expectedRevision: number
   ) => Promise<GenerationSession>;
   completeVerification: (
     id: string,

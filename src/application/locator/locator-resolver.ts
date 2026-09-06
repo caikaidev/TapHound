@@ -24,6 +24,12 @@ export interface LocatedTarget {
   matchedBy: LocatorField;
 }
 
+export interface LocatedIdentity {
+  status: "found";
+  element: LayoutElement;
+  matchedBy: LocatorField;
+}
+
 export interface LocatorFailure {
   status: "failed";
   code: Extract<
@@ -35,6 +41,7 @@ export interface LocatorFailure {
 }
 
 export type LocatorResolution = LocatedTarget | LocatorFailure;
+export type LocatorIdentityResolution = LocatedIdentity | LocatorFailure;
 
 export interface LocatorResolutionOptions {
   requireEnabled?: boolean | undefined;
@@ -175,6 +182,33 @@ function resolveEntry(
     };
   }
   return { status: "found", entry, matchedBy };
+}
+
+export function resolveLocatorIdentity(
+  roots: readonly LayoutElement[],
+  locator: Locator
+): LocatorIdentityResolution {
+  const resolution = resolveEntry(flattenLayout(roots), locator);
+  if (resolution.status === "failed") {
+    return resolution;
+  }
+  const { element } = resolution.entry;
+  if (
+    locator.evidence !== undefined
+    && !locatorEvidenceMatches(element, locator.evidence)
+  ) {
+    return {
+      status: "failed",
+      code: "LOCATOR_NOT_FOUND",
+      message: "Indexed Locator element evidence does not match the live Layout",
+      evidenceMismatch: true
+    };
+  }
+  return {
+    status: "found",
+    element,
+    matchedBy: resolution.matchedBy
+  };
 }
 
 export function resolveLocator(

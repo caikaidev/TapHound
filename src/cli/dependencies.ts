@@ -34,6 +34,10 @@ import { FileSystemGenerationMetaWriter } from "../adapters/filesystem/generatio
 import { FileSystemGenerationSessionStore } from "../adapters/filesystem/generation-session-store.js";
 import { FileSystemJourneyWriter } from "../adapters/filesystem/journey-writer.js";
 import { FileSystemUiCacheStore } from "../adapters/filesystem/ui-cache-store.js";
+import { FileSystemKnowledgeRegistry } from "../adapters/filesystem/knowledge-registry.js";
+import {
+  FileSystemKnowledgeReceiptStore
+} from "../adapters/filesystem/knowledge-receipt-store.js";
 import {
   FileSystemJourneyCompositionStore
 } from "../adapters/filesystem/journey-composition-store.js";
@@ -110,6 +114,7 @@ import type { ResolvedProjectContext } from "../domain/project-context.js";
 import {
   GenerationStepExecutor
 } from "../application/generation/generation-step-executor.js";
+import { GenerationPlanner } from "../application/generation/generation-planner.js";
 import {
   RuntimeObserver,
   SnapshotReobservationGuard,
@@ -119,6 +124,19 @@ import {
 import { InitService, type InitInput } from "../application/init/init-service.js";
 import { JourneyResolver } from "../application/journey/journey-resolver.js";
 import { ExternalFlowResolver } from "../application/journey/external-flow-resolver.js";
+import { KnowledgeLoader } from "../application/knowledge/knowledge-loader.js";
+import {
+  KnowledgeReceiptRecorder
+} from "../application/knowledge/receipt-recorder.js";
+import {
+  KnowledgeBootstrapper
+} from "../application/knowledge/knowledge-bootstrapper.js";
+import {
+  KnowledgePromotionService
+} from "../application/knowledge/promotion-service.js";
+import type {
+  ActionResolutionResult
+} from "../application/resolution/action-resolver.js";
 import { ProjectDescriber } from "../application/project/project-describer.js";
 import { RecorderService, type RecordInput, type RecordResult } from "../application/recorder/recorder-service.js";
 import { ReportWriter } from "../application/report/report-writer.js";
@@ -127,8 +145,14 @@ import { IdleWaiter } from "../application/wait/idle-waiter.js";
 import type { TapHoundConfig } from "../domain/config.js";
 import type { UiBackendSelection } from "../domain/ui-backend.js";
 import type { InitResult } from "../domain/init.js";
+import type { RuntimeSnapshot } from "../domain/runtime-snapshot.js";
+import type {
+  KnowledgePromotion,
+  KnowledgeReceipt
+} from "../domain/knowledge-receipt.js";
 import {
   verificationPhaseLabel,
+  type GenerationPlanning,
   type GenerationSession
 } from "../domain/generation.js";
 import type { InitPromptPort } from "../ports/init-prompt.js";
@@ -142,6 +166,10 @@ import type { WorkspaceLayoutPort } from "../ports/workspace-layout.js";
 import type {
   JourneyCompositionStore
 } from "../ports/journey-composition-store.js";
+import type {
+  LoadedKnowledgeBundle,
+  WriteKnowledgeBundleResult
+} from "../ports/knowledge-registry.js";
 import { isErrnoException } from "../shared/errors.js";
 
 export interface TextOutput {
@@ -177,6 +205,10 @@ export interface GenerationCliRuntime {
     manualReplay?: boolean | undefined;
     signal?: AbortSignal | undefined;
   }) => Promise<GenerationReplaceResult>;
+  resolvePlannedAction?: ((input: {
+    session: GenerationSession;
+    snapshot: RuntimeSnapshot;
+  }) => Promise<ActionResolutionResult>) | undefined;
 }
 
 export interface CliDependencies {
@@ -253,6 +285,27 @@ export interface CliDependencies {
       bytes: number;
     }>;
     clear: (projectRoot: string) => Promise<void>;
+  } | undefined;
+  knowledge?: {
+    load: (input: {
+      projectRoot: string;
+      packageName?: string | undefined;
+      expectedKnowledgeHash?: string | undefined;
+    }) => Promise<LoadedKnowledgeBundle>;
+    bootstrap: (input: {
+      projectRoot: string;
+      packageName: string;
+      modules: Parameters<KnowledgeBootstrapper["bootstrap"]>[0]["modules"];
+      expectedKnowledgeHash?: string | undefined;
+    }) => Promise<WriteKnowledgeBundleResult>;
+    promote: (input: {
+      projectRoot: string;
+      packageName: string;
+      promotion: KnowledgePromotion;
+    }) => Promise<WriteKnowledgeBundleResult>;
+    listReceipts: (
+      projectRoot: string
+    ) => Promise<readonly KnowledgeReceipt[]>;
   } | undefined;
   readJson: (path: string) => Promise<unknown>;
   cwd: () => string;
@@ -353,6 +406,17 @@ export function createProductionDependencies(
   );
   const externalFlowResolver = new ExternalFlowResolver({
     registry: externalFlowRegistry
+  });
+  const knowledgeRegistry = new FileSystemKnowledgeRegistry();
+  const knowledgeReceiptStore = new FileSystemKnowledgeReceiptStore();
+  const knowledgeLoader = new KnowledgeLoader(knowledgeRegistry);
+  const knowledgeReceiptRecorder = new KnowledgeReceiptRecorder(
+    knowledgeReceiptStore
+  );
+  const knowledgeBootstrapper = new KnowledgeBootstrapper(knowledgeRegistry);
+  const knowledgePromotion = new KnowledgePromotionService({
+    registry: knowledgeRegistry,
+    receipts: knowledgeReceiptStore
   });
   return {
     ...(signal === undefined ? {} : { signal }),
@@ -471,6 +535,18 @@ export function createProductionDependencies(
       status: async (projectRoot) => new FileSystemUiCacheStore(projectRoot).status(),
       clear: async (projectRoot) => new FileSystemUiCacheStore(projectRoot).clear()
     },
+    knowledge: {
+      load: (input): Promise<LoadedKnowledgeBundle> => knowledgeLoader.load(input),
+      bootstrap: (input): Promise<WriteKnowledgeBundleResult> => (
+        knowledgeBootstrapper.bootstrap(input)
+      ),
+      promote: (input): Promise<WriteKnowledgeBundleResult> => (
+        knowledgePromotion.promote(input)
+      ),
+      listReceipts: (projectRoot): Promise<readonly KnowledgeReceipt[]> => (
+        knowledgeReceiptStore.list(projectRoot)
+      )
+    },
     generationStarter: {
       start: async (input): Promise<
         Awaited<ReturnType<GenerationStarter["start"]>>
@@ -499,6 +575,13 @@ export function createProductionDependencies(
     },
     generationRuntime: ({ projectRoot, config }): GenerationCliRuntime => {
       const store = generationStoreFactory(projectRoot);
+      const planner = new GenerationPlanner({
+        projectRoot,
+        knowledge: knowledgeLoader,
+        receipts: knowledgeReceiptRecorder,
+        now: (): Date => new Date(),
+        createReceiptId: randomUUID
+      });
       const prompt = new InquirerGenerationPrompt();
       const observer = new RuntimeObserver({
         store,
@@ -508,7 +591,18 @@ export function createProductionDependencies(
         waitUntilIdle,
         now: (): Date => new Date(),
         createAttemptId: randomUUID,
-        uiCacheEnabled: config.ui?.cacheEnabled ?? true
+        uiCacheEnabled: config.ui?.cacheEnabled ?? true,
+        planSnapshot: async ({
+          session,
+          snapshot,
+          verifyTransition
+        }): Promise<GenerationPlanning> => (
+          (await planner.planSnapshot(
+            session,
+            snapshot,
+            verifyTransition
+          )).planning
+        )
       });
       const confirmation = new GenerationConfirmationService({
         store,
@@ -649,7 +743,21 @@ export function createProductionDependencies(
             verifyRuntime,
             appPreparer: new GenerationAppPreparer(adb, clock)
           }).replace(input)
-        )
+        ),
+        resolvePlannedAction: async (input): Promise<ActionResolutionResult> => {
+          if (input.session.version !== 2 || input.session.planning === undefined) {
+            throw new GenerationOperationError(
+              "KNOWLEDGE_INVALID",
+              "Generation session has no planning binding"
+            );
+          }
+          const knowledge = await knowledgeLoader.load({
+            projectRoot,
+            packageName: input.session.target.packageName,
+            expectedKnowledgeHash: input.session.planning.knowledgeHash
+          });
+          return planner.resolveNext({ ...input, knowledge });
+        }
       };
     },
     detachedProcess: new NodeDetachedProcessLauncher(),

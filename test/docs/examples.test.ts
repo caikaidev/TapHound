@@ -280,6 +280,7 @@ describe("TapHound documentation examples", () => {
       "context",
       "journey",
       "generation",
+      "knowledge",
       "init",
       "align",
       "ui-cache"
@@ -298,6 +299,7 @@ describe("TapHound documentation examples", () => {
         "context validate",
         "journey resolve",
         "generation start",
+        "knowledge status",
         "taphound init",
         "ui-cache status"
       ]) {

@@ -24,6 +24,11 @@ import type {
   GenerationSessionStore
 } from "../../ports/generation-session-store.js";
 import {
+  GoalSpecSchema,
+  hashGoalSpec,
+  type GoalSpec
+} from "../../domain/route.js";
+import {
   JourneySchema,
   type Journey,
   type JourneyStep
@@ -85,6 +90,10 @@ export interface GenerationStartInput {
     verificationReportPath: string;
   } | undefined;
   externalFlows?: readonly GenerationExternalFlowInput[] | undefined;
+  planning?: {
+    knowledgeHash: string;
+    goal: GoalSpec;
+  } | undefined;
 }
 
 export interface GenerationStarterDependencies {
@@ -357,8 +366,14 @@ export class GenerationStarter {
 
     const generationId = this.dependencies.generateId();
     const runId = distinctId(generationId, this.dependencies.generateId);
+    const planning = input.planning === undefined
+      ? undefined
+      : {
+          knowledgeHash: input.planning.knowledgeHash,
+          goal: GoalSpecSchema.parse(input.planning.goal)
+        };
     const session = GenerationSessionSchema.parse({
-      version: 1,
+      version: planning === undefined ? 1 : 2,
       id: generationId,
       revision: 0,
       state: "active",
@@ -388,7 +403,21 @@ export class GenerationStarter {
       inFlight: null,
       pendingConfirmation: null,
       verification: { status: "notRun" },
-      publication: { status: "notRun" }
+      publication: { status: "notRun" },
+      ...(planning === undefined
+        ? {}
+        : {
+            planning: {
+              knowledgeHash: planning.knowledgeHash,
+              goalHash: hashGoalSpec(planning.goal),
+              goal: planning.goal,
+              currentScreen: null,
+              currentRoute: null,
+              replansUsed: 0,
+              maxReplans: planning.goal.limits.maxReplans,
+              maxSteps: planning.goal.limits.maxSteps
+            }
+          })
     });
 
     await this.dependencies.store.create(session);

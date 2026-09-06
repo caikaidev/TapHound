@@ -14,11 +14,28 @@ import {
   type ProposedStep
 } from "./proposed-step.js";
 import { RuntimeSnapshotSchema } from "./runtime-snapshot.js";
+import {
+  GoalSpecSchema,
+  RoutePlanSchema,
+  hashGoalSpec,
+  type GoalSpec
+} from "./route.js";
 
 export const GENERATION_ERROR_CODES = [
   "CONFIG_INVALID",
   "CONTEXT_INVALID",
   "CONTEXT_STALE",
+  "KNOWLEDGE_INVALID",
+  "KNOWLEDGE_STALE",
+  "SCREEN_UNKNOWN",
+  "SCREEN_AMBIGUOUS",
+  "NO_ROUTE",
+  "TARGET_UNKNOWN",
+  "ROUTE_LIMIT_EXCEEDED",
+  "ANCHOR_UNKNOWN",
+  "ANCHOR_AMBIGUOUS",
+  "PARAMETER_MISSING",
+  "REPLAN_BUDGET_EXHAUSTED",
   "FLOW_INVALID",
   "FLOW_REPLAY_FAILED",
   "APP_LAUNCH_FAILED",
@@ -190,8 +207,50 @@ const PublicationSchema = z.discriminatedUnion("status", [
   })
 ]);
 
-export const GenerationSessionSchema = z.strictObject({
-  version: z.literal(1),
+export const GenerationPlanningSchema = z.strictObject({
+  knowledgeHash: Sha256Schema,
+  goalHash: Sha256Schema,
+  goal: GoalSpecSchema,
+  currentScreen: z.string().trim().min(1).nullable(),
+  currentRoute: RoutePlanSchema.nullable(),
+  replansUsed: z.number().int().nonnegative(),
+  maxReplans: z.number().int().nonnegative(),
+  maxSteps: z.number().int().positive()
+}).superRefine((planning, context) => {
+  if (
+    planning.maxReplans !== planning.goal.limits.maxReplans
+    || planning.maxSteps !== planning.goal.limits.maxSteps
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["goal", "limits"],
+      message: "Planning limits must match the bound Goal"
+    });
+  }
+  if (planning.goalHash !== hashGoalSpec(planning.goal)) {
+    context.addIssue({
+      code: "custom",
+      path: ["goalHash"],
+      message: "Goal hash must match the canonical bound Goal"
+    });
+  }
+  if (
+    planning.currentRoute !== null
+    && (
+      planning.currentRoute.goalId !== planning.goal.id
+      || planning.currentRoute.knowledgeHash !== planning.knowledgeHash
+      || planning.currentRoute.startScreen !== planning.currentScreen
+    )
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["currentRoute"],
+      message: "Current Route must match the planning binding and current Screen"
+    });
+  }
+});
+
+const GenerationSessionFields = {
   id: GenerationSessionIdSchema,
   revision: NonnegativeSafeIntegerSchema,
   state: z.enum(["active", "recoveryRequired", "archived"]),
@@ -221,7 +280,23 @@ export const GenerationSessionSchema = z.strictObject({
   pendingConfirmation: PendingConfirmationSchema.nullable(),
   verification: VerificationSchema,
   publication: PublicationSchema
+};
+
+export const GenerationSessionSchema = z.strictObject({
+  version: z.union([z.literal(1), z.literal(2)]),
+  ...GenerationSessionFields,
+  planning: GenerationPlanningSchema.optional()
 }).superRefine((session, context) => {
+  if (
+    (session.version === 1 && session.planning !== undefined)
+    || (session.version === 2 && session.planning === undefined)
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["planning"],
+      message: "Generation session v2 requires planning and v1 forbids it"
+    });
+  }
   if (session.candidateSources.length !== session.candidateSteps.length) {
     context.addIssue({
       code: "custom",
@@ -338,6 +413,7 @@ export type GenerationVariables = z.infer<typeof GenerationVariablesSchema>;
 export type GenerationInFlight = z.infer<typeof GenerationInFlightSchema>;
 export type PendingConfirmation = z.infer<typeof PendingConfirmationSchema>;
 export type GenerationSession = z.infer<typeof GenerationSessionSchema>;
+export type GenerationPlanning = z.infer<typeof GenerationPlanningSchema>;
 
 export function isGenerationConfirmationExpired(
   challenge: PendingConfirmation,
@@ -493,6 +569,13 @@ export interface GenerationCoreIdentity {
   variables: GenerationSession["variables"];
   baseFlow?: NonNullable<GenerationSession["baseFlow"]> | undefined;
   externalFlows: GenerationSession["externalFlows"];
+  planningBinding?: {
+    knowledgeHash: string;
+    goalHash: string;
+    goal: GoalSpec;
+    maxReplans: number;
+    maxSteps: number;
+  } | undefined;
 }
 
 export function generationCoreIdentity(
@@ -512,7 +595,18 @@ export function generationCoreIdentity(
     contextSelection: session.contextSelection,
     variables: session.variables,
     ...(session.baseFlow === undefined ? {} : { baseFlow: session.baseFlow }),
-    externalFlows: session.externalFlows
+    externalFlows: session.externalFlows,
+    ...(session.version === 1 || session.planning === undefined
+      ? {}
+      : {
+          planningBinding: {
+            knowledgeHash: session.planning.knowledgeHash,
+            goalHash: session.planning.goalHash,
+            goal: session.planning.goal,
+            maxReplans: session.planning.maxReplans,
+            maxSteps: session.planning.maxSteps
+          }
+        })
   };
 }
 

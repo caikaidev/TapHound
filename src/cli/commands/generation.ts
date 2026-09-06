@@ -43,6 +43,7 @@ import {
 import { LocatorSchema } from "../../domain/layout.js";
 import type { ResolvedProjectContext } from "../../domain/project-context.js";
 import { RuntimeSnapshotSchema } from "../../domain/runtime-snapshot.js";
+import { GoalSpecSchema } from "../../domain/route.js";
 import {
   assertArtifactDirectory,
   CONFIG_PATH,
@@ -71,6 +72,7 @@ interface GenerationStartOptions {
   allowEvidenceDrift?: boolean | undefined;
   baseFlow?: string | undefined;
   externalFlow?: string[] | undefined;
+  goal?: string | undefined;
   compact?: boolean | undefined;
   json?: boolean | undefined;
 }
@@ -92,6 +94,8 @@ interface GenerationStepOptions extends GenerationObserveOptions {
   input?: string | undefined;
   replace?: string | undefined;
 }
+
+type GenerationNextOptions = GenerationObserveOptions;
 
 interface GenerationConfirmOptions extends GenerationObserveOptions {
   challenge: string;
@@ -528,6 +532,10 @@ function createStartCommand(dependencies: CliDependencies): Command {
       "Allow changed source evidence; replay remains mandatory"
     )
     .option(
+      "--goal <path>",
+      "Bind a strict Goal Spec and the current committed Knowledge Registry"
+    )
+    .option(
       "--compact",
       "Summarize contextSelection as indexHash plus module ids instead of per-module binding hashes"
     )
@@ -541,6 +549,28 @@ function createStartCommand(dependencies: CliDependencies): Command {
           ...(options.module === undefined ? {} : { moduleIds: options.module })
         });
         const context = loaded.context;
+        const goalPath = options.goal;
+        const planning = goalPath === undefined
+          ? undefined
+          : await (async (): Promise<{
+              knowledgeHash: string;
+              goal: z.infer<typeof GoalSpecSchema>;
+            }> => {
+              if (dependencies.knowledge === undefined) {
+                throw new GenerationOperationError(
+                  "KNOWLEDGE_INVALID",
+                  "Knowledge services are unavailable"
+                );
+              }
+              const goal = GoalSpecSchema.parse(
+                await dependencies.readJson(resolve(options.project, goalPath))
+              );
+              const knowledge = await dependencies.knowledge.load({
+                projectRoot: options.project,
+                packageName: context.packageName
+              });
+              return { knowledgeHash: knowledge.knowledgeHash, goal };
+            })();
         const doctor = await dependencies.doctor.run({
           packageName: config.run.packageName,
           ...(config.ui?.backend === undefined
@@ -680,6 +710,7 @@ function createStartCommand(dependencies: CliDependencies): Command {
             : { signal: dependencies.signal }),
           ...(baseFlow === undefined ? {} : { baseFlow }),
           ...(externalFlows === undefined ? {} : { externalFlows }),
+          ...(planning === undefined ? {} : { planning }),
           ...(options.allowEvidenceDrift === true
             ? { allowEvidenceDrift: true }
             : {})
@@ -711,7 +742,8 @@ function createStartCommand(dependencies: CliDependencies): Command {
             : { baseFlow: session.baseFlow }),
           ...(session.externalFlows.length === 0
             ? {}
-            : { externalFlows: session.externalFlows })
+            : { externalFlows: session.externalFlows }),
+          ...(session.version === 1 ? {} : { planning: session.planning })
         };
         if (options.json === true) {
           writeJson(dependencies.stdout, output);
@@ -774,7 +806,10 @@ function createObserveCommand(dependencies: CliDependencies): Command {
           snapshotRef: observation.snapshotRef,
           ...(options.compact === true
             ? {}
-            : { snapshot: observation.snapshot })
+            : { snapshot: observation.snapshot }),
+          ...(observation.planning === undefined
+            ? {}
+            : { planning: observation.planning })
         };
         if (options.json === true) {
           writeJson(dependencies.stdout, output);
@@ -811,6 +846,92 @@ function createObserveCommand(dependencies: CliDependencies): Command {
         mappedFailure(dependencies, options, error);
       }
     });
+}
+
+function createNextCommand(dependencies: CliDependencies): Command {
+  return addCommonOptions(
+    new Command("next")
+      .description("Recognize, plan, and execute the next known Transition")
+      .option(
+        "--compact",
+        "Return authoritative snapshot references instead of full snapshots"
+      ),
+    dependencies
+  ).action(async (options: GenerationNextOptions): Promise<void> => {
+    try {
+      const generationId = GenerationSessionIdSchema.parse(options.session);
+      const config = await loadConfig(dependencies, options);
+      const runtime = requireRuntime(dependencies, options.project, config);
+      await assertRuntimeConfig(runtime, generationId);
+      if (runtime.resolvePlannedAction === undefined) {
+        throw new GenerationOperationError(
+          "KNOWLEDGE_INVALID",
+          "Generation planning runtime is unavailable"
+        );
+      }
+      const observation = await runtime.observer.observe({
+        generationId,
+        idle: config.idle,
+        ...(dependencies.signal === undefined
+          ? {}
+          : { signal: dependencies.signal })
+      });
+      const session = await runtime.readSession(generationId);
+      if (session.version !== 2 || session.planning === undefined) {
+        throw new GenerationOperationError(
+          "KNOWLEDGE_INVALID",
+          "Generation session has no planning binding"
+        );
+      }
+      if (session.planning.currentRoute?.segments.length === 0) {
+        writeSuccess(dependencies, options, {
+          status: "goalReached",
+          exitCode: 0,
+          generationId,
+          revision: session.revision,
+          screen: session.planning.currentScreen,
+          goal: session.planning.goal
+        }, `Generation Goal reached at ${session.planning.currentScreen as string}`);
+        return;
+      }
+      const resolution = await runtime.resolvePlannedAction({
+        session,
+        snapshot: observation.snapshot
+      });
+      if (resolution.status === "failed") {
+        throw new GenerationOperationError(
+          resolution.failure.code,
+          resolution.failure.message,
+          resolution.failure
+        );
+      }
+      const confirmation = await runtime.confirmation.request({
+        generationId,
+        proposal: resolution.action.proposal,
+        snapshot: observation.snapshot,
+        source: "planner"
+      });
+      if (confirmation.status === "confirmationRequired") {
+        writeSuccess(dependencies, options, {
+          status: "confirmationRequired",
+          exitCode: 0,
+          generationId,
+          revision: confirmation.revision,
+          transitionId: resolution.action.transitionId,
+          challenge: confirmation.challenge
+        }, `Confirmation required: ${confirmation.challenge.challengeId}`);
+        return;
+      }
+      await executeApproved(dependencies, options, runtime, {
+        generationId,
+        proposal: confirmation.proposal,
+        snapshot: confirmation.snapshot,
+        source: "planner"
+      });
+    } catch (error) {
+      mappedFailure(dependencies, options, error);
+    }
+  });
 }
 
 function addCommonOptions(
@@ -1709,6 +1830,7 @@ export function createGenerationCommand(
     .description("Manage deterministic generation sessions")
     .addCommand(createStartCommand(dependencies))
     .addCommand(createObserveCommand(dependencies))
+    .addCommand(createNextCommand(dependencies))
     .addCommand(createStepCommand(dependencies))
     .addCommand(createConfirmCommand(dependencies))
     .addCommand(createManualCommand(dependencies))

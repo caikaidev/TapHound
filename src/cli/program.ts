@@ -15,6 +15,7 @@ import { createRecordCommand } from "./commands/record.js";
 import { createVerifyCommand } from "./commands/verify.js";
 import { createAlignCommand } from "./commands/align.js";
 import { createUiCacheCommand } from "./commands/ui-cache.js";
+import { createKnowledgeCommand } from "./commands/knowledge.js";
 import {
   createProductionDependencies,
   type CliDependencies
@@ -70,6 +71,7 @@ export function createProgram(
     .addCommand(configureOutput(createContextCommand(dependencies)))
     .addCommand(configureOutput(createJourneyCommand(dependencies)))
     .addCommand(configureOutput(createGenerationCommand(dependencies)))
+    .addCommand(configureOutput(createKnowledgeCommand(dependencies)))
     .addCommand(configureOutput(createInitCommand(dependencies)))
     .addCommand(configureOutput(createAlignCommand(dependencies)))
     .addCommand(configureOutput(createUiCacheCommand(dependencies)));

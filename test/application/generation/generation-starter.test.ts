@@ -213,6 +213,42 @@ describe("GenerationStarter", () => {
     );
   });
 
+  it("creates a planning-bound v2 session without changing legacy starts", async () => {
+    const test = starter();
+
+    const session = await test.service.start({
+      projectRoot: "/project",
+      config,
+      context,
+      project,
+      deviceSerial: "emulator-5554",
+      planning: {
+        knowledgeHash: "9".repeat(64),
+        goal: {
+          version: 1,
+          id: "open-detail",
+          targetScreen: "detail",
+          parameters: {},
+          limits: { maxSteps: 5, maxReplans: 2 }
+        }
+      }
+    });
+
+    expect(session).toMatchObject({
+      version: 2,
+      planning: {
+        knowledgeHash: "9".repeat(64),
+        goal: { id: "open-detail" },
+        currentScreen: null,
+        currentRoute: null,
+        replansUsed: 0,
+        maxReplans: 2,
+        maxSteps: 5
+      }
+    });
+    expect(session.planning?.goalHash).toMatch(/^[a-f\d]{64}$/);
+  });
+
   it("fails the start when the context snapshot cannot be persisted", async () => {
     const test = starter();
     test.writeEvidence.mockRejectedValueOnce(

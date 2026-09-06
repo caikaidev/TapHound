@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   CONFIG_PATH,
+  BENCHMARKS_DIR,
+  BENCHMARK_RUNS_DIR,
+  GROUND_TRUTH_DIR,
+  KNOWLEDGE_DIR,
+  KNOWLEDGE_RECEIPTS_DIR,
   activeGenerationBundleName,
   legacyWorkspaceMessage,
   parseSnapshotEvidenceReference
@@ -10,6 +15,13 @@ import {
 describe("workspace paths", () => {
   it("keeps the config inside the committed TapHound workspace", () => {
     expect(CONFIG_PATH).toBe(".taphound/config.json");
+    expect(KNOWLEDGE_DIR).toBe(".taphound/knowledge");
+    expect(BENCHMARKS_DIR).toBe(".taphound/benchmarks");
+    expect(GROUND_TRUTH_DIR).toBe(".taphound/ground-truth");
+    expect(KNOWLEDGE_RECEIPTS_DIR).toBe(
+      ".taphound/build/knowledge-receipts"
+    );
+    expect(BENCHMARK_RUNS_DIR).toBe(".taphound/build/benchmark-runs");
   });
 });
 

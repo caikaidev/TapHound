@@ -4,6 +4,7 @@ import { primaryAppPid } from "../../domain/app-process.js";
 import {
   GenerationSessionIdSchema,
   GenerationSessionSchema,
+  type GenerationPlanning,
   type GenerationSession,
   type PendingConfirmation
 } from "../../domain/generation.js";
@@ -40,6 +41,7 @@ export interface RuntimeObservation {
   snapshot: RuntimeSnapshot;
   snapshotHash: string;
   snapshotRef: string;
+  planning?: GenerationPlanning | undefined;
 }
 
 export interface RuntimeObserveInput {
@@ -90,6 +92,11 @@ export interface RuntimeObserverDependencies {
   now: () => Date;
   createAttemptId: () => string;
   uiCacheEnabled?: boolean | undefined;
+  planSnapshot?: (input: {
+    session: GenerationSession;
+    snapshot: RuntimeSnapshot;
+    verifyTransition: boolean;
+  }) => Promise<GenerationPlanning> | GenerationPlanning;
 }
 
 export interface SnapshotReobservationGuardDependencies {
@@ -303,7 +310,7 @@ export class RuntimeObserver {
       await closeUiSnapshotProvider(uiSnapshotProvider);
     }
 
-    return this.commit(current, runtime, input.signal);
+    return this.commit(current, runtime, false, input.signal);
   };
 
   public readonly observeCollected = async (
@@ -322,12 +329,13 @@ export class RuntimeObserver {
         "Collected post-action runtime is not a valid target-app state"
       );
     }
-    return this.commit(current, input.runtime, input.signal);
+    return this.commit(current, input.runtime, true, input.signal);
   };
 
   private async commit(
     current: GenerationSession,
     runtime: CollectedRuntimeState,
+    verifyTransition: boolean,
     signal?: AbortSignal
   ): Promise<RuntimeObservation> {
     const baseRevision = current.revision + 1;
@@ -403,6 +411,21 @@ export class RuntimeObserver {
       snapshotPath,
       snapshot
     );
+    const planning = current.version === 2
+      ? await (async (): Promise<GenerationPlanning> => {
+          if (this.dependencies.planSnapshot === undefined) {
+            throw new GenerationOperationError(
+              "KNOWLEDGE_INVALID",
+              "Planning-aware observation is not configured"
+            );
+          }
+          return this.dependencies.planSnapshot({
+            session: current,
+            snapshot,
+            verifyTransition
+          });
+        })()
+      : undefined;
     const next = GenerationSessionSchema.parse({
       ...current,
       revision: baseRevision,
@@ -410,7 +433,8 @@ export class RuntimeObserver {
         ...current.bindings,
         snapshotHash,
         uiBackend: runtime.uiSnapshot.backend
-      }
+      },
+      ...(planning === undefined ? {} : { planning })
     });
     await this.dependencies.store.commitSnapshot(
       current.id,
@@ -430,7 +454,8 @@ export class RuntimeObserver {
       },
       snapshot,
       snapshotHash,
-      snapshotRef
+      snapshotRef,
+      ...(planning === undefined ? {} : { planning })
     };
   }
 }

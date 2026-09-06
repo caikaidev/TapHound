@@ -102,6 +102,12 @@ See the [local testing guide](docs/local-testing.md) for source, npm tarball, an
 - `ui-cache status` / `ui-cache clear --yes`: inspect or delete only the
   rebuildable `.taphound/build/cache/ui/` indexes; Journeys, reports, and
   Generation evidence are never touched.
+- `knowledge status` / `bootstrap` / `plan` / `receipts` / `promote`: manage
+  committed Anchor, Screen, and Transition knowledge. Runtime commands write
+  immutable receipts; only explicit bootstrap or promotion updates authority.
+- `generation start --goal <goal.json>` / `generation next`: bind Knowledge
+  and a strict Goal, then recognize and execute one known Transition through
+  the existing proposal, risk, evidence, and replay controls.
 
 ## Configuration
 
@@ -266,6 +272,11 @@ The device is bound at `generation start`; subsequent `observe`, `step`,
 that binding via the session. `generation start --external-flow <name...>` binds
 named External Flows by content hash so `generation bridge --flow <name>` can
 resolve them deterministically later. See the Skill's [`GUIDE.md`](assets/skills/taphound-journey-generator/GUIDE.md) for the full workflow.
+
+Generation may optionally bind a strict Goal Spec and committed Knowledge hash.
+Bounded re-planning is limited to Generation and known Transitions. Finalize
+still replays the exact candidate Journey from its initial state. See
+[Knowledge and Route Planning](docs/knowledge-planning.md).
 
 If Base Flow replay fails, `generation start --json` reports
 `FLOW_REPLAY_FAILED` with the Flow name, Verify report path, primary failure,

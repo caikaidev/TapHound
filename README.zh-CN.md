@@ -99,6 +99,12 @@ git diff --exit-code -- assets/brand/png
   `--force`。
 - `ui-cache status` / `ui-cache clear --yes`：查看或删除仅用于加速的
   `.taphound/build/cache/ui/` 索引；不会删除 Journey、报告或 Generation 证据。
+- `knowledge status` / `bootstrap` / `plan` / `receipts` / `promote`：
+  管理已提交的 Anchor、Screen 与 Transition 知识。运行时只写不可变收据；
+  只有显式 bootstrap 或 promote 才会更新权威知识。
+- `generation start --goal <goal.json>` / `generation next`：绑定 Knowledge
+  与严格 Goal，并通过现有 proposal、风险、证据和 Replay 控制执行一个已知
+  Transition。
 
 ## 配置
 
@@ -240,6 +246,11 @@ taphound generation start \
 `generation start --external-flow <name...>` 按内容哈希绑定具名 External Flow，
 供后续 `generation bridge --flow <name>` 确定性解析。完整流程见 Skill 的
 [`GUIDE.md`](assets/skills/taphound-journey-generator/GUIDE.md)。
+
+Generation 也可选择绑定严格 Goal Spec 与已提交的 Knowledge hash。受限重规划
+只发生在 Generation，并且只能走已知 Transition；Finalize 仍从初始状态精确
+重放完整候选 Journey。详见
+[Knowledge and Route Planning](docs/knowledge-planning.md)。
 
 Base Flow 重放失败时，`generation start --json` 会返回
 `FLOW_REPLAY_FAILED`，并附带 Flow 名称、Verify 报告路径、主失败、

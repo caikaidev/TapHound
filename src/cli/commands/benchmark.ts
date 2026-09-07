@@ -38,7 +38,7 @@ interface RunOptions extends CommonOptions {
   context: string;
   device?: string | undefined;
   engine: string;
-  caseId?: string[] | undefined;
+  case?: string[] | undefined;
 }
 
 interface BenchmarkOutput {
@@ -442,9 +442,9 @@ export function createBenchmarkCommand(dependencies: CliDependencies): Command {
         const { result, path } = await runner.run({
           projectRoot: options.project,
           engine,
-          ...(options.caseId === undefined
+          ...(options.case === undefined
             ? {}
-            : { caseIds: options.caseId }),
+            : { caseIds: options.case }),
           knowledgeHash: knowledge.knowledgeHash
         });
         emit(dependencies, options, {

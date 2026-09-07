@@ -6,6 +6,9 @@ import {
 } from "../../../src/application/benchmark/generation-benchmark-executor.js";
 import { GenerationOperationError } from "../../../src/application/generation/generation-starter.js";
 import type {
+  ActionResolutionResult
+} from "../../../src/application/resolution/action-resolver.js";
+import type {
   BenchmarkCaseResult,
   BenchmarkEngine
 } from "../../../src/domain/benchmark.js";
@@ -430,5 +433,226 @@ describe("GenerationBenchmarkExecutor", () => {
       status: "failed",
       failureCode: "LOCATOR_NOT_FOUND"
     });
+  });
+
+  it("recovers from a SNAPSHOT_STALE step failure by re-observing within the step budget", async () => {
+    const resolvedAction = {
+      proposal,
+      transitionId: "open-detail"
+    } as unknown as Extract<
+      ActionResolutionResult,
+      { status: "resolved" }
+    >["action"];
+    const observe = vi.fn((): Promise<typeof observation> =>
+      Promise.resolve(observation)
+    );
+    const readSession = vi.fn()
+      .mockResolvedValueOnce(session([["open-detail"]]))
+      .mockResolvedValueOnce(session([["open-detail"]]))
+      .mockResolvedValueOnce(session([]));
+    const resolvePlannedAction = vi.fn((): Promise<ActionResolutionResult> =>
+      Promise.resolve({ status: "resolved", action: resolvedAction })
+    );
+    const confirmation = vi.fn((): Promise<
+      Awaited<ReturnType<GenerationBenchmarkRuntime["confirmation"]["request"]>>
+    > => Promise.resolve({
+      status: "approved",
+      proposal,
+      snapshot: snapshot()
+    } as unknown as Awaited<
+      ReturnType<GenerationBenchmarkRuntime["confirmation"]["request"]>
+    >));
+    const executeStep = vi.fn()
+      .mockResolvedValueOnce({
+        status: "failed",
+        failure: {
+          code: "SNAPSHOT_STALE",
+          message: "Runtime snapshot changed after proposal"
+        }
+      })
+      .mockResolvedValueOnce({
+        status: "succeeded",
+        step: { action: "wait" } as never,
+        nextObservation: observation
+      });
+    const { runtime: testRuntime } = runtime({
+      observe,
+      readSession,
+      resolvePlannedAction,
+      confirmation,
+      execute: executeStep
+    });
+
+    const result = await execute(testRuntime);
+
+    expect(result).toMatchObject({
+      status: "passed",
+      routeCorrect: true
+    });
+    expect(observe).toHaveBeenCalledTimes(2);
+    expect(executeStep).toHaveBeenCalledTimes(2);
+  });
+
+  it("fails with the last SNAPSHOT_STALE when retries exhaust the step budget", async () => {
+    const resolvedAction = {
+      proposal,
+      transitionId: "open-detail"
+    } as unknown as Extract<
+      ActionResolutionResult,
+      { status: "resolved" }
+    >["action"];
+    const observe = vi.fn((): Promise<typeof observation> =>
+      Promise.resolve(observation)
+    );
+    const readSession = vi.fn((): Promise<GenerationSession> =>
+      Promise.resolve(session([["open-detail"]]))
+    );
+    const resolvePlannedAction = vi.fn((): Promise<ActionResolutionResult> =>
+      Promise.resolve({ status: "resolved", action: resolvedAction })
+    );
+    const confirmation = vi.fn((): Promise<
+      Awaited<ReturnType<GenerationBenchmarkRuntime["confirmation"]["request"]>>
+    > => Promise.resolve({
+      status: "approved",
+      proposal,
+      snapshot: snapshot()
+    } as unknown as Awaited<
+      ReturnType<GenerationBenchmarkRuntime["confirmation"]["request"]>
+    >));
+    const executeStep = vi.fn((): Promise<
+      Awaited<ReturnType<GenerationBenchmarkRuntime["executor"]["execute"]>>
+    > => Promise.resolve({
+      status: "failed",
+      failure: {
+        code: "SNAPSHOT_STALE",
+        message: "Runtime snapshot changed after proposal"
+      }
+    }));
+    const { runtime: testRuntime } = runtime({
+      observe,
+      readSession,
+      resolvePlannedAction,
+      confirmation,
+      execute: executeStep
+    });
+
+    const result = await execute(testRuntime);
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failureCode: "SNAPSHOT_STALE",
+      detail: "Runtime snapshot changed after proposal"
+    });
+    expect(executeStep).toHaveBeenCalledTimes(3);
+    expect(observe).toHaveBeenCalledTimes(3);
+  });
+
+  it("recovers when confirmation throws SNAPSHOT_STALE once", async () => {
+    const resolvedAction = {
+      proposal,
+      transitionId: "open-detail"
+    } as unknown as Extract<
+      ActionResolutionResult,
+      { status: "resolved" }
+    >["action"];
+    const observe = vi.fn((): Promise<typeof observation> =>
+      Promise.resolve(observation)
+    );
+    const readSession = vi.fn()
+      .mockResolvedValueOnce(session([["open-detail"]]))
+      .mockResolvedValueOnce(session([["open-detail"]]))
+      .mockResolvedValueOnce(session([]));
+    const resolvePlannedAction = vi.fn((): Promise<ActionResolutionResult> =>
+      Promise.resolve({ status: "resolved", action: resolvedAction })
+    );
+    const confirmation = vi.fn()
+      .mockRejectedValueOnce(new GenerationOperationError(
+        "SNAPSHOT_STALE",
+        "Referenced snapshot evidence is unavailable"
+      ))
+      .mockResolvedValueOnce({
+        status: "approved",
+        proposal,
+        snapshot: snapshot()
+      });
+    const executeStep = vi.fn((): Promise<
+      Awaited<ReturnType<GenerationBenchmarkRuntime["executor"]["execute"]>>
+    > => Promise.resolve({
+      status: "succeeded",
+      step: { action: "wait" } as never,
+      nextObservation: observation
+    }));
+    const { runtime: testRuntime } = runtime({
+      observe,
+      readSession,
+      resolvePlannedAction,
+      confirmation,
+      execute: executeStep
+    });
+
+    const result = await execute(testRuntime);
+
+    expect(result).toMatchObject({
+      status: "passed",
+      routeCorrect: true
+    });
+    expect(confirmation).toHaveBeenCalledTimes(2);
+  });
+
+  it("recovers when the planner throws SNAPSHOT_STALE once", async () => {
+    const resolvedAction = {
+      proposal,
+      transitionId: "open-detail"
+    } as unknown as Extract<
+      ActionResolutionResult,
+      { status: "resolved" }
+    >["action"];
+    const observe = vi.fn((): Promise<typeof observation> =>
+      Promise.resolve(observation)
+    );
+    const readSession = vi.fn()
+      .mockResolvedValueOnce(session([["open-detail"]]))
+      .mockResolvedValueOnce(session([["open-detail"]]))
+      .mockResolvedValueOnce(session([]));
+    const resolvePlannedAction = vi.fn()
+      .mockRejectedValueOnce(new GenerationOperationError(
+        "SNAPSHOT_STALE",
+        "Runtime snapshot changed after proposal"
+      ))
+      .mockResolvedValueOnce({
+        status: "resolved",
+        action: resolvedAction
+      });
+    const confirmation = vi.fn((): Promise<
+      Awaited<ReturnType<GenerationBenchmarkRuntime["confirmation"]["request"]>>
+    > => Promise.resolve({
+      status: "approved",
+      proposal,
+      snapshot: snapshot()
+    } as unknown as Awaited<
+      ReturnType<GenerationBenchmarkRuntime["confirmation"]["request"]>
+    >));
+    const executeStep = vi.fn((): Promise<
+      Awaited<ReturnType<GenerationBenchmarkRuntime["executor"]["execute"]>>
+    > => Promise.resolve({
+      status: "succeeded",
+      step: { action: "wait" } as never,
+      nextObservation: observation
+    }));
+    const { runtime: testRuntime } = runtime({
+      observe,
+      readSession,
+      resolvePlannedAction,
+      confirmation,
+      execute: executeStep
+    });
+
+    const result = await execute(testRuntime);
+
+    expect(result).toMatchObject({
+      status: "passed",
+      routeCorrect: true
+    });
+    expect(resolvePlannedAction).toHaveBeenCalledTimes(2);
   });
 });

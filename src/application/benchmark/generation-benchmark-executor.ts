@@ -76,6 +76,16 @@ function routeMatches(
   );
 }
 
+function snapshotStaleMessage(error: unknown): string | undefined {
+  if (
+    error instanceof GenerationOperationError
+    && error.code === "SNAPSHOT_STALE"
+  ) {
+    return error.message;
+  }
+  return undefined;
+}
+
 export class GenerationBenchmarkExecutor implements EngineAwareBenchmarkExecutor {
   public constructor(private readonly dependencies: {
     runtime: GenerationBenchmarkRuntime;
@@ -180,6 +190,7 @@ export class GenerationBenchmarkExecutor implements EngineAwareBenchmarkExecutor
     }
 
     const maxSteps = session.planning?.maxSteps ?? benchmark.goal.limits.maxSteps;
+    let staleDetail: string | undefined;
     for (let step = 0; step < maxSteps; step++) {
       if (observation === undefined) {
         try {
@@ -190,6 +201,11 @@ export class GenerationBenchmarkExecutor implements EngineAwareBenchmarkExecutor
               : { signal: input.environment.signal })
           });
         } catch (error) {
+          const stale = snapshotStaleMessage(error);
+          if (stale !== undefined) {
+            staleDetail = stale;
+            continue;
+          }
           return this.planFailure(
             error,
             benchmark.id,
@@ -218,10 +234,24 @@ export class GenerationBenchmarkExecutor implements EngineAwareBenchmarkExecutor
       }
 
       const resolutionStartedAt = this.dependencies.now().getTime();
-      const resolution = await this.dependencies.runtime.resolvePlannedAction({
-        session,
-        snapshot: observation.snapshot
-      });
+      let resolution: ActionResolutionResult;
+      try {
+        resolution = await this.dependencies.runtime.resolvePlannedAction({
+          session,
+          snapshot: observation.snapshot
+        });
+      } catch (error) {
+        timing.actionResolutionMs += (
+          this.dependencies.now().getTime() - resolutionStartedAt
+        );
+        const stale = snapshotStaleMessage(error);
+        if (stale !== undefined) {
+          staleDetail = stale;
+          observation = undefined;
+          continue;
+        }
+        throw error;
+      }
       timing.actionResolutionMs += (
         this.dependencies.now().getTime() - resolutionStartedAt
       );
@@ -229,12 +259,25 @@ export class GenerationBenchmarkExecutor implements EngineAwareBenchmarkExecutor
         return failure(resolution.failure.code, resolution.failure.message);
       }
 
-      const confirmation = await this.dependencies.runtime.confirmation.request({
-        generationId,
-        proposal: resolution.action.proposal,
-        snapshot: observation.snapshot,
-        source: "planner"
-      });
+      let confirmation: Awaited<
+        ReturnType<GenerationBenchmarkRuntime["confirmation"]["request"]>
+      >;
+      try {
+        confirmation = await this.dependencies.runtime.confirmation.request({
+          generationId,
+          proposal: resolution.action.proposal,
+          snapshot: observation.snapshot,
+          source: "planner"
+        });
+      } catch (error) {
+        const stale = snapshotStaleMessage(error);
+        if (stale !== undefined) {
+          staleDetail = stale;
+          observation = undefined;
+          continue;
+        }
+        throw error;
+      }
       if (confirmation.status === "confirmationRequired") {
         return failure(
           "RISK_CONFIRMATION_REQUIRED",
@@ -242,16 +285,34 @@ export class GenerationBenchmarkExecutor implements EngineAwareBenchmarkExecutor
         );
       }
 
-      const result = await this.dependencies.runtime.executor.execute({
-        generationId,
-        proposal: confirmation.proposal,
-        snapshot: confirmation.snapshot,
-        source: "planner",
-        ...(input.environment.signal === undefined
-          ? {}
-          : { signal: input.environment.signal })
-      });
+      let result: Awaited<
+        ReturnType<GenerationBenchmarkRuntime["executor"]["execute"]>
+      >;
+      try {
+        result = await this.dependencies.runtime.executor.execute({
+          generationId,
+          proposal: confirmation.proposal,
+          snapshot: confirmation.snapshot,
+          source: "planner",
+          ...(input.environment.signal === undefined
+            ? {}
+            : { signal: input.environment.signal })
+        });
+      } catch (error) {
+        const stale = snapshotStaleMessage(error);
+        if (stale !== undefined) {
+          staleDetail = stale;
+          observation = undefined;
+          continue;
+        }
+        throw error;
+      }
       if (result.status !== "succeeded") {
+        if (result.failure.code === "SNAPSHOT_STALE") {
+          staleDetail = result.failure.message;
+          observation = undefined;
+          continue;
+        }
         return failure(result.failure.code, result.failure.message);
       }
       timing.executionMs += result.timing?.totalMs ?? 0;
@@ -277,6 +338,9 @@ export class GenerationBenchmarkExecutor implements EngineAwareBenchmarkExecutor
           startedAt
         );
       }
+    }
+    if (staleDetail !== undefined) {
+      return failure("SNAPSHOT_STALE", staleDetail);
     }
     return failure(
       "BENCHMARK_STEP_BUDGET_EXHAUSTED",

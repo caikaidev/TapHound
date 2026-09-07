@@ -255,6 +255,8 @@ function dependencies(): {
 
 const benchmarkCaseRecord = (overrides: {
   routeTransitionIds?: string[];
+  startScreen?: string;
+  targetScreen?: string;
 } = {}): BenchmarkCaseRecord => ({
   benchmark: {
     version: 1,
@@ -273,8 +275,8 @@ const benchmarkCaseRecord = (overrides: {
   groundTruth: {
     version: 1,
     caseId: "home-search",
-    startScreen: "home",
-    targetScreen: "home-search",
+    startScreen: overrides.startScreen ?? "home",
+    targetScreen: overrides.targetScreen ?? "home-search",
     routeTransitionIds: overrides.routeTransitionIds ?? ["home-to-home-search"],
     expectedOutcome: "success"
   }
@@ -2148,6 +2150,122 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
         id: "home-search",
         ok: false,
         issues: ["Unknown route Transition: missing-transition"]
+      }]
+    });
+    expect(test.exitCodes).toEqual([2]);
+  });
+
+  it("accepts a contiguous multi-hop ground truth route", async () => {
+    const test = dependencies();
+    const knowledge = fakeKnowledge();
+    const base = await knowledge.load({ projectRoot: "/project" });
+    vi.mocked(knowledge.load).mockResolvedValue({
+      ...base,
+      screens: [...base.screens, {
+        version: 1 as const,
+        id: "detail",
+        status: "verified" as const,
+        requiredAnchors: ["detail-activity"],
+        optionalAnchors: [],
+        forbiddenAnchors: [],
+        predicates: []
+      }],
+      transitions: [...base.transitions, {
+        version: 1 as const,
+        id: "home-search-to-detail",
+        status: "verified" as const,
+        fromScreen: "home-search",
+        toScreen: "detail",
+        semantic: "open-detail",
+        action: { action: "click" as const, anchorId: "detail-anchor" },
+        verification: { targetScreen: "detail", timeoutMs: 5000 },
+        observations: { attempts: 0, successes: 0, recoveryCost: 0 }
+      }]
+    });
+    const store = fakeBenchmarkStore([
+      benchmarkCaseRecord({
+        routeTransitionIds: ["home-to-home-search", "home-search-to-detail"],
+        targetScreen: "detail"
+      })
+    ]);
+
+    await createProgram({
+      ...test.value,
+      benchmark: { store },
+      knowledge
+    }).parseAsync([
+      "node", "taphound", "benchmark", "validate",
+      "--project", "/project",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "valid",
+      exitCode: 0,
+      cases: [{ id: "home-search", ok: true, issues: [] }]
+    });
+    expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("rejects a ground truth route with a discontinuous Transition chain", async () => {
+    const test = dependencies();
+    const store = fakeBenchmarkStore([
+      benchmarkCaseRecord({
+        routeTransitionIds: ["home-to-home-search", "home-to-home-search"]
+      })
+    ]);
+
+    await createProgram({
+      ...test.value,
+      benchmark: { store },
+      knowledge: fakeKnowledge()
+    }).parseAsync([
+      "node", "taphound", "benchmark", "validate",
+      "--project", "/project",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "invalid",
+      exitCode: 2,
+      cases: [{
+        id: "home-search",
+        ok: false,
+        issues: [
+          "Route Transition home-to-home-search must start at Screen"
+          + " home-search but starts at home"
+        ]
+      }]
+    });
+    expect(test.exitCodes).toEqual([2]);
+  });
+
+  it("rejects a ground truth route that ends away from the target Screen", async () => {
+    const test = dependencies();
+    const store = fakeBenchmarkStore([
+      benchmarkCaseRecord({ routeTransitionIds: [] })
+    ]);
+
+    await createProgram({
+      ...test.value,
+      benchmark: { store },
+      knowledge: fakeKnowledge()
+    }).parseAsync([
+      "node", "taphound", "benchmark", "validate",
+      "--project", "/project",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "invalid",
+      exitCode: 2,
+      cases: [{
+        id: "home-search",
+        ok: false,
+        issues: [
+          "Route ends at Screen home but the Ground Truth target is"
+          + " home-search"
+        ]
       }]
     });
     expect(test.exitCodes).toEqual([2]);

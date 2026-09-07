@@ -226,6 +226,44 @@ function execute(
   });
 }
 
+function oneStepThenGoalRuntime(routes: readonly string[][]): {
+  runtime: GenerationBenchmarkRuntime;
+  start: ReturnType<typeof vi.fn>;
+} {
+  const resolvedAction = {
+    proposal,
+    transitionId: "open-detail"
+  } as unknown as Extract<
+    ActionResolutionResult,
+    { status: "resolved" }
+  >["action"];
+  const readSession = vi.fn()
+    .mockResolvedValueOnce(session(routes))
+    .mockResolvedValueOnce(session([]));
+  return runtime({
+    observe: (): Promise<typeof observation> => Promise.resolve(observation),
+    readSession,
+    resolvePlannedAction: (): Promise<ActionResolutionResult> =>
+      Promise.resolve({ status: "resolved", action: resolvedAction }),
+    confirmation: (): Promise<
+      Awaited<ReturnType<GenerationBenchmarkRuntime["confirmation"]["request"]>>
+    > => Promise.resolve({
+      status: "approved",
+      proposal,
+      snapshot: snapshot()
+    } as unknown as Awaited<
+      ReturnType<GenerationBenchmarkRuntime["confirmation"]["request"]>
+    >),
+    execute: (): Promise<
+      Awaited<ReturnType<GenerationBenchmarkRuntime["executor"]["execute"]>>
+    > => Promise.resolve({
+      status: "succeeded",
+      step: { action: "wait" } as never,
+      nextObservation: observation
+    })
+  });
+}
+
 describe("GenerationBenchmarkExecutor", () => {
   it("passes when the first observation already reaches the Goal", async () => {
     const { runtime: testRuntime } = runtime({
@@ -256,6 +294,67 @@ describe("GenerationBenchmarkExecutor", () => {
     });
 
     const result = await execute(testRuntime, "knowledge", ["other-path"]);
+
+    expect(result).toMatchObject({
+      status: "passed",
+      routeCorrect: false
+    });
+  });
+
+  it("accepts a planned route that matches the Ground Truth suffix after cold-start auto-advance", async () => {
+    const { runtime: testRuntime } = oneStepThenGoalRuntime([["open-detail"]]);
+
+    const result = await execute(
+      testRuntime,
+      "knowledge",
+      ["boot-to-home", "open-detail"]
+    );
+
+    expect(result).toMatchObject({
+      status: "passed",
+      routeCorrect: true
+    });
+  });
+
+  it("rejects a planned route that diverges inside the Ground Truth route", async () => {
+    const { runtime: testRuntime } = oneStepThenGoalRuntime([["open-detail"]]);
+
+    const result = await execute(
+      testRuntime,
+      "knowledge",
+      ["boot-to-home", "open-sidebar"]
+    );
+
+    expect(result).toMatchObject({
+      status: "passed",
+      routeCorrect: false
+    });
+  });
+
+  it("rejects a planned route longer than the Ground Truth route", async () => {
+    const { runtime: testRuntime } = oneStepThenGoalRuntime([["open-detail", "open-detail-again"]]);
+
+    const result = await execute(testRuntime, "knowledge", ["open-detail"]);
+
+    expect(result).toMatchObject({
+      status: "passed",
+      routeCorrect: false
+    });
+  });
+
+  it("rejects an empty planned route against a non-empty Ground Truth route", async () => {
+    const { runtime: testRuntime } = runtime({
+      observe: (): Promise<typeof observation> => Promise.resolve(observation),
+      readSession: (): Promise<GenerationSession> => Promise.resolve(
+        session([])
+      )
+    });
+
+    const result = await execute(
+      testRuntime,
+      "knowledge",
+      ["boot-to-home"]
+    );
 
     expect(result).toMatchObject({
       status: "passed",

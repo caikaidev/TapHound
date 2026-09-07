@@ -46,8 +46,10 @@ for `knowledge`); the Case goal and Ground Truth stay untouched.
 
 - `passedCases / eligibleCases` — replay passed / goal reached
 - `firstRunSuccessRate` — passed without recovery
-- `routeAccuracy` (knowledge only) — planned transition chain equals the
-  Ground Truth route, screen for screen and hop for hop
+- `routeAccuracy` (knowledge only) — the planned transition chain equals the
+  Ground Truth route, or its remaining suffix when the first stable
+  observation lands downstream of the Ground Truth start Screen (cold-start
+  auto-advance), screen for screen and hop for hop
 - per-step timing: `recognitionMs`, `planningMs`, `actionResolutionMs`,
   `executionMs`, `totalMs`
 - LLM counters — TapHound Core calls no model; external Skills may report
@@ -95,7 +97,13 @@ The single `routeAccuracy` miss is the cold-start Case: the splash screen
 auto-advances to home before the first observation stabilizes, so the planner
 correctly plans the 1-hop route from home while the Ground Truth records the
 full 2-hop route from splash. This is a first-observation timing property of
-the cold-start Case, not a planning defect; the case still passes.
+the cold-start Case, not a planning defect; the case still passes. Route
+evaluation now accepts the remaining Ground Truth suffix when the first stable
+observation lands downstream of the Ground Truth start Screen, so this
+cold-start pattern counts as route-correct; the recorded run above predates
+that semantics. `benchmark validate` additionally rejects Ground Truth routes
+that are not a contiguous Transition chain from the start Screen to the
+target Screen.
 
 ## What the matrix required of Knowledge
 

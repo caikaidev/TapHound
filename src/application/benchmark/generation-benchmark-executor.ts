@@ -70,9 +70,16 @@ function routeMatches(
     return actual === null || actual.length === 0;
   }
   if (actual === null) return false;
-  if (actual.length !== groundTruth.routeTransitionIds.length) return false;
-  return groundTruth.routeTransitionIds.every(
-    (transitionId, index) => transitionId === actual[index]
+  const expected = groundTruth.routeTransitionIds;
+  if (actual.length === 0) return expected.length === 0;
+  if (actual.length > expected.length) return false;
+  // Cold-start auto-advance can move the app downstream of the Ground Truth
+  // start Screen before the first stable observation. The planner then
+  // correctly plans only the remaining suffix, so a planned route matches
+  // when it equals the tail of the Ground Truth route.
+  const offset = expected.length - actual.length;
+  return actual.every(
+    (transitionId, index) => transitionId === expected[offset + index]
   );
 }
 

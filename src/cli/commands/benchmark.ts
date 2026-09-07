@@ -185,8 +185,8 @@ async function validate(
     projectRoot: options.project
   });
   const screens = new Set(knowledge.screens.map((screen) => screen.id));
-  const transitions = new Set(knowledge.transitions.map(
-    (transition) => transition.id
+  const transitionsById = new Map(knowledge.transitions.map(
+    (transition) => [transition.id, transition]
   ));
   const graph = new InteractionGraph(
     knowledge.transitions,
@@ -206,9 +206,33 @@ async function validate(
       if (!screens.has(groundTruth.targetScreen)) {
         issues.push(`Unknown target Screen: ${groundTruth.targetScreen}`);
       }
-      for (const transitionId of groundTruth.routeTransitionIds) {
-        if (!transitions.has(transitionId)) {
-          issues.push(`Unknown route Transition: ${transitionId}`);
+      const unknownRouteTransitions = groundTruth.routeTransitionIds.filter(
+        (transitionId) => !transitionsById.has(transitionId)
+      );
+      for (const transitionId of unknownRouteTransitions) {
+        issues.push(`Unknown route Transition: ${transitionId}`);
+      }
+      if (
+        groundTruth.expectedOutcome === "success"
+        && unknownRouteTransitions.length === 0
+      ) {
+        let screen = groundTruth.startScreen;
+        for (const transitionId of groundTruth.routeTransitionIds) {
+          const transition = transitionsById.get(transitionId);
+          if (transition === undefined) break;
+          if (transition.fromScreen !== screen) {
+            issues.push(
+              `Route Transition ${transitionId} must start at Screen ${screen}`
+                + ` but starts at ${transition.fromScreen}`
+            );
+          }
+          screen = transition.toScreen;
+        }
+        if (screen !== groundTruth.targetScreen) {
+          issues.push(
+            `Route ends at Screen ${screen} but the Ground Truth target is`
+              + ` ${groundTruth.targetScreen}`
+          );
         }
       }
       if (

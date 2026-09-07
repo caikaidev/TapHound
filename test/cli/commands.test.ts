@@ -19,6 +19,13 @@ import {
 } from "../../src/application/generation/generation-starter.js";
 import { createProgram } from "../../src/cli/program.js";
 import type { CliDependencies, TextOutput } from "../../src/cli/dependencies.js";
+import type { BenchmarkStore } from "../../src/ports/benchmark-store.js";
+import type {
+  BenchmarkCaseRecord
+} from "../../src/ports/benchmark-store.js";
+import type {
+  BenchmarkRunResult
+} from "../../src/domain/benchmark.js";
 import {
   GenerationSessionStoreError
 } from "../../src/ports/generation-session-store.js";
@@ -246,8 +253,112 @@ function dependencies(): {
   };
 }
 
-describe("TapHound CLI commands", () => {
-  it("uses TapHound config defaults", () => {
+const benchmarkCaseRecord = (overrides: {
+  routeTransitionIds?: string[];
+} = {}): BenchmarkCaseRecord => ({
+  benchmark: {
+    version: 1,
+    id: "home-search",
+    description: "Open search from Home",
+    goal: {
+      version: 1,
+      id: "goal-home-search",
+      targetScreen: "home-search",
+      parameters: {},
+      limits: { maxSteps: 4, maxReplans: 2 }
+    },
+    preconditions: [],
+    tags: []
+  },
+  groundTruth: {
+    version: 1,
+    caseId: "home-search",
+    startScreen: "home",
+    targetScreen: "home-search",
+    routeTransitionIds: overrides.routeTransitionIds ?? ["home-to-home-search"],
+    expectedOutcome: "success"
+  }
+});
+
+const fakeBenchmarkStore = (
+  records: readonly BenchmarkCaseRecord[]
+): BenchmarkStore => ({
+  readCases: vi.fn(() => Promise.resolve(records)),
+  writeResult: vi.fn(),
+  readResult: vi.fn()
+});
+
+const fakeKnowledge = (): NonNullable<CliDependencies["knowledge"]> => ({
+  load: vi.fn(() => Promise.resolve({
+    index: {
+      version: 1 as const,
+      packageName: "com.example.app",
+      revision: 1,
+      anchors: [],
+      screens: [
+        {
+          id: "home",
+          path: ".taphound/knowledge/screens/home.json",
+          sha256: "1".repeat(64),
+          status: "verified" as const
+        },
+        {
+          id: "home-search",
+          path: ".taphound/knowledge/screens/home-search.json",
+          sha256: "2".repeat(64),
+          status: "verified" as const
+        }
+      ],
+      transitions: [{
+        id: "home-to-home-search",
+        path: ".taphound/knowledge/transitions/home-to-home-search.json",
+        sha256: "3".repeat(64),
+        status: "verified" as const
+      }]
+    },
+    indexSha256: "b".repeat(64),
+    knowledgeHash: "a".repeat(64),
+    anchors: [],
+    screens: [
+      {
+        version: 1 as const,
+        id: "home",
+        status: "verified" as const,
+        requiredAnchors: ["home-activity"],
+        optionalAnchors: [],
+        forbiddenAnchors: [],
+        predicates: []
+      },
+      {
+        version: 1 as const,
+        id: "home-search",
+        status: "verified" as const,
+        requiredAnchors: ["home-search-activity"],
+        optionalAnchors: [],
+        forbiddenAnchors: [],
+        predicates: []
+      }
+    ],
+    transitions: [
+      {
+        version: 1 as const,
+        id: "home-to-home-search",
+        status: "verified" as const,
+        fromScreen: "home",
+        toScreen: "home-search",
+        semantic: "open-home-search",
+        action: { action: "click" as const, anchorId: "search-anchor" },
+        verification: { targetScreen: "home-search", timeoutMs: 5000 },
+        observations: { attempts: 0, successes: 0, recoveryCost: 0 }
+      }
+    ]
+  })),
+  bootstrap: vi.fn(),
+  promote: vi.fn(),
+  listReceipts: vi.fn()
+});
+
+describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", () => {
     const program = createProgram(dependencies().value);
     const commands = [
       program,
@@ -260,7 +371,7 @@ describe("TapHound CLI commands", () => {
       )
     );
 
-    expect(configOptions).toHaveLength(22);
+    expect(configOptions).toHaveLength(23);
     expect(configOptions.every(
       (option) => option.defaultValue === CONFIG_PATH
     )).toBe(true);
@@ -1965,5 +2076,133 @@ describe("TapHound CLI commands", () => {
       (option) => option.long === "--version"
     );
     expect(versionOption).toBeDefined();
+  });
+
+  it("lists benchmark cases with one exact JSON result", async () => {
+    const test = dependencies();
+    const store = fakeBenchmarkStore([benchmarkCaseRecord()]);
+
+    await createProgram({...test.value, benchmark: { store }}).parseAsync([
+      "node", "taphound", "benchmark", "list",
+      "--project", "/project",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "listed",
+      exitCode: 0,
+      directory: ".taphound/benchmarks",
+      cases: [{
+        id: "home-search",
+        targetScreen: "home-search",
+        hasGroundTruth: true
+      }]
+    });
+    expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("validates benchmark ground truth against the Knowledge Registry", async () => {
+    const test = dependencies();
+    const store = fakeBenchmarkStore([benchmarkCaseRecord()]);
+
+    await createProgram({
+      ...test.value,
+      benchmark: { store },
+      knowledge: fakeKnowledge()
+    }).parseAsync([
+      "node", "taphound", "benchmark", "validate",
+      "--project", "/project",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "valid",
+      exitCode: 0,
+      cases: [{ id: "home-search", ok: true, issues: [] }]
+    });
+    expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("fails benchmark validation with per-case issues at exit 2", async () => {
+    const test = dependencies();
+    const store = fakeBenchmarkStore([
+      benchmarkCaseRecord({
+        routeTransitionIds: ["missing-transition"]
+      })
+    ]);
+
+    await createProgram({
+      ...test.value,
+      benchmark: { store },
+      knowledge: fakeKnowledge()
+    }).parseAsync([
+      "node", "taphound", "benchmark", "validate",
+      "--project", "/project",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "invalid",
+      exitCode: 2,
+      cases: [{
+        id: "home-search",
+        ok: false,
+        issues: ["Unknown route Transition: missing-transition"]
+      }]
+    });
+    expect(test.exitCodes).toEqual([2]);
+  });
+
+  it("compares two benchmark runs with one exact JSON result", async () => {
+    const test = dependencies();
+    const run = (
+      runId: string,
+      firstRunSuccessRate: number
+    ): BenchmarkRunResult => ({
+      version: 1 as const,
+      runId,
+      startedAt: "2026-09-06T00:00:00.000Z",
+      completedAt: "2026-09-06T00:01:00.000Z",
+      results: [],
+      metrics: {
+        eligibleCases: 1,
+        passedCases: firstRunSuccessRate === 1 ? 1 : 0,
+        firstRunSuccessRate,
+        routeAccuracy: null,
+        averageRecognitionMs: 10,
+        averagePlanningMs: 20,
+        averageRecoveryCount: 0,
+        totalLlmCalls: 0,
+        totalLlmInputTokens: 0,
+        totalLlmOutputTokens: 0
+      }
+    });
+    const store: BenchmarkStore = {
+      readCases: vi.fn(),
+      writeResult: vi.fn(),
+      readResult: vi.fn((_projectRoot: string, runId: string) => Promise.resolve(
+        runId === "run-a" ? run("run-a", 0) : run("run-b", 1)
+      ))
+    };
+
+    await createProgram({
+      ...test.value,
+      benchmark: { store }
+    }).parseAsync([
+      "node", "taphound", "benchmark", "compare",
+      "--project", "/project",
+      "--baseline", "run-a",
+      "--candidate", "run-b",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "compared",
+      exitCode: 0,
+      baseline: "run-a",
+      candidate: "run-b",
+      metrics: { firstRunSuccessRate: { baseline: 0, candidate: 1 } }
+    });
+    expect(test.exitCodes).toEqual([0]);
   });
 });

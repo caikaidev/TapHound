@@ -35,6 +35,8 @@ import { FileSystemGenerationSessionStore } from "../adapters/filesystem/generat
 import { FileSystemJourneyWriter } from "../adapters/filesystem/journey-writer.js";
 import { FileSystemUiCacheStore } from "../adapters/filesystem/ui-cache-store.js";
 import { FileSystemKnowledgeRegistry } from "../adapters/filesystem/knowledge-registry.js";
+import { FileSystemBenchmarkStore } from "../adapters/filesystem/benchmark-store.js";
+import type { BenchmarkStore } from "../ports/benchmark-store.js";
 import {
   FileSystemKnowledgeReceiptStore
 } from "../adapters/filesystem/knowledge-receipt-store.js";
@@ -119,7 +121,8 @@ import {
   RuntimeObserver,
   SnapshotReobservationGuard,
   type RuntimeObservation,
-  type RuntimeObserveInput
+  type RuntimeObserveInput,
+  type SnapshotPlanning
 } from "../application/generation/runtime-observer.js";
 import { InitService, type InitInput } from "../application/init/init-service.js";
 import { JourneyResolver } from "../application/journey/journey-resolver.js";
@@ -152,7 +155,6 @@ import type {
 } from "../domain/knowledge-receipt.js";
 import {
   verificationPhaseLabel,
-  type GenerationPlanning,
   type GenerationSession
 } from "../domain/generation.js";
 import type { InitPromptPort } from "../ports/init-prompt.js";
@@ -307,6 +309,9 @@ export interface CliDependencies {
       projectRoot: string
     ) => Promise<readonly KnowledgeReceipt[]>;
   } | undefined;
+  benchmark?: {
+    store: BenchmarkStore;
+  } | undefined;
   readJson: (path: string) => Promise<unknown>;
   cwd: () => string;
   stdout: TextOutput;
@@ -418,6 +423,7 @@ export function createProductionDependencies(
     registry: knowledgeRegistry,
     receipts: knowledgeReceiptStore
   });
+  const benchmarkStore = new FileSystemBenchmarkStore();
   return {
     ...(signal === undefined ? {} : { signal }),
     doctor: new DoctorService({
@@ -542,10 +548,12 @@ export function createProductionDependencies(
       ),
       promote: (input): Promise<WriteKnowledgeBundleResult> => (
         knowledgePromotion.promote(input)
-      ),
-      listReceipts: (projectRoot): Promise<readonly KnowledgeReceipt[]> => (
+      ),      listReceipts: (projectRoot): Promise<readonly KnowledgeReceipt[]> => (
         knowledgeReceiptStore.list(projectRoot)
       )
+    },
+    benchmark: {
+      store: benchmarkStore
     },
     generationStarter: {
       start: async (input): Promise<
@@ -596,13 +604,14 @@ export function createProductionDependencies(
           session,
           snapshot,
           verifyTransition
-        }): Promise<GenerationPlanning> => (
-          (await planner.planSnapshot(
+        }): Promise<SnapshotPlanning> => {
+          const result = await planner.planSnapshot(
             session,
             snapshot,
             verifyTransition
-          )).planning
-        )
+          );
+          return { planning: result.planning, timing: result.timing };
+        }
       });
       const confirmation = new GenerationConfirmationService({
         store,

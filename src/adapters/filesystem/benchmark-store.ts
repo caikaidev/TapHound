@@ -158,4 +158,23 @@ export class FileSystemBenchmarkStore implements BenchmarkStore {
     }
     return `${BENCHMARK_RUNS_DIR}/${result.runId}.json`;
   };
+
+  public readonly readResult = async (
+    projectRoot: string,
+    runId: string
+  ): Promise<BenchmarkRunResult> => {
+    const root = await safeRoot(projectRoot, BENCHMARK_RUNS_DIR, false);
+    if (root === undefined) {
+      throw new Error(`Benchmark run does not exist: ${runId}`);
+    }
+    const result = BenchmarkRunResultSchema.parse(
+      await readJson(join(root, `${runId}.json`))
+    );
+    if (result.runId !== runId) {
+      throw new Error(
+        `Benchmark run id does not match file name: ${result.runId}`
+      );
+    }
+    return result;
+  };
 }

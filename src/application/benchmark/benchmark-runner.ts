@@ -2,6 +2,7 @@ import {
   BenchmarkCaseResultSchema,
   BenchmarkRunResultSchema,
   type BenchmarkCaseResult,
+  type BenchmarkEngine,
   type BenchmarkRunResult
 } from "../../domain/benchmark.js";
 import type {
@@ -12,7 +13,7 @@ import type {
 export interface BenchmarkExecutor {
   execute: (input: {
     record: BenchmarkCaseRecord;
-    engine: "legacy" | "knowledge";
+    engine: BenchmarkEngine;
   }) => Promise<BenchmarkCaseResult>;
 }
 
@@ -32,7 +33,7 @@ export class BenchmarkRunner {
 
   public readonly run = async (input: {
     projectRoot: string;
-    engine: "legacy" | "knowledge";
+    engine: BenchmarkEngine;
     caseIds?: readonly string[] | undefined;
     knowledgeHash?: string | undefined;
   }): Promise<{ result: BenchmarkRunResult; path: string }> => {

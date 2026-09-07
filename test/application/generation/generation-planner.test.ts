@@ -238,6 +238,8 @@ describe("GenerationPlanner", () => {
       }
     });
     expect(receipts).toEqual([{ kind: "screenDetection" }]);
+    expect(result.timing.recognitionMs).toBeGreaterThanOrEqual(0);
+    expect(result.timing.planningMs).toBeGreaterThanOrEqual(0);
   });
 
   it("records deviation and uses one bounded re-plan", async () => {

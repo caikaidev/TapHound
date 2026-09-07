@@ -32,9 +32,15 @@ import type {
   GenerationSessionStore
 } from "../../ports/generation-session-store.js";
 import { GenerationOperationError } from "./generation-starter.js";
+import type { GenerationPlanningTiming } from "./generation-planner.js";
 import { closeUiSnapshotProvider } from "../ui/ui-snapshot-lifecycle.js";
 
 export type RuntimeObservationBinding = ProposalBinding;
+
+export interface SnapshotPlanning {
+  planning: GenerationPlanning;
+  timing?: GenerationPlanningTiming | undefined;
+}
 
 export interface RuntimeObservation {
   binding: RuntimeObservationBinding;
@@ -42,6 +48,7 @@ export interface RuntimeObservation {
   snapshotHash: string;
   snapshotRef: string;
   planning?: GenerationPlanning | undefined;
+  planningTiming?: GenerationPlanningTiming | undefined;
 }
 
 export interface RuntimeObserveInput {
@@ -96,7 +103,7 @@ export interface RuntimeObserverDependencies {
     session: GenerationSession;
     snapshot: RuntimeSnapshot;
     verifyTransition: boolean;
-  }) => Promise<GenerationPlanning> | GenerationPlanning;
+  }) => Promise<SnapshotPlanning> | SnapshotPlanning;
 }
 
 export interface SnapshotReobservationGuardDependencies {
@@ -411,8 +418,8 @@ export class RuntimeObserver {
       snapshotPath,
       snapshot
     );
-    const planning = current.version === 2
-      ? await (async (): Promise<GenerationPlanning> => {
+    const planningResult = current.version === 2
+      ? await (async (): Promise<SnapshotPlanning> => {
           if (this.dependencies.planSnapshot === undefined) {
             throw new GenerationOperationError(
               "KNOWLEDGE_INVALID",
@@ -426,6 +433,8 @@ export class RuntimeObserver {
           });
         })()
       : undefined;
+    const planning = planningResult?.planning;
+    const planningTiming = planningResult?.timing;
     const next = GenerationSessionSchema.parse({
       ...current,
       revision: baseRevision,
@@ -455,7 +464,8 @@ export class RuntimeObserver {
       snapshot,
       snapshotHash,
       snapshotRef,
-      ...(planning === undefined ? {} : { planning })
+      ...(planning === undefined ? {} : { planning }),
+      ...(planningTiming === undefined ? {} : { planningTiming })
     };
   }
 }

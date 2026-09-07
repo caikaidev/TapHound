@@ -3,13 +3,27 @@ import { z } from "zod";
 import { KnowledgeIdSchema, KnowledgeSha256Schema } from "./knowledge.js";
 import { GoalSpecSchema } from "./route.js";
 
+export const BenchmarkBaselineSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("baseFlow"),
+    name: KnowledgeIdSchema
+  }),
+  z.strictObject({
+    kind: z.literal("journey"),
+    name: KnowledgeIdSchema
+  })
+]);
+
+export type BenchmarkBaseline = z.infer<typeof BenchmarkBaselineSchema>;
+
 export const BenchmarkCaseSchema = z.strictObject({
   version: z.literal(1),
   id: KnowledgeIdSchema,
   description: z.string().trim().min(1),
   goal: GoalSpecSchema,
   preconditions: z.array(z.string().trim().min(1)),
-  tags: z.array(KnowledgeIdSchema).default([])
+  tags: z.array(KnowledgeIdSchema).default([]),
+  baseline: BenchmarkBaselineSchema.optional()
 });
 
 export const BenchmarkGroundTruthSchema = z.strictObject({
@@ -29,10 +43,14 @@ const BenchmarkTimingSchema = z.strictObject({
   totalMs: z.number().nonnegative()
 });
 
+export const BenchmarkEngineSchema = z.enum(["legacy", "baseFlow", "knowledge"]);
+
+export type BenchmarkEngine = z.infer<typeof BenchmarkEngineSchema>;
+
 export const BenchmarkCaseResultSchema = z.strictObject({
   caseId: KnowledgeIdSchema,
   status: z.enum(["passed", "failed", "invalid", "notRun"]),
-  engine: z.enum(["legacy", "knowledge"]),
+  engine: BenchmarkEngineSchema,
   routeCorrect: z.boolean().nullable(),
   firstRunSuccess: z.boolean().nullable(),
   recoveryCount: z.number().int().nonnegative(),

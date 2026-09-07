@@ -18,4 +18,5 @@ export interface BenchmarkStore {
     projectRoot: string;
     result: BenchmarkRunResult;
   }) => Promise<string>;
+  readResult: (projectRoot: string, runId: string) => Promise<BenchmarkRunResult>;
 }

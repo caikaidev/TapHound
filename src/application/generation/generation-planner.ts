@@ -19,10 +19,16 @@ import { ScreenDetector } from "../recognition/screen-detector.js";
 import { ActionResolver, type ActionResolutionResult } from "../resolution/action-resolver.js";
 import { GenerationOperationError } from "./generation-starter.js";
 
+export interface GenerationPlanningTiming {
+  recognitionMs: number;
+  planningMs: number;
+}
+
 export interface GenerationPlanningResult {
   planning: GenerationPlanning;
   knowledge: LoadedKnowledgeBundle;
   detectionReceiptPath: string;
+  timing: GenerationPlanningTiming;
   transitionReceiptPath?: string | undefined;
   replanReceiptPath?: string | undefined;
 }
@@ -63,6 +69,7 @@ export class GenerationPlanner {
       );
     });
     const now = this.dependencies.now();
+    const recognitionStartedAt = this.dependencies.now().getTime();
     const detectionReceipt = this.detector.receipt({
       id: this.dependencies.createReceiptId(),
       recordedAt: now.toISOString(),
@@ -71,6 +78,7 @@ export class GenerationPlanner {
       anchors: knowledge.anchors,
       screens: knowledge.screens
     });
+    const recognitionMs = this.dependencies.now().getTime() - recognitionStartedAt;
     const detectionReceiptPath = await this.dependencies.receipts.record({
       projectRoot: this.dependencies.projectRoot,
       receipt: detectionReceipt
@@ -137,6 +145,7 @@ export class GenerationPlanner {
       knowledge.transitions,
       session.target.interactionPolicy.allowedActions
     );
+    const planningStartedAt = this.dependencies.now().getTime();
     const planned = this.routePlanner.plan({
       goal: {
         ...session.planning.goal,
@@ -151,6 +160,7 @@ export class GenerationPlanner {
       graph,
       now
     });
+    const planningMs = this.dependencies.now().getTime() - planningStartedAt;
     if (planned.status === "failed") {
       throw new GenerationOperationError(
         "NO_ROUTE",
@@ -186,6 +196,10 @@ export class GenerationPlanner {
       }),
       knowledge,
       detectionReceiptPath,
+      timing: {
+        recognitionMs,
+        planningMs
+      },
       ...(transitionReceiptPath === undefined ? {} : { transitionReceiptPath }),
       ...(replanReceiptPath === undefined ? {} : { replanReceiptPath })
     };

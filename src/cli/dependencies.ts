@@ -600,6 +600,7 @@ export function createProductionDependencies(
         now: (): Date => new Date(),
         createAttemptId: randomUUID,
         uiCacheEnabled: config.ui?.cacheEnabled ?? true,
+        uiSnapshotTimeoutMs: config.ui?.snapshotTimeoutMs,
         planSnapshot: async ({
           session,
           snapshot,
@@ -630,7 +631,8 @@ export function createProductionDependencies(
             store,
             adb,
             uiSnapshotProvider,
-            now: (): Date => new Date()
+            now: (): Date => new Date(),
+            uiSnapshotTimeoutMs: config.ui?.snapshotTimeoutMs
           })
         ),
         adb,

@@ -99,6 +99,7 @@ export interface RuntimeObserverDependencies {
   now: () => Date;
   createAttemptId: () => string;
   uiCacheEnabled?: boolean | undefined;
+  uiSnapshotTimeoutMs?: number | undefined;
   planSnapshot?: (input: {
     session: GenerationSession;
     snapshot: RuntimeSnapshot;
@@ -114,6 +115,7 @@ export interface SnapshotReobservationGuardDependencies {
   >;
   uiSnapshotProvider: UiSnapshotProvider;
   now: () => Date;
+  uiSnapshotTimeoutMs?: number | undefined;
 }
 
 function failedCapture(result: {
@@ -158,6 +160,7 @@ async function collectRuntime(
       "foregroundComponent" | "appProcesses" | "windowTopology"
     >;
     uiSnapshotProvider: UiSnapshotProvider;
+    uiSnapshotTimeoutMs: number;
   },
   session: GenerationSession,
   signal?: AbortSignal,
@@ -181,7 +184,7 @@ async function collectRuntime(
     dependencies.adb.windowTopology(identity),
     dependencies.uiSnapshotProvider.capture({
       reason: "evidence",
-      timeoutMs: 5000,
+      timeoutMs: dependencies.uiSnapshotTimeoutMs,
       ...(signal === undefined ? {} : { signal })
     })
   ]);
@@ -308,7 +311,8 @@ export class RuntimeObserver {
       runtime = await collectRuntime(
         {
           adb: this.dependencies.adb,
-          uiSnapshotProvider
+          uiSnapshotProvider,
+          uiSnapshotTimeoutMs: this.dependencies.uiSnapshotTimeoutMs ?? 5000
         },
         current,
         input.signal
@@ -524,7 +528,8 @@ export class SnapshotReobservationGuard {
       const runtime = await collectRuntime(
         {
           adb: this.dependencies.adb,
-          uiSnapshotProvider: this.dependencies.uiSnapshotProvider
+          uiSnapshotProvider: this.dependencies.uiSnapshotProvider,
+          uiSnapshotTimeoutMs: this.dependencies.uiSnapshotTimeoutMs ?? 5000
         },
         session,
         signal

@@ -105,6 +105,9 @@ git diff --exit-code -- assets/brand/png
 - `generation start --goal <goal.json>` / `generation next`：绑定 Knowledge
   与严格 Goal，并通过现有 proposal、风险、证据和 Replay 控制执行一个已知
   Transition。
+- `benchmark validate` / `list` / `run` / `compare`：以 `legacy`、`baseFlow`
+  或 `knowledge` 引擎对照 Ground Truth 回放 Benchmark Case，并比较成功率、
+  路由准确率、耗时与 LLM 指标。
 
 ## 配置
 

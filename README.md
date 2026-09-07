@@ -108,6 +108,9 @@ See the [local testing guide](docs/local-testing.md) for source, npm tarball, an
 - `generation start --goal <goal.json>` / `generation next`: bind Knowledge
   and a strict Goal, then recognize and execute one known Transition through
   the existing proposal, risk, evidence, and replay controls.
+- `benchmark validate` / `list` / `run` / `compare`: replay Benchmark Cases
+  against Ground Truth with the `legacy`, `baseFlow`, or `knowledge` engine
+  and compare aggregate success, route accuracy, timing, and LLM metrics.
 
 ## Configuration
 

@@ -281,6 +281,7 @@ describe("TapHound documentation examples", () => {
       "journey",
       "generation",
       "knowledge",
+      "benchmark",
       "init",
       "align",
       "ui-cache"
@@ -300,6 +301,7 @@ describe("TapHound documentation examples", () => {
         "journey resolve",
         "generation start",
         "knowledge status",
+        "benchmark validate",
         "taphound init",
         "ui-cache status"
       ]) {

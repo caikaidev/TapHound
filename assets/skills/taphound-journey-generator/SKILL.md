@@ -381,8 +381,20 @@ proposals. See `docs/knowledge-planning.md` for the full protocol.
    taphound knowledge bootstrap --project <project> --json
    taphound knowledge status --project <project> --json
    ```
-2. Write a strict Goal Spec JSON (`version: 1`, `id`, `targetScreen`,
-   `parameters`, `limits.{maxSteps,maxReplans}`) and start a v2 session:
+2. Obtain a strict Goal Spec JSON (`version: 1`, `id`, `targetScreen`,
+   `parameters`, `limits.{maxSteps,maxReplans}`). Scaffold it from the
+   committed Registry instead of hand-writing (text mode prints the Goal
+   Spec alone, so it redirects directly to a file):
+   ```bash
+   taphound knowledge goal \
+     --project <project> \
+     --target <screenId> \
+     --parameter key=value \
+     --max-steps 10 --max-replans 2 \
+     > goal.json
+   ```
+   `--target` is validated against the committed Registry; natural-language
+   intent stays with the external agent. Then start a v2 session:
    ```bash
    taphound generation start ... --goal <goal.json>
    ```
@@ -415,6 +427,22 @@ taphound knowledge promote --project <project> --input <promotion.json> --json
 A promotion bumps the Registry revision and `knowledgeHash`; the current
 session keeps its old binding. Reach a natural stopping point, then start a
 new `--goal` session to continue planning under the promoted Registry.
+
+After knowledge-planned sessions and `benchmark run --engine knowledge`
+campaigns accumulate receipts under `.taphound/build/knowledge-receipts/`,
+fold the runtime evidence back into the Registry:
+
+```bash
+taphound knowledge evolve --project <project> --json
+```
+
+Only receipts bound to the current `knowledgeHash` are folded, so a batch
+can never double-count. `transitionVerification` receipts accumulate
+Transition observation counts (attempts, successes, recovery cost), and
+matched `screenDetection`/`anchorResolution` evidence upgrades `inferred`
+Screens, Anchors, and Transitions to `observed`; statuses never downgrade.
+A fold that changes nothing reports `status: "unchanged"` without writing.
+Run it after each campaign, then start new sessions under the evolved hash.
 
 ## Phase 4: Finalize
 
@@ -472,7 +500,23 @@ new `--goal` session to continue planning under the promoted Registry.
    original session with the same `--output` re-exports the sidecar with
    the field.
 
-5. Clean up any remaining temp files.
+5. Promote the replay-verified Journey into a durable asset when it should
+   become a protected baseline:
+   ```bash
+   taphound journey promote \
+     --project <project> \
+     --journey <journeyPath> \
+     --reason <text> \
+     --json
+   ```
+   Promotion re-hashes the generation bundle's verification report, compares
+   the exported Journey against the bundle's verified Journey evidence, and
+   rewrites the meta sidecar to `status: "promoted"` with the promotion
+   record. It fails closed (exit code 2) on missing evidence, report hash
+   drift, a Journey modified after verification, or an already promoted
+   sidecar.
+
+6. Clean up any remaining temp files.
 
 ## Error Handling Summary
 
@@ -495,6 +539,7 @@ new `--goal` session to continue planning under the promoted Registry.
 | `knowledge plan` rejects the snapshot | Pass a session `snapshotRef` file, not `observe --json` output |
 | Max steps exceeded         | Stop, report incomplete Goal                    |
 | Finalize not verified      | Report failure detail, do not claim success     |
+| `journey promote` fails closed | Journey or report drifted from the verified bundle; re-finalize on the original session, then promote |
 | Journey check reports stale/invalid | Inspect `reasons`; refresh Context or regenerate the Journey |
 
 ## Key Rules

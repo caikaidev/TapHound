@@ -857,6 +857,27 @@ Sidecars published before `contextSelection` was recorded classify as
 re-exports the sidecar with the field; publication to the same path is
 idempotent and does not repeat the verification replay.
 
+### 3.12 Promote a Verified Journey
+
+A finalized Journey starts at sidecar `status: "verified"`. When it should
+become a durable, protected baseline (regression asset, benchmark baseline),
+complete the lifecycle:
+
+```bash
+taphound journey promote \
+  --project /path/to/android-project \
+  --journey .taphound/journeys/<name>.json \
+  --reason "core regression path" \
+  --json
+```
+
+Promotion re-hashes the generation bundle's verification report, compares
+the exported Journey against the bundle's verified Journey evidence, and
+rewrites the sidecar to `status: "promoted"` with a
+`promotion: {promotedAt, reason}` record. It fails closed (exit `2`) on
+missing evidence, report hash drift, a Journey modified after verification,
+or an already promoted sidecar.
+
 ---
 
 ## 4. Complete Example: Testing the Demo Search Feature

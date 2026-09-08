@@ -9,6 +9,10 @@ import {
   type JourneyCheckEntry
 } from "../../application/journey/journey-check-service.js";
 import {
+  JourneyPromotionError,
+  JourneyPromoter
+} from "../../application/journey/journey-promoter.js";
+import {
   JourneyCompositionError
 } from "../../application/journey/journey-resolver.js";
 import {
@@ -54,6 +58,13 @@ interface JourneyCheckOptions {
   strict?: boolean | undefined;
 }
 
+interface JourneyPromoteOptions {
+  project: string;
+  journey: string;
+  reason: string;
+  json?: boolean | undefined;
+}
+
 function manifestPath(outputPath: string): string {
   const extension = extname(outputPath);
   return extension.toLowerCase() === ".json"
@@ -90,6 +101,7 @@ function writeFailure(
 ): void {
   const known = error instanceof JourneyCompositionError
     || error instanceof JourneyCheckError
+    || error instanceof JourneyPromotionError
     || error instanceof ContextLoadError
     || error instanceof z.ZodError;
   const output = {
@@ -100,11 +112,13 @@ function writeFailure(
         ? error.code
         : error instanceof JourneyCheckError
           ? error.code
-          : error instanceof ContextLoadError
+          : error instanceof JourneyPromotionError
             ? error.code
-            : error instanceof z.ZodError
-              ? "CONFIG_INVALID"
-              : "INTERNAL_ERROR",
+            : error instanceof ContextLoadError
+              ? error.code
+              : error instanceof z.ZodError
+                ? "CONFIG_INVALID"
+                : "INTERNAL_ERROR",
       message: errorMessage(error)
     }
   };
@@ -339,10 +353,53 @@ function createCheckCommand(dependencies: CliDependencies): Command {
     });
 }
 
+function createPromoteCommand(dependencies: CliDependencies): Command {
+  return new Command("promote")
+    .description("Promote a replay-verified Journey into a durable asset")
+    .option("--project <path>", "Android project root", dependencies.cwd())
+    .requiredOption("--journey <path>", "Project-relative Journey path")
+    .requiredOption("--reason <text>", "Why this Journey is worth keeping")
+    .option("--json", "Emit one machine-readable JSON value")
+    .action(async (options: JourneyPromoteOptions): Promise<void> => {
+      try {
+        await assertNoLegacyWorkspace(dependencies, options.project);
+        const composition = requireComposition(dependencies);
+        const result = await new JourneyPromoter({
+          store: composition.store
+        }).promote({
+          projectRoot: options.project,
+          journeyPath: options.journey,
+          reason: options.reason,
+          now: new Date()
+        });
+        const output = {
+          status: "promoted" as const,
+          exitCode: 0 as const,
+          journeyPath: result.journeyPath,
+          metaPath: result.metaPath,
+          generationId: result.generationId,
+          promotedAt: result.promotedAt
+        };
+        if (options.json === true) {
+          writeJson(dependencies.stdout, output);
+        } else {
+          writeLine(
+            dependencies.stdout,
+            `Promoted ${result.journeyPath} (${result.generationId})`
+          );
+        }
+        dependencies.setExitCode(0);
+      } catch (error) {
+        writeFailure(dependencies, options, error);
+      }
+    });
+}
+
 export function createJourneyCommand(dependencies: CliDependencies): Command {
   return new Command("journey")
     .description("Compose reusable Flows into runnable Journeys")
     .addCommand(createResolveCommand(dependencies))
     .addCommand(createListFlowsCommand(dependencies))
-    .addCommand(createCheckCommand(dependencies));
+    .addCommand(createCheckCommand(dependencies))
+    .addCommand(createPromoteCommand(dependencies));
 }

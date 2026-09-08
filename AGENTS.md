@@ -278,6 +278,27 @@ revision checks, locking, atomic renames, path validation, recovery state, and
 core-identity invariants are part of the protocol; do not bypass them with
 direct filesystem writes.
 
+### Knowledge Evolution and Journey Promotion
+
+`knowledge evolve` folds the immutable receipts bound to the current Knowledge
+hash back into a new Registry revision: `transitionVerification` receipts
+accumulate Transition observation attempts/successes/recovery cost, and
+matched `screenDetection`/`anchorResolution` evidence upgrades `inferred`
+Anchors, Screens, and Transitions to `observed`. Statuses never downgrade and
+`verified` stays promotion-gated. Receipts are hash-bound, so a folded batch
+can never be double-counted, and a no-op fold reports `unchanged` without a
+write. `knowledge goal` drafts a strict Goal Spec for a known target Screen
+(`--target`, `--parameter key=value`, `--max-steps`, `--max-replans`); natural
+language stays with external Skills.
+
+`journey promote --journey <path> --reason <text>` completes the Journey
+lifecycle `verified → promoted`. It re-hashes the generation bundle's
+verification report, compares the exported Journey against the bundle's
+verified Journey evidence, and rewrites the meta sidecar to
+`status: "promoted"` with `promotion: {promotedAt, reason}` only when every
+check passes. Missing evidence, hash drift, a modified Journey, or an already
+promoted sidecar fails closed at exit code 2.
+
 ## Protocol and Implementation Constraints
 
 - The project uses ESM with NodeNext resolution. TypeScript source imports use

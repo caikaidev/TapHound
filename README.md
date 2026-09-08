@@ -102,15 +102,24 @@ See the [local testing guide](docs/local-testing.md) for source, npm tarball, an
 - `ui-cache status` / `ui-cache clear --yes`: inspect or delete only the
   rebuildable `.taphound/build/cache/ui/` indexes; Journeys, reports, and
   Generation evidence are never touched.
-- `knowledge status` / `bootstrap` / `plan` / `receipts` / `promote`: manage
-  committed Anchor, Screen, and Transition knowledge. Runtime commands write
-  immutable receipts; only explicit bootstrap or promotion updates authority.
+- `knowledge status` / `bootstrap` / `goal` / `plan` / `receipts` / `promote` /
+  `evolve`: manage committed Anchor, Screen, and Transition knowledge. Runtime
+  commands write immutable receipts; only explicit bootstrap, promotion, or
+  receipt-folded evolution updates authority. `goal` drafts a strict Goal Spec
+  for a known target Screen, and `evolve` folds receipts bound to the current
+  Registry hash into Transition observation counts and upgrades `inferred`
+  documents to `observed`.
 - `generation start --goal <goal.json>` / `generation next`: bind Knowledge
   and a strict Goal, then recognize and execute one known Transition through
   the existing proposal, risk, evidence, and replay controls.
 - `benchmark validate` / `list` / `run` / `compare`: replay Benchmark Cases
   against Ground Truth with the `legacy`, `baseFlow`, or `knowledge` engine
   and compare aggregate success, route accuracy, timing, and LLM metrics.
+- `journey promote --journey <path> --reason <text>`: promote a replay-verified
+  Journey into a durable asset. Promotion re-checks the verification report
+  hash and the verified Journey evidence inside the generation bundle before
+  flipping the meta sidecar to `promoted`; Journeys that drifted from their
+  evidence fail closed.
 
 ## Configuration
 

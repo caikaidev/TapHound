@@ -213,8 +213,7 @@ describe("generation planning sessions", () => {
 });
 
 describe("generation finalization evidence schemas", () => {
-  it("parses aligned strict verified meta and provenance", () => {
-    expect(GenerationMetaSchema.parse({
+  it("parses aligned strict verified meta and provenance", () => {    expect(GenerationMetaSchema.parse({
       version: 1,
       status: "verified",
       generationId: "generation-1",
@@ -249,6 +248,53 @@ describe("generation finalization evidence schemas", () => {
         { index: 1, source: "manualOverride" }
       ]
     }).steps).toHaveLength(2);
+  });
+
+  it("parses promoted meta and enforces promotion lifecycle coherence", () => {
+    const meta = {
+      version: 1,
+      status: "verified",
+      generationId: "generation-1",
+      journeyPath: ".taphound/journeys/generated.json",
+      bindings: {
+        projectHash: "a".repeat(64),
+        configHash: "b".repeat(64),
+        contextHash: "c".repeat(64)
+      },
+      verification: {
+        reportPath: "verification/report.json",
+        reportSha256: "d".repeat(64),
+        runId: "verify-run",
+        runs: 1
+      },
+      manualOverrideStepIndexes: []
+    };
+    const promoted = GenerationMetaSchema.parse({
+      ...meta,
+      status: "promoted",
+      promotion: {
+        promotedAt: "2026-01-02T00:00:00.000Z",
+        reason: "core regression path"
+      }
+    });
+    expect(promoted.status).toBe("promoted");
+    expect(promoted.promotion?.reason).toBe("core regression path");
+    expect(() => GenerationMetaSchema.parse({
+      ...meta,
+      status: "promoted"
+    })).toThrow(/Promoted Journeys require promotion details/);
+    expect(() => GenerationMetaSchema.parse({
+      ...meta,
+      status: "verified",
+      promotion: {
+        promotedAt: "2026-01-02T00:00:00.000Z",
+        reason: "core regression path"
+      }
+    })).toThrow(/Only promoted Journeys carry promotion details/);
+    expect(() => GenerationMetaSchema.parse({
+      ...meta,
+      status: "draft"
+    })).toThrow();
   });
 
   it("parses verified meta with a Context selection and rejects drifted shapes", () => {

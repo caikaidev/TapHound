@@ -41,7 +41,7 @@ describe("createProgram", () => {
     expect(
       createProgram().commands.find((command) => command.name() === "journey")
         ?.commands.map((command) => command.name())
-    ).toEqual(["resolve", "list-flows", "check"]);
+    ).toEqual(["resolve", "list-flows", "check", "promote"]);
     expect(
       createProgram().commands.find((command) => command.name() === "generation")
         ?.commands.map((command) => command.name())
@@ -63,7 +63,7 @@ describe("createProgram", () => {
     expect(
       createProgram().commands.find((command) => command.name() === "knowledge")
         ?.commands.map((command) => command.name())
-    ).toEqual(["status", "bootstrap", "plan", "receipts", "promote"]);
+    ).toEqual(["status", "bootstrap", "goal", "plan", "receipts", "promote", "evolve"]);
     expect(
       createProgram().commands.find((command) => command.name() === "benchmark")
         ?.commands.map((command) => command.name())

@@ -481,7 +481,11 @@ const BundleRelativePathSchema = z.string().min(1).superRefine(
 
 export const GenerationMetaSchema = z.strictObject({
   version: z.literal(1),
-  status: z.literal("verified"),
+  status: z.enum(["verified", "promoted"]),
+  promotion: z.strictObject({
+    promotedAt: z.iso.datetime(),
+    reason: z.string().trim().min(1)
+  }).optional(),
   generationId: GenerationSessionIdSchema,
   journeyPath: ProjectRelativePathSchema,
   bindings: z.strictObject({
@@ -500,6 +504,21 @@ export const GenerationMetaSchema = z.strictObject({
   baseFlow: GenerationBaseFlowSchema.optional(),
   externalFlows: z.array(GenerationExternalFlowBindingSchema).default([]),
   manualOverrideStepIndexes: z.array(z.number().int().nonnegative())
+}).superRefine((meta, context) => {
+  if (meta.status === "verified" && meta.promotion !== undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["promotion"],
+      message: "Only promoted Journeys carry promotion details"
+    });
+  }
+  if (meta.status === "promoted" && meta.promotion === undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["promotion"],
+      message: "Promoted Journeys require promotion details"
+    });
+  }
 });
 
 export const GenerationReportSchema = z.strictObject({

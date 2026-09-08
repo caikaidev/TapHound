@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
 
 import {
   ContextGenerateError
@@ -357,6 +358,7 @@ const fakeKnowledge = (): NonNullable<CliDependencies["knowledge"]> => ({
   })),
   bootstrap: vi.fn(),
   promote: vi.fn(),
+  evolve: vi.fn(),
   listReceipts: vi.fn()
 });
 
@@ -373,7 +375,7 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
       )
     );
 
-    expect(configOptions).toHaveLength(23);
+    expect(configOptions).toHaveLength(24);
     expect(configOptions.every(
       (option) => option.defaultValue === CONFIG_PATH
     )).toBe(true);
@@ -2322,5 +2324,283 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
       metrics: { firstRunSuccessRate: { baseline: 0, candidate: 1 } }
     });
     expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("evolves Knowledge from bound receipts with one exact JSON result", async () => {
+    const test = dependencies();
+    const knowledge = fakeKnowledge();
+    vi.mocked(knowledge.evolve).mockResolvedValue({
+      status: "evolved",
+      knowledgeHash: "9".repeat(64),
+      revision: 2,
+      foldedReceipts: 3,
+      summary: {
+        transitionsUpdated: 1,
+        anchorsUpgraded: 2,
+        screensUpgraded: 1
+      }
+    });
+
+    await createProgram({
+      ...test.value,
+      knowledge
+    }).parseAsync([
+      "node", "taphound", "knowledge", "evolve",
+      "--project", "/project",
+      "--expected-hash", "a".repeat(64),
+      "--json"
+    ]);
+
+    expect(knowledge.evolve).toHaveBeenCalledWith({
+      projectRoot: "/project",
+      packageName: "com.example.app",
+      expectedKnowledgeHash: "a".repeat(64)
+    });
+    expect(JSON.parse(test.stdout.value)).toEqual({
+      status: "evolved",
+      exitCode: 0,
+      knowledgeHash: "9".repeat(64),
+      revision: 2,
+      foldedReceipts: 3,
+      summary: {
+        transitionsUpdated: 1,
+        anchorsUpgraded: 2,
+        screensUpgraded: 1
+      }
+    });
+    expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("reports unchanged Knowledge evolution without a Registry write", async () => {
+    const test = dependencies();
+    const knowledge = fakeKnowledge();
+    vi.mocked(knowledge.evolve).mockResolvedValue({
+      status: "unchanged",
+      knowledgeHash: "a".repeat(64),
+      revision: 1,
+      foldedReceipts: 0
+    });
+
+    await createProgram({
+      ...test.value,
+      knowledge
+    }).parseAsync([
+      "node", "taphound", "knowledge", "evolve",
+      "--project", "/project",
+      "--json"
+    ]);
+
+    expect(knowledge.evolve).toHaveBeenCalledWith({
+      projectRoot: "/project",
+      packageName: "com.example.app"
+    });
+    expect(JSON.parse(test.stdout.value)).toEqual({
+      status: "unchanged",
+      exitCode: 0,
+      knowledgeHash: "a".repeat(64),
+      revision: 1,
+      foldedReceipts: 0
+    });
+    expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("drafts a strict Goal Spec for a known target Screen", async () => {
+    const test = dependencies();
+    const knowledge = fakeKnowledge();
+
+    await createProgram({
+      ...test.value,
+      knowledge
+    }).parseAsync([
+      "node", "taphound", "knowledge", "goal",
+      "--project", "/project",
+      "--target", "home-search",
+      "--parameter", "query=hello world",
+      "--max-steps", "5",
+      "--max-replans", "1",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toEqual({
+      status: "drafted",
+      exitCode: 0,
+      goal: {
+        version: 1,
+        id: "goal-home-search",
+        targetScreen: "home-search",
+        parameters: { query: "hello world" },
+        limits: { maxSteps: 5, maxReplans: 1 }
+      }
+    });
+    expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("rejects a Goal Spec for an unknown target Screen", async () => {
+    const test = dependencies();
+    const knowledge = fakeKnowledge();
+
+    await createProgram({
+      ...test.value,
+      knowledge
+    }).parseAsync([
+      "node", "taphound", "knowledge", "goal",
+      "--project", "/project",
+      "--target", "missing-screen",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "failed",
+      exitCode: 2,
+      code: "KNOWLEDGE_INVALID"
+    });
+    expect(test.exitCodes).toEqual([2]);
+  });
+
+  it("promotes a verified Journey after checking intact evidence", async () => {
+    const test = dependencies();
+    const generationId = "644a6a0d-bc9a-414d-8f88-addbf8d31ca7";
+    const journey = {
+      ...runtimeJourney,
+      name: "Generated"
+    };
+    const report = validReport({ runId: "verify-run" });
+    const meta = {
+      version: 1,
+      status: "verified",
+      generationId,
+      journeyPath: ".taphound/journeys/generated.json",
+      bindings: {
+        projectHash: "a".repeat(64),
+        configHash: "b".repeat(64),
+        contextHash: "c".repeat(64)
+      },
+      verification: {
+        reportPath: "verification/report.json",
+        reportSha256: createHash("sha256")
+          .update(`${JSON.stringify(report, null, 2)}\n`)
+          .digest("hex"),
+        runId: "verify-run",
+        runs: 1
+      },
+      manualOverrideStepIndexes: []
+    };
+    const writes: Array<{ relativePath: string; content: string }> = [];
+    test.value.journeyCompositionStore = {
+      read: vi.fn(({ relativePath }: { relativePath: string }) => {
+        if (relativePath === ".taphound/journeys/generated.json") {
+          return Promise.resolve(
+            Buffer.from(`${JSON.stringify(journey, null, 2)}\n`)
+          );
+        }
+        if (
+          relativePath
+          === `.taphound/build/generations/${generationId}/verification/report.json`
+        ) {
+          return Promise.resolve(
+            Buffer.from(`${JSON.stringify(report, null, 2)}\n`)
+          );
+        }
+        return Promise.resolve(
+          Buffer.from(`${JSON.stringify(journey, null, 2)}\n`)
+        );
+      }),
+      listJourneyPaths: vi.fn(),
+      readJourneyMeta: vi.fn(() => Promise.resolve(
+        Buffer.from(`${JSON.stringify(meta, null, 2)}\n`)
+      )),
+      writeText: vi.fn((input: { relativePath: string; content: string }) => {
+        writes.push({
+          relativePath: input.relativePath,
+          content: input.content
+        });
+        return Promise.resolve();
+      })
+    };
+    test.value.journeyResolver = {
+      resolve: vi.fn(),
+      resolveFlow: vi.fn(),
+      listFlows: vi.fn()
+    };
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "journey", "promote",
+      "--project", "/project",
+      "--journey", ".taphound/journeys/generated.json",
+      "--reason", "core regression path",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "promoted",
+      exitCode: 0,
+      journeyPath: ".taphound/journeys/generated.json",
+      generationId
+    });
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.relativePath).toBe(
+      ".taphound/journeys/generated.meta.json"
+    );
+    expect((JSON.parse(writes[0]?.content ?? "{}") as {
+      status: string;
+      promotion: { reason: string };
+    }).promotion.reason).toBe("core regression path");
+    expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("refuses to promote an already promoted Journey", async () => {
+    const test = dependencies();
+    const meta = {
+      version: 1,
+      status: "promoted",
+      promotion: {
+        promotedAt: "2026-01-01T00:00:00.000Z",
+        reason: "already promoted"
+      },
+      generationId: "644a6a0d-bc9a-414d-8f88-addbf8d31ca7",
+      journeyPath: ".taphound/journeys/generated.json",
+      bindings: {
+        projectHash: "a".repeat(64),
+        configHash: "b".repeat(64),
+        contextHash: "c".repeat(64)
+      },
+      verification: {
+        reportPath: "verification/report.json",
+        reportSha256: "d".repeat(64),
+        runId: "verify-run",
+        runs: 1
+      },
+      manualOverrideStepIndexes: []
+    };
+    test.value.journeyCompositionStore = {
+      read: vi.fn(() => Promise.resolve(
+        Buffer.from(`${JSON.stringify(runtimeJourney, null, 2)}\n`)
+      )),
+      listJourneyPaths: vi.fn(),
+      readJourneyMeta: vi.fn(() => Promise.resolve(
+        Buffer.from(`${JSON.stringify(meta, null, 2)}\n`)
+      )),
+      writeText: vi.fn()
+    };
+    test.value.journeyResolver = {
+      resolve: vi.fn(),
+      resolveFlow: vi.fn(),
+      listFlows: vi.fn()
+    };
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "journey", "promote",
+      "--project", "/project",
+      "--journey", ".taphound/journeys/generated.json",
+      "--reason", "again",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "error",
+      exitCode: 2,
+      failure: { code: "JOURNEY_ALREADY_PROMOTED" }
+    });
+    expect(test.exitCodes).toEqual([2]);
   });
 });

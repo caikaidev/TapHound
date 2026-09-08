@@ -66,6 +66,58 @@ Use `knowledge promote --input <promotion.json>` to apply a reviewed,
 receipt-backed update. A promotion must bind `expectedKnowledgeHash`; a
 concurrent or drifted Registry is rejected instead of overwritten.
 
+## Receipt-folded evolution
+
+Runtime commands accumulate immutable receipts under
+`.taphound/build/knowledge-receipts/`. `knowledge evolve` folds the receipts
+bound to the current Registry hash back into authority:
+
+```bash
+taphound knowledge evolve \
+  --project /path/to/android-project \
+  --expected-hash <knowledgeHash> \
+  --json
+```
+
+Deterministic folding rules:
+
+- each bound `transitionVerification` receipt adds one attempt to its
+  Transition; `verified` also adds a success and `deviated` adds recovery
+  cost,
+- matched `screenDetection` and `anchorResolution` evidence upgrades
+  `inferred` Screens and Anchors to `observed`,
+- a Transition with at least one folded success is upgraded from `inferred`
+  to `observed`,
+- statuses never downgrade, and `verified` remains reserved for explicit
+  promotion.
+
+Because receipts record the exact `knowledgeHash` they observed, folded
+receipts cannot be double-counted: the next revision has a new hash and only
+newly bound receipts are eligible. When nothing changes, `evolve` reports
+`status: "unchanged"` and does not write a revision. Transition observation
+counts feed the Route Planner's edge cost, so repeatedly verified Transitions
+become cheaper than unproven ones.
+
+## Goal scaffolding
+
+`knowledge goal` drafts the strict Goal Spec for a known Screen without
+hand-editing JSON:
+
+```bash
+taphound knowledge goal \
+  --project /path/to/android-project \
+  --target todo-create \
+  --parameter title=TeamSync \
+  --max-steps 5 \
+  --max-replans 1 \
+  --json
+```
+
+The command validates that the target Screen exists in the committed
+Registry. Natural-language intent stays outside Core: an external Skill or
+agent selects the target Screen and literal parameters, then the drafted
+Goal feeds `generation start --goal`.
+
 ## Goal-bound Generation
 
 A Goal Spec is canonical JSON:
@@ -114,6 +166,27 @@ Knowledge, no Route, and exhausted budgets fail closed.
 
 Continue until `status: "goalReached"`, then use the existing `generation
 finalize`. Final replay never changes route and never consults the planner.
+
+## Journey promotion
+
+`generation finalize` exports each verified Journey with a
+`<name>.meta.json` sidecar in `status: "verified"`. High-value Journeys can
+then be promoted into durable assets:
+
+```bash
+taphound journey promote \
+  --project /path/to/android-project \
+  --journey .taphound/journeys/todo-create.json \
+  --reason "core regression path" \
+  --json
+```
+
+Promotion re-reads the generation bundle, re-hashes the verification report,
+compares the exported Journey against the verified Journey evidence, and only
+then rewrites the sidecar to `status: "promoted"` with `promotedAt` and the
+recorded reason. Missing evidence, hash drift, an edited Journey, or an
+already promoted sidecar fails closed with a `JOURNEY_*` or `EVIDENCE_*`
+code at exit code 2.
 
 ## Offline planning and Benchmark
 

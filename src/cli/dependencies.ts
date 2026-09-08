@@ -137,6 +137,10 @@ import {
 import {
   KnowledgePromotionService
 } from "../application/knowledge/promotion-service.js";
+import {
+  KnowledgeEvolutionService,
+  type KnowledgeEvolutionResult
+} from "../application/knowledge/knowledge-evolver.js";
 import type {
   ActionResolutionResult
 } from "../application/resolution/action-resolver.js";
@@ -305,6 +309,11 @@ export interface CliDependencies {
       packageName: string;
       promotion: KnowledgePromotion;
     }) => Promise<WriteKnowledgeBundleResult>;
+    evolve: (input: {
+      projectRoot: string;
+      packageName: string;
+      expectedKnowledgeHash?: string | undefined;
+    }) => Promise<KnowledgeEvolutionResult>;
     listReceipts: (
       projectRoot: string
     ) => Promise<readonly KnowledgeReceipt[]>;
@@ -420,6 +429,10 @@ export function createProductionDependencies(
   );
   const knowledgeBootstrapper = new KnowledgeBootstrapper(knowledgeRegistry);
   const knowledgePromotion = new KnowledgePromotionService({
+    registry: knowledgeRegistry,
+    receipts: knowledgeReceiptStore
+  });
+  const knowledgeEvolution = new KnowledgeEvolutionService({
     registry: knowledgeRegistry,
     receipts: knowledgeReceiptStore
   });
@@ -548,7 +561,11 @@ export function createProductionDependencies(
       ),
       promote: (input): Promise<WriteKnowledgeBundleResult> => (
         knowledgePromotion.promote(input)
-      ),      listReceipts: (projectRoot): Promise<readonly KnowledgeReceipt[]> => (
+      ),
+      evolve: (input): Promise<KnowledgeEvolutionResult> => (
+        knowledgeEvolution.evolve(input)
+      ),
+      listReceipts: (projectRoot): Promise<readonly KnowledgeReceipt[]> => (
         knowledgeReceiptStore.list(projectRoot)
       )
     },

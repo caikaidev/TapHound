@@ -97,6 +97,24 @@ The CLI exposes `doctor`, `record`, `verify`, `observe`, `project`, `context`,
 `journey`, `generation`, `init`, and `align`. Keep external tools and filesystem effects
 behind ports so application tests can inject fakes.
 
+### Runtime Backend SPI
+
+Device work flows through the Runtime Backend SPI
+(`src/ports/runtime-backend.ts`): a `RuntimeBackend` lists devices and opens
+serial-bound `RuntimeSession`s. `AdbRuntimeBackend`
+(`src/adapters/runtime/`) composes the existing ADB/Android CLI adapters
+without reimplementation; `FakeRuntimeBackend` serves benchmarks and unit
+tests; a Mobile MCP backend is planned as the Phase 2 default. Application
+services still accept the `AdbPort` interface: the composition root bridges it
+over the SPI via `RuntimeBackendAdbBridge`, so backend selection is a wiring
+and config change only. `openSession` performs no device I/O; layout snapshot
+providers open lazily through `session.openUiSnapshots()`. Capability-gated
+members (`annotatedScreens`, `startActivityByIntent`) are `undefined` when
+unsupported and must fail closed. `config.json` accepts a reserved
+`runtime.backend` selection (`auto` | `adb`), both resolving to `adb` today.
+See `docs/architecture/runtime-backend.md` for the SPI contract, adoption
+roadmap, and Mobile MCP flip checklist.
+
 ### Host Project Workspace
 
 `src/domain/workspace.ts` is the single source of truth for the host project

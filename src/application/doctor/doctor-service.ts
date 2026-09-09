@@ -1,4 +1,5 @@
 import type { FailureCode } from "../../domain/failure.js";
+import type { RuntimeBackendId } from "../../domain/runtime.js";
 import type { UiBackendSelection } from "../../domain/ui-backend.js";
 import type { AdbPort } from "../../ports/adb.js";
 import type { ProcessRunner } from "../../ports/process-runner.js";
@@ -11,7 +12,8 @@ export type DoctorCheckName =
   | "app"
   | "permissions"
   | "device"
-  | "appium";
+  | "appium"
+  | "mobile-mcp";
 
 export type DoctorCheckStatus = "passed" | "failed" | "notRun";
 
@@ -33,6 +35,7 @@ export interface DoctorDeviceCheck {
 
 export interface DoctorReport {
   status: "passed" | "failed";
+  runtimeBackend: RuntimeBackendId;
   checks: DoctorCheck[];
   deviceSerial?: string | undefined;
   devices?: readonly DoctorDeviceCheck[] | undefined;
@@ -55,6 +58,7 @@ export interface DoctorDependencies {
   runner: ProcessRunner;
   adb: AdbPort;
   nodeVersion: string;
+  runtimeBackendId: RuntimeBackendId;
   checkAndroidPermissions: (
     deviceSerial: string,
     signal?: AbortSignal
@@ -63,6 +67,13 @@ export interface DoctorDependencies {
     message?: string | undefined;
   }>;
   checkAppiumUiAutomator2?: (
+    signal?: AbortSignal
+  ) => Promise<{
+    status: "passed" | "failed";
+    version?: string | undefined;
+    message?: string | undefined;
+  }>;
+  checkMobileMcpServer?: (
     signal?: AbortSignal
   ) => Promise<{
     status: "passed" | "failed";
@@ -141,29 +152,67 @@ export class DoctorService {
       }
     };
 
-    checks.push(
-      await tool("adb", "adb", ["version"]),
-      await tool("android", "android", ["--version"])
-    );
-    if (input.requestedUiBackend === "appium-uiautomator2") {
+    checks.push(await tool("adb", "adb", ["version"]));
+    if (this.dependencies.runtimeBackendId === "mobile-mcp") {
+      checks.push({
+        name: "android",
+        status: "notRun",
+        message: "Android CLI probe requires the adb runtime backend"
+      });
       try {
-        const appium = await this.dependencies.checkAppiumUiAutomator2?.(signal);
-        checks.push(appium === undefined ? {
-          name: "appium",
+        const mobileMcp = await this.dependencies.checkMobileMcpServer?.(signal);
+        checks.push(mobileMcp === undefined ? {
+          name: "mobile-mcp",
           status: "failed",
-          message: "Appium UiAutomator2 check is not configured"
+          message: "Mobile MCP server check is not configured"
         } : {
-          name: "appium",
-          status: appium.status,
-          ...(appium.version === undefined ? {} : { version: appium.version }),
-          ...(appium.message === undefined ? {} : { message: appium.message })
+          name: "mobile-mcp",
+          status: mobileMcp.status,
+          ...(mobileMcp.version === undefined ? {} : { version: mobileMcp.version }),
+          ...(mobileMcp.message === undefined ? {} : { message: mobileMcp.message })
         });
       } catch (error) {
         checks.push({
-          name: "appium",
+          name: "mobile-mcp",
           status: "failed",
           message: error instanceof Error ? error.message : String(error)
         });
+      }
+    } else {
+      checks.push(await tool("android", "android", ["--version"]));
+      checks.push({
+        name: "mobile-mcp",
+        status: "notRun",
+        message: "Mobile MCP server probe requires the mobile-mcp runtime backend"
+      });
+    }
+    if (input.requestedUiBackend === "appium-uiautomator2") {
+      if (this.dependencies.runtimeBackendId === "mobile-mcp") {
+        checks.push({
+          name: "appium",
+          status: "failed",
+          message: "ui.backend=appium-uiautomator2 is not supported by the mobile-mcp runtime backend"
+        });
+      } else {
+        try {
+          const appium = await this.dependencies.checkAppiumUiAutomator2?.(signal);
+          checks.push(appium === undefined ? {
+            name: "appium",
+            status: "failed",
+            message: "Appium UiAutomator2 check is not configured"
+          } : {
+            name: "appium",
+            status: appium.status,
+            ...(appium.version === undefined ? {} : { version: appium.version }),
+            ...(appium.message === undefined ? {} : { message: appium.message })
+          });
+        } catch (error) {
+          checks.push({
+            name: "appium",
+            status: "failed",
+            message: error instanceof Error ? error.message : String(error)
+          });
+        }
       }
     } else {
       checks.push({
@@ -185,8 +234,9 @@ export class DoctorService {
     const failedCheck = (name: DoctorCheckName): boolean => checks.some(
       (check) => check.name === name && check.status === "failed"
     );
-    const environmentFailed = (["node", "adb", "android", "appium", "permissions"] as const)
-      .some(failedCheck);
+    const environmentFailed = (
+      ["node", "adb", "android", "appium", "mobile-mcp", "permissions"] as const
+    ).some(failedCheck);
     const failureCode = environmentFailed
       ? "ENVIRONMENT_MISSING_TOOL"
       : failedCheck("device")
@@ -196,6 +246,7 @@ export class DoctorService {
           : undefined;
     return {
       status: failureCode === undefined ? "passed" : "failed",
+      runtimeBackend: this.dependencies.runtimeBackendId,
       checks,
       ...(identity.deviceSerial === undefined
         ? {}

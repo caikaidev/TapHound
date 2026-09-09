@@ -73,6 +73,7 @@ function dependencies(): {
       doctor: {
         run: vi.fn(() => Promise.resolve({
           status: "passed" as const,
+          runtimeBackend: "adb" as const,
           deviceSerial: "emulator-5554",
           checks: [
             { name: "node" as const, status: "passed" as const, version: "24.3.0" },

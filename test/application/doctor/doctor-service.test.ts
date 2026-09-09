@@ -13,6 +13,8 @@ function fixture(overrides: {
   permissions?: boolean;
   permissionsBySerial?: Record<string, boolean>;
   appium?: boolean;
+  runtimeBackend?: "adb" | "mobile-mcp";
+  mobileMcpServer?: boolean;
   failures?: Record<string, string>;
   devicesError?: boolean;
 } = {}): {
@@ -32,9 +34,11 @@ function fixture(overrides: {
       }
       const stdout = spec.executable === "adb"
         ? "Android Debug Bridge version 1.0.41"
-        : spec.args.includes("doctor")
-          ? '{"permissions":"ok"}'
-          : "Android CLI 0.1.0";
+        : spec.executable === "mcp-server-mobile"
+          ? "9.9.9-fixture"
+          : spec.args.includes("doctor")
+            ? '{"permissions":"ok"}'
+            : "Android CLI 0.1.0";
       return Promise.resolve(commandResult({ stdout }));
     }),
     start: vi.fn(() => runningCommand())
@@ -79,12 +83,22 @@ function fixture(overrides: {
       runner,
       adb,
       nodeVersion: overrides.nodeVersion ?? "v24.3.0",
+      runtimeBackendId: overrides.runtimeBackend ?? "adb",
       checkAndroidPermissions: checkPermissions
       ,checkAppiumUiAutomator2: vi.fn(() => Promise.resolve(
         overrides.appium === false
           ? { status: "failed" as const, message: "Appium unavailable" }
           : { status: "passed" as const, version: "3.0.0" }
       ))
+      ,...(overrides.runtimeBackend === "mobile-mcp"
+        ? {
+            checkMobileMcpServer: vi.fn(() => Promise.resolve(
+              overrides.mobileMcpServer === false
+                ? { status: "failed" as const, message: "mcp-server-mobile not found" }
+                : { status: "passed" as const, version: "9.9.9-fixture" }
+            ))
+          }
+        : {})
     })
   };
 }
@@ -113,6 +127,7 @@ describe("DoctorService", () => {
         { name: "node", status: "passed", version: "24.3.0" },
         { name: "adb", status: "passed" },
         { name: "android", status: "passed" },
+        { name: "mobile-mcp", status: "notRun" },
         { name: "appium", status: "notRun" },
         { name: "app", status: "passed", message: "com.example.app" },
         { name: "permissions", status: "passed" },
@@ -238,7 +253,7 @@ describe("DoctorService multi-device", () => {
       }
     ]);
     expect(report.checks.map((check) => check.name)).toEqual([
-      "node", "adb", "android", "appium", "app", "permissions", "device"
+      "node", "adb", "android", "mobile-mcp", "appium", "app", "permissions", "device"
     ]);
     expect(report.checks).toContainEqual(expect.objectContaining({
       name: "device",
@@ -412,5 +427,78 @@ describe("DoctorService multi-device", () => {
         message: "Device listing failed: adb listing failed"
       })
     ]);
+  });
+});
+
+describe("DoctorService mobile-mcp backend", () => {
+  it("checks the Mobile MCP server and skips the Android CLI probe", async () => {
+    const report = await fixture({ runtimeBackend: "mobile-mcp" }).service.run({
+      packageName: "com.example.app"
+    });
+
+    expect(report).toMatchObject({
+      status: "passed",
+      runtimeBackend: "mobile-mcp",
+      deviceSerial: "emulator-5554"
+    });
+    expect(report.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: "node", status: "passed", version: "24.3.0"
+      }),
+      expect.objectContaining({ name: "adb", status: "passed" }),
+      expect.objectContaining({ name: "android", status: "notRun" }),
+      expect.objectContaining({
+        name: "mobile-mcp", status: "passed", version: "9.9.9-fixture"
+      }),
+      expect.objectContaining({
+        name: "app", status: "passed", message: "com.example.app"
+      }),
+      expect.objectContaining({ name: "permissions", status: "passed" }),
+      expect.objectContaining({
+        name: "device", status: "passed", message: "emulator-5554"
+      })
+    ]));
+  });
+
+  it("fails the environment when the Mobile MCP server check fails", async () => {
+    const report = await fixture({
+      runtimeBackend: "mobile-mcp",
+      mobileMcpServer: false
+    }).service.run({ packageName: "com.example.app" });
+
+    expect(report).toMatchObject({
+      status: "failed",
+      failureCode: "ENVIRONMENT_MISSING_TOOL"
+    });
+    expect(report.checks).toContainEqual(expect.objectContaining({
+      name: "mobile-mcp",
+      status: "failed",
+      message: "mcp-server-mobile not found"
+    }));
+  });
+
+  it("rejects the appium UI backend under mobile-mcp", async () => {
+    const report = await fixture({
+      runtimeBackend: "mobile-mcp"
+    }).service.run({
+      packageName: "com.example.app",
+      requestedUiBackend: "appium-uiautomator2"
+    });
+
+    expect(report).toMatchObject({
+      status: "failed",
+      failureCode: "ENVIRONMENT_MISSING_TOOL"
+    });
+    expect(report.checks).toContainEqual(expect.objectContaining({
+      name: "appium",
+      status: "failed",
+      message: "ui.backend=appium-uiautomator2 is not supported by the mobile-mcp runtime backend"
+    }));
+  });
+
+  it("reports the adb runtime backend by default", async () => {
+    const report = await fixture().service.run();
+
+    expect(report.runtimeBackend).toBe("adb");
   });
 });

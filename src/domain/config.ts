@@ -4,6 +4,7 @@ import {
   DEFAULT_ARTIFACTS_DIR,
   isInvalidRelativeArtifactDirectory
 } from "./workspace.js";
+import { RuntimeBackendSelectionSchema } from "./runtime.js";
 import { UiBackendSelectionSchema } from "./ui-backend.js";
 
 const PackageNameSchema = z.string().regex(
@@ -38,6 +39,9 @@ export const TapHoundConfigSchema = z.strictObject({
     snapshotTimeoutMs: z.number().int().positive().optional(),
     cacheEnabled: z.boolean().optional()
   }).optional(),
+  runtime: z.strictObject({
+    backend: RuntimeBackendSelectionSchema
+  }).optional(),
   artifactsDir: z.string().trim().min(1).refine(
     (path) => !isInvalidRelativeArtifactDirectory(path),
     "artifactsDir inside .taphound/ must stay under .taphound/build/"
@@ -47,5 +51,9 @@ export const TapHoundConfigSchema = z.strictObject({
 export type TapHoundConfig = z.infer<typeof TapHoundConfigSchema>;
 
 export const DEFAULT_UI_CONFIG = {
+  backend: "auto" as const
+};
+
+export const DEFAULT_RUNTIME_CONFIG = {
   backend: "auto" as const
 };

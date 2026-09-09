@@ -9,6 +9,7 @@ import {
   type PendingConfirmation
 } from "../../domain/generation.js";
 import { LayoutElementSchema } from "../../domain/layout.js";
+import { uiBackendIdAsSelection } from "../../domain/ui-backend.js";
 import {
   ProposalBindingSchema,
   type ProposalBinding
@@ -278,7 +279,7 @@ export class RuntimeObserver {
       timeoutMs: idle?.timeoutMs ?? 5000,
       ...(current.bindings.uiBackend === undefined
         ? {}
-        : { backend: current.bindings.uiBackend.id }),
+        : { backend: uiBackendIdAsSelection(current.bindings.uiBackend.id) }),
       ...(this.dependencies.uiCacheEnabled === undefined
         ? {}
         : { cacheEnabled: this.dependencies.uiCacheEnabled }),

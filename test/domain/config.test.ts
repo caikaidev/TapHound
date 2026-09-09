@@ -63,6 +63,28 @@ describe("TapHoundConfigSchema", () => {
     })).toThrow();
   });
 
+  it("keeps runtime absent for old configs and accepts reserved selections", () => {
+    expect(TapHoundConfigSchema.parse(validConfig))
+      .not.toHaveProperty("runtime");
+    for (const backend of ["auto", "adb"] as const) {
+      expect(TapHoundConfigSchema.parse({
+        ...validConfig,
+        runtime: { backend }
+      }).runtime).toEqual({ backend });
+    }
+  });
+
+  it("rejects unknown runtime backend selections and extra runtime fields", () => {
+    expect(() => TapHoundConfigSchema.parse({
+      ...validConfig,
+      runtime: { backend: "mobile-mcp" }
+    })).toThrow();
+    expect(() => TapHoundConfigSchema.parse({
+      ...validConfig,
+      runtime: { backend: "adb", deviceSerial: "emulator-5554" }
+    })).toThrow();
+  });
+
   it("defaults the idle strategy to hybrid", () => {
     const config = structuredClone(validConfig);
     Reflect.deleteProperty(config.idle, "strategy");

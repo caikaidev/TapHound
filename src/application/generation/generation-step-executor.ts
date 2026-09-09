@@ -18,6 +18,7 @@ import {
 } from "../../domain/generation.js";
 import { JourneyStepSchema, type JourneyStep } from "../../domain/journey.js";
 import type { LayoutElement } from "../../domain/layout.js";
+import { uiBackendIdAsSelection } from "../../domain/ui-backend.js";
 import type { DisplayViewport } from "../../domain/geometry.js";
 import { assessWindowHierarchy } from "../../domain/window-hierarchy.js";
 import {
@@ -587,7 +588,7 @@ export class GenerationStepExecutor {
         timeoutMs: idle.timeoutMs,
         ...(session.bindings.uiBackend === undefined
           ? {}
-          : { backend: session.bindings.uiBackend.id }),
+          : { backend: uiBackendIdAsSelection(session.bindings.uiBackend.id) }),
         ...(this.dependencies.uiCacheEnabled === undefined
           ? {}
           : { cacheEnabled: this.dependencies.uiCacheEnabled }),

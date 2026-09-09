@@ -11,7 +11,7 @@ export interface UiStabilitySampleOptions {
 export interface UiStabilityObservation {
   changes: readonly unknown[];
   layout?: readonly LayoutElement[] | undefined;
-  backend?: "uiautomator" | "androidCli" | "gfxFrameStats" | undefined;
+  backend?: "uiautomator" | "androidCli" | "gfxFrameStats" | "mobileMcp" | undefined;
   durationMs?: number | undefined;
 }
 

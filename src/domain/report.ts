@@ -52,7 +52,8 @@ const IdleReportSchema = z.strictObject({
   backend: z.enum([
     "uiautomator",
     "androidCli",
-    "gfxFrameStats"
+    "gfxFrameStats",
+    "mobileMcp"
   ]).optional(),
   backendId: z.string().trim().min(1).optional(),
   fallbackUsed: z.boolean().optional(),

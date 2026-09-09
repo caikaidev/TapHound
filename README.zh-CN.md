@@ -146,6 +146,10 @@ git diff --exit-code -- assets/brand/png
 UIAutomator 结构确认稳定。如果页面持续绘制，`hybrid` 会回退到结构稳定性判定，
 不会仅因帧计数持续变化而超时。已知存在持续重绘的应用可使用 `layoutDiff` 完全跳过
 帧计数；只有确实需要像素帧静止时才使用 `frameStats`。
+`runtime.backend` 选择设备运行时后端（默认 `auto`，或显式 `adb`）。当前两个取值都
+解析为 ADB 后端；该字段为 Runtime Backend SPI
+（`docs/architecture/runtime-backend.md`）预留，后续 `auto` 将映射到推荐的第三方
+运行时，`adb` 保留为显式回退。
 
 Generation 会在 session 启动时绑定规范化后的完整配置。请在
 `generation start` 前确定 idle 策略与超时时间；配置变更后必须创建新 session。

@@ -75,6 +75,18 @@
         }
       }
     },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backend"],
+      "properties": {
+        "backend": {
+          "enum": ["auto", "adb"],
+          "default": "auto",
+          "description": "Device runtime backend selection. Reserved for the RuntimeBackend SPI rollout; both values currently resolve to the adb backend."
+        }
+      }
+    },
     "artifactsDir": {
       "type": "string",
       "minLength": 1,

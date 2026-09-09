@@ -9,6 +9,18 @@ import { dirname, join, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { AdbAdapter } from "../adapters/adb/adb-adapter.js";
+import { AdbRuntimeBackend } from "../adapters/runtime/adb-runtime-backend.js";
+import { RuntimeBackendAdbBridge } from "../adapters/runtime/runtime-backend-adb-bridge.js";
+import { SharedSessionRuntimeBackend } from "../adapters/runtime/shared-session-runtime-backend.js";
+import {
+  FailClosedAnnotatedScreenResolver,
+  SessionBackedScreenshotAdapter,
+  SessionBackedUiSnapshotProviderFactory,
+  SessionBackedUiStabilityAdapter
+} from "../adapters/runtime/session-backed-ports.js";
+import { MobileMcpRuntimeBackend } from "../adapters/runtime/mobile-mcp/mobile-mcp-runtime-backend.js";
+import { McpToolClient } from "../adapters/runtime/mobile-mcp/mcp-tool-client.js";
+import type { MobileMcpTools } from "../adapters/runtime/mobile-mcp/mobile-mcp-tools.js";
 import {
   SystemUiAutomatorSnapshotProviderFactory
 } from "../adapters/adb/system-uiautomator-snapshot-provider.js";
@@ -150,6 +162,15 @@ import { ReportWriter } from "../application/report/report-writer.js";
 import { VerifyRuntime, type VerifyInput, type VerifyResult } from "../application/runtime/verify-runtime.js";
 import { IdleWaiter } from "../application/wait/idle-waiter.js";
 import type { TapHoundConfig } from "../domain/config.js";
+import {
+  resolveRuntimeBackendId,
+  type RuntimeBackendChoice
+} from "../domain/runtime.js";
+import type { AdbPort } from "../ports/adb.js";
+import type { AnnotatedScreenResolverPort } from "../ports/annotated-screen-resolver.js";
+import type { ScreenshotPort } from "../ports/screenshot.js";
+import type { UiSnapshotProviderFactory } from "../ports/ui-snapshot.js";
+import type { UiStabilityProbe } from "../ports/ui-stability.js";
 import type { UiBackendSelection } from "../domain/ui-backend.js";
 import type { InitResult } from "../domain/init.js";
 import type { RuntimeSnapshot } from "../domain/runtime-snapshot.js";
@@ -177,6 +198,7 @@ import type {
   WriteKnowledgeBundleResult
 } from "../ports/knowledge-registry.js";
 import { isErrnoException } from "../shared/errors.js";
+import { readRuntimeBackendChoice } from "./runtime-selection.js";
 
 export interface TextOutput {
   write: (content: string) => void;
@@ -326,12 +348,15 @@ export interface CliDependencies {
   stdout: TextOutput;
   stderr: TextOutput;
   setExitCode: (code: number) => void;
+  close?: (() => Promise<void>) | undefined;
 }
 
 export interface ProductionDependencyOptions {
   generationStoreFactory?: (
     projectRoot: string
   ) => GenerationSessionStore;
+  runtimeBackendChoice?: RuntimeBackendChoice | undefined;
+  mobileMcpToolsFactory?: (() => MobileMcpTools) | undefined;
 }
 
 function runId(): string {
@@ -342,16 +367,55 @@ export function createProductionDependencies(
   signal?: AbortSignal,
   options: ProductionDependencyOptions = {}
 ): CliDependencies {
-  const runner = new NodeProcessRunner();
-  const adb = new AdbAdapter(runner);
-  const androidCli = new AndroidCliAdapter(runner);
-  const uiSnapshots = new CachedUiSnapshotProviderFactory(
-    new AutoUiSnapshotProviderFactory(
-      new SystemUiAutomatorSnapshotProviderFactory(runner),
-      new AndroidCliSnapshotProviderFactory(runner),
-      new AppiumUiSnapshotProviderFactory(runner)
-    )
+  const backendId = resolveRuntimeBackendId(
+    options.runtimeBackendChoice ?? readRuntimeBackendChoice(process.env)
   );
+  const runner = new NodeProcessRunner();
+  let adb: AdbPort;
+  let screenshots: ScreenshotPort;
+  let annotatedScreens: AnnotatedScreenResolverPort;
+  let uiStability: UiStabilityProbe;
+  let uiSnapshots: UiSnapshotProviderFactory;
+  let sharedBackend: SharedSessionRuntimeBackend | undefined;
+  if (backendId === "mobile-mcp") {
+    const backend = new SharedSessionRuntimeBackend(
+      new MobileMcpRuntimeBackend({
+        createTools: options.mobileMcpToolsFactory
+          ?? ((): MobileMcpTools => new McpToolClient())
+      })
+    );
+    sharedBackend = backend;
+    adb = new RuntimeBackendAdbBridge({ backend });
+    screenshots = new SessionBackedScreenshotAdapter(backend);
+    annotatedScreens = new FailClosedAnnotatedScreenResolver("mobile-mcp");
+    uiStability = new SessionBackedUiStabilityAdapter(backend);
+    uiSnapshots = new CachedUiSnapshotProviderFactory(
+      new SessionBackedUiSnapshotProviderFactory(backend)
+    );
+  } else {
+    const adbAdapter = new AdbAdapter(runner);
+    const androidCli = new AndroidCliAdapter(runner);
+    const autoSnapshots = new CachedUiSnapshotProviderFactory(
+      new AutoUiSnapshotProviderFactory(
+        new SystemUiAutomatorSnapshotProviderFactory(runner),
+        new AndroidCliSnapshotProviderFactory(runner),
+        new AppiumUiSnapshotProviderFactory(runner)
+      )
+    );
+    adb = new RuntimeBackendAdbBridge({
+      backend: new AdbRuntimeBackend({
+        adb: adbAdapter,
+        screenshots: androidCli,
+        annotatedScreens: androidCli,
+        uiStability: androidCli,
+        uiSnapshots: autoSnapshots
+      })
+    });
+    screenshots = androidCli;
+    annotatedScreens = androidCli;
+    uiStability = androidCli;
+    uiSnapshots = autoSnapshots;
+  }
   const clock = new SystemClock();
   const waitUntilIdle = (
     deviceSerial: string,
@@ -359,7 +423,7 @@ export function createProductionDependencies(
     signal?: AbortSignal,
     packageName?: string
   ): ReturnType<IdleWaiter["waitUntilIdle"]> => new IdleWaiter(
-    androidCli,
+    uiStability,
     clock,
     deviceSerial,
     packageName
@@ -439,10 +503,14 @@ export function createProductionDependencies(
   const benchmarkStore = new FileSystemBenchmarkStore();
   return {
     ...(signal === undefined ? {} : { signal }),
+    ...(sharedBackend === undefined
+      ? {}
+      : { close: (): Promise<void> => sharedBackend.close() }),
     doctor: new DoctorService({
       runner,
       adb,
       nodeVersion: process.version,
+      runtimeBackendId: backendId,
       checkAndroidPermissions: async (
         deviceSerial,
         signal
@@ -452,7 +520,7 @@ export function createProductionDependencies(
       }> => {
         const directory = await mkdtemp(join(tmpdir(), "taphound-doctor-"));
         try {
-          const result = await androidCli.capture({
+          const result = await screenshots.capture({
             outputPath: join(directory, "screen.png"),
             deviceSerial,
             ...(signal === undefined ? {} : { signal })
@@ -477,11 +545,39 @@ export function createProductionDependencies(
       },
       checkAppiumUiAutomator2: async (appiumSignal) => (
         checkAppiumUiAutomator2(runner, appiumSignal)
-      )
+      ),
+      checkMobileMcpServer: async (mcpSignal): Promise<{
+        status: "passed" | "failed";
+        version?: string | undefined;
+        message?: string | undefined;
+      }> => {
+        const result = await runner.run({
+          executable: "mcp-server-mobile",
+          args: ["--version"],
+          ...(mcpSignal === undefined ? {} : { signal: mcpSignal })
+        });
+        if (
+          result.exitCode !== 0
+          || result.spawnError !== undefined
+          || result.cancelled
+          || result.timedOut
+        ) {
+          return {
+            status: "failed" as const,
+            message: result.stderr.trim()
+              || result.spawnError
+              || "mcp-server-mobile check failed"
+          };
+        }
+        return {
+          status: "passed" as const,
+          version: result.stdout.trim().split(/\r?\n/, 1)[0] ?? "unknown"
+        };
+      }
     }),
     recorder: new RecorderService({
-      screenshots: androidCli,
-      uiStability: androidCli,
+      screenshots,
+      uiStability,
       uiSnapshots,
       adb,
       clock,
@@ -489,9 +585,9 @@ export function createProductionDependencies(
       journeyWriter: new FileSystemJourneyWriter()
     }),
     verifier: new VerifyRuntime({
-      screenshots: androidCli,
-      annotatedScreens: androidCli,
-      uiStability: androidCli,
+      screenshots,
+      annotatedScreens,
+      uiStability,
       uiSnapshots,
       adb,
       clock,
@@ -590,7 +686,7 @@ export function createProductionDependencies(
         new RuntimeObserver({
           store: generationStoreFactory(projectRoot),
           adb,
-          screenshots: androidCli,
+          screenshots,
           uiSnapshots,
           waitUntilIdle,
           now: () => new Date(),
@@ -611,7 +707,7 @@ export function createProductionDependencies(
       const observer = new RuntimeObserver({
         store,
         adb,
-        screenshots: androidCli,
+        screenshots,
         uiSnapshots,
         waitUntilIdle,
         now: (): Date => new Date(),
@@ -653,7 +749,7 @@ export function createProductionDependencies(
           })
         ),
         adb,
-        uiStability: androidCli,
+        uiStability,
         uiSnapshots,
         uiCacheEnabled: config.ui?.cacheEnabled ?? true,
         clock,
@@ -685,9 +781,9 @@ export function createProductionDependencies(
         metaWriter: new FileSystemGenerationMetaWriter()
       });
       const verifyRuntime = new VerifyRuntime({
-        screenshots: androidCli,
-        annotatedScreens: androidCli,
-        uiStability: androidCli,
+        screenshots,
+        annotatedScreens,
+        uiStability,
         uiSnapshots,
         adb,
         clock,

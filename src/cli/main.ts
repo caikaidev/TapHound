@@ -10,6 +10,7 @@ import {
   createProductionDependencies,
   type CliDependencies
 } from "./dependencies.js";
+import { RuntimeBackendSelectionError } from "./runtime-selection.js";
 import { errorMessage, failureOutput, writeJson, writeLine } from "./output.js";
 import { createProgram } from "./program.js";
 
@@ -98,8 +99,49 @@ if (
   entryPath !== undefined
   && import.meta.url === pathToFileURL(realpathSync(resolve(entryPath))).href
 ) {
-  await withTerminationSignal((signal) => runMain(
-    process.argv,
-    createProductionDependencies(signal)
-  ));
+  await withTerminationSignal(async (signal) => {
+    let dependencies: CliDependencies;
+    try {
+      dependencies = createProductionDependencies(signal);
+    } catch (error) {
+      if (error instanceof RuntimeBackendSelectionError) {
+        const output = failureOutput(2, "CONFIG_INVALID", error.message);
+        if (process.argv.includes("--json")) {
+          writeJson(
+            {
+              write: (content): void => {
+                process.stdout.write(content);
+              }
+            },
+            output
+          );
+        } else {
+          writeLine(
+            {
+              write: (content): void => {
+                process.stderr.write(content);
+              }
+            },
+            output.failure.message
+          );
+        }
+        process.exitCode = 2;
+        return;
+      }
+      throw error;
+    }
+    try {
+      await runMain(process.argv, dependencies);
+    } finally {
+      try {
+        await dependencies.close?.();
+      } catch (error) {
+        process.stderr.write(
+          `TapHound: failed to release the runtime backend: ${
+            errorMessage(error)
+          }\n`
+        );
+      }
+    }
+  });
 }

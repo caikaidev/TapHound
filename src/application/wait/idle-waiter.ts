@@ -8,7 +8,7 @@ import type {
 import type { Clock } from "../../ports/clock.js";
 
 export type IdleStrategy = "hybrid" | "layoutDiff" | "frameStats" | "structural";
-export type IdleBackend = "uiautomator" | "androidCli" | "gfxFrameStats";
+export type IdleBackend = "uiautomator" | "androidCli" | "gfxFrameStats" | "mobileMcp";
 
 const EARLY_BAIL_FRAME_CHANGES = 2;
 const POST_FALLBACK_MIN_STABLE = 2;

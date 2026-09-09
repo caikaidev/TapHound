@@ -29,6 +29,9 @@ config because it does not compile or install APKs.
     "snapshotTimeoutMs": 10000,
     "cacheEnabled": true
   },
+  "runtime": {
+    "backend": "auto"
+  },
   "artifactsDir": ".taphound/build/runs"
 }
 ```
@@ -80,6 +83,24 @@ floors, per-strategy poll accounting) are documented in
 
 Parsing an existing config without a `ui` block adds no fields and does not
 change its Generation binding hash.
+
+### `runtime` (optional)
+
+Selects which device runtime backend executes device work. See
+[architecture/runtime-backend.md](architecture/runtime-backend.md) for the
+RuntimeBackend SPI, capability model, and backend adoption roadmap.
+
+| Field | Type | Constraint |
+|---|---|---|
+| `runtime.backend` | enum | `auto` (default), `adb`. Reserved for the Runtime Backend SPI rollout: both values currently resolve to the `adb` backend. Future releases map `auto` to the recommended third-party runtime (Mobile MCP) while `adb` stays available as the explicit fallback. |
+
+The `mobile-mcp` backend is currently selected with the
+`TAPHOUND_RUNTIME_BACKEND` environment variable (`auto` / `adb` / `mobile-mcp`)
+at the composition root, not through this field; see
+[architecture/runtime-backend.md](architecture/runtime-backend.md#backend-selection).
+
+The field participates in the Generation binding hash like every other config
+block, so switching it mid-session requires a new generation session.
 
 ### `artifactsDir` (optional)
 

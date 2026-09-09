@@ -99,21 +99,25 @@ device action now flows through the SPI.
 
 ## Backend selection
 
-The composition root selects the backend per CLI process from the
-`TAPHOUND_RUNTIME_BACKEND` environment variable (`src/cli/runtime-selection.ts`):
+The CLI selects the backend per invocation (`src/cli/runtime-selection.ts`)
+from two sources with fixed precedence:
 
-| Value | Resolves to |
+1. `TAPHOUND_RUNTIME_BACKEND` environment variable — an explicit value
+   (`adb` / `mobile-mcp`) always wins, so CI and experiments can override
+   committed project state;
+2. `runtime.backend` in `config.json` — the persisted project choice, read
+   before command parsing (the entry resolves the `--project`/`--config`
+   arguments with the same defaults the commands use).
+
+| Effective choice | Resolves to |
 |---|---|
-| unset / `auto` | `adb` (the Mobile MCP default is a later, separate decision) |
+| `auto` (default) | `adb` (the Mobile MCP default is a later, separate decision) |
 | `adb` | `AdbRuntimeBackend` |
 | `mobile-mcp` | `MobileMcpRuntimeBackend` |
 
-An invalid value fails with `CONFIG_INVALID` (exit code 2) before any command
-runs. Selection is intentionally environment-based for now: config is loaded
-per command, while the backend must be fixed when dependencies are constructed.
-`config.json` keeps the reserved `runtime.backend` key (`auto` / `adb`), which
-still resolves to `adb` today; moving the selection into config is a later
-step of the flip checklist.
+An invalid value in either source fails with `CONFIG_INVALID` (exit code 2)
+before any command runs; a missing config or a config without `runtime.backend`
+simply falls back to `auto`.
 
 Under `mobile-mcp` the composition root wires:
 
@@ -171,7 +175,7 @@ Known limitations:
 | 0 — bridge (current) | done | Production flows through the SPI via `RuntimeBackendAdbBridge`; services keep the `AdbPort` type. `doctor` is backend-aware and fully works under mobile-mcp. |
 | 1 — session-first orchestrators | next | `VerifyRuntime`, `RecorderService`, `RuntimeObserver`, and `GenerationStepExecutor` open a session per run and pass it down; the bridge remains for device discovery and long-tail consumers. |
 | 2 — full session typing | later | Helpers (`ProcessWaiter`, `ActionExecutor`, `LogcatCollector`, …) accept `Pick<RuntimeSession, …>`; `AdbPort` shrinks to the bridge or is deleted. |
-| 3 — Mobile MCP default | Phase 2 | `MobileMcpRuntimeBackend` passes the same contract suite; `auto` resolves to it. The backend and env selection are done; the default flip is pending. |
+| 3 — Mobile MCP default | Phase 2 | `MobileMcpRuntimeBackend` passes the same contract suite; `auto` resolves to it. The backend, config selection, and env override are done; the default flip is pending. |
 
 ## Phase 2 flip checklist
 
@@ -185,10 +189,12 @@ change, not a rewrite:
 3. ~~Run it through `describeRuntimeBackendContract` plus capability-specific
    suites; gate features (annotated fallback, intent start, window topology)
    on declared capabilities.~~ done
-4. Plumb `config.runtime.backend` into the composition root (config is loaded
+4. ~~Plumb `config.runtime.backend` into the composition root (config is loaded
    per command today, so selection must move to service construction or a
-   lazy resolver). Interim: `TAPHOUND_RUNTIME_BACKEND` env selection is wired
-   at the composition root; moving it into config is still open.
+   lazy resolver).~~ done: the CLI entry resolves the invocation's
+   `--project`/`--config` before dependency construction and combines the
+   config choice with the `TAPHOUND_RUNTIME_BACKEND` override
+   (`src/cli/runtime-selection.ts`).
 5. Flip the `auto` resolution default and update
    `docs/config-schema.md`.
 

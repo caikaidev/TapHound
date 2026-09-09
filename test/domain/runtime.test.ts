@@ -4,7 +4,6 @@ import {
   RuntimeBackendChoiceSchema,
   RuntimeBackendDescriptorSchema,
   RuntimeBackendIdSchema,
-  RuntimeBackendSelectionSchema,
   RuntimeCapabilitiesSchema,
   resolveRuntimeBackendId
 } from "../../src/domain/runtime.js";
@@ -29,12 +28,6 @@ const validDescriptor = {
 };
 
 describe("runtime backend domain schema", () => {
-  it("accepts the reserved config selections", () => {
-    for (const selection of ["auto", "adb"] as const) {
-      expect(RuntimeBackendSelectionSchema.parse(selection)).toBe(selection);
-    }
-  });
-
   it("accepts every backend id and the full choice surface", () => {
     for (const id of ["adb", "mobile-mcp"] as const) {
       expect(RuntimeBackendIdSchema.parse(id)).toBe(id);
@@ -44,8 +37,7 @@ describe("runtime backend domain schema", () => {
     }
   });
 
-  it("keeps mobile-mcp out of the config selection schema", () => {
-    expect(() => RuntimeBackendSelectionSchema.parse("mobile-mcp")).toThrow();
+  it("rejects unknown backend ids and choices", () => {
     expect(() => RuntimeBackendIdSchema.parse("appium")).toThrow();
     expect(() => RuntimeBackendChoiceSchema.parse("maestro")).toThrow();
   });

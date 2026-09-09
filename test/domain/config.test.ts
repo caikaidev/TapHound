@@ -63,10 +63,10 @@ describe("TapHoundConfigSchema", () => {
     })).toThrow();
   });
 
-  it("keeps runtime absent for old configs and accepts reserved selections", () => {
+  it("keeps runtime absent for old configs and accepts every choice", () => {
     expect(TapHoundConfigSchema.parse(validConfig))
       .not.toHaveProperty("runtime");
-    for (const backend of ["auto", "adb"] as const) {
+    for (const backend of ["auto", "adb", "mobile-mcp"] as const) {
       expect(TapHoundConfigSchema.parse({
         ...validConfig,
         runtime: { backend }
@@ -77,7 +77,7 @@ describe("TapHoundConfigSchema", () => {
   it("rejects unknown runtime backend selections and extra runtime fields", () => {
     expect(() => TapHoundConfigSchema.parse({
       ...validConfig,
-      runtime: { backend: "mobile-mcp" }
+      runtime: { backend: "maestro" }
     })).toThrow();
     expect(() => TapHoundConfigSchema.parse({
       ...validConfig,

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { realpathSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -10,7 +11,11 @@ import {
   createProductionDependencies,
   type CliDependencies
 } from "./dependencies.js";
-import { RuntimeBackendSelectionError } from "./runtime-selection.js";
+import {
+  RuntimeBackendConfigError,
+  RuntimeBackendSelectionError,
+  resolveRuntimeBackendChoiceFromInvocation
+} from "./runtime-selection.js";
 import { errorMessage, failureOutput, writeJson, writeLine } from "./output.js";
 import { createProgram } from "./program.js";
 
@@ -102,9 +107,19 @@ if (
   await withTerminationSignal(async (signal) => {
     let dependencies: CliDependencies;
     try {
-      dependencies = createProductionDependencies(signal);
+      dependencies = createProductionDependencies(signal, {
+        runtimeBackendChoice: await resolveRuntimeBackendChoiceFromInvocation({
+          env: process.env,
+          argv: process.argv,
+          cwd: process.cwd(),
+          readConfigFile: (path): Promise<string> => readFile(path, "utf8")
+        })
+      });
     } catch (error) {
-      if (error instanceof RuntimeBackendSelectionError) {
+      if (
+        error instanceof RuntimeBackendSelectionError
+        || error instanceof RuntimeBackendConfigError
+      ) {
         const output = failureOutput(2, "CONFIG_INVALID", error.message);
         if (process.argv.includes("--json")) {
           writeJson(

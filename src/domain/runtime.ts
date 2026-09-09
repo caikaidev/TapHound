@@ -4,10 +4,6 @@ export const RuntimeBackendIdSchema = z.enum([
   "adb",
   "mobile-mcp"
 ]);
-export const RuntimeBackendSelectionSchema = z.enum([
-  "auto",
-  "adb"
-]);
 export const RuntimeBackendChoiceSchema = z.enum([
   "auto",
   "adb",
@@ -40,9 +36,6 @@ export interface DeviceInfo {
 }
 
 export type RuntimeBackendId = z.infer<typeof RuntimeBackendIdSchema>;
-export type RuntimeBackendSelection = z.infer<
-  typeof RuntimeBackendSelectionSchema
->;
 export type RuntimeBackendChoice = z.infer<typeof RuntimeBackendChoiceSchema>;
 export type RuntimeCapabilities = z.infer<typeof RuntimeCapabilitiesSchema>;
 export type RuntimeBackendDescriptor = z.infer<

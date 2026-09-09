@@ -81,9 +81,9 @@
       "required": ["backend"],
       "properties": {
         "backend": {
-          "enum": ["auto", "adb"],
+          "enum": ["auto", "adb", "mobile-mcp"],
           "default": "auto",
-          "description": "Device runtime backend selection. Reserved for the RuntimeBackend SPI rollout; both values currently resolve to the adb backend."
+          "description": "Device runtime backend selection. auto and adb resolve to the adb backend today; mobile-mcp routes device work through the Mobile MCP server. The TAPHOUND_RUNTIME_BACKEND environment variable overrides this field per invocation."
         }
       }
     },

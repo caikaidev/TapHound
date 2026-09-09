@@ -74,7 +74,7 @@ See the [local testing guide](docs/local-testing.md) for source, npm tarball, an
 
 ## CLI Commands
 
-- `doctor`: checks Node.js, ADB, Android CLI, app installation, permissions, and device. With `ui.backend=appium-uiautomator2`, it also checks the local Appium server and UiAutomator2 driver. With `TAPHOUND_RUNTIME_BACKEND=mobile-mcp`, it checks the Mobile MCP server instead of the Android CLI and diagnoses the device through Mobile MCP tools.
+- `doctor`: checks Node.js, ADB, Android CLI, app installation, permissions, and device. With `ui.backend=appium-uiautomator2`, it also checks the local Appium server and UiAutomator2 driver. With `runtime.backend=mobile-mcp` in config (or `TAPHOUND_RUNTIME_BACKEND=mobile-mcp`), it checks the Mobile MCP server instead of the Android CLI and diagnoses the device through Mobile MCP tools.
 - `record`: interactively execute actions and record a Journey.
 - `verify`: deterministically replay a Journey and publish a report.
 - `observe`: capture a point-in-time device snapshot (foreground, activity, layout, optional logcat) without a session or side effects.

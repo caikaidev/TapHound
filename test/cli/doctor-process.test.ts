@@ -49,7 +49,9 @@ afterEach(async () => {
   ));
 });
 
-async function fixture(): Promise<ProcessFixture> {
+async function fixture(options: {
+  runtimeBackend?: "adb" | "mobile-mcp" | "emulator";
+} = {}): Promise<ProcessFixture> {
   const root = await mkdtemp(join(tmpdir(), "taphound-doctor-process-test-"));
   temporaryRoots.push(root);
   const bin = join(root, "bin");
@@ -63,7 +65,10 @@ async function fixture(): Promise<ProcessFixture> {
   await writeFile(configPath, `${JSON.stringify({
     version: 1,
     run: { packageName: "com.example.app", activity: ".MainActivity" },
-    idle: { pollIntervalMs: 10, stablePolls: 1, timeoutMs: 10000 }
+    idle: { pollIntervalMs: 10, stablePolls: 1, timeoutMs: 10000 },
+    ...(options.runtimeBackend === undefined
+      ? {}
+      : { runtime: { backend: options.runtimeBackend } })
   })}\n`);
   return { root, bin, configPath };
 }
@@ -164,6 +169,57 @@ describe("built taphound doctor --json process contract", () => {
     });
     const failure = output.failure as { message?: string | undefined };
     expect(failure.message).toContain("TAPHOUND_RUNTIME_BACKEND");
+    expect(result.stderr).toBe("");
+  }, 20000);
+
+  it("selects mobile-mcp from config.runtime.backend without the environment", async () => {
+    const test = await fixture({ runtimeBackend: "mobile-mcp" });
+    const result = runDoctor(test);
+
+    expect(result.status).toBe(0);
+    const report = jsonOutput(result);
+    expect(report).toMatchObject({
+      status: "passed",
+      runtimeBackend: "mobile-mcp",
+      deviceSerial: "emulator-5554"
+    });
+    expect(report.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "android", status: "notRun" }),
+      expect.objectContaining({
+        name: "mobile-mcp", status: "passed", version: "9.9.9-fake"
+      })
+    ]));
+  }, 20000);
+
+  it("lets the environment override config.runtime.backend", async () => {
+    const test = await fixture({ runtimeBackend: "mobile-mcp" });
+    const result = runDoctor(test, {
+      TAPHOUND_RUNTIME_BACKEND: "adb"
+    });
+
+    expect(result.status).toBe(0);
+    const report = jsonOutput(result);
+    expect(report).toMatchObject({
+      status: "passed",
+      runtimeBackend: "adb"
+    });
+    expect(report.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "android", status: "passed" })
+    ]));
+  }, 20000);
+
+  it("rejects an invalid config runtime backend with CONFIG_INVALID", async () => {
+    const test = await fixture({ runtimeBackend: "emulator" });
+    const result = runDoctor(test);
+
+    expect(result.status).toBe(2);
+    const output = jsonOutput(result);
+    expect(output).toMatchObject({
+      exitCode: 2,
+      failure: { code: "CONFIG_INVALID" }
+    });
+    const failure = output.failure as { message?: string | undefined };
+    expect(failure.message).toContain("runtime.backend");
     expect(result.stderr).toBe("");
   }, 20000);
 });

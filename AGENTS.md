@@ -104,16 +104,18 @@ Device work flows through the Runtime Backend SPI
 serial-bound `RuntimeSession`s. `AdbRuntimeBackend`
 (`src/adapters/runtime/`) composes the existing ADB/Android CLI adapters
 without reimplementation; `FakeRuntimeBackend` serves benchmarks and unit
-tests; a Mobile MCP backend is planned as the Phase 2 default. Application
+tests; `MobileMcpRuntimeBackend` (`src/adapters/runtime/mobile-mcp/`) runs
+device work through the Mobile MCP server over stdio. Application
 services still accept the `AdbPort` interface: the composition root bridges it
 over the SPI via `RuntimeBackendAdbBridge`, so backend selection is a wiring
 and config change only. `openSession` performs no device I/O; layout snapshot
 providers open lazily through `session.openUiSnapshots()`. Capability-gated
 members (`annotatedScreens`, `startActivityByIntent`) are `undefined` when
-unsupported and must fail closed. `config.json` accepts a reserved
-`runtime.backend` selection (`auto` | `adb`), both resolving to `adb` today.
-See `docs/architecture/runtime-backend.md` for the SPI contract, adoption
-roadmap, and Mobile MCP flip checklist.
+unsupported and must fail closed. `config.json` selects the backend through
+`runtime.backend` (`auto` | `adb` | `mobile-mcp`); `auto` and `adb` resolve to
+`adb` today, and the `TAPHOUND_RUNTIME_BACKEND` environment variable overrides
+the config per invocation. See `docs/architecture/runtime-backend.md` for the
+SPI contract, adoption roadmap, and Mobile MCP flip checklist.
 
 ### Host Project Workspace
 

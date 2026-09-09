@@ -88,15 +88,17 @@ change its Generation binding hash.
 
 Selects which device runtime backend executes device work. See
 [architecture/runtime-backend.md](architecture/runtime-backend.md) for the
-RuntimeBackend SPI, capability model, and backend adoption roadmap.
+Runtime Backend SPI, capability model, and backend adoption roadmap.
 
 | Field | Type | Constraint |
 |---|---|---|
-| `runtime.backend` | enum | `auto` (default), `adb`. Reserved for the Runtime Backend SPI rollout: both values currently resolve to the `adb` backend. Future releases map `auto` to the recommended third-party runtime (Mobile MCP) while `adb` stays available as the explicit fallback. |
+| `runtime.backend` | enum | `auto` (default), `adb`, `mobile-mcp`. `auto` and `adb` resolve to the `adb` backend today; `mobile-mcp` routes device work through the Mobile MCP server. |
 
-The `mobile-mcp` backend is currently selected with the
-`TAPHOUND_RUNTIME_BACKEND` environment variable (`auto` / `adb` / `mobile-mcp`)
-at the composition root, not through this field; see
+The `TAPHOUND_RUNTIME_BACKEND` environment variable (`auto` / `adb` /
+`mobile-mcp`) overrides this field per invocation, so CI and experiments can
+override committed project state; an explicit environment value always wins,
+and `auto` defers to the config. An invalid value in either source fails with
+`CONFIG_INVALID` (exit code 2) before any command runs. See
 [architecture/runtime-backend.md](architecture/runtime-backend.md#backend-selection).
 
 The field participates in the Generation binding hash like every other config

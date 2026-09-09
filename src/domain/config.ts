@@ -4,7 +4,7 @@ import {
   DEFAULT_ARTIFACTS_DIR,
   isInvalidRelativeArtifactDirectory
 } from "./workspace.js";
-import { RuntimeBackendSelectionSchema } from "./runtime.js";
+import { RuntimeBackendChoiceSchema } from "./runtime.js";
 import { UiBackendSelectionSchema } from "./ui-backend.js";
 
 const PackageNameSchema = z.string().regex(
@@ -40,7 +40,7 @@ export const TapHoundConfigSchema = z.strictObject({
     cacheEnabled: z.boolean().optional()
   }).optional(),
   runtime: z.strictObject({
-    backend: RuntimeBackendSelectionSchema
+    backend: RuntimeBackendChoiceSchema
   }).optional(),
   artifactsDir: z.string().trim().min(1).refine(
     (path) => !isInvalidRelativeArtifactDirectory(path),

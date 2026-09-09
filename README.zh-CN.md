@@ -74,7 +74,7 @@ git diff --exit-code -- assets/brand/png
 
 ## CLI 命令
 
-- `doctor`：检查 Node.js、ADB、Android CLI、应用安装、权限和设备；显式使用 `ui.backend=appium-uiautomator2` 时还检查本地 Appium 与 UiAutomator2 driver。
+- `doctor`：检查 Node.js、ADB、Android CLI、应用安装、权限和设备；显式使用 `ui.backend=appium-uiautomator2` 时还检查本地 Appium 与 UiAutomator2 driver；配置 `runtime.backend=mobile-mcp`（或环境变量 `TAPHOUND_RUNTIME_BACKEND=mobile-mcp`）时改为检查 Mobile MCP server，并通过 Mobile MCP 工具诊断设备。
 - `record`：交互式执行操作并录制 Journey。
 - `verify`：确定性重放 Journey 并发布报告。
 - `observe`：捕获设备即时快照（前台组件、Activity、布局、可选 logcat），无 session、无副作用。

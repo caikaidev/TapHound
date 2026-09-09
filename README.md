@@ -74,7 +74,7 @@ See the [local testing guide](docs/local-testing.md) for source, npm tarball, an
 
 ## CLI Commands
 
-- `doctor`: checks Node.js, ADB, Android CLI, app installation, permissions, and device. With `ui.backend=appium-uiautomator2`, it also checks the local Appium server and UiAutomator2 driver. With `runtime.backend=mobile-mcp` in config (or `TAPHOUND_RUNTIME_BACKEND=mobile-mcp`), it checks the Mobile MCP server instead of the Android CLI and diagnoses the device through Mobile MCP tools.
+- `doctor`: checks Node.js, ADB, Android CLI, app installation, permissions, and device. With `ui.backend=appium-uiautomator2`, it also checks the local Appium server and UiAutomator2 driver. The default runtime backend is Mobile MCP (`runtime.backend=auto`), so it checks the Mobile MCP server instead of the Android CLI and diagnoses the device through Mobile MCP tools; set `runtime.backend=adb` in config (or `TAPHOUND_RUNTIME_BACKEND=adb`) to check the ADB toolchain instead.
 - `record`: interactively execute actions and record a Journey.
 - `verify`: deterministically replay a Journey and publish a report.
 - `observe`: capture a point-in-time device snapshot (foreground, activity, layout, optional logcat) without a session or side effects.
@@ -165,11 +165,12 @@ because the frame counter changes. Use `layoutDiff` to skip frame counters
 entirely for apps with known continuous rendering, or `frameStats` only when
 pixel-level frame quiescence is required.
 
-`runtime.backend` selects the device runtime backend (`auto`, default, or
-`adb`). Both values currently resolve to the ADB backend; the field is
-reserved for the [Runtime Backend SPI](docs/architecture/runtime-backend.md)
-rollout, where `auto` will map to the recommended third-party runtime while
-`adb` remains the explicit fallback.
+`runtime.backend` selects the device runtime backend: `auto` (default) and
+`mobile-mcp` route device work through the [Mobile MCP](https://www.npmjs.com/package/@mobilenext/mobile-mcp)
+server, while `adb` selects the ADB + Android CLI backend as the explicit
+fallback. See the [Runtime Backend SPI](docs/architecture/runtime-backend.md)
+for the capability matrix and the Level 1 orchestrators that will bring full
+`verify`/`record`/`generation` support to Mobile MCP.
 
 Generation binds the normalized configuration when a session starts. Choose
 the idle strategy and timeout before `generation start`; after start, any config

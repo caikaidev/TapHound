@@ -111,10 +111,16 @@ over the SPI via `RuntimeBackendAdbBridge`, so backend selection is a wiring
 and config change only. `openSession` performs no device I/O; layout snapshot
 providers open lazily through `session.openUiSnapshots()`. Capability-gated
 members (`annotatedScreens`, `startActivityByIntent`) are `undefined` when
-unsupported and must fail closed. `config.json` selects the backend through
-`runtime.backend` (`auto` | `adb` | `mobile-mcp`); `auto` and `adb` resolve to
-`adb` today, and the `TAPHOUND_RUNTIME_BACKEND` environment variable overrides
-the config per invocation. See `docs/architecture/runtime-backend.md` for the
+unsupported and fail closed with `RUNTIME_CAPABILITY_MISSING` (exit code 3),
+which names the `runtime.backend` / `TAPHOUND_RUNTIME_BACKEND` escape hatches.
+`config.json` selects the backend through
+`runtime.backend` (`auto` | `adb` | `mobile-mcp`); `auto` and `mobile-mcp`
+resolve to the Mobile MCP backend, `adb` selects the ADB backend, and the
+`TAPHOUND_RUNTIME_BACKEND` environment variable overrides
+the config per invocation. Commands that need capabilities the selected
+backend lacks (`verify`, `record`, `generation`, `observe`, `align`) fail
+closed until the Level 1 session-first orchestrators land; `doctor` is fully
+adapted. See `docs/architecture/runtime-backend.md` for the
 SPI contract, adoption roadmap, and Mobile MCP flip checklist.
 
 ### Host Project Workspace

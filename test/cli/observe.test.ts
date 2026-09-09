@@ -61,6 +61,7 @@ async function fixture(options: {
     await writeFile(configPath, `${JSON.stringify({
       version: 1,
       run: { packageName: "com.example.app", activity: ".MainActivity" },
+      runtime: { backend: "adb" },
       idle: { pollIntervalMs: 10, stablePolls: 1, timeoutMs: 10000 }
     })}\n`);
   }

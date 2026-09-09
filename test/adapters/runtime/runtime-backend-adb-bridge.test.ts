@@ -322,7 +322,7 @@ describe("RuntimeBackendAdbBridge", () => {
     });
   });
 
-  it("rejects startActivityByIntent when the session lacks the capability", async () => {
+  it("rejects startActivityByIntent with a coded capability error", async () => {
     const session = mockSession("emulator-5554");
     const sessionWithoutIntent: RuntimeSession = {
       ...session,
@@ -330,10 +330,19 @@ describe("RuntimeBackendAdbBridge", () => {
     };
     const backend = mockBackend(() => sessionWithoutIntent);
     const bridge = new RuntimeBackendAdbBridge({ backend });
-    await expect(bridge.startActivityByIntent({
+    const error = await bridge.startActivityByIntent({
       action: "android.media.action.IMAGE_CAPTURE",
       deviceSerial: "emulator-5554"
-    })).rejects.toThrow(/does not support startActivityByIntent/);
+    }).then(
+      () => undefined,
+      (rethrown: unknown): unknown => rethrown
+    );
+    expect(error).toMatchObject({
+      code: "RUNTIME_CAPABILITY_MISSING"
+    });
+    expect((error as Error).message)
+      .toContain('does not support startActivityByIntent');
+    expect((error as Error).message).toContain("TAPHOUND_RUNTIME_BACKEND");
   });
 
   it("fails closed on resolveLauncherActivity", async () => {

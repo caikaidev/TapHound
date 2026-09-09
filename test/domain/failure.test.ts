@@ -33,7 +33,8 @@ describe("exitCodeForFailure", () => {
     "ENVIRONMENT_MISSING_TOOL",
     "DEVICE_UNAVAILABLE",
     "APP_NOT_INSTALLED",
-    "DEVICE_ROLE_UNMAPPED"
+    "DEVICE_ROLE_UNMAPPED",
+    "RUNTIME_CAPABILITY_MISSING"
   ] as const)("maps %s to environment exit code 3", (failure) => {
     expect(exitCodeForFailure(failure)).toBe(3);
   });
@@ -45,7 +46,7 @@ describe("exitCodeForFailure", () => {
   });
 
   it("defines exactly the approved failure vocabulary", () => {
-    expect(FAILURE_CODES).toHaveLength(42);
+    expect(FAILURE_CODES).toHaveLength(43);
   });
 
   it.each([

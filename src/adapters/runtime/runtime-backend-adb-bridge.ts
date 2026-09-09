@@ -19,6 +19,7 @@ import type { Point } from "../../domain/geometry.js";
 import type { ForegroundComponent } from "../../domain/activity.js";
 import type { AppProcess } from "../../domain/app-process.js";
 import type { WindowTopology } from "../../domain/window-hierarchy.js";
+import { runtimeCapabilityMissing } from "./capability-error.js";
 
 export interface RuntimeBackendAdbBridgeDependencies {
   backend: RuntimeBackend;
@@ -40,8 +41,9 @@ export class RuntimeBackendAdbBridge implements AdbPort {
   ): Promise<ForegroundComponent> {
     return this.session(identity.deviceSerial).then((session) => {
       if (session.foregroundComponent === undefined) {
-        return Promise.reject(new Error(
-          `Runtime backend "${session.descriptor.id}" does not support foregroundComponent`
+        return Promise.reject(runtimeCapabilityMissing(
+          session.descriptor.id,
+          "foregroundComponent"
         ));
       }
       return session.foregroundComponent(appQuery(identity));
@@ -51,8 +53,9 @@ export class RuntimeBackendAdbBridge implements AdbPort {
   public currentActivity(identity: AppIdentity): Promise<string> {
     return this.session(identity.deviceSerial).then((session) => {
       if (session.currentActivity === undefined) {
-        return Promise.reject(new Error(
-          `Runtime backend "${session.descriptor.id}" does not support currentActivity`
+        return Promise.reject(runtimeCapabilityMissing(
+          session.descriptor.id,
+          "currentActivity"
         ));
       }
       return session.currentActivity(appQuery(identity));
@@ -76,8 +79,9 @@ export class RuntimeBackendAdbBridge implements AdbPort {
   ): Promise<CommandResult> {
     return this.session(options.deviceSerial).then((session) => {
       if (session.startActivityByIntent === undefined) {
-        return Promise.reject(new Error(
-          `Runtime backend "${session.descriptor.id}" does not support startActivityByIntent`
+        return Promise.reject(runtimeCapabilityMissing(
+          session.descriptor.id,
+          "startActivityByIntent"
         ));
       }
       return session.startActivityByIntent({
@@ -106,8 +110,9 @@ export class RuntimeBackendAdbBridge implements AdbPort {
   ): Promise<readonly AppProcess[]> {
     return this.session(identity.deviceSerial).then((session) => {
       if (session.appProcesses === undefined) {
-        return Promise.reject(new Error(
-          `Runtime backend "${session.descriptor.id}" does not support appProcesses`
+        return Promise.reject(runtimeCapabilityMissing(
+          session.descriptor.id,
+          "appProcesses"
         ));
       }
       return session.appProcesses(appQuery(identity));
@@ -119,8 +124,9 @@ export class RuntimeBackendAdbBridge implements AdbPort {
   ): Promise<WindowTopology> {
     return this.session(identity.deviceSerial).then((session) => {
       if (session.windowTopology === undefined) {
-        return Promise.reject(new Error(
-          `Runtime backend "${session.descriptor.id}" does not support windowTopology`
+        return Promise.reject(runtimeCapabilityMissing(
+          session.descriptor.id,
+          "windowTopology"
         ));
       }
       return session.windowTopology(appQuery(identity));
@@ -177,8 +183,9 @@ export class RuntimeBackendAdbBridge implements AdbPort {
   public startLogcat(options: LogcatOptions): RunningCommand {
     const opened = this.session(options.deviceSerial).then((session) => {
       if (session.startLogcat === undefined) {
-        throw new Error(
-          `Runtime backend "${session.descriptor.id}" does not support startLogcat`
+        throw runtimeCapabilityMissing(
+          session.descriptor.id,
+          "startLogcat"
         );
       }
       return session.startLogcat({
@@ -203,8 +210,9 @@ export class RuntimeBackendAdbBridge implements AdbPort {
   ): Promise<CommandResult> {
     return this.session(options.deviceSerial).then((session) => {
       if (session.dumpLogcat === undefined) {
-        return Promise.reject(new Error(
-          `Runtime backend "${session.descriptor.id}" does not support dumpLogcat`
+        return Promise.reject(runtimeCapabilityMissing(
+          session.descriptor.id,
+          "dumpLogcat"
         ));
       }
       return session.dumpLogcat({

@@ -83,7 +83,7 @@
         "backend": {
           "enum": ["auto", "adb", "mobile-mcp"],
           "default": "auto",
-          "description": "Device runtime backend selection. auto and adb resolve to the adb backend today; mobile-mcp routes device work through the Mobile MCP server. The TAPHOUND_RUNTIME_BACKEND environment variable overrides this field per invocation."
+          "description": "Device runtime backend selection. auto and mobile-mcp route device work through the Mobile MCP server; adb selects the ADB + Android CLI backend. The TAPHOUND_RUNTIME_BACKEND environment variable overrides this field per invocation."
         }
       }
     },

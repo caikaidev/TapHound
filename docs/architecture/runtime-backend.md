@@ -35,8 +35,8 @@ Implementations:
 
 | Backend | Location | Role |
 |---|---|---|
-| `AdbRuntimeBackend` | `src/adapters/runtime/adb-runtime-backend.ts` | Production default. Composes the existing `AdbAdapter`, `AndroidCliAdapter`, stability probe, and snapshot factory; no reimplementation. |
-| `MobileMcpRuntimeBackend` | `src/adapters/runtime/mobile-mcp/mobile-mcp-runtime-backend.ts` | Opt-in backend over the [Mobile MCP](https://www.npmjs.com/package/@mobilenext/mobile-mcp) server (`mcp-server-mobile`) using MCP stdio tools. |
+| `AdbRuntimeBackend` | `src/adapters/runtime/adb-runtime-backend.ts` | ADB + Android CLI backend. Composes the existing `AdbAdapter`, `AndroidCliAdapter`, stability probe, and snapshot factory; no reimplementation. Selected with `runtime.backend: "adb"`. |
+| `MobileMcpRuntimeBackend` | `src/adapters/runtime/mobile-mcp/mobile-mcp-runtime-backend.ts` | Default backend over the [Mobile MCP](https://www.npmjs.com/package/@mobilenext/mobile-mcp) server (`mcp-server-mobile`) using MCP stdio tools. `auto` resolves here. |
 | `FakeRuntimeBackend` | `src/adapters/runtime/fake-runtime-backend.ts` | Benchmarks and unit tests. |
 
 ## Design rules
@@ -51,8 +51,10 @@ Implementations:
   re-open.
 - **Capability-gated members fail closed.** `annotatedScreens` and
   `startActivityByIntent` are `undefined` on backends that lack the
-  capability. Callers must check before use; a missing member is a hard error,
-  never a silent fallback.
+  capability. Callers must check before use; a missing member is a hard error
+  (`RUNTIME_CAPABILITY_MISSING`, exit code 3) naming the
+  `runtime.backend` / `TAPHOUND_RUNTIME_BACKEND` escape hatches, never a
+  silent fallback.
 - **Descriptors are content-hashed.** `configSha256` covers identity,
   adapter version, and capabilities. Generation binds descriptors the same way
   it binds UI backend descriptors, so a backend change invalidates sessions
@@ -111,7 +113,7 @@ from two sources with fixed precedence:
 
 | Effective choice | Resolves to |
 |---|---|
-| `auto` (default) | `adb` (the Mobile MCP default is a later, separate decision) |
+| `auto` (default) | `MobileMcpRuntimeBackend` |
 | `adb` | `AdbRuntimeBackend` |
 | `mobile-mcp` | `MobileMcpRuntimeBackend` |
 
@@ -159,7 +161,8 @@ Known limitations:
   mobile-mcp.
 - `verify`, `record`, `generation`, and `observe` still call capability-gated
   members (`currentActivity`, `appProcesses`, Logcat) through the bridge and
-  therefore fail closed under mobile-mcp; running them requires the Level 1
+  therefore fail closed under mobile-mcp with `RUNTIME_CAPABILITY_MISSING`
+  (exit code 3); running them requires the Level 1
   session-first orchestrators on the roadmap.
 - Launching uses `mobile_launch_app`, which resolves the launcher activity
   (the same semantics as `monkey -p`).
@@ -175,7 +178,7 @@ Known limitations:
 | 0 — bridge (current) | done | Production flows through the SPI via `RuntimeBackendAdbBridge`; services keep the `AdbPort` type. `doctor` is backend-aware and fully works under mobile-mcp. |
 | 1 — session-first orchestrators | next | `VerifyRuntime`, `RecorderService`, `RuntimeObserver`, and `GenerationStepExecutor` open a session per run and pass it down; the bridge remains for device discovery and long-tail consumers. |
 | 2 — full session typing | later | Helpers (`ProcessWaiter`, `ActionExecutor`, `LogcatCollector`, …) accept `Pick<RuntimeSession, …>`; `AdbPort` shrinks to the bridge or is deleted. |
-| 3 — Mobile MCP default | Phase 2 | `MobileMcpRuntimeBackend` passes the same contract suite; `auto` resolves to it. The backend, config selection, and env override are done; the default flip is pending. |
+| 3 — Mobile MCP default | done | `MobileMcpRuntimeBackend` passes the shared contract suite and `auto` resolves to it; ADB remains available through `runtime.backend: "adb"` and the environment override. |
 
 ## Phase 2 flip checklist
 
@@ -195,8 +198,10 @@ change, not a rewrite:
    `--project`/`--config` before dependency construction and combines the
    config choice with the `TAPHOUND_RUNTIME_BACKEND` override
    (`src/cli/runtime-selection.ts`).
-5. Flip the `auto` resolution default and update
-   `docs/config-schema.md`.
+5. ~~Flip the `auto` resolution default and update
+    `docs/config-schema.md`.~~ done: `auto` now resolves to `mobile-mcp`;
+    ADB stays available through `runtime.backend: "adb"`, the environment
+    override, and the pinned demo project config.
 
 ## Dependency governance
 

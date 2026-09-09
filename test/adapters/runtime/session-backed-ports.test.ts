@@ -154,13 +154,19 @@ describe("SessionBackedUiSnapshotProviderFactory", () => {
 });
 
 describe("FailClosedAnnotatedScreenResolver", () => {
-  it("rejects annotated screen resolution with a backend-specific error", async () => {
+  it("rejects annotated screen resolution with a coded capability error", async () => {
     const resolver: AnnotatedScreenResolverPort =
       new FailClosedAnnotatedScreenResolver("mobile-mcp");
 
-    await expect(resolver.resolve("/tmp/screen.png", "Continue"))
-      .rejects.toThrow(
-        'Runtime backend "mobile-mcp" does not support annotated screens'
-      );
+    const error = await resolver.resolve("/tmp/screen.png", "Continue").then(
+      () => undefined,
+      (rethrown: unknown): unknown => rethrown
+    );
+    expect(error).toMatchObject({
+      code: "RUNTIME_CAPABILITY_MISSING"
+    });
+    expect((error as Error).message)
+      .toContain('does not support annotated screens');
+    expect((error as Error).message).toContain("TAPHOUND_RUNTIME_BACKEND");
   });
 });

@@ -47,6 +47,7 @@ A post-processing failure must not overwrite `primaryFailure`. For example, when
 - `ENVIRONMENT_MISSING_TOOL`
 - `DEVICE_UNAVAILABLE`
 - `UI_BACKEND_UNAVAILABLE`
+- `RUNTIME_CAPABILITY_MISSING`
 - `UI_SNAPSHOT_FAILED`
 - `UI_SNAPSHOT_INVALID`
 - `APP_NOT_INSTALLED`
@@ -91,7 +92,7 @@ A post-processing failure must not overwrite `primaryFailure`. For example, when
 - `0`: verification passed, or the Recorder was safely cancelled by the user.
 - `1`: the project under verification did not meet requirements, e.g. Replay, Activity, or Expect failure.
 - `2`: invalid config, Journey, or CLI arguments.
-- `3`: tools, permissions, app not installed, or device environment unavailable.
+- `3`: tools, permissions, app not installed, device environment unavailable, or the selected runtime backend lacks a capability the command needs (`RUNTIME_CAPABILITY_MISSING`).
 - `4`: TapHound internal error or an unclassifiable cancellation.
 
 The JSON `exitCode` of `taphound verify --json` matches the process exit code. Success or a normal verification failure includes `report`, `reportPath`, and `summaryPath`; config, environment, or internal errors that occur before the report is generated use `failure.code` and `failure.message`.

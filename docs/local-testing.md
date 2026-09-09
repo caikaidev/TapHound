@@ -136,7 +136,13 @@ TAPHOUND_ACCEPTANCE_DEVICE=1 npm run acceptance:generation
 
 Both entries are explicit opt-in; passing the normal test suite is not evidence that real-device Replay or Generation acceptance passed. You must run `npm run build` first.
 
-The Mobile MCP runtime backend has its own opt-in acceptance entry. It requires `mcp-server-mobile` on `PATH`, an online device with the demo app installed, and runs `doctor` end to end through the real MCP server (device discovery, app installation, and the screenshot permission probe):
+The Mobile MCP runtime backend is the `auto` default for the CLI, and it has
+its own opt-in acceptance entry. It requires `mcp-server-mobile` on `PATH`, an
+online device with the demo app installed, and runs `doctor` end to end through
+the real MCP server (device discovery, app installation, and the screenshot
+permission probe). The demo project config pins `runtime.backend: "adb"` so
+the Replay and Generation acceptance entries above keep exercising the ADB
+path; the Mobile MCP entry selects its backend through the environment:
 
 ```bash
 TAPHOUND_MOBILE_MCP_DEVICE=1 npm run acceptance:mobile-mcp

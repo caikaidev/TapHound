@@ -132,6 +132,7 @@ function layerForFailure(code: FailureCode): keyof TapHoundReport["layers"] {
     code === "APP_NOT_INSTALLED"
     || code === "APP_LAUNCH_FAILED"
     || code === "APP_CRASHED"
+    || code === "RUNTIME_CAPABILITY_MISSING"
   ) {
     return "run";
   }
@@ -359,7 +360,7 @@ export class VerifyRuntime {
         } catch (error) {
           layers.collection = "failed";
           setPrimary(
-            "COLLECTION_FAILED",
+            failureCodeFromUnknown(error) ?? "COLLECTION_FAILED",
             errorMessage(error),
             "collection"
           );

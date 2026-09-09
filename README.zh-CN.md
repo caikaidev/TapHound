@@ -74,7 +74,7 @@ git diff --exit-code -- assets/brand/png
 
 ## CLI 命令
 
-- `doctor`：检查 Node.js、ADB、Android CLI、应用安装、权限和设备；显式使用 `ui.backend=appium-uiautomator2` 时还检查本地 Appium 与 UiAutomator2 driver；配置 `runtime.backend=mobile-mcp`（或环境变量 `TAPHOUND_RUNTIME_BACKEND=mobile-mcp`）时改为检查 Mobile MCP server，并通过 Mobile MCP 工具诊断设备。
+- `doctor`：检查 Node.js、ADB、Android CLI、应用安装、权限和设备；显式使用 `ui.backend=appium-uiautomator2` 时还检查本地 Appium 与 UiAutomator2 driver。默认运行时后端为 Mobile MCP（`runtime.backend=auto`），此时检查 Mobile MCP server 并通过 Mobile MCP 工具诊断设备；在配置中设置 `runtime.backend=adb`（或环境变量 `TAPHOUND_RUNTIME_BACKEND=adb`）可改回检查 ADB 工具链。
 - `record`：交互式执行操作并录制 Journey。
 - `verify`：确定性重放 Journey 并发布报告。
 - `observe`：捕获设备即时快照（前台组件、Activity、布局、可选 logcat），无 session、无副作用。
@@ -146,10 +146,11 @@ git diff --exit-code -- assets/brand/png
 UIAutomator 结构确认稳定。如果页面持续绘制，`hybrid` 会回退到结构稳定性判定，
 不会仅因帧计数持续变化而超时。已知存在持续重绘的应用可使用 `layoutDiff` 完全跳过
 帧计数；只有确实需要像素帧静止时才使用 `frameStats`。
-`runtime.backend` 选择设备运行时后端（默认 `auto`，或显式 `adb`）。当前两个取值都
-解析为 ADB 后端；该字段为 Runtime Backend SPI
-（`docs/architecture/runtime-backend.md`）预留，后续 `auto` 将映射到推荐的第三方
-运行时，`adb` 保留为显式回退。
+`runtime.backend` 选择设备运行时后端：默认 `auto` 与 `mobile-mcp` 通过
+[Mobile MCP](https://www.npmjs.com/package/@mobilenext/mobile-mcp) server 执行设备操作，
+`adb` 则显式选择 ADB + Android CLI 后端作为回退。能力矩阵及让
+`verify`/`record`/`generation` 完整支持 Mobile MCP 的 Level 1 编排器规划见
+Runtime Backend SPI（`docs/architecture/runtime-backend.md`）。
 
 Generation 会在 session 启动时绑定规范化后的完整配置。请在
 `generation start` 前确定 idle 策略与超时时间；配置变更后必须创建新 session。

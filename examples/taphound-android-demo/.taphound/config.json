@@ -4,6 +4,9 @@
     "packageName": "dev.taphound.demo",
     "activity": ".MainActivity"
   },
+  "runtime": {
+    "backend": "adb"
+  },
   "idle": {
     "strategy": "structural",
     "pollIntervalMs": 200,

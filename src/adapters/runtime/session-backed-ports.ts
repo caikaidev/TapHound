@@ -16,6 +16,7 @@ import type {
   UiStabilitySampleOptions,
   UiStabilitySampleResult
 } from "../../ports/ui-stability.js";
+import { runtimeCapabilityMissing } from "./capability-error.js";
 
 export type RuntimeSessionOpener = Pick<RuntimeBackend, "openSession">;
 
@@ -86,8 +87,9 @@ export class FailClosedAnnotatedScreenResolver
   public constructor(private readonly backendId: string) {}
 
   public resolve(): Promise<Point> {
-    return Promise.reject(new Error(
-      `Runtime backend "${this.backendId}" does not support annotated screens`
+    return Promise.reject(runtimeCapabilityMissing(
+      this.backendId,
+      "annotated screens"
     ));
   }
 }

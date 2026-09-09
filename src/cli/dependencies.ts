@@ -20,6 +20,10 @@ import {
 } from "../adapters/runtime/session-backed-ports.js";
 import { MobileMcpRuntimeBackend } from "../adapters/runtime/mobile-mcp/mobile-mcp-runtime-backend.js";
 import { McpToolClient } from "../adapters/runtime/mobile-mcp/mcp-tool-client.js";
+import {
+  isMobileMcpSpawnFailureDetail,
+  mobileMcpServerUnavailableMessage
+} from "../adapters/runtime/mobile-mcp/mobile-mcp-errors.js";
 import type { MobileMcpTools } from "../adapters/runtime/mobile-mcp/mobile-mcp-tools.js";
 import {
   SystemUiAutomatorSnapshotProviderFactory
@@ -562,11 +566,14 @@ export function createProductionDependencies(
           || result.cancelled
           || result.timedOut
         ) {
+          const detail = result.stderr.trim()
+            || result.spawnError
+            || "mcp-server-mobile check failed";
           return {
             status: "failed" as const,
-            message: result.stderr.trim()
-              || result.spawnError
-              || "mcp-server-mobile check failed"
+            message: isMobileMcpSpawnFailureDetail(detail)
+              ? mobileMcpServerUnavailableMessage("mcp-server-mobile", detail)
+              : detail
           };
         }
         return {

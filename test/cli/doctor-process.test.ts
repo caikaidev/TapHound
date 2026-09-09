@@ -51,6 +51,7 @@ afterEach(async () => {
 
 async function fixture(options: {
   runtimeBackend?: "adb" | "mobile-mcp" | "emulator";
+  withoutMobileMcp?: boolean;
 } = {}): Promise<ProcessFixture> {
   const root = await mkdtemp(join(tmpdir(), "taphound-doctor-process-test-"));
   temporaryRoots.push(root);
@@ -58,7 +59,10 @@ async function fixture(options: {
   await mkdir(bin);
   await symlink(fakeAdbTool, join(bin, "adb"));
   await symlink(fakeAdbTool, join(bin, "android"));
-  await symlink(fakeMobileMcpTool, join(bin, "mcp-server-mobile"));
+  await symlink(process.execPath, join(bin, "node"));
+  if (options.withoutMobileMcp !== true) {
+    await symlink(fakeMobileMcpTool, join(bin, "mcp-server-mobile"));
+  }
   const workspace = join(root, ".taphound");
   await mkdir(workspace);
   const configPath = join(workspace, "config.json");
@@ -75,7 +79,8 @@ async function fixture(options: {
 
 function runDoctor(
   test: ProcessFixture,
-  environment: Record<string, string> = {}
+  environment: Record<string, string> = {},
+  options: { isolatedPath?: boolean } = {}
 ): CliProcessResult {
   const result = spawnSync(process.execPath, [
     cli,
@@ -89,7 +94,9 @@ function runDoctor(
     timeout: 15_000,
     env: {
       ...childSpawnEnv(),
-      PATH: `${test.bin}${delimiter}${process.env.PATH ?? ""}`,
+      PATH: options.isolatedPath === true
+        ? test.bin
+        : `${test.bin}${delimiter}${process.env.PATH ?? ""}`,
       TAPHOUND_FAKE_ROOT: test.root,
       ...environment
     }
@@ -242,5 +249,24 @@ describe("built taphound doctor --json process contract", () => {
     const failure = output.failure as { message?: string | undefined };
     expect(failure.message).toContain("runtime.backend");
     expect(result.stderr).toBe("");
+  }, 20000);
+
+  it("explains how to install the Mobile MCP server when it is missing", async () => {
+    const test = await fixture({ withoutMobileMcp: true });
+    const result = runDoctor(test, {}, { isolatedPath: true });
+
+    expect(result.status).toBe(3);
+    const report = jsonOutput(result);
+    expect(report.status).toBe("failed");
+    const checks = report.checks as {
+      name: string;
+      status: string;
+      message?: string | undefined;
+    }[];
+    const mobileMcp = checks.find((check) => check.name === "mobile-mcp");
+    expect(mobileMcp?.status).toBe("failed");
+    expect(mobileMcp?.message).toContain("npm install -g @mobilenext/mobile-mcp");
+    expect(mobileMcp?.message).toContain("TAPHOUND_RUNTIME_BACKEND");
+    expect(mobileMcp?.message).toContain("ENOENT");
   }, 20000);
 });

@@ -24,6 +24,7 @@ import {
 } from "../../../src/adapters/runtime/mobile-mcp/mobile-mcp-responses.js";
 import { MobileMcpToolError } from "../../../src/adapters/runtime/mobile-mcp/mobile-mcp-errors.js";
 import { McpToolClient } from "../../../src/adapters/runtime/mobile-mcp/mcp-tool-client.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type {
   MobileMcpDeviceEntry,
   MobileMcpElement
@@ -663,5 +664,60 @@ describe("McpToolClient", () => {
     await client.close();
     expect(transport.closeCalls).toBe(1);
     await expect(client.listDevices()).rejects.toThrow("closed");
+  });
+
+  function clientWithFailingTransport(failure: Error): McpToolClient {
+    const transport: Transport = {
+      start: (): Promise<void> => Promise.reject(failure),
+      send: (): Promise<void> => Promise.resolve(),
+      close: (): Promise<void> => Promise.resolve()
+    };
+    return new McpToolClient({
+      transportFactory: (): Transport => transport
+    });
+  }
+
+  it("explains how to install the server when the spawn fails", async () => {
+    const failure = Object.assign(
+      new Error("spawn mcp-server-mobile ENOENT"),
+      { code: "ENOENT" }
+    );
+    const client = clientWithFailingTransport(failure);
+    const rejection = await client.listDevices().then(
+      () => undefined,
+      (error: unknown): unknown => error
+    ) as { code?: unknown; message?: unknown };
+    expect(rejection.code).toBe("ENVIRONMENT_MISSING_TOOL");
+    expect(rejection.message).toContain("npm install -g @mobilenext/mobile-mcp");
+    expect(rejection.message).toContain("TAPHOUND_RUNTIME_BACKEND");
+    expect(rejection.message).toContain("spawn mcp-server-mobile ENOENT");
+  });
+
+  it("explains how to fix an unusable server binary", async () => {
+    const failure = Object.assign(
+      new Error("spawn mcp-server-mobile EACCES"),
+      { code: "EACCES" }
+    );
+    const client = clientWithFailingTransport(failure);
+    const rejection = await client.listDevices().then(
+      () => undefined,
+      (error: unknown): unknown => error
+    ) as { code?: unknown; message?: unknown };
+    expect(rejection.code).toBe("ENVIRONMENT_MISSING_TOOL");
+    expect(rejection.message).toContain("npm install -g @mobilenext/mobile-mcp");
+  });
+
+  it("codes handshake failures as environment failures with context", async () => {
+    const client = clientWithFailingTransport(
+      new Error("server closed the stream")
+    );
+    const rejection = await client.listDevices().then(
+      () => undefined,
+      (error: unknown): unknown => error
+    ) as { code?: unknown; message?: unknown };
+    expect(rejection.code).toBe("ENVIRONMENT_MISSING_TOOL");
+    expect(rejection.message).toContain("mcp-server-mobile");
+    expect(rejection.message).toContain("server closed the stream");
+    expect(rejection.message).not.toContain("npm install");
   });
 });

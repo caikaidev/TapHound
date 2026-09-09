@@ -2,7 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 
-import { MobileMcpToolError } from "./mobile-mcp-errors.js";
+import { MobileMcpToolError, mobileMcpConnectError } from "./mobile-mcp-errors.js";
 import type {
   MobileMcpToolCallOptions,
   MobileMcpSwipeDirection,
@@ -108,7 +108,11 @@ export class McpToolClient implements MobileMcpTools {
       { capabilities: {} }
     );
     const transport = this.transportFactory();
-    await client.connect(transport);
+    try {
+      await client.connect(transport);
+    } catch (error) {
+      throw mobileMcpConnectError(this.command, error);
+    }
     return client;
   }
 

@@ -12,7 +12,7 @@ that delegation possible without changing application behavior.
 ```text
 RuntimeBackend                          (one per CLI process)
   descriptor                             stable identity + capabilities
-  capabilities                           8 declared booleans
+  capabilities                           9 declared booleans
   listDevices(signal?)                   device discovery
   openSession({deviceSerial}) -> RuntimeSession
 
@@ -54,7 +54,15 @@ Implementations:
   capability. Callers must check before use; a missing member is a hard error
   (`RUNTIME_CAPABILITY_MISSING`, exit code 3) naming the
   `runtime.backend` / `TAPHOUND_RUNTIME_BACKEND` escape hatches, never a
-  silent fallback.
+  silent fallback. The error factory lives in
+  `src/ports/runtime-capability.ts` so application services can reject
+  without importing adapters.
+- **Call session members as property calls.** Implementations may declare
+  capability-gated members as prototype methods (`AdbRuntimeSession`) or as
+  bound instance fields (`MobileMcpRuntimeSession`). Consumers must invoke
+  them directly on the session (`session.dumpLogcat({...})`) after the
+  `undefined` guard, never as detached functions, or method-style
+  implementations lose their `this` binding.
 - **Descriptors are content-hashed.** `configSha256` covers identity,
   adapter version, and capabilities. Generation binds descriptors the same way
   it binds UI backend descriptors, so a backend change invalidates sessions
@@ -79,8 +87,12 @@ AdbRuntimeBackend ──openSession(serial)──▶ RuntimeSession
 RuntimeBackendAdbBridge (implements AdbPort)
         │  re-inserts the bound serial into each call
         ▼
-DoctorService / RecorderService / VerifyRuntime / generation / observe / align
+DoctorService / RecorderService / VerifyRuntime / generation / align
 ```
+
+`ObserveService` no longer uses the bridge: it is the first Level 1
+session-first consumer and borrows a `RuntimeSession` per run through the
+`RuntimeSessionOpener` port (see the roadmap below).
 
 The bridge (`src/adapters/runtime/runtime-backend-adb-bridge.ts`):
 
@@ -159,11 +171,16 @@ Known limitations:
   launcher-visible apps), and runs the permission probe through the MCP
   screenshot path. `ui.backend=appium-uiautomator2` is rejected under
   mobile-mcp.
+- A missing `mcp-server-mobile` binary is a coded `ENVIRONMENT_MISSING_TOOL`
+  failure (exit code 3), not a bare spawn error: `McpToolClient` connection
+  failures and the doctor probe share one remediation message that names the
+  `npm install -g @mobilenext/mobile-mcp` install command and the
+  `runtime.backend` / `TAPHOUND_RUNTIME_BACKEND` escape hatch to `adb`.
 - `verify`, `record`, `generation`, and `observe` still call capability-gated
-  members (`currentActivity`, `appProcesses`, Logcat) through the bridge and
-  therefore fail closed under mobile-mcp with `RUNTIME_CAPABILITY_MISSING`
-  (exit code 3); running them requires the Level 1
-  session-first orchestrators on the roadmap.
+  members (`currentActivity`, `appProcesses`, Logcat) and therefore fail
+  closed under mobile-mcp with `RUNTIME_CAPABILITY_MISSING` (exit code 3);
+  `observe` already fails closed through its own session-first path, while the
+  others still route through the bridge until the Level 1 orchestrators land.
 - Launching uses `mobile_launch_app`, which resolves the launcher activity
   (the same semantics as `monkey -p`).
 - Evidence is not portable across backends: descriptors are content-hashed
@@ -176,7 +193,7 @@ Known limitations:
 | Level | State | Description |
 |---|---|---|
 | 0 — bridge (current) | done | Production flows through the SPI via `RuntimeBackendAdbBridge`; services keep the `AdbPort` type. `doctor` is backend-aware and fully works under mobile-mcp. |
-| 1 — session-first orchestrators | next | `VerifyRuntime`, `RecorderService`, `RuntimeObserver`, and `GenerationStepExecutor` open a session per run and pass it down; the bridge remains for device discovery and long-tail consumers. |
+| 1 — session-first orchestrators | in progress | `ObserveService` borrows a session per run through `RuntimeSessionOpener` and fails closed on missing capability members. `VerifyRuntime`, `RecorderService`, `RuntimeObserver`, and `GenerationStepExecutor` follow the same pattern; the bridge remains for device discovery and long-tail consumers. |
 | 2 — full session typing | later | Helpers (`ProcessWaiter`, `ActionExecutor`, `LogcatCollector`, …) accept `Pick<RuntimeSession, …>`; `AdbPort` shrinks to the bridge or is deleted. |
 | 3 — Mobile MCP default | done | `MobileMcpRuntimeBackend` passes the shared contract suite and `auto` resolves to it; ADB remains available through `runtime.backend: "adb"` and the environment override. |
 

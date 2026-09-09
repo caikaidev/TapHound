@@ -117,10 +117,14 @@ which names the `runtime.backend` / `TAPHOUND_RUNTIME_BACKEND` escape hatches.
 `runtime.backend` (`auto` | `adb` | `mobile-mcp`); `auto` and `mobile-mcp`
 resolve to the Mobile MCP backend, `adb` selects the ADB backend, and the
 `TAPHOUND_RUNTIME_BACKEND` environment variable overrides
-the config per invocation. Commands that need capabilities the selected
+the config per invocation. A missing `mcp-server-mobile` binary fails with the
+coded `ENVIRONMENT_MISSING_TOOL` and a remediation message naming the install
+command and the adb escape hatch. Commands that need capabilities the selected
 backend lacks (`verify`, `record`, `generation`, `observe`, `align`) fail
-closed until the Level 1 session-first orchestrators land; `doctor` is fully
-adapted. See `docs/architecture/runtime-backend.md` for the
+closed; `observe` already borrows a session per run through the
+`RuntimeSessionOpener` port (the first Level 1 session-first service), while
+the others route through the bridge until their Level 1 orchestrators land;
+`doctor` is fully adapted. See `docs/architecture/runtime-backend.md` for the
 SPI contract, adoption roadmap, and Mobile MCP flip checklist.
 
 ### Host Project Workspace

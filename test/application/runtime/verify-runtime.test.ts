@@ -7,8 +7,10 @@ import {
   type VerifyProgressEvent
 } from "../../../src/application/runtime/verify-runtime.js";
 import type { StepRunner } from "../../../src/application/runtime/step-runner.js";
+import { adbRuntimeCapabilities } from "../../../src/adapters/runtime/adb-runtime-backend.js";
 import type { AppProcess } from "../../../src/domain/app-process.js";
 import type { Journey } from "../../../src/domain/journey.js";
+import type { RuntimeSession } from "../../../src/ports/runtime-backend.js";
 import type { CommandResult } from "../../../src/ports/process-runner.js";
 import {
   runtimeConfig,
@@ -498,6 +500,70 @@ describe("VerifyRuntime", () => {
       report: { primaryFailure: { code: "INTERNAL_ERROR" } }
     });
     expect(test.order.at(-1)).toBe("report");
+  });
+
+  it("fails closed with RUNTIME_CAPABILITY_MISSING when the session cannot stream logcat", async () => {
+    const test = runtimeFixture();
+    const session: RuntimeSession = {
+      descriptor: {
+        id: "mobile-mcp",
+        adapterVersion: "test-v1",
+        configSha256: "0".repeat(64),
+        capabilities: { ...adbRuntimeCapabilities(), logs: false }
+      },
+      deviceSerial: "emulator-5554",
+      openUiSnapshots: (options) => test.uiSnapshots.open({
+        deviceSerial: "emulator-5554",
+        timeoutMs: options?.timeoutMs ?? 5000,
+        ...(options?.backend === undefined ? {} : { backend: options.backend }),
+        ...(options?.cacheEnabled === undefined
+          ? {}
+          : { cacheEnabled: options.cacheEnabled }),
+        ...(options?.signal === undefined ? {} : { signal: options.signal })
+      }),
+      isInstalled: () => Promise.resolve(true),
+      launchApp: () => Promise.resolve(commandResult()),
+      forceStop: () => Promise.resolve(commandResult()),
+      currentActivity: undefined,
+      foregroundComponent: undefined,
+      appProcesses: undefined,
+      windowTopology: undefined,
+      tap: () => Promise.resolve(commandResult()),
+      longClick: () => Promise.resolve(commandResult()),
+      swipe: () => Promise.resolve(commandResult()),
+      back: () => Promise.resolve(commandResult()),
+      inputText: () => Promise.resolve(commandResult()),
+      startLogcat: undefined,
+      dumpLogcat: undefined,
+      captureScreenshot: () => Promise.resolve(commandResult()),
+      annotatedScreens: undefined,
+      uiStability: test.androidCli,
+      startActivityByIntent: undefined,
+      close: () => Promise.resolve()
+    };
+    test.dependencies.sessions = {
+      openSession: (): Promise<RuntimeSession> => Promise.resolve(session)
+    };
+
+    const result = await new VerifyRuntime(test.dependencies).verify(input());
+
+    expect(result).toMatchObject({
+      status: "failed",
+      exitCode: 3,
+      report: {
+        primaryFailure: {
+          code: "RUNTIME_CAPABILITY_MISSING",
+          phase: "collection"
+        },
+        layers: { run: "failed", collection: "failed" },
+        steps: []
+      }
+    });
+    expect(result.report.primaryFailure?.message).toContain("startLogcat");
+    expect(result.report.primaryFailure?.message).toContain("mobile-mcp");
+    expect(result.report.artifacts.screenshots)
+      .toEqual([{ role: "default", path: "screenshot-default.png" }]);
+    expect(test.order).toEqual(["report"]);
   });
 });
 

@@ -17,18 +17,17 @@ import {
   type TapHoundReport,
   type ReportFailure
 } from "../../domain/report.js";
-import type { AdbPort } from "../../ports/adb.js";
-import type {
-  AnnotatedScreenResolverPort
-} from "../../ports/annotated-screen-resolver.js";
 import type { ArtifactStore } from "../../ports/artifact-store.js";
 import type { Clock } from "../../ports/clock.js";
-import type { ScreenshotPort } from "../../ports/screenshot.js";
-import type { UiStabilityProbe } from "../../ports/ui-stability.js";
 import type {
-  UiSnapshotProvider,
-  UiSnapshotProviderFactory
-} from "../../ports/ui-snapshot.js";
+  RuntimeSession,
+  RuntimeSessionOpener
+} from "../../ports/runtime-backend.js";
+import type {
+  RuntimeSessionPortViews,
+  RuntimeSessionPortViewsFactory
+} from "../../ports/runtime-session-ports.js";
+import type { UiSnapshotProvider } from "../../ports/ui-snapshot.js";
 import type { DeviceAssignment } from "../devices/resolve-device-assignments.js";
 import { LogcatCollector } from "../collector/logcat-collector.js";
 import { logcatStopFailed } from "../collector/logcat-stop.js";
@@ -69,11 +68,8 @@ export interface StepRunnerLike {
 }
 
 export interface VerifyRuntimeDependencies {
-  screenshots: ScreenshotPort;
-  annotatedScreens: AnnotatedScreenResolverPort;
-  uiStability: UiStabilityProbe;
-  uiSnapshots: UiSnapshotProviderFactory;
-  adb: AdbPort;
+  sessions: RuntimeSessionOpener;
+  sessionPorts: RuntimeSessionPortViewsFactory;
   clock: Clock;
   artifactStore: ArtifactStore;
   reportWriter: Pick<ReportWriter, "writeAndPublish">;
@@ -93,6 +89,8 @@ export interface VerifyResult {
 interface DeviceRuntime {
   role: string;
   deviceSerial: string;
+  session: RuntimeSession;
+  views: RuntimeSessionPortViews;
   provider: UiSnapshotProvider | undefined;
   logcat: LogcatCollector;
   logcatStarted: boolean;
@@ -244,24 +242,7 @@ export class VerifyRuntime {
     const assignmentByRole = new Map(
       input.devices.map((assignment) => [assignment.role, assignment])
     );
-    const runtimes: DeviceRuntime[] = input.journey.devices.flatMap(
-      (declaration) => {
-        const assignment = assignmentByRole.get(declaration.role);
-        return assignment === undefined
-          ? []
-          : [{
-              role: declaration.role,
-              deviceSerial: assignment.deviceSerial,
-              provider: undefined,
-              logcat: new LogcatCollector(
-                this.dependencies.adb,
-                this.dependencies.clock
-              ),
-              logcatStarted: false,
-              runner: undefined
-            }];
-      }
-    );
+    const runtimes: DeviceRuntime[] = [];
     let primaryFailure: ReportFailure | undefined = coverage === undefined
       ? undefined
       : {
@@ -313,12 +294,35 @@ export class VerifyRuntime {
     try {
       const createStepRunner = this.dependencies.createStepRunner
         ?? ((options: StepRunnerOptions): StepRunnerLike => new StepRunner(options));
+      if (coverage === undefined) {
+        for (const declaration of input.journey.devices) {
+          const assignment = assignmentByRole.get(declaration.role);
+          if (assignment === undefined) {
+            continue;
+          }
+          const deviceSession = await this.dependencies.sessions.openSession({
+            deviceSerial: assignment.deviceSerial,
+            ...(input.signal === undefined ? {} : { signal: input.signal })
+          });
+          const views = this.dependencies.sessionPorts(deviceSession);
+          runtimes.push({
+            role: declaration.role,
+            deviceSerial: assignment.deviceSerial,
+            session: deviceSession,
+            views,
+            provider: undefined,
+            logcat: new LogcatCollector(views.adb, this.dependencies.clock),
+            logcatStarted: false,
+            runner: undefined
+          });
+        }
+      }
       for (const runtime of runtimes) {
         if (primaryFailure !== undefined) {
           break;
         }
-        const provider = await this.dependencies.uiSnapshots.open({
-          deviceSerial: runtime.deviceSerial,
+        const deviceSession = runtime.session;
+        const provider = await deviceSession.openUiSnapshots({
           timeoutMs: input.config.ui?.snapshotTimeoutMs
             ?? input.config.idle.timeoutMs,
           backend: input.config.ui?.backend ?? "auto",
@@ -329,9 +333,8 @@ export class VerifyRuntime {
 
         let installFailed = false;
         try {
-          const installed = await this.dependencies.adb.isInstalled({
+          const installed = await deviceSession.isInstalled({
             packageName: input.config.run.packageName,
-            deviceSerial: runtime.deviceSerial,
             ...(input.signal === undefined ? {} : { signal: input.signal }),
             timeoutMs: input.config.idle.timeoutMs
           });
@@ -369,19 +372,17 @@ export class VerifyRuntime {
           break;
         }
 
-        const identity = {
+        const app = {
           packageName: input.config.run.packageName,
-          deviceSerial: runtime.deviceSerial,
           ...(input.signal === undefined ? {} : { signal: input.signal }),
           timeoutMs: input.config.idle.timeoutMs
         };
-        const stopped = await this.dependencies.adb.forceStop(identity);
+        const stopped = await deviceSession.forceStop(app);
         const launched = commandFailed(stopped)
           ? undefined
-          : await this.dependencies.adb.launchActivity({
+          : await deviceSession.launchApp({
               packageName: input.config.run.packageName,
               activity: launchActivity,
-              deviceSerial: runtime.deviceSerial,
               ...(input.signal === undefined ? {} : { signal: input.signal }),
               timeoutMs: input.config.idle.timeoutMs
             });
@@ -397,7 +398,7 @@ export class VerifyRuntime {
         try {
           const launchReadinessStartedAt = this.dependencies.clock.now();
           const processReadiness = await new ProcessWaiter(
-            this.dependencies.adb,
+            runtime.views.adb,
             this.dependencies.clock
           ).wait({
             packageName: input.config.run.packageName,
@@ -444,7 +445,7 @@ export class VerifyRuntime {
             break;
           }
           const readiness = await new ActivityWaiter(
-            this.dependencies.adb,
+            runtime.views.adb,
             this.dependencies.clock
           ).wait({
             packageName: input.config.run.packageName,
@@ -485,10 +486,10 @@ export class VerifyRuntime {
             timeoutMs: input.config.idle.timeoutMs
           });
           runtime.runner = createStepRunner({
-            adb: this.dependencies.adb,
-            screenshots: this.dependencies.screenshots,
-            annotatedScreens: this.dependencies.annotatedScreens,
-            uiStability: this.dependencies.uiStability,
+            adb: runtime.views.adb,
+            screenshots: runtime.views.screenshots,
+            annotatedScreens: runtime.views.annotatedScreens,
+            uiStability: runtime.views.uiStability,
             uiSnapshotProvider: provider,
             clock: this.dependencies.clock,
             logcat: runtime.logcat,
@@ -612,9 +613,8 @@ export class VerifyRuntime {
       for (const runtime of runtimes) {
         const screenshotPath = `screenshot-${runtime.role}.png`;
         try {
-          const screenshot = await this.dependencies.screenshots.capture({
+          const screenshot = await runtime.session.captureScreenshot({
             outputPath: session.path(screenshotPath),
-            deviceSerial: runtime.deviceSerial,
             ...(input.signal === undefined ? {} : { signal: input.signal })
           });
           if (commandFailed(screenshot)) {

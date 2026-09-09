@@ -13,11 +13,11 @@ import { AdbRuntimeBackend } from "../adapters/runtime/adb-runtime-backend.js";
 import { RuntimeBackendAdbBridge } from "../adapters/runtime/runtime-backend-adb-bridge.js";
 import { SharedSessionRuntimeBackend } from "../adapters/runtime/shared-session-runtime-backend.js";
 import {
-  FailClosedAnnotatedScreenResolver,
   SessionBackedScreenshotAdapter,
   SessionBackedUiSnapshotProviderFactory,
   SessionBackedUiStabilityAdapter
 } from "../adapters/runtime/session-backed-ports.js";
+import { runtimeSessionPortViews } from "../adapters/runtime/session-adb-view.js";
 import { MobileMcpRuntimeBackend } from "../adapters/runtime/mobile-mcp/mobile-mcp-runtime-backend.js";
 import { McpToolClient } from "../adapters/runtime/mobile-mcp/mcp-tool-client.js";
 import {
@@ -171,7 +171,6 @@ import {
   type RuntimeBackendChoice
 } from "../domain/runtime.js";
 import type { AdbPort } from "../ports/adb.js";
-import type { AnnotatedScreenResolverPort } from "../ports/annotated-screen-resolver.js";
 import type { RuntimeSessionOpener } from "../ports/runtime-backend.js";
 import type { ScreenshotPort } from "../ports/screenshot.js";
 import type { UiSnapshotProviderFactory } from "../ports/ui-snapshot.js";
@@ -379,7 +378,6 @@ export function createProductionDependencies(
   let adb: AdbPort;
   let sessions: RuntimeSessionOpener;
   let screenshots: ScreenshotPort;
-  let annotatedScreens: AnnotatedScreenResolverPort;
   let uiStability: UiStabilityProbe;
   let uiSnapshots: UiSnapshotProviderFactory;
   let sharedBackend: SharedSessionRuntimeBackend | undefined;
@@ -394,7 +392,6 @@ export function createProductionDependencies(
     sessions = backend;
     adb = new RuntimeBackendAdbBridge({ backend });
     screenshots = new SessionBackedScreenshotAdapter(backend);
-    annotatedScreens = new FailClosedAnnotatedScreenResolver("mobile-mcp");
     uiStability = new SessionBackedUiStabilityAdapter(backend);
     uiSnapshots = new CachedUiSnapshotProviderFactory(
       new SessionBackedUiSnapshotProviderFactory(backend)
@@ -419,7 +416,6 @@ export function createProductionDependencies(
     sessions = adbBackend;
     adb = new RuntimeBackendAdbBridge({ backend: adbBackend });
     screenshots = androidCli;
-    annotatedScreens = androidCli;
     uiStability = androidCli;
     uiSnapshots = autoSnapshots;
   }
@@ -595,11 +591,8 @@ export function createProductionDependencies(
       journeyWriter: new FileSystemJourneyWriter()
     }),
     verifier: new VerifyRuntime({
-      screenshots,
-      annotatedScreens,
-      uiStability,
-      uiSnapshots,
-      adb,
+      sessions,
+      sessionPorts: runtimeSessionPortViews,
       clock,
       artifactStore: new FileSystemArtifactStore(),
       reportWriter: new ReportWriter(),
@@ -790,11 +783,8 @@ export function createProductionDependencies(
         metaWriter: new FileSystemGenerationMetaWriter()
       });
       const verifyRuntime = new VerifyRuntime({
-        screenshots,
-        annotatedScreens,
-        uiStability,
-        uiSnapshots,
-        adb,
+        sessions,
+        sessionPorts: runtimeSessionPortViews,
         clock,
         artifactStore: new FileSystemArtifactStore(),
         reportWriter: new ReportWriter(),

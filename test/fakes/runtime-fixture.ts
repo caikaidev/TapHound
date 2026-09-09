@@ -8,6 +8,8 @@ import type { TapHoundReport } from "../../src/domain/report.js";
 import type { VerifyRuntimeDependencies } from "../../src/application/runtime/verify-runtime.js";
 import type { TapHoundConfig } from "../../src/domain/config.js";
 import type { Journey } from "../../src/domain/journey.js";
+import { AdbRuntimeBackend } from "../../src/adapters/runtime/adb-runtime-backend.js";
+import { runtimeSessionPortViews } from "../../src/adapters/runtime/session-adb-view.js";
 import type {
   AdbPort,
   AppIdentity,
@@ -67,6 +69,7 @@ export interface RuntimeFixtureOptions {
 export interface RuntimeFixture {
   order: string[];
   dependencies: VerifyRuntimeDependencies;
+  backend: AdbRuntimeBackend;
   androidCli: UiStabilityProbe & AnnotatedScreenResolverPort & {
     layout: (options: {
       deviceSerial: string;
@@ -219,19 +222,24 @@ export function runtimeFixture(
     })
   };
   const uiSnapshots = uiSnapshotFactoryFromLayout(androidCli.layout);
+  const backend = new AdbRuntimeBackend({
+    adb,
+    screenshots,
+    annotatedScreens: androidCli,
+    uiStability: androidCli,
+    uiSnapshots
+  });
   return {
     order,
     androidCli,
     screenshots,
     uiSnapshots,
     adb,
+    backend,
     artifacts,
     dependencies: {
-      screenshots,
-      annotatedScreens: androidCli,
-      uiStability: androidCli,
-      uiSnapshots,
-      adb,
+      sessions: backend,
+      sessionPorts: runtimeSessionPortViews,
       clock: new FakeClock(),
       artifactStore: artifacts,
       reportWriter: {

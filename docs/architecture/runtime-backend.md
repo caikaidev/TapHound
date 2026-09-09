@@ -87,12 +87,18 @@ AdbRuntimeBackend ──openSession(serial)──▶ RuntimeSession
 RuntimeBackendAdbBridge (implements AdbPort)
         │  re-inserts the bound serial into each call
         ▼
-DoctorService / RecorderService / VerifyRuntime / generation / align
+RecorderService / generation / align
 ```
 
-`ObserveService` no longer uses the bridge: it is the first Level 1
-session-first consumer and borrows a `RuntimeSession` per run through the
-`RuntimeSessionOpener` port (see the roadmap below).
+`ObserveService` and `VerifyRuntime` no longer use the bridge: they are the
+Level 1 session-first consumers and borrow a `RuntimeSession` per run through
+the `RuntimeSessionOpener` port (see the roadmap below). `VerifyRuntime` feeds
+its unchanged `AdbPort`-shaped helpers (`ProcessWaiter`, `ActivityWaiter`,
+`LogcatCollector`, `StepRunner`) through `runtimeSessionPortViews`
+(`src/adapters/runtime/session-adb-view.ts`), a serial-bound legacy port view
+over one borrowed session; the view type lives in
+`src/ports/runtime-session-ports.ts` so application services depend on the
+factory type only.
 
 The bridge (`src/adapters/runtime/runtime-backend-adb-bridge.ts`):
 
@@ -184,8 +190,9 @@ Known limitations:
 - `verify`, `record`, `generation`, and `observe` still call capability-gated
   members (`currentActivity`, `appProcesses`, Logcat) and therefore fail
   closed under mobile-mcp with `RUNTIME_CAPABILITY_MISSING` (exit code 3);
-  `observe` already fails closed through its own session-first path, while the
-  others still route through the bridge until the Level 1 orchestrators land.
+  `observe` and `verify` fail closed through their own session-first paths,
+  while `record` and `generation` still route through the bridge until their
+  Level 1 orchestrators land.
 - Launching uses `mobile_launch_app`, which resolves the launcher activity
   (the same semantics as `monkey -p`).
 - Evidence is not portable across backends: descriptors are content-hashed
@@ -198,7 +205,7 @@ Known limitations:
 | Level | State | Description |
 |---|---|---|
 | 0 — bridge (current) | done | Production flows through the SPI via `RuntimeBackendAdbBridge`; services keep the `AdbPort` type. `doctor` is backend-aware and fully works under mobile-mcp. |
-| 1 — session-first orchestrators | in progress | `ObserveService` borrows a session per run through `RuntimeSessionOpener` and fails closed on missing capability members. `VerifyRuntime`, `RecorderService`, `RuntimeObserver`, and `GenerationStepExecutor` follow the same pattern; the bridge remains for device discovery and long-tail consumers. |
+| 1 — session-first orchestrators | in progress | `ObserveService` and `VerifyRuntime` borrow a session per run through `RuntimeSessionOpener` and fail closed on missing capability members; `VerifyRuntime` feeds its `AdbPort`-shaped helpers through `RuntimeSessionPortViews` (`src/ports/runtime-session-ports.ts`). `RecorderService`, `RuntimeObserver`, and `GenerationStepExecutor` follow the same pattern; the bridge remains for device discovery and long-tail consumers. |
 | 2 — full session typing | later | Helpers (`ProcessWaiter`, `ActionExecutor`, `LogcatCollector`, …) accept `Pick<RuntimeSession, …>`; `AdbPort` shrinks to the bridge or is deleted. |
 | 3 — Mobile MCP default | done | `MobileMcpRuntimeBackend` passes the shared contract suite and `auto` resolves to it; ADB remains available through `runtime.backend: "adb"` and the environment override. |
 

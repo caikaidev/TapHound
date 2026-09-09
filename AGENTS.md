@@ -121,9 +121,11 @@ the config per invocation. A missing `mcp-server-mobile` binary fails with the
 coded `ENVIRONMENT_MISSING_TOOL` and a remediation message naming the install
 command and the adb escape hatch. Commands that need capabilities the selected
 backend lacks (`verify`, `record`, `generation`, `observe`, `align`) fail
-closed; `observe` already borrows a session per run through the
-`RuntimeSessionOpener` port (the first Level 1 session-first service), while
-the others route through the bridge until their Level 1 orchestrators land;
+closed; `observe` and `verify` borrow a session per run through the
+`RuntimeSessionOpener` port (the Level 1 session-first services;
+`VerifyRuntime` feeds its unchanged `AdbPort`-shaped helpers through the
+`RuntimeSessionPortViewsFactory` port), while `record`, `generation`, and
+`align` route through the bridge until their Level 1 orchestrators land;
 `doctor` is fully adapted. See `docs/architecture/runtime-backend.md` for the
 SPI contract, adoption roadmap, and Mobile MCP flip checklist.
 

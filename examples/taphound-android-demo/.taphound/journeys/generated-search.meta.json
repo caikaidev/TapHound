@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "status": "verified",
+  "generationId": "4474bc3c-3c37-4a24-9496-97931ed0a10a",
+  "journeyPath": ".taphound/journeys/generated-search.json",
+  "bindings": {
+    "projectHash": "a63315a2eb3a1d68abe6717d6145eb7322147e20d8631058901b9b8439382fe0",
+    "configHash": "31d36f069b9aae304567fbcf580caad6058c07fad51fbb84e993cf8095a0adfe",
+    "contextHash": "504560ccb3aa260a2853c2b4b3f9d980fd6304e1ee3118ce3279961dc6eda416",
+    "uiBackend": {
+      "id": "system-uiautomator",
+      "adapterVersion": "system-uiautomator-v1",
+      "engineVersion": "android-api-34",
+      "configSha256": "e5118d7704efdbb4467d808f8ec08b799e73927326fa056fa89172895ae19a13"
+    }
+  },
+  "contextSelection": {
+    "bundleVersion": 2,
+    "indexHash": "4268e9d363c8f2706fa6b108cdaaa22e52b34c5f8ab3052a8331ed6a9a5f7648",
+    "modules": [
+      {
+        "id": ":app",
+        "sha256": "1a3282dbc985a1a25fcd8934e406152f89f2ae1a6a9d54be5cb469fb20618e42",
+        "projectDir": "app",
+        "inventory": {
+          "pathSetSha256": "8e5ea4cd788ec9b881426967139bea6edaf9ec980c83ff1bea22049893e294ff",
+          "categories": [
+            "manifests",
+            "sources",
+            "layouts",
+            "navigation"
+          ]
+        }
+      }
+    ]
+  },
+  "verification": {
+    "reportPath": "verification/report.json",
+    "reportSha256": "faf65bfc32b08256e3bacb9eeff33eb5b97ba9999d83cbbcb22e6aee95bd9608",
+    "runId": "2026-09-09T07-10-05.142Z-a89200b1-3bf4-4310-8c45-7878c82bd746",
+    "runs": 1
+  },
+  "externalFlows": [],
+  "manualOverrideStepIndexes": []
+}

@@ -1,0 +1,51 @@
+{
+  "version": 2,
+  "packageName": "dev.taphound.demo",
+  "launchActivity": "dev.taphound.demo.MainActivity",
+  "manifest": {
+    "version": 1,
+    "files": [
+      {
+        "path": "settings.gradle.kts",
+        "sha256": "20982fed45806089e62a011a3350acea7f50ae02c4b82e6004555f889bcbdf86",
+        "confidence": "sourceConfirmed"
+      }
+    ]
+  },
+  "interactionPolicy": {
+    "allowedActions": [
+      "click",
+      "longClick",
+      "inputText",
+      "swipe",
+      "scrollTo",
+      "back",
+      "wait"
+    ],
+    "confirmationRequiredActions": [],
+    "forbiddenActions": []
+  },
+  "modules": [
+    {
+      "id": ":app",
+      "projectDir": "app",
+      "kind": "application",
+      "contextPath": ".taphound/context/modules/app.json",
+      "sha256": "1a3282dbc985a1a25fcd8934e406152f89f2ae1a6a9d54be5cb469fb20618e42",
+      "features": [
+        "launch",
+        "search",
+        "compose",
+        "hybrid"
+      ],
+      "activities": [
+        "dev.taphound.demo.MainActivity",
+        "dev.taphound.demo.SearchActivity",
+        "dev.taphound.demo.ComposeActivity",
+        "dev.taphound.demo.HybridActivity"
+      ],
+      "dependsOn": [],
+      "status": "complete"
+    }
+  ]
+}

@@ -1,0 +1,143 @@
+{
+  "version": 2,
+  "moduleId": ":app",
+  "projectDir": "app",
+  "status": "complete",
+  "inventory": {
+    "version": 2,
+    "pathSetSha256": "8e5ea4cd788ec9b881426967139bea6edaf9ec980c83ff1bea22049893e294ff",
+    "categories": [
+      "manifests",
+      "sources",
+      "layouts",
+      "navigation"
+    ]
+  },
+  "manifest": {
+    "version": 1,
+    "files": [
+      {
+        "path": "app/src/main/AndroidManifest.xml",
+        "sha256": "ca7814285418d72ff2270b3c64103fdf44d0b57238ce3e306e2c6e596408e937",
+        "confidence": "sourceConfirmed"
+      },
+      {
+        "path": "app/src/main/java/dev/taphound/demo/MainActivity.kt",
+        "sha256": "c34dce18189c80c27b9b57f1650c698fadfc1d957b36060cd4762afce9b8065c",
+        "confidence": "sourceConfirmed"
+      },
+      {
+        "path": "app/src/main/java/dev/taphound/demo/SearchActivity.kt",
+        "sha256": "c8775ad47ad3f667502d3d3743698595efe4c1e8d16d4979db653474ba4ec358",
+        "confidence": "sourceConfirmed"
+      },
+      {
+        "path": "app/src/main/java/dev/taphound/demo/ComposeActivity.kt",
+        "sha256": "85b8b8c9981f5ba6b3f4dc4050bcc30e19f383f32f5d37c86b230afc17a537fe",
+        "confidence": "sourceConfirmed"
+      },
+      {
+        "path": "app/src/main/java/dev/taphound/demo/HybridActivity.kt",
+        "sha256": "e8fc4634fc6699cece680281dd354b126a55991458c6e7e1d325698cff414f4a",
+        "confidence": "sourceConfirmed"
+      },
+      {
+        "path": "app/src/main/res/layout/activity_main.xml",
+        "sha256": "58437fe977d58e239dabafd96322d1636d02355837c99f59580e57afe52e07ac",
+        "confidence": "sourceConfirmed"
+      },
+      {
+        "path": "app/src/main/res/layout/activity_hybrid.xml",
+        "sha256": "9033c7041b6534d9a26ba112216c548416f28b78e01488608d8f14b6af920e10",
+        "confidence": "sourceConfirmed"
+      },
+      {
+        "path": "app/src/main/res/layout/activity_search.xml",
+        "sha256": "0f7e35a8ba7a3fdbb80e3d790070d60b14d338d47a9ff5674c051276618881e1",
+        "confidence": "sourceConfirmed"
+      }
+    ]
+  },
+  "summary": {
+    "features": [
+      "launch",
+      "search",
+      "compose",
+      "hybrid"
+    ],
+    "activities": [
+      {
+        "name": "dev.taphound.demo.MainActivity",
+        "entryPoints": [],
+        "screens": [
+          "home"
+        ]
+      },
+      {
+        "name": "dev.taphound.demo.SearchActivity",
+        "entryPoints": [
+          "dev.taphound.demo.MainActivity"
+        ],
+        "screens": [
+          "search"
+        ]
+      },
+      {
+        "name": "dev.taphound.demo.ComposeActivity",
+        "entryPoints": [
+          "dev.taphound.demo.MainActivity"
+        ],
+        "screens": [
+          "compose"
+        ]
+      },
+      {
+        "name": "dev.taphound.demo.HybridActivity",
+        "entryPoints": [
+          "dev.taphound.demo.MainActivity"
+        ],
+        "screens": [
+          "hybrid"
+        ]
+      }
+    ],
+    "elements": [
+      {
+        "screen": "home",
+        "resourceId": "open_search",
+        "actions": [
+          "click"
+        ]
+      },
+      {
+        "screen": "search",
+        "resourceId": "search_input",
+        "actions": [
+          "click",
+          "inputText"
+        ]
+      },
+      {
+        "screen": "search",
+        "resourceId": "submit_search",
+        "actions": [
+          "click"
+        ]
+      }
+    ],
+    "transitions": [
+      {
+        "fromActivity": "dev.taphound.demo.MainActivity",
+        "actionResourceId": "open_search",
+        "toActivity": "dev.taphound.demo.SearchActivity"
+      }
+    ],
+    "logcat": [
+      {
+        "tag": "SearchViewModel",
+        "pattern": "submitted query=hello world",
+        "match": "literal"
+      }
+    ]
+  }
+}

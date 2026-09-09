@@ -1449,7 +1449,8 @@ export class GenerationStepExecutor {
     timeoutMs = this.dependencies.idle.timeoutMs,
     stableLayout?: readonly LayoutElement[]
   ): Promise<LiveRuntime> {
-    const deadline = this.dependencies.clock.now() + timeoutMs;
+    const deadline = this.dependencies.clock.now()
+      + Math.max(timeoutMs, this.dependencies.idle.timeoutMs);
     const identity = (): {
       packageName: string;
       deviceSerial: string;
@@ -1552,7 +1553,8 @@ export class GenerationStepExecutor {
     signal?: AbortSignal,
     timeoutMs = this.dependencies.idle.timeoutMs
   ): Promise<string> {
-    const deadline = this.dependencies.clock.now() + timeoutMs;
+    const deadline = this.dependencies.clock.now()
+      + Math.max(timeoutMs, this.dependencies.idle.timeoutMs);
     const identity = (): {
       packageName: string;
       deviceSerial: string;

@@ -25,6 +25,7 @@ import {
   type RuntimeSnapshot
 } from "../../../src/domain/runtime-snapshot.js";
 import type { CommandResult, RunningCommand } from "../../../src/ports/process-runner.js";
+import type { Clock } from "../../../src/ports/clock.js";
 import { contextSelection } from "../../fixtures/project-context.js";
 import type { ExternalFlow } from "../../../src/domain/external-flow.js";
 import type { UiSnapshotProvider } from "../../../src/ports/ui-snapshot.js";
@@ -138,7 +139,8 @@ function harness(
   initial = session(),
   generateAttemptId: () => string = () => "attempt-1",
   useSnapshotFactory = false,
-  viewport?: DisplayViewport
+  viewport?: DisplayViewport,
+  clock?: Clock
 ): {
   execute: GenerationStepExecutor["execute"];
   current: () => GenerationSession;
@@ -324,7 +326,7 @@ function harness(
           freshnessGuard: { assertFresh: guard },
           uiSnapshotProvider
         }),
-    clock: {
+    clock: clock ?? {
       now: (): number => {
         time += 1;
         return time;
@@ -1244,6 +1246,50 @@ describe("GenerationStepExecutor", () => {
     });
     expect(test.current().state).toBe("recoveryRequired");
     expect(test.current().candidateSteps).toEqual([]);
+  });
+
+  it("funds guarded identity checks when an Element Expect budget is below one observation", async () => {
+    const runtime = snapshot();
+    let time = 0;
+    const test = harness(session(runtime), () => "attempt-1", false, undefined, {
+      now: (): number => time,
+      sleep: (): Promise<void> => Promise.resolve()
+    });
+    test.adb.foregroundComponent.mockImplementation((() => Promise.resolve({
+      packageName: "com.example.app",
+      activity
+    })) as never);
+    test.androidCli.layout.mockImplementation((() => {
+      time += 4;
+      return Promise.resolve(snapshot().layout);
+    }) as never);
+    test.adb.appProcesses.mockImplementation(((
+      identity: { timeoutMs: number }
+    ) => {
+      if (identity.timeoutMs < 2) {
+        return Promise.reject(new Error("ADB ps timed out"));
+      }
+      time += 1;
+      return Promise.resolve([{ pid: 42, name: "com.example.app" }]);
+    }) as never);
+    const expected: ProposedStep = {
+      ...proposal(runtime),
+      expect: {
+        type: "element",
+        locator: { resourceId: "submit" },
+        timeoutMs: 6
+      }
+    };
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: expected,
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(test.current().candidateSteps).toHaveLength(1);
   });
 
   it("rechecks a unique enabled focused element immediately before inputText", async () => {

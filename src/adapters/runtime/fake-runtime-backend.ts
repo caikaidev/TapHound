@@ -9,6 +9,7 @@ import type {
 } from "../../ports/process-runner.js";
 import type {
   OpenRuntimeSessionOptions,
+  OpenRuntimeUiSnapshotsOptions,
   RuntimeAppQuery,
   RuntimeBackend,
   RuntimeDumpLogcatOptions,
@@ -99,6 +100,7 @@ export interface FakeRuntimeSessionState {
   processes?: readonly AppProcess[] | undefined;
   topology?: WindowTopology | undefined;
   currentActivity?: string | undefined;
+  dumpLogcatResult?: CommandResult | undefined;
 }
 
 export class FakeRuntimeSession implements RuntimeSession {
@@ -132,6 +134,7 @@ export class FakeRuntimeSession implements RuntimeSession {
 
   public state: FakeRuntimeSessionState;
   public readonly calls: string[] = [];
+  public lastUiSnapshotOptions: OpenRuntimeUiSnapshotsOptions | undefined;
   private openedUiSnapshots: UiSnapshotProvider | undefined;
 
   public constructor(input: {
@@ -204,13 +207,16 @@ export class FakeRuntimeSession implements RuntimeSession {
     this.dumpLogcat = this.capabilities.logs
       ? (options: RuntimeDumpLogcatOptions): Promise<CommandResult> => {
         this.calls.push(`dumpLogcat:${String(options.maxLines)}`);
-        return Promise.resolve(successResult());
+        return Promise.resolve(this.state.dumpLogcatResult ?? successResult());
       }
       : undefined;
   }
 
-  public openUiSnapshots(): Promise<UiSnapshotProvider> {
+  public openUiSnapshots(
+    options?: OpenRuntimeUiSnapshotsOptions
+  ): Promise<UiSnapshotProvider> {
     this.calls.push("openUiSnapshots");
+    this.lastUiSnapshotOptions = options;
     this.openedUiSnapshots ??= this.uiSnapshotProvider;
     return Promise.resolve(this.openedUiSnapshots);
   }

@@ -2,12 +2,12 @@ import {
   ObserveReportSchema,
   type ObserveReport
 } from "../../domain/observation.js";
-import type { AdbPort } from "../../ports/adb.js";
 import type { CommandResult } from "../../ports/process-runner.js";
+import type { RuntimeSessionOpener } from "../../ports/runtime-backend.js";
+import { runtimeCapabilityMissing } from "../../ports/runtime-capability.js";
 import type {
   UiSnapshot,
-  UiSnapshotProvider,
-  UiSnapshotProviderFactory
+  UiSnapshotProvider
 } from "../../ports/ui-snapshot.js";
 import type { UiBackendSelection } from "../../domain/ui-backend.js";
 import { closeUiSnapshotProvider } from "../ui/ui-snapshot-lifecycle.js";
@@ -20,8 +20,7 @@ export interface ObserveInput {
 }
 
 export interface ObserveDependencies {
-  adb: AdbPort;
-  uiSnapshots: UiSnapshotProviderFactory;
+  sessions: RuntimeSessionOpener;
   layoutTimeoutMs: number;
   backend?: UiBackendSelection | undefined;
   cacheEnabled?: boolean | undefined;
@@ -49,20 +48,28 @@ export class ObserveService {
 
   public async observe(input: ObserveInput): Promise<ObserveReport> {
     const { packageName, deviceSerial, logcatLines, signal } = input;
-    const identity = {
-      packageName,
+    const session = await this.dependencies.sessions.openSession({
       deviceSerial,
+      ...(signal === undefined ? {} : { signal })
+    });
+    const app = {
+      packageName,
       ...(signal === undefined ? {} : { signal })
     };
 
-    const foreground = await this.dependencies.adb.foregroundComponent(identity);
+    if (session.foregroundComponent === undefined) {
+      throw runtimeCapabilityMissing(
+        session.descriptor.id,
+        "foregroundComponent"
+      );
+    }
+    const foreground = await session.foregroundComponent(app);
 
     const activity = foreground.packageName === packageName
       ? foreground.activity
       : undefined;
 
-    const uiSnapshotProvider = await this.dependencies.uiSnapshots.open({
-      deviceSerial,
+    const uiSnapshotProvider = await session.openUiSnapshots({
       timeoutMs: this.dependencies.layoutTimeoutMs,
       ...(this.dependencies.backend === undefined
         ? {}
@@ -90,8 +97,13 @@ export class ObserveService {
 
     let logcat: string[] | undefined;
     if (logcatLines !== undefined && logcatLines > 0) {
-      const result = await this.dependencies.adb.dumpLogcat({
-        deviceSerial,
+      if (session.dumpLogcat === undefined) {
+        throw runtimeCapabilityMissing(
+          session.descriptor.id,
+          "dumpLogcat"
+        );
+      }
+      const result = await session.dumpLogcat({
         maxLines: logcatLines,
         ...(signal === undefined ? {} : { signal })
       });

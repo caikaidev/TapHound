@@ -172,6 +172,7 @@ import {
 } from "../domain/runtime.js";
 import type { AdbPort } from "../ports/adb.js";
 import type { AnnotatedScreenResolverPort } from "../ports/annotated-screen-resolver.js";
+import type { RuntimeSessionOpener } from "../ports/runtime-backend.js";
 import type { ScreenshotPort } from "../ports/screenshot.js";
 import type { UiSnapshotProviderFactory } from "../ports/ui-snapshot.js";
 import type { UiStabilityProbe } from "../ports/ui-stability.js";
@@ -376,6 +377,7 @@ export function createProductionDependencies(
   );
   const runner = new NodeProcessRunner();
   let adb: AdbPort;
+  let sessions: RuntimeSessionOpener;
   let screenshots: ScreenshotPort;
   let annotatedScreens: AnnotatedScreenResolverPort;
   let uiStability: UiStabilityProbe;
@@ -389,6 +391,7 @@ export function createProductionDependencies(
       })
     );
     sharedBackend = backend;
+    sessions = backend;
     adb = new RuntimeBackendAdbBridge({ backend });
     screenshots = new SessionBackedScreenshotAdapter(backend);
     annotatedScreens = new FailClosedAnnotatedScreenResolver("mobile-mcp");
@@ -406,15 +409,15 @@ export function createProductionDependencies(
         new AppiumUiSnapshotProviderFactory(runner)
       )
     );
-    adb = new RuntimeBackendAdbBridge({
-      backend: new AdbRuntimeBackend({
-        adb: adbAdapter,
-        screenshots: androidCli,
-        annotatedScreens: androidCli,
-        uiStability: androidCli,
-        uiSnapshots: autoSnapshots
-      })
+    const adbBackend = new AdbRuntimeBackend({
+      adb: adbAdapter,
+      screenshots: androidCli,
+      annotatedScreens: androidCli,
+      uiStability: androidCli,
+      uiSnapshots: autoSnapshots
     });
+    sessions = adbBackend;
+    adb = new RuntimeBackendAdbBridge({ backend: adbBackend });
     screenshots = androidCli;
     annotatedScreens = androidCli;
     uiStability = androidCli;
@@ -642,8 +645,7 @@ export function createProductionDependencies(
       observe: (input: ObserveInput) => Promise<ObserveReport>;
     } => {
       const service = new ObserveService({
-        adb,
-        uiSnapshots,
+        sessions,
         layoutTimeoutMs,
         ...(backend === undefined ? {} : { backend }),
         ...(cacheEnabled === undefined ? {} : { cacheEnabled })

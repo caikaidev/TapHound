@@ -1,4 +1,4 @@
-import type { FailureCode } from "../../domain/failure.js";
+import type { FailureCode } from "../domain/failure.js";
 
 export interface RuntimeCapabilityError extends Error {
   code: FailureCode;

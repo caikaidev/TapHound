@@ -2,9 +2,10 @@ import type { Point } from "../../domain/geometry.js";
 import type { AnnotatedScreenResolverPort } from "../../ports/annotated-screen-resolver.js";
 import type { CommandResult } from "../../ports/process-runner.js";
 import type {
-  RuntimeBackend,
-  RuntimeSession
+  RuntimeSession,
+  RuntimeSessionOpener
 } from "../../ports/runtime-backend.js";
+import { runtimeCapabilityMissing } from "../../ports/runtime-capability.js";
 import type { ScreenshotOptions, ScreenshotPort } from "../../ports/screenshot.js";
 import type {
   OpenUiSnapshotProviderOptions,
@@ -16,9 +17,6 @@ import type {
   UiStabilitySampleOptions,
   UiStabilitySampleResult
 } from "../../ports/ui-stability.js";
-import { runtimeCapabilityMissing } from "./capability-error.js";
-
-export type RuntimeSessionOpener = Pick<RuntimeBackend, "openSession">;
 
 export class SessionBackedScreenshotAdapter implements ScreenshotPort {
   public constructor(private readonly sessions: RuntimeSessionOpener) {}

@@ -129,3 +129,10 @@ export interface RuntimeBackend {
     options: OpenRuntimeSessionOptions
   ): Promise<RuntimeSession>;
 }
+
+/**
+ * The session-opening slice of `RuntimeBackend`. Application services that
+ * borrow a `RuntimeSession` per run depend on this type so backends can be
+ * shared or replaced without exposing the full backend interface.
+ */
+export type RuntimeSessionOpener = Pick<RuntimeBackend, "openSession">;

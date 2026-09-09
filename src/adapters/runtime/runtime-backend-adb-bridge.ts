@@ -19,7 +19,7 @@ import type { Point } from "../../domain/geometry.js";
 import type { ForegroundComponent } from "../../domain/activity.js";
 import type { AppProcess } from "../../domain/app-process.js";
 import type { WindowTopology } from "../../domain/window-hierarchy.js";
-import { runtimeCapabilityMissing } from "./capability-error.js";
+import { runtimeCapabilityMissing } from "../../ports/runtime-capability.js";
 
 export interface RuntimeBackendAdbBridgeDependencies {
   backend: RuntimeBackend;

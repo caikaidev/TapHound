@@ -23,7 +23,7 @@ import {
   parseMobileMcpScreenSize
 } from "../../../src/adapters/runtime/mobile-mcp/mobile-mcp-responses.js";
 import { MobileMcpToolError } from "../../../src/adapters/runtime/mobile-mcp/mobile-mcp-errors.js";
-import { McpToolClient } from "../../../src/adapters/runtime/mobile-mcp/mcp-tool-client.js";
+import { McpToolClient, defaultToolEnv } from "../../../src/adapters/runtime/mobile-mcp/mcp-tool-client.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type {
   MobileMcpDeviceEntry,
@@ -623,6 +623,37 @@ describe("McpToolClient", () => {
       arguments: {}
     });
     await client.close();
+  });
+
+  it("forwards TMPDIR so the server temp allowlist covers TapHound temp paths", () => {
+    const previous = process.env.TMPDIR;
+    process.env.TMPDIR = "/var/folders/example/T/";
+    try {
+      expect(defaultToolEnv()).toMatchObject({
+        MOBILEMCP_DISABLE_TELEMETRY: "1",
+        TMPDIR: "/var/folders/example/T/"
+      });
+    } finally {
+      if (previous === undefined) {
+        delete process.env.TMPDIR;
+      } else {
+        process.env.TMPDIR = previous;
+      }
+    }
+  });
+
+  it("omits TMPDIR when the host environment does not set it", () => {
+    const previous = process.env.TMPDIR;
+    delete process.env.TMPDIR;
+    try {
+      const env = defaultToolEnv();
+      expect(env.MOBILEMCP_DISABLE_TELEMETRY).toBe("1");
+      expect(env.TMPDIR).toBeUndefined();
+    } finally {
+      if (previous !== undefined) {
+        process.env.TMPDIR = previous;
+      }
+    }
   });
 
   it("passes tool arguments through to the server", async () => {

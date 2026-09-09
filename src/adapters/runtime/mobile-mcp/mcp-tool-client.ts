@@ -23,10 +23,13 @@ export interface McpToolClientOptions {
   transportFactory?: (() => Transport) | undefined;
 }
 
-function defaultToolEnv(): Record<string, string> {
+export function defaultToolEnv(): Record<string, string> {
   const env: Record<string, string> = {
     MOBILEMCP_DISABLE_TELEMETRY: "1"
   };
+  if (process.env.TMPDIR !== undefined) {
+    env.TMPDIR = process.env.TMPDIR;
+  }
   if (process.env.ANDROID_HOME !== undefined) {
     env.ANDROID_HOME = process.env.ANDROID_HOME;
   }

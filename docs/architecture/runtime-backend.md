@@ -176,6 +176,11 @@ Known limitations:
   failures and the doctor probe share one remediation message that names the
   `npm install -g @mobilenext/mobile-mcp` install command and the
   `runtime.backend` / `TAPHOUND_RUNTIME_BACKEND` escape hatch to `adb`.
+- `McpToolClient` forwards `TMPDIR` to the server process. The MCP SDK spawns
+  servers with a minimal inherited environment that omits `TMPDIR`, so a
+  1.0.3+ server would otherwise treat `/tmp` as the only allowed temp
+  directory and reject TapHound's `os.tmpdir()`-based screenshot paths with
+  `"is not in the list of allowed directories"`.
 - `verify`, `record`, `generation`, and `observe` still call capability-gated
   members (`currentActivity`, `appProcesses`, Logcat) and therefore fail
   closed under mobile-mcp with `RUNTIME_CAPABILITY_MISSING` (exit code 3);

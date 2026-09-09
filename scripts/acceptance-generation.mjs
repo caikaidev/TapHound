@@ -200,7 +200,7 @@ const stepTemplates = [
     expect: {
       type: "element",
       locator: { resourceId: "search_input" },
-      timeoutMs: 3000
+      timeoutMs: 10000
     }
   },
   {

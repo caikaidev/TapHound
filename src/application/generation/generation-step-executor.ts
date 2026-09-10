@@ -31,15 +31,19 @@ import {
   hashRuntimeSnapshot,
   type RuntimeSnapshot
 } from "../../domain/runtime-snapshot.js";
-import type { AdbPort } from "../../ports/adb.js";
 import type { Clock } from "../../ports/clock.js";
-import type { UiStabilityProbe } from "../../ports/ui-stability.js";
+import type {
+  RuntimeSessionOpener
+} from "../../ports/runtime-backend.js";
+import type {
+  RuntimeSessionPortViews,
+  RuntimeSessionPortViewsFactory
+} from "../../ports/runtime-session-ports.js";
 import type { GenerationSessionStore } from "../../ports/generation-session-store.js";
 import type {
   CaptureUiSnapshotOptions,
   UiSnapshot,
-  UiSnapshotProvider,
-  UiSnapshotProviderFactory
+  UiSnapshotProvider
 } from "../../ports/ui-snapshot.js";
 import {
   isKnownSystemPackage,
@@ -138,12 +142,13 @@ export interface GenerationStepExecutorDependencies {
   >;
   freshnessGuard?: Pick<SnapshotReobservationGuard, "assertFresh"> | undefined;
   createFreshnessGuard?: ((
-    uiSnapshotProvider: UiSnapshotProvider
+    uiSnapshotProvider: UiSnapshotProvider,
+    views: RuntimeSessionPortViews
   ) => Pick<SnapshotReobservationGuard, "assertFresh">) | undefined;
-  adb: AdbPort;
-  uiStability: UiStabilityProbe;
+  views?: RuntimeSessionPortViews | undefined;
+  sessions?: RuntimeSessionOpener | undefined;
+  sessionPorts?: RuntimeSessionPortViewsFactory | undefined;
   uiSnapshotProvider?: UiSnapshotProvider | undefined;
-  uiSnapshots?: UiSnapshotProviderFactory | undefined;
   uiCacheEnabled?: boolean | undefined;
   clock: Clock;
   idle: IdleConfig;
@@ -530,6 +535,14 @@ export class GenerationStepExecutor {
     return uiSnapshotProvider;
   }
 
+  private boundViews(): RuntimeSessionPortViews {
+    const views = this.dependencies.views;
+    if (views === undefined) {
+      throw new Error("Generation runtime session views are not bound");
+    }
+    return views;
+  }
+
   private requireCurrentViewport(): DisplayViewport {
     if (this.currentViewport === undefined) {
       throw new Error("Generation UI snapshot viewport is unavailable");
@@ -572,7 +585,8 @@ export class GenerationStepExecutor {
   ): Promise<GenerationStepExecutionResult> => {
     if (this.dependencies.uiSnapshotProvider === undefined) {
       if (
-        this.dependencies.uiSnapshots === undefined
+        this.dependencies.sessions === undefined
+        || this.dependencies.sessionPorts === undefined
         || this.dependencies.createFreshnessGuard === undefined
       ) {
         throw new Error("Generation UI snapshot provider factory is unavailable");
@@ -583,8 +597,13 @@ export class GenerationStepExecutor {
       const idle = session.idlePolicy === undefined
         ? this.dependencies.idle
         : session.idlePolicy;
-      const uiSnapshotProvider = await this.dependencies.uiSnapshots.open({
+      const deviceSession = await this.dependencies.sessions.openSession({
         deviceSerial: session.target.deviceSerial,
+        ...(input.signal === undefined ? {} : { signal: input.signal })
+      });
+      try {
+      const views = this.dependencies.sessionPorts(deviceSession);
+      const uiSnapshotProvider = await deviceSession.openUiSnapshots({
         timeoutMs: idle.timeoutMs,
         ...(session.bindings.uiBackend === undefined
           ? {}
@@ -599,12 +618,17 @@ export class GenerationStepExecutor {
           ...this.dependencies,
           idle,
           freshnessGuard: this.dependencies.createFreshnessGuard(
-            uiSnapshotProvider
+            uiSnapshotProvider,
+            views
           ),
+          views,
           uiSnapshotProvider
         }).execute(input);
       } finally {
         await closeUiSnapshotProvider(uiSnapshotProvider);
+      }
+      } finally {
+        await deviceSession.close();
       }
     }
     const freshnessGuard = this.dependencies.freshnessGuard;
@@ -821,7 +845,7 @@ export class GenerationStepExecutor {
     }
 
     const logcat = new LogcatCollector(
-      this.dependencies.adb,
+      this.boundViews().adb,
       this.dependencies.clock
     );
     let logcatStarted = false;
@@ -865,12 +889,12 @@ export class GenerationStepExecutor {
         proposal.activity.before
       );
       const actionExecutor = new ActionExecutor(
-        this.dependencies.adb,
+        this.boundViews().adb,
         session.target.deviceSerial,
         (): void => this.boundUiSnapshotProvider().invalidate?.("beforeAction")
       );
       const idleWaiter = new IdleWaiter(
-        this.dependencies.uiStability,
+        this.boundViews().uiStability,
         this.dependencies.clock,
         session.target.deviceSerial,
         session.target.packageName
@@ -1160,7 +1184,7 @@ export class GenerationStepExecutor {
           const expectationStartedAt = this.dependencies.clock.now();
           let expectationRuntime: LiveRuntime | undefined;
           const expectation = await new ExpectationEvaluator(
-            this.dependencies.adb,
+            this.boundViews().adb,
             this.boundUiSnapshotProvider(),
             logcat,
             this.dependencies.clock
@@ -1462,14 +1486,14 @@ export class GenerationStepExecutor {
       ...(signal === undefined ? {} : { signal }),
       timeoutMs: Math.max(1, deadline - this.dependencies.clock.now())
     });
-    const foreground = await this.dependencies.adb.foregroundComponent(
+    const foreground = await this.boundViews().adb.foregroundComponent(
       identity()
     );
     throwIfCancelled(signal);
     if (foreground.packageName !== session.target.packageName) {
       fail("PACKAGE_ESCAPE", "Foreground package escaped generation target");
     }
-    const processes = await this.dependencies.adb.appProcesses(identity());
+    const processes = await this.boundViews().adb.appProcesses(identity());
     const pid = primaryAppPid(processes, session.target.packageName);
     throwIfCancelled(signal);
     if (pid === null || pid !== expectedPid) {
@@ -1489,18 +1513,18 @@ export class GenerationStepExecutor {
             signal
           )
         : Promise.resolve(stableLayout),
-      this.dependencies.adb.windowTopology(identity())
+      this.boundViews().adb.windowTopology(identity())
     ]);
     const windowHierarchy = assessWindowHierarchy(topology, layout);
     throwIfCancelled(signal);
-    const confirmedForeground = await this.dependencies.adb
+    const confirmedForeground = await this.boundViews().adb
       .foregroundComponent(identity());
     throwIfCancelled(signal);
     if (confirmedForeground.packageName !== session.target.packageName) {
       fail("PACKAGE_ESCAPE", "Foreground package escaped generation target");
     }
     const confirmedPid = primaryAppPid(
-      await this.dependencies.adb.appProcesses(identity()),
+      await this.boundViews().adb.appProcesses(identity()),
       session.target.packageName
     );
     throwIfCancelled(signal);
@@ -1566,7 +1590,7 @@ export class GenerationStepExecutor {
       ...(signal === undefined ? {} : { signal }),
       timeoutMs: Math.max(1, deadline - this.dependencies.clock.now())
     });
-    const foreground = await this.dependencies.adb.foregroundComponent(
+    const foreground = await this.boundViews().adb.foregroundComponent(
       identity()
     );
     throwIfCancelled(signal);
@@ -1580,7 +1604,7 @@ export class GenerationStepExecutor {
       fail("SNAPSHOT_STALE", "Generation Activity changed before mutation");
     }
     const pid = primaryAppPid(
-      await this.dependencies.adb.appProcesses(identity()),
+      await this.boundViews().adb.appProcesses(identity()),
       session.target.packageName
     );
     throwIfCancelled(signal);
@@ -1633,7 +1657,7 @@ export class GenerationStepExecutor {
     const deadline = this.dependencies.clock.now() + timeoutMs;
     while (this.dependencies.clock.now() < deadline) {
       throwIfCancelled(signal);
-      const foreground = await this.dependencies.adb.foregroundComponent({
+      const foreground = await this.boundViews().adb.foregroundComponent({
         packageName: session.target.packageName,
         deviceSerial: session.target.deviceSerial,
         ...(signal === undefined ? {} : { signal }),
@@ -1658,7 +1682,7 @@ export class GenerationStepExecutor {
     const deadline = this.dependencies.clock.now() + timeoutMs;
     while (this.dependencies.clock.now() < deadline) {
       throwIfCancelled(signal);
-      const foreground = await this.dependencies.adb.foregroundComponent({
+      const foreground = await this.boundViews().adb.foregroundComponent({
         packageName: session.target.packageName,
         deviceSerial: session.target.deviceSerial,
         ...(signal === undefined ? {} : { signal }),
@@ -1726,7 +1750,7 @@ export class GenerationStepExecutor {
       );
     }
     if (resolution.flow.expectedEscapeActivity !== undefined) {
-      const foreground = await this.dependencies.adb.foregroundComponent({
+      const foreground = await this.boundViews().adb.foregroundComponent({
         packageName: escapedPackageName,
         deviceSerial: session.target.deviceSerial,
         ...(signal === undefined ? {} : { signal }),
@@ -1744,7 +1768,7 @@ export class GenerationStepExecutor {
       }
     }
     const actionExecutor = new ActionExecutor(
-      this.dependencies.adb,
+      this.boundViews().adb,
       session.target.deviceSerial,
       (): void => this.boundUiSnapshotProvider().invalidate?.("beforeAction")
     );
@@ -1774,7 +1798,7 @@ export class GenerationStepExecutor {
       ...(signal === undefined ? {} : { signal }),
       timeoutMs: 5000
     };
-    const foreground = await this.dependencies.adb.foregroundComponent(
+    const foreground = await this.boundViews().adb.foregroundComponent(
       identity
     );
     throwIfCancelled(signal);
@@ -1801,7 +1825,7 @@ export class GenerationStepExecutor {
         { action: "scrollTo" }
       >;
       const externalIdleWaiter = new IdleWaiter(
-        this.dependencies.uiStability,
+        this.boundViews().uiStability,
         this.dependencies.clock,
         session.target.deviceSerial,
         escapedPackageName
@@ -1867,7 +1891,7 @@ export class GenerationStepExecutor {
     }
 
     const externalIdleWaiter = new IdleWaiter(
-      this.dependencies.uiStability,
+      this.boundViews().uiStability,
       this.dependencies.clock,
       session.target.deviceSerial,
       escapedPackageName
@@ -1913,7 +1937,7 @@ export class GenerationStepExecutor {
       ...(signal === undefined ? {} : { signal }),
       timeoutMs: 5000
     };
-    const foreground = await this.dependencies.adb.foregroundComponent(
+    const foreground = await this.boundViews().adb.foregroundComponent(
       identity
     );
     throwIfCancelled(signal);
@@ -1947,7 +1971,7 @@ export class GenerationStepExecutor {
       ...(signal === undefined ? {} : { signal }),
       timeoutMs: 5000
     };
-    const foreground = await this.dependencies.adb.foregroundComponent(
+    const foreground = await this.boundViews().adb.foregroundComponent(
       identity
     );
     throwIfCancelled(signal);
@@ -1985,7 +2009,7 @@ export class GenerationStepExecutor {
     };
     if (expect.type === "activity") {
       const expectedPackage = expect.packageName ?? escapedPackageName;
-      const foreground = await this.dependencies.adb.foregroundComponent({
+      const foreground = await this.boundViews().adb.foregroundComponent({
         ...identity,
         packageName: expectedPackage
       });

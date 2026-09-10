@@ -49,6 +49,17 @@ import { hashJourney, type TapHoundReport } from "../../../src/domain/report.js"
 import { assessWindowHierarchy } from "../../../src/domain/window-hierarchy.js";
 import type { CommandResult, RunningCommand } from "../../../src/ports/process-runner.js";
 import type { VerifyInput, VerifyResult } from "../../../src/application/runtime/verify-runtime.js";
+import type {
+  RuntimeSession,
+  RuntimeSessionOpener
+} from "../../../src/ports/runtime-backend.js";
+import type {
+  RuntimeSessionPortViews,
+  RuntimeSessionPortViewsFactory
+} from "../../../src/ports/runtime-session-ports.js";
+import type { AnnotatedScreenResolverPort } from "../../../src/ports/annotated-screen-resolver.js";
+import type { UiStabilityProbe } from "../../../src/ports/ui-stability.js";
+import type { UiSnapshotProvider } from "../../../src/ports/ui-snapshot.js";
 import { contextSelection } from "../../fixtures/project-context.js";
 
 const roots: string[] = [];
@@ -207,13 +218,29 @@ async function createLifecycleFixture(): Promise<LifecycleFixture> {
   });
 
   const attemptIds = ["attempt-1", "attempt-2", "attempt-3", "attempt-4"];
+  const observerSessionPorts: RuntimeSessionPortViewsFactory = (): RuntimeSessionPortViews => ({
+    adb: adb as never,
+    screenshots: { capture: androidCli.captureScreen },
+    annotatedScreens: {} as AnnotatedScreenResolverPort,
+    uiStability: {} as UiStabilityProbe
+  });
+  const observerSessions: RuntimeSessionOpener = {
+    openSession: vi.fn((): Promise<RuntimeSession> => (
+      Promise.resolve({
+        descriptor: { id: "test" },
+        openUiSnapshots: vi.fn((): Promise<UiSnapshotProvider> => (
+          uiSnapshotFactory(
+            uiSnapshotProviderFromLayout(androidCli.layout)
+          ).open({ deviceSerial, timeoutMs: 5000 })
+        )),
+        close: vi.fn((): Promise<void> => Promise.resolve())
+      } as unknown as RuntimeSession)
+    ))
+  };
   const observer = new RuntimeObserver({
     store,
-    adb: adb,
-    screenshots: { capture: androidCli.captureScreen },
-    uiSnapshots: uiSnapshotFactory(
-      uiSnapshotProviderFromLayout(androidCli.layout)
-    ),
+    sessions: observerSessions,
+    sessionPorts: observerSessionPorts,
     now: (): Date => new Date("2026-07-22T12:00:01.000Z"),
     createAttemptId: (): string => attemptIds.shift() ?? "unexpected-attempt"
   });
@@ -243,10 +270,14 @@ async function createLifecycleFixture(): Promise<LifecycleFixture> {
         }
       )
     },
-    adb: adb as never,
-    uiStability: {
-      reset: vi.fn(),
-      sample: androidCli.layoutDiff
+    views: {
+      adb: adb as never,
+      screenshots: { capture: androidCli.captureScreen },
+      annotatedScreens: {} as never,
+      uiStability: {
+        reset: vi.fn(),
+        sample: androidCli.layoutDiff
+      }
     },
     uiSnapshotProvider: uiSnapshotProviderFromLayout(androidCli.layout),
     clock: {

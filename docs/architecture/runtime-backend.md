@@ -90,15 +90,19 @@ RuntimeBackendAdbBridge (implements AdbPort)
 RecorderService / generation / align
 ```
 
-`ObserveService` and `VerifyRuntime` no longer use the bridge: they are the
-Level 1 session-first consumers and borrow a `RuntimeSession` per run through
-the `RuntimeSessionOpener` port (see the roadmap below). `VerifyRuntime` feeds
+`ObserveService`, `VerifyRuntime`, `RecorderService`, `RuntimeObserver`, and
+`GenerationStepExecutor` no longer use the bridge: they are the Level 1
+session-first consumers and borrow a `RuntimeSession` per run through the
+`RuntimeSessionOpener` port (see the roadmap below). `VerifyRuntime` feeds
 its unchanged `AdbPort`-shaped helpers (`ProcessWaiter`, `ActivityWaiter`,
 `LogcatCollector`, `StepRunner`) through `runtimeSessionPortViews`
 (`src/adapters/runtime/session-adb-view.ts`), a serial-bound legacy port view
 over one borrowed session; the view type lives in
 `src/ports/runtime-session-ports.ts` so application services depend on the
-factory type only.
+factory type only. `RuntimeObserver` and `GenerationStepExecutor` open a
+session per observation/step execution through the same port and pass the
+views into their evidence and replay helpers; the executor binds one session
+(and its snapshot provider) for the duration of a step.
 
 The bridge (`src/adapters/runtime/runtime-backend-adb-bridge.ts`):
 
@@ -134,6 +138,13 @@ from two sources with fixed precedence:
 | `auto` (default) | `MobileMcpRuntimeBackend` |
 | `adb` | `AdbRuntimeBackend` |
 | `mobile-mcp` | `MobileMcpRuntimeBackend` |
+
+**Mobile MCP is the preferred runtime path (2026-09-10).** ADB is the
+designated backup driver for capability gaps — notably process discovery,
+which the verify path needs — and remains reachable through
+`runtime.backend: "adb"` or `TAPHOUND_RUNTIME_BACKEND=adb`. The demo project
+keeps pinning `adb` until the Mobile MCP capability matrix covers the core
+commands.
 
 An invalid value in either source fails with `CONFIG_INVALID` (exit code 2)
 before any command runs; a missing config or a config without `runtime.backend`
@@ -205,9 +216,10 @@ Known limitations:
 | Level | State | Description |
 |---|---|---|
 | 0 — bridge (current) | done | Production flows through the SPI via `RuntimeBackendAdbBridge`; services keep the `AdbPort` type. `doctor` is backend-aware and fully works under mobile-mcp. |
-| 1 — session-first orchestrators | in progress | `ObserveService` and `VerifyRuntime` borrow a session per run through `RuntimeSessionOpener` and fail closed on missing capability members; `VerifyRuntime` feeds its `AdbPort`-shaped helpers through `RuntimeSessionPortViews` (`src/ports/runtime-session-ports.ts`). `RecorderService`, `RuntimeObserver`, and `GenerationStepExecutor` follow the same pattern; the bridge remains for device discovery and long-tail consumers. |
+| 1 — session-first orchestrators | done | `ObserveService`, `VerifyRuntime`, `RecorderService`, `RuntimeObserver`, and `GenerationStepExecutor` borrow a session per run through `RuntimeSessionOpener` and fail closed on missing capability members; `VerifyRuntime` feeds its `AdbPort`-shaped helpers through `RuntimeSessionPortViews` (`src/ports/runtime-session-ports.ts`). The bridge remains for device discovery, `align`, and long-tail consumers. |
 | 2 — full session typing | later | Helpers (`ProcessWaiter`, `ActionExecutor`, `LogcatCollector`, …) accept `Pick<RuntimeSession, …>`; `AdbPort` shrinks to the bridge or is deleted. |
 | 3 — Mobile MCP default | done | `MobileMcpRuntimeBackend` passes the shared contract suite and `auto` resolves to it; ADB remains available through `runtime.backend: "adb"` and the environment override. |
+| 4 — Mobile MCP capability completion | next | Re-check the 1.0.3 capability matrix on a real device and close the remaining gaps (process discovery is the hard one; foreground and log evidence may already be covered by `mobile_get_foreground_app` / `mobile_get_device_logs`) so `verify`, `record`, and `generation` run on the default backend without failing closed. |
 
 ## Phase 2 flip checklist
 

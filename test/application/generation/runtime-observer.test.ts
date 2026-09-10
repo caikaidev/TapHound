@@ -11,7 +11,6 @@ import {
   type Mock
 } from "vitest";
 import {
-  uiSnapshotFactory,
   uiSnapshotProviderFromLayout
 } from "../../fakes/ui-snapshot.js";
 
@@ -30,6 +29,17 @@ import type {
 import type { IdleResult } from "../../../src/application/wait/idle-waiter.js";
 import type { CommandResult } from "../../../src/ports/process-runner.js";
 import type { UiSnapshotProvider } from "../../../src/ports/ui-snapshot.js";
+import type {
+  RuntimeSession,
+  RuntimeSessionOpener
+} from "../../../src/ports/runtime-backend.js";
+import type {
+  RuntimeSessionPortViewsFactory
+} from "../../../src/ports/runtime-session-ports.js";
+import type { AdbPort } from "../../../src/ports/adb.js";
+import type { ScreenshotPort } from "../../../src/ports/screenshot.js";
+import type { AnnotatedScreenResolverPort } from "../../../src/ports/annotated-screen-resolver.js";
+import type { UiStabilityProbe } from "../../../src/ports/ui-stability.js";
 import {
   GenerationSessionStoreError
 } from "../../../src/ports/generation-session-store.js";
@@ -188,6 +198,8 @@ interface ObserverHarness {
     ) => Promise<IdleResult>
   >;
   uiSnapshotProvider: UiSnapshotProvider;
+  sessions: RuntimeSessionOpener;
+  fakeSession: RuntimeSession;
   observer: RuntimeObserver;
 }
 
@@ -253,6 +265,27 @@ function harness(): ObserverHarness {
     });
   });
   const uiSnapshotProvider = uiSnapshotProviderFromLayout(androidCli.layout);
+  const fakeSession = {
+    descriptor: { id: "test" },
+    openUiSnapshots: vi.fn((): Promise<UiSnapshotProvider> => (
+      Promise.resolve(uiSnapshotProvider)
+    )),
+    close: vi.fn((): Promise<void> => Promise.resolve())
+  } as unknown as RuntimeSession;
+  const sessions: RuntimeSessionOpener = {
+    openSession: vi.fn((): Promise<RuntimeSession> => Promise.resolve(fakeSession))
+  };
+  const sessionPorts: RuntimeSessionPortViewsFactory = (): {
+    adb: AdbPort;
+    screenshots: ScreenshotPort;
+    annotatedScreens: AnnotatedScreenResolverPort;
+    uiStability: UiStabilityProbe;
+  } => ({
+    adb: adb as never,
+    screenshots,
+    annotatedScreens: {} as AnnotatedScreenResolverPort,
+    uiStability: {} as UiStabilityProbe
+  });
   return {
     store,
     adb,
@@ -261,11 +294,12 @@ function harness(): ObserverHarness {
     waitUntilIdle,
     identities,
     uiSnapshotProvider,
+    sessions,
+    fakeSession,
     observer: new RuntimeObserver({
       store,
-      adb,
-      screenshots,
-      uiSnapshots: uiSnapshotFactory(uiSnapshotProvider),
+      sessions,
+      sessionPorts,
       waitUntilIdle,
       now: (): Date => new Date("2026-07-22T12:05:00.000Z"),
       createAttemptId: () => attemptIds.shift() ?? "unexpected-attempt"

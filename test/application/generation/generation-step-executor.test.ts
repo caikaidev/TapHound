@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  uiSnapshotFactory,
   uiSnapshotProviderFromLayout
 } from "../../fakes/ui-snapshot.js";
 
@@ -26,6 +25,14 @@ import {
 } from "../../../src/domain/runtime-snapshot.js";
 import type { CommandResult, RunningCommand } from "../../../src/ports/process-runner.js";
 import type { Clock } from "../../../src/ports/clock.js";
+import type {
+  RuntimeSession,
+  RuntimeSessionOpener
+} from "../../../src/ports/runtime-backend.js";
+import type {
+  RuntimeSessionPortViews,
+  RuntimeSessionPortViewsFactory
+} from "../../../src/ports/runtime-session-ports.js";
 import { contextSelection } from "../../fixtures/project-context.js";
 import type { ExternalFlow } from "../../../src/domain/external-flow.js";
 import type { UiSnapshotProvider } from "../../../src/ports/ui-snapshot.js";
@@ -165,7 +172,8 @@ function harness(
   guard: ReturnType<typeof vi.fn>;
   createFreshnessGuard: ReturnType<typeof vi.fn>;
   uiSnapshotProvider: UiSnapshotProvider;
-  uiSnapshots: ReturnType<typeof uiSnapshotFactory>;
+  executorOpenUiSnapshots: ReturnType<typeof vi.fn>;
+  sessions: RuntimeSessionOpener;
   evidence: Map<string, unknown>;
   stopLogcat: ReturnType<typeof vi.fn>;
   writeEvidence: ReturnType<typeof vi.fn>;
@@ -308,23 +316,45 @@ function harness(
     "emulator-5554",
     viewport
   );
-  const uiSnapshots = uiSnapshotFactory(uiSnapshotProvider);
-  const createFreshnessGuard = vi.fn((provider: UiSnapshotProvider) => {
+  const views: RuntimeSessionPortViews = {
+    adb: adb as never,
+    screenshots: {} as never,
+    annotatedScreens: {} as never,
+    uiStability: {
+      reset: vi.fn(),
+      sample: androidCli.layoutDiff
+    }
+  };
+  const executorOpenUiSnapshots = vi.fn(
+    (): Promise<UiSnapshotProvider> => Promise.resolve(uiSnapshotProvider)
+  );
+  const executorSession = {
+    descriptor: { id: "test" },
+    openUiSnapshots: executorOpenUiSnapshots,
+    close: vi.fn((): Promise<void> => Promise.resolve())
+  } as unknown as RuntimeSession;
+  const sessions: RuntimeSessionOpener = {
+    openSession: vi.fn((): Promise<RuntimeSession> => (
+      Promise.resolve(executorSession)
+    ))
+  };
+  const sessionPorts: RuntimeSessionPortViewsFactory = (): RuntimeSessionPortViews => views;
+  const createFreshnessGuard = vi.fn((
+    provider: UiSnapshotProvider,
+    guardViews: RuntimeSessionPortViews
+  ) => {
     expect(provider).toBe(uiSnapshotProvider);
+    expect(guardViews).toBe(views);
     return { assertFresh: guard };
   });
   const executor = new GenerationStepExecutor({
     store,
-    adb: adb as never,
-    uiStability: {
-      reset: vi.fn(),
-      sample: androidCli.layoutDiff
-    },
     ...(useSnapshotFactory
-      ? { uiSnapshots, createFreshnessGuard }
+      ? { sessions, sessionPorts, createFreshnessGuard }
       : {
           freshnessGuard: { assertFresh: guard },
-          uiSnapshotProvider
+          uiSnapshotProvider,
+          views
         }),
     clock: clock ?? {
       now: (): number => {
@@ -349,7 +379,8 @@ function harness(
     guard,
     createFreshnessGuard,
     uiSnapshotProvider,
-    uiSnapshots,
+    executorOpenUiSnapshots,
+    sessions,
     evidence,
     stopLogcat,
     writeEvidence: store.writeEvidence,
@@ -393,9 +424,9 @@ describe("GenerationStepExecutor", () => {
       source: "planner"
     })).resolves.toMatchObject({ status: "succeeded" });
 
-    expect(test.uiSnapshots.open).toHaveBeenCalledOnce();
-    expect(test.uiSnapshots.open).toHaveBeenCalledWith({
-      deviceSerial: "emulator-5554",
+    const openOptions = test.executorOpenUiSnapshots;
+    expect(openOptions).toHaveBeenCalledOnce();
+    expect(openOptions).toHaveBeenCalledWith({
       timeoutMs: 10
     });
     expect(test.createFreshnessGuard).toHaveBeenCalledOnce();
@@ -425,8 +456,7 @@ describe("GenerationStepExecutor", () => {
       source: "planner"
     })).resolves.toMatchObject({ status: "succeeded" });
 
-    expect(test.uiSnapshots.open).toHaveBeenCalledWith({
-      deviceSerial: "emulator-5554",
+    expect(test.executorOpenUiSnapshots).toHaveBeenCalledWith({
       timeoutMs: 30000
     });
     expect(test.androidCli.layoutDiff).toHaveBeenCalledTimes(5);

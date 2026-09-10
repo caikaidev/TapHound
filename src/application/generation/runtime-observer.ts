@@ -21,11 +21,14 @@ import {
 } from "../../domain/runtime-snapshot.js";
 import { assessWindowHierarchy } from "../../domain/window-hierarchy.js";
 import type { AdbPort } from "../../ports/adb.js";
-import type { ScreenshotPort } from "../../ports/screenshot.js";
+import type { RuntimeSessionOpener } from "../../ports/runtime-backend.js";
+import type {
+  RuntimeSessionPortViews,
+  RuntimeSessionPortViewsFactory
+} from "../../ports/runtime-session-ports.js";
 import type {
   UiSnapshot,
-  UiSnapshotProvider,
-  UiSnapshotProviderFactory
+  UiSnapshotProvider
 } from "../../ports/ui-snapshot.js";
 import type { IdleConfig, IdleResult } from "../wait/idle-waiter.js";
 import { withIdleAdvice } from "../wait/idle-advice.js";
@@ -85,12 +88,8 @@ export interface RuntimeObserverDependencies {
     | "commitSnapshot"
     | "evidenceReference"
   >;
-  adb: Pick<
-    AdbPort,
-    "foregroundComponent" | "appProcesses" | "windowTopology"
-  >;
-  screenshots: ScreenshotPort;
-  uiSnapshots: UiSnapshotProviderFactory;
+  sessions: RuntimeSessionOpener;
+  sessionPorts: RuntimeSessionPortViewsFactory;
   waitUntilIdle?: (
     deviceSerial: string,
     config: IdleConfig,
@@ -274,8 +273,51 @@ export class RuntimeObserver {
         );
       }
     }
-    const uiSnapshotProvider = await this.dependencies.uiSnapshots.open({
+    const session = await this.dependencies.sessions.openSession({
       deviceSerial: current.target.deviceSerial,
+      ...(input.signal === undefined ? {} : { signal: input.signal })
+    });
+    try {
+    const views = this.dependencies.sessionPorts(session);
+    if (
+      idle !== undefined
+      && this.dependencies.waitUntilIdle !== undefined
+    ) {
+      const idleResult = await this.dependencies.waitUntilIdle(
+        current.target.deviceSerial,
+        idle,
+        input.signal,
+        current.target.packageName
+      );
+      if (idleResult.status !== "stable") {
+        throw new GenerationOperationError(
+          idleResult.status === "cancelled" ? "RECOVERY_REQUIRED" : "IDLE_TIMEOUT",
+          idleResult.status === "cancelled"
+            ? "Runtime observation was cancelled while waiting for layout stability"
+            : withIdleAdvice(
+              "Layout did not become stable before observation",
+              idleResult
+            ),
+          idleResult.status === "cancelled"
+            ? undefined
+            : {
+                idle: {
+                  strategy: idleResult.strategy,
+                  ...(idleResult.backend === undefined
+                    ? {}
+                    : { backend: idleResult.backend }),
+                  polls: idleResult.polls,
+                  durationMs: idleResult.durationMs,
+                  samplingDurationMs: idleResult.samplingDurationMs,
+                  fallbackUsed: idleResult.fallbackUsed,
+                  frameActivityDetected: idleResult.frameActivityDetected,
+                  lastDiff: idleResult.lastDiff
+                }
+              }
+        );
+      }
+    }
+    const uiSnapshotProvider = await session.openUiSnapshots({
       timeoutMs: idle?.timeoutMs ?? 5000,
       ...(current.bindings.uiBackend === undefined
         ? {}
@@ -311,7 +353,7 @@ export class RuntimeObserver {
       }
       runtime = await collectRuntime(
         {
-          adb: this.dependencies.adb,
+          adb: views.adb,
           uiSnapshotProvider,
           uiSnapshotTimeoutMs: this.dependencies.uiSnapshotTimeoutMs ?? 5000
         },
@@ -322,7 +364,10 @@ export class RuntimeObserver {
       await closeUiSnapshotProvider(uiSnapshotProvider);
     }
 
-    return this.commit(current, runtime, false, input.signal);
+    return await this.commit(current, runtime, false, views, input.signal);
+    } finally {
+      await session.close();
+    }
   };
 
   public readonly observeCollected = async (
@@ -341,13 +386,23 @@ export class RuntimeObserver {
         "Collected post-action runtime is not a valid target-app state"
       );
     }
-    return this.commit(current, input.runtime, true, input.signal);
+    const session = await this.dependencies.sessions.openSession({
+      deviceSerial: current.target.deviceSerial,
+      ...(input.signal === undefined ? {} : { signal: input.signal })
+    });
+    try {
+      const views = this.dependencies.sessionPorts(session);
+      return await this.commit(current, input.runtime, true, views, input.signal);
+    } finally {
+      await session.close();
+    }
   };
 
   private async commit(
     current: GenerationSession,
     runtime: CollectedRuntimeState,
     verifyTransition: boolean,
+    views: RuntimeSessionPortViews,
     signal?: AbortSignal
   ): Promise<RuntimeObservation> {
     const baseRevision = current.revision + 1;
@@ -361,7 +416,7 @@ export class RuntimeObserver {
       current.id,
       screenshotPath,
       async (temporaryPath) => {
-        const capture = await this.dependencies.screenshots.capture({
+        const capture = await views.screenshots.capture({
           outputPath: temporaryPath,
           deviceSerial: current.target.deviceSerial,
           ...(signal === undefined ? {} : { signal })
@@ -381,8 +436,8 @@ export class RuntimeObserver {
       ...(signal === undefined ? {} : { signal })
     };
     const [confirmedForeground, confirmedProcesses] = await Promise.all([
-      this.dependencies.adb.foregroundComponent(identity),
-      this.dependencies.adb.appProcesses(identity)
+      views.adb.foregroundComponent(identity),
+      views.adb.appProcesses(identity)
     ]);
     const confirmedPid = primaryAppPid(
       confirmedProcesses,
@@ -526,7 +581,7 @@ export class SnapshotReobservationGuard {
           "Generation UI backend changed after snapshot binding"
         );
       }
-      const runtime = await collectRuntime(
+const runtime = await collectRuntime(
         {
           adb: this.dependencies.adb,
           uiSnapshotProvider: this.dependencies.uiSnapshotProvider,

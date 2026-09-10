@@ -13,15 +13,15 @@ import {
   type JourneyStep
 } from "../../domain/journey.js";
 import type { LayoutElement, Locator } from "../../domain/layout.js";
-import type { AppIdentity, AdbPort } from "../../ports/adb.js";
+import type { AppIdentity } from "../../ports/adb.js";
 import type { Clock } from "../../ports/clock.js";
 import type { JourneyWriterPort } from "../../ports/journey-writer.js";
-import type { ScreenshotPort } from "../../ports/screenshot.js";
-import type { UiStabilityProbe } from "../../ports/ui-stability.js";
+import type { RuntimeSessionOpener } from "../../ports/runtime-backend.js";
 import type {
-  UiSnapshotProvider,
-  UiSnapshotProviderFactory
-} from "../../ports/ui-snapshot.js";
+  RuntimeSessionPortViews,
+  RuntimeSessionPortViewsFactory
+} from "../../ports/runtime-session-ports.js";
+import type { UiSnapshotProvider } from "../../ports/ui-snapshot.js";
 import type {
   ExternalStepAction,
   RecorderAction,
@@ -40,10 +40,8 @@ import {
 import { closeUiSnapshotProvider } from "../ui/ui-snapshot-lifecycle.js";
 
 export interface RecorderDependencies {
-  screenshots: ScreenshotPort;
-  uiStability: UiStabilityProbe;
-  uiSnapshots: UiSnapshotProviderFactory;
-  adb: AdbPort;
+  sessions: RuntimeSessionOpener;
+  sessionPorts: RuntimeSessionPortViewsFactory;
   clock: Clock;
   prompt: RecorderPromptPort;
   journeyWriter: JourneyWriterPort;
@@ -154,14 +152,20 @@ export class RecorderService {
       ...(input.signal === undefined ? {} : { signal: input.signal }),
       timeoutMs: input.config.idle.timeoutMs
     };
-    if (!await this.dependencies.adb.isInstalled(identity)) {
+    const session = await this.dependencies.sessions.openSession({
+      deviceSerial: input.deviceSerial,
+      ...(input.signal === undefined ? {} : { signal: input.signal })
+    });
+    try {
+    const views = this.dependencies.sessionPorts(session);
+    if (!await views.adb.isInstalled(identity)) {
       return {
         status: "failed",
         stepsRecorded: 0,
         message: `Package ${input.config.run.packageName} is not installed on ${input.deviceSerial}`
       };
     }
-    const stopped = await this.dependencies.adb.forceStop(identity);
+    const stopped = await views.adb.forceStop(identity);
     if (failedCommand(stopped)) {
       return {
         status: "failed",
@@ -170,7 +174,7 @@ export class RecorderService {
       };
     }
     const launchError = launchFailure(
-      await this.dependencies.adb.launchActivity({
+      await views.adb.launchActivity({
         packageName: input.config.run.packageName,
         activity: launchActivity,
         deviceSerial: input.deviceSerial,
@@ -186,7 +190,7 @@ export class RecorderService {
       };
     }
     const processReadiness = await new ProcessWaiter(
-      this.dependencies.adb,
+      views.adb,
       this.dependencies.clock
     ).wait({
       packageName: input.config.run.packageName,
@@ -206,8 +210,7 @@ export class RecorderService {
       };
     }
 
-    const uiSnapshotProvider = await this.dependencies.uiSnapshots.open({
-      deviceSerial: input.deviceSerial,
+    const uiSnapshotProvider = await session.openUiSnapshots({
       timeoutMs: input.config.ui?.snapshotTimeoutMs
         ?? input.config.idle.timeoutMs,
       backend: input.config.ui?.backend ?? "auto",
@@ -216,7 +219,7 @@ export class RecorderService {
     });
     try {
     const idleWaiter = new IdleWaiter(
-      this.dependencies.uiStability,
+      views.uiStability,
       this.dependencies.clock,
       input.deviceSerial,
       input.config.run.packageName
@@ -243,7 +246,7 @@ export class RecorderService {
 
     const steps: JourneyStep[] = [];
     const executor = new ActionExecutor(
-      this.dependencies.adb,
+      views.adb,
       input.deviceSerial,
       (): void => uiSnapshotProvider.invalidate?.("beforeAction")
     );
@@ -282,7 +285,8 @@ export class RecorderService {
           layout,
           input,
           identity,
-          uiSnapshotProvider
+          uiSnapshotProvider,
+          views
         );
         if (result.status === "cancelled") {
           return { status: "cancelled", stepsRecorded: steps.length };
@@ -304,7 +308,8 @@ export class RecorderService {
         action,
         layout,
         input,
-        uiSnapshotProvider
+        uiSnapshotProvider,
+        views
       );
       if (prepared === undefined) {
         continue;
@@ -312,7 +317,7 @@ export class RecorderService {
       // scrollTo captures `before` post-scroll by design: it does not navigate, so before==after in practice (replay checks `before` pre-scroll but the Activity is unchanged).
       const before = normalizeActivity(
         input.config.run.packageName,
-        await this.dependencies.adb.currentActivity(identity)
+        await views.adb.currentActivity(identity)
       );
       if (prepared.draft.action !== "scrollTo") {
         const execution = await executor.execute(
@@ -336,7 +341,7 @@ export class RecorderService {
           };
         }
       }
-      const processes = await this.dependencies.adb.appProcesses(identity);
+      const processes = await views.adb.appProcesses(identity);
       if (primaryAppPid(processes, input.config.run.packageName) === null) {
         return {
           status: "failed",
@@ -346,7 +351,7 @@ export class RecorderService {
       }
       const after = normalizeActivity(
         input.config.run.packageName,
-        await this.dependencies.adb.currentActivity(identity)
+        await views.adb.currentActivity(identity)
       );
       steps.push(JourneyStepSchema.parse({
         ...prepared.draft,
@@ -356,16 +361,20 @@ export class RecorderService {
     } finally {
       await closeUiSnapshotProvider(uiSnapshotProvider);
     }
+    } finally {
+      await session.close();
+    }
   }
 
   private async prepareAction(
     action: Exclude<RecorderAction, "finish" | "cancel" | "bridgeTrigger">,
     layout: readonly LayoutElement[],
     input: RecordInput,
-    uiSnapshotProvider: UiSnapshotProvider
+    uiSnapshotProvider: UiSnapshotProvider,
+    views: RuntimeSessionPortViews
   ): Promise<{ draft: ActionDraft; target?: RecorderTarget } | undefined> {
     if (action === "scrollTo") {
-      return this.prepareScrollTo(layout, input, uiSnapshotProvider);
+      return this.prepareScrollTo(layout, input, uiSnapshotProvider, views);
     }
     if (action === "inputText") {
       return {
@@ -410,7 +419,7 @@ export class RecorderService {
 
     let fallback: { type: "annotatedLabel"; label: string } | undefined;
     const screenshotPath = annotatedPath(input.outputPath);
-    const capture = await this.dependencies.screenshots.capture({
+    const capture = await views.screenshots.capture({
       outputPath: screenshotPath,
       annotate: true,
       deviceSerial: input.deviceSerial,
@@ -449,6 +458,7 @@ export class RecorderService {
     layout: readonly LayoutElement[],
     input: RecordInput,
     uiSnapshotProvider: UiSnapshotProvider,
+    views: RuntimeSessionPortViews,
     packageName: string = input.config.run.packageName,
     resourceIdOnly: boolean = false
   ): Promise<{ draft: ActionDraft; target?: RecorderTarget } | undefined> {
@@ -473,12 +483,12 @@ export class RecorderService {
     const options = await this.dependencies.prompt.swipeOptions();
 
     const executor = new ActionExecutor(
-      this.dependencies.adb,
+      views.adb,
       input.deviceSerial,
       (): void => uiSnapshotProvider.invalidate?.("beforeAction")
     );
     const idleWaiter = new IdleWaiter(
-      this.dependencies.uiStability,
+      views.uiStability,
       this.dependencies.clock,
       input.deviceSerial,
       packageName
@@ -559,7 +569,8 @@ export class RecorderService {
     layout: readonly LayoutElement[],
     input: RecordInput,
     identity: AppIdentity,
-    uiSnapshotProvider: UiSnapshotProvider
+    uiSnapshotProvider: UiSnapshotProvider,
+    views: RuntimeSessionPortViews
   ): Promise<BridgeRecordResult> {
     try {
       const scenario = await this.dependencies.prompt.selectBridgeScenario();
@@ -591,11 +602,11 @@ export class RecorderService {
 
       const before = normalizeActivity(
         input.config.run.packageName,
-        await this.dependencies.adb.currentActivity(identity)
+        await views.adb.currentActivity(identity)
       );
 
       const executor = new ActionExecutor(
-        this.dependencies.adb,
+        views.adb,
         input.deviceSerial,
         (): void => uiSnapshotProvider.invalidate?.("beforeAction")
       );
@@ -614,7 +625,7 @@ export class RecorderService {
         return { status: "skipped" };
       }
 
-      const escapedPackageName = await this.pollBridgeEscape(identity, input);
+      const escapedPackageName = await this.pollBridgeEscape(identity, input, views);
       if (escapedPackageName === null) {
         await this.dependencies.prompt.notifyBridgeNoEscape();
         return { status: "skipped" };
@@ -624,14 +635,15 @@ export class RecorderService {
       const externalResult = await this.recordExternalSteps(
         input,
         escapedPackageName,
-        uiSnapshotProvider
+        uiSnapshotProvider,
+        views
       );
       if (externalResult.status === "cancelled") {
         return { status: "cancelled" };
       }
       const externalSteps = externalResult.steps;
 
-      const returned = await this.pollBridgeReturn(identity, input, returnTimeoutMs);
+      const returned = await this.pollBridgeReturn(identity, input, returnTimeoutMs, views);
       if (!returned) {
         return {
           status: "failed",
@@ -641,7 +653,7 @@ export class RecorderService {
       await this.dependencies.prompt.notifyExternalReturn();
 
       const idleWaiter = new IdleWaiter(
-        this.dependencies.uiStability,
+        views.uiStability,
         this.dependencies.clock,
         input.deviceSerial,
         input.config.run.packageName
@@ -657,7 +669,7 @@ export class RecorderService {
         };
       }
 
-      const processes = await this.dependencies.adb.appProcesses(identity);
+      const processes = await views.adb.appProcesses(identity);
       if (primaryAppPid(processes, input.config.run.packageName) === null) {
         return {
           status: "failed",
@@ -667,7 +679,7 @@ export class RecorderService {
 
       const after = normalizeActivity(
         input.config.run.packageName,
-        await this.dependencies.adb.currentActivity(identity)
+        await views.adb.currentActivity(identity)
       );
 
       const bridgeStep = JourneyStepSchema.parse({
@@ -693,7 +705,8 @@ export class RecorderService {
   private async recordExternalSteps(
     input: RecordInput,
     escapedPackageName: string,
-    uiSnapshotProvider: UiSnapshotProvider
+    uiSnapshotProvider: UiSnapshotProvider,
+    views: RuntimeSessionPortViews
   ): Promise<ExternalStepsResult> {
     const externalSteps: ExternalStep[] = [];
     const externalIdentity: AppIdentity = {
@@ -703,13 +716,13 @@ export class RecorderService {
       timeoutMs: input.config.idle.timeoutMs
     };
     const externalIdleWaiter = new IdleWaiter(
-      this.dependencies.uiStability,
+      views.uiStability,
       this.dependencies.clock,
       input.deviceSerial,
       escapedPackageName
     );
     const executor = new ActionExecutor(
-      this.dependencies.adb,
+      views.adb,
       input.deviceSerial,
       (): void => uiSnapshotProvider.invalidate?.("beforeAction")
     );
@@ -720,7 +733,7 @@ export class RecorderService {
         break;
       }
 
-      const foreground = await this.dependencies.adb.foregroundComponent(
+      const foreground = await views.adb.foregroundComponent(
         externalIdentity
       );
       if (foreground.packageName !== escapedPackageName) {
@@ -740,7 +753,8 @@ export class RecorderService {
         layout,
         input,
         escapedPackageName,
-        uiSnapshotProvider
+        uiSnapshotProvider,
+        views
       );
       if (prepared === undefined) {
         continue;
@@ -757,7 +771,7 @@ export class RecorderService {
           continue;
         }
 
-        const postForeground = await this.dependencies.adb.foregroundComponent(
+        const postForeground = await views.adb.foregroundComponent(
           externalIdentity
         );
         if (postForeground.packageName !== escapedPackageName) {
@@ -795,13 +809,15 @@ export class RecorderService {
     layout: readonly LayoutElement[],
     input: RecordInput,
     packageName: string,
-    uiSnapshotProvider: UiSnapshotProvider
+    uiSnapshotProvider: UiSnapshotProvider,
+    views: RuntimeSessionPortViews
   ): Promise<{ draft: ActionDraft; target?: RecorderTarget } | undefined> {
     if (action === "scrollTo") {
       return this.prepareScrollTo(
         layout,
         input,
         uiSnapshotProvider,
+        views,
         packageName,
         true
       );
@@ -885,12 +901,13 @@ export class RecorderService {
 
   private async pollBridgeEscape(
     identity: AppIdentity,
-    input: RecordInput
+    input: RecordInput,
+    views: RuntimeSessionPortViews
   ): Promise<string | null> {
     const deadline = this.dependencies.clock.now() + 3000;
     while (this.dependencies.clock.now() < deadline) {
       if (input.signal?.aborted === true) return null;
-      const foreground = await this.dependencies.adb.foregroundComponent(
+      const foreground = await views.adb.foregroundComponent(
         identity
       );
       if (foreground.packageName !== input.config.run.packageName) {
@@ -910,12 +927,13 @@ export class RecorderService {
   private async pollBridgeReturn(
     identity: AppIdentity,
     input: RecordInput,
-    timeoutMs: number
+    timeoutMs: number,
+    views: RuntimeSessionPortViews
   ): Promise<boolean> {
     const deadline = this.dependencies.clock.now() + timeoutMs;
     while (this.dependencies.clock.now() < deadline) {
       if (input.signal?.aborted === true) return false;
-      const foreground = await this.dependencies.adb.foregroundComponent(
+      const foreground = await views.adb.foregroundComponent(
         identity
       );
       if (foreground.packageName === input.config.run.packageName) {

@@ -582,10 +582,8 @@ export function createProductionDependencies(
       }
     }),
     recorder: new RecorderService({
-      screenshots,
-      uiStability,
-      uiSnapshots,
-      adb,
+      sessions,
+      sessionPorts: runtimeSessionPortViews,
       clock,
       prompt: new InquirerRecorderPrompt(),
       journeyWriter: new FileSystemJourneyWriter()
@@ -687,9 +685,8 @@ export function createProductionDependencies(
       observe: async ({ projectRoot, ...input }): Promise<RuntimeObservation> => (
         new RuntimeObserver({
           store: generationStoreFactory(projectRoot),
-          adb,
-          screenshots,
-          uiSnapshots,
+          sessions,
+          sessionPorts: runtimeSessionPortViews,
           waitUntilIdle,
           now: () => new Date(),
           createAttemptId: randomUUID
@@ -708,9 +705,8 @@ export function createProductionDependencies(
       const prompt = new InquirerGenerationPrompt();
       const observer = new RuntimeObserver({
         store,
-        adb,
-        screenshots,
-        uiSnapshots,
+        sessions,
+        sessionPorts: runtimeSessionPortViews,
         waitUntilIdle,
         now: (): Date => new Date(),
         createAttemptId: randomUUID,
@@ -738,21 +734,20 @@ export function createProductionDependencies(
       });
       const executor = new GenerationStepExecutor({
         store,
-        createFreshnessGuard: (uiSnapshotProvider): Pick<
-          SnapshotReobservationGuard,
-          "assertFresh"
-        > => (
+        createFreshnessGuard: (
+          uiSnapshotProvider,
+          views
+        ): Pick<SnapshotReobservationGuard, "assertFresh"> => (
           new SnapshotReobservationGuard({
             store,
-            adb,
+            adb: views.adb,
             uiSnapshotProvider,
             now: (): Date => new Date(),
             uiSnapshotTimeoutMs: config.ui?.snapshotTimeoutMs
           })
         ),
-        adb,
-        uiStability,
-        uiSnapshots,
+        sessions,
+        sessionPorts: runtimeSessionPortViews,
         uiCacheEnabled: config.ui?.cacheEnabled ?? true,
         clock,
         idle: config.idle,

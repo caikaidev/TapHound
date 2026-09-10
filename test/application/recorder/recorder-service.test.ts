@@ -88,10 +88,8 @@ async function recordScrollToJourney(): Promise<Journey> {
     .mockResolvedValueOnce({ kind: "select", id: "message_bubble" });
   const journeyWriter = writer();
   const service = new RecorderService({
-      screenshots: runtime.screenshots,
-      uiStability: runtime.androidCli,
-    uiSnapshots: runtime.uiSnapshots,
-    adb: runtime.adb,
+      sessions: runtime.dependencies.sessions,
+      sessionPorts: runtime.dependencies.sessionPorts,
     clock: runtime.dependencies.clock,
     prompt: recorderPrompt,
     journeyWriter
@@ -129,10 +127,8 @@ describe("RecorderService", () => {
     });
     const journeyWriter = writer();
     const service = new RecorderService({
-      screenshots: runtime.screenshots,
-      uiStability: runtime.androidCli,
-      uiSnapshots: runtime.uiSnapshots,
-      adb: runtime.adb,
+      sessions: runtime.dependencies.sessions,
+      sessionPorts: runtime.dependencies.sessionPorts,
       clock: runtime.dependencies.clock,
       prompt: recorderPrompt,
       journeyWriter
@@ -161,10 +157,8 @@ describe("RecorderService", () => {
     const recorderPrompt = prompt(["click", "finish"]);
     const journeyWriter = writer();
     const service = new RecorderService({
-      screenshots: runtime.screenshots,
-      uiStability: runtime.androidCli,
-      uiSnapshots: runtime.uiSnapshots,
-      adb: runtime.adb,
+      sessions: runtime.dependencies.sessions,
+      sessionPorts: runtime.dependencies.sessionPorts,
       clock: runtime.dependencies.clock,
       prompt: recorderPrompt,
       journeyWriter
@@ -204,10 +198,8 @@ describe("RecorderService", () => {
     const recorderPrompt = prompt(["click", "finish"]);
     const journeyWriter = writer();
     const service = new RecorderService({
-      screenshots: runtime.screenshots,
-      uiStability: runtime.androidCli,
-      uiSnapshots: runtime.uiSnapshots,
-      adb: runtime.adb,
+      sessions: runtime.dependencies.sessions,
+      sessionPorts: runtime.dependencies.sessionPorts,
       clock: runtime.dependencies.clock,
       prompt: recorderPrompt,
       journeyWriter
@@ -240,10 +232,8 @@ describe("RecorderService", () => {
     });
     const journeyWriter = writer();
     const service = new RecorderService({
-      screenshots: runtime.screenshots,
-      uiStability: runtime.androidCli,
-      uiSnapshots: runtime.uiSnapshots,
-      adb: runtime.adb,
+      sessions: runtime.dependencies.sessions,
+      sessionPorts: runtime.dependencies.sessionPorts,
       clock: runtime.dependencies.clock,
       prompt: recorderPrompt,
       journeyWriter
@@ -269,10 +259,8 @@ describe("RecorderService", () => {
     const recorderPrompt = prompt(["finish"]);
     const journeyWriter = writer();
     const service = new RecorderService({
-      screenshots: runtime.screenshots,
-      uiStability: runtime.androidCli,
-      uiSnapshots: runtime.uiSnapshots,
-      adb: runtime.adb,
+      sessions: runtime.dependencies.sessions,
+      sessionPorts: runtime.dependencies.sessionPorts,
       clock: runtime.dependencies.clock,
       prompt: recorderPrompt,
       journeyWriter
@@ -303,10 +291,8 @@ describe("RecorderService", () => {
     const recorderPrompt = prompt(["finish"]);
     const journeyWriter = writer();
     const service = new RecorderService({
-      screenshots: runtime.screenshots,
-      uiStability: runtime.androidCli,
-      uiSnapshots: runtime.uiSnapshots,
-      adb: runtime.adb,
+      sessions: runtime.dependencies.sessions,
+      sessionPorts: runtime.dependencies.sessionPorts,
       clock,
       prompt: recorderPrompt,
       journeyWriter
@@ -332,10 +318,8 @@ describe("RecorderService", () => {
     const recorderPrompt = prompt(["finish"]);
     const journeyWriter = writer();
     const service = new RecorderService({
-      screenshots: runtime.screenshots,
-      uiStability: runtime.androidCli,
-      uiSnapshots: runtime.uiSnapshots,
-      adb: runtime.adb,
+      sessions: runtime.dependencies.sessions,
+      sessionPorts: runtime.dependencies.sessionPorts,
       clock: runtime.dependencies.clock,
       prompt: recorderPrompt,
       journeyWriter
@@ -371,10 +355,8 @@ describe("RecorderService", () => {
     const recorderPrompt = prompt(["click", "click", "finish"]);
     const journeyWriter = writer();
     const service = new RecorderService({
-      screenshots: runtime.screenshots,
-      uiStability: runtime.androidCli,
-      uiSnapshots: runtime.uiSnapshots,
-      adb: runtime.adb,
+      sessions: runtime.dependencies.sessions,
+      sessionPorts: runtime.dependencies.sessionPorts,
       clock: runtime.dependencies.clock,
       prompt: recorderPrompt,
       journeyWriter
@@ -404,10 +386,8 @@ describe("RecorderService", () => {
     const recorderPrompt = prompt(["click", "finish"]);
     const journeyWriter = writer();
     const service = new RecorderService({
-      screenshots: runtime.screenshots,
-      uiStability: runtime.androidCli,
-      uiSnapshots: runtime.uiSnapshots,
-      adb: runtime.adb,
+      sessions: runtime.dependencies.sessions,
+      sessionPorts: runtime.dependencies.sessionPorts,
       clock: runtime.dependencies.clock,
       prompt: recorderPrompt,
       journeyWriter
@@ -444,10 +424,8 @@ describe("RecorderService", () => {
     vi.mocked(recorderPrompt.selectFallbackLabel).mockResolvedValue("#7");
     const journeyWriter = writer();
     const service = new RecorderService({
-      screenshots: runtime.screenshots,
-      uiStability: runtime.androidCli,
-      uiSnapshots: runtime.uiSnapshots,
-      adb: runtime.adb,
+      sessions: runtime.dependencies.sessions,
+      sessionPorts: runtime.dependencies.sessionPorts,
       clock: runtime.dependencies.clock,
       prompt: recorderPrompt,
       journeyWriter
@@ -478,10 +456,8 @@ describe("RecorderService", () => {
     const runtime = runtimeFixture();
     const journeyWriter = writer();
     const service = new RecorderService({
-      screenshots: runtime.screenshots,
-      uiStability: runtime.androidCli,
-      uiSnapshots: runtime.uiSnapshots,
-      adb: runtime.adb,
+      sessions: runtime.dependencies.sessions,
+      sessionPorts: runtime.dependencies.sessionPorts,
       clock: runtime.dependencies.clock,
       prompt: prompt([
         "longClick",
@@ -530,10 +506,8 @@ describe("RecorderService", () => {
     const recorderPrompt = prompt(["finish"]);
     const journeyWriter = writer();
     const service = new RecorderService({
-      screenshots: runtime.screenshots,
-      uiStability: runtime.androidCli,
-      uiSnapshots: runtime.uiSnapshots,
-      adb: runtime.adb,
+      sessions: runtime.dependencies.sessions,
+      sessionPorts: runtime.dependencies.sessionPorts,
       clock: runtime.dependencies.clock,
       prompt: recorderPrompt,
       journeyWriter
@@ -560,10 +534,8 @@ describe("RecorderService", () => {
     const runtime = runtimeFixture();
     const journeyWriter = writer();
     const service = new RecorderService({
-      screenshots: runtime.screenshots,
-      uiStability: runtime.androidCli,
-      uiSnapshots: runtime.uiSnapshots,
-      adb: runtime.adb,
+      sessions: runtime.dependencies.sessions,
+      sessionPorts: runtime.dependencies.sessionPorts,
       clock: runtime.dependencies.clock,
       prompt: prompt(["cancel"]),
       journeyWriter
@@ -603,10 +575,8 @@ describe("RecorderService", () => {
     vi.mocked(recorderPrompt.selectTarget).mockResolvedValue("subject");
     const journeyWriter = writer();
     const service = new RecorderService({
-      screenshots: runtime.screenshots,
-      uiStability: runtime.androidCli,
-      uiSnapshots: runtime.uiSnapshots,
-      adb: runtime.adb,
+      sessions: runtime.dependencies.sessions,
+      sessionPorts: runtime.dependencies.sessionPorts,
       clock: runtime.dependencies.clock,
       prompt: recorderPrompt,
       journeyWriter
@@ -665,10 +635,8 @@ describe("RecorderService", () => {
     });
     const journeyWriter = writer();
     const service = new RecorderService({
-      screenshots: runtime.screenshots,
-      uiStability: runtime.androidCli,
-      uiSnapshots: runtime.uiSnapshots,
-      adb: runtime.adb,
+      sessions: runtime.dependencies.sessions,
+      sessionPorts: runtime.dependencies.sessionPorts,
       clock: runtime.dependencies.clock,
       prompt: recorderPrompt,
       journeyWriter
@@ -724,10 +692,8 @@ describe("RecorderService", () => {
     vi.mocked(recorderPrompt.inputBridgeReturnTimeoutMs).mockResolvedValue(30000);
     const journeyWriter = writer();
     const service = new RecorderService({
-      screenshots: runtime.screenshots,
-      uiStability: runtime.androidCli,
-      uiSnapshots: runtime.uiSnapshots,
-      adb: runtime.adb,
+      sessions: runtime.dependencies.sessions,
+      sessionPorts: runtime.dependencies.sessionPorts,
       clock: runtime.dependencies.clock,
       prompt: recorderPrompt,
       journeyWriter
@@ -779,10 +745,8 @@ describe("RecorderService", () => {
     vi.mocked(recorderPrompt.inputBridgeReturnTimeoutMs).mockResolvedValue(30000);
     const journeyWriter = writer();
     const service = new RecorderService({
-      screenshots: runtime.screenshots,
-      uiStability: runtime.androidCli,
-      uiSnapshots: runtime.uiSnapshots,
-      adb: runtime.adb,
+      sessions: runtime.dependencies.sessions,
+      sessionPorts: runtime.dependencies.sessionPorts,
       clock: runtime.dependencies.clock,
       prompt: recorderPrompt,
       journeyWriter
@@ -826,10 +790,8 @@ describe("RecorderService", () => {
     vi.mocked(recorderPrompt.selectExternalStepAction).mockResolvedValue("finishExternal");
     const journeyWriter = writer();
     const service = new RecorderService({
-      screenshots: runtime.screenshots,
-      uiStability: runtime.androidCli,
-      uiSnapshots: runtime.uiSnapshots,
-      adb: runtime.adb,
+      sessions: runtime.dependencies.sessions,
+      sessionPorts: runtime.dependencies.sessionPorts,
       clock: runtime.dependencies.clock,
       prompt: recorderPrompt,
       journeyWriter
@@ -877,10 +839,8 @@ describe("RecorderService", () => {
     vi.mocked(recorderPrompt.selectExternalStepAction).mockResolvedValue("finishExternal");
     const journeyWriter = writer();
     const service = new RecorderService({
-      screenshots: runtime.screenshots,
-      uiStability: runtime.androidCli,
-      uiSnapshots: runtime.uiSnapshots,
-      adb: runtime.adb,
+      sessions: runtime.dependencies.sessions,
+      sessionPorts: runtime.dependencies.sessionPorts,
       clock: runtime.dependencies.clock,
       prompt: recorderPrompt,
       journeyWriter
@@ -961,10 +921,8 @@ describe("RecorderService", () => {
     });
     const journeyWriter = writer();
     const service = new RecorderService({
-      screenshots: runtime.screenshots,
-      uiStability: runtime.androidCli,
-      uiSnapshots: runtime.uiSnapshots,
-      adb: runtime.adb,
+      sessions: runtime.dependencies.sessions,
+      sessionPorts: runtime.dependencies.sessionPorts,
       clock: runtime.dependencies.clock,
       prompt: recorderPrompt,
       journeyWriter
@@ -1021,10 +979,8 @@ describe("RecorderService", () => {
       .mockResolvedValueOnce("finishExternal");
     const journeyWriter = writer();
     const service = new RecorderService({
-      screenshots: runtime.screenshots,
-      uiStability: runtime.androidCli,
-      uiSnapshots: runtime.uiSnapshots,
-      adb: runtime.adb,
+      sessions: runtime.dependencies.sessions,
+      sessionPorts: runtime.dependencies.sessionPorts,
       clock: runtime.dependencies.clock,
       prompt: recorderPrompt,
       journeyWriter

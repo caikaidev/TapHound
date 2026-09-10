@@ -48,7 +48,7 @@ describe("exitCodeForFailure", () => {
   });
 
   it("defines exactly the approved failure vocabulary", () => {
-    expect(FAILURE_CODES).toHaveLength(45);
+    expect(FAILURE_CODES).toHaveLength(57);
   });
 
   it.each([

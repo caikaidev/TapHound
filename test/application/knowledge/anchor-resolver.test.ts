@@ -78,10 +78,11 @@ describe("KnowledgeAnchorResolver", () => {
       layout: [element]
     });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       status: "found",
       point: { x: 50, y: 25 },
-      bounds: { left: 0, top: 0, right: 100, bottom: 50 }
+      bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+      element: { id: "search" }
     });
   });
 

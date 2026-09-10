@@ -126,6 +126,9 @@ export class StepRunner {
       deviceSerial: options.deviceSerial,
       idle: options.idle,
       viewport: (): DisplayViewport | undefined => this.currentViewport,
+      ...(options.anchorResolver === undefined
+        ? {}
+        : { anchorResolver: options.anchorResolver }),
       ...(options.generatedReplayPolicy === true
         ? {
             readLayout: async (): Promise<readonly LayoutElement[]> => (
@@ -872,6 +875,92 @@ export class StepRunner {
         }
       }
 
+      if (
+        step.action === "inputText"
+        && step.anchor !== undefined
+      ) {
+        const anchorResolver = this.options.anchorResolver;
+        if (anchorResolver === undefined) {
+          report.locator = {
+            status: "failed",
+            fallbackUsed: false,
+            message: `Step targets Knowledge anchor ${step.anchor} but no anchor resolver is configured`
+          };
+          return fail(
+            "ANCHOR_NOT_FOUND",
+            `Step targets Knowledge anchor ${step.anchor} but no anchor resolver is configured`
+          );
+        }
+        const anchorResolution = await anchorResolver.resolve({
+          anchorId: step.anchor,
+          layout,
+          ...(this.currentViewport === undefined
+            ? {}
+            : { viewport: this.currentViewport }),
+          ...(signal === undefined ? {} : { signal })
+        });
+        if (anchorResolution.status !== "found") {
+          report.locator = {
+            status: "failed",
+            anchorId: step.anchor,
+            fallbackUsed: false,
+            anchor: {
+              status: "failed",
+              ...(anchorResolution.message === undefined
+                ? {}
+                : { message: anchorResolution.message })
+            },
+            message: anchorResolution.message
+          };
+          return fail(
+            anchorResolution.status === "ambiguous"
+              ? "ANCHOR_AMBIGUOUS"
+              : "ANCHOR_NOT_FOUND",
+            anchorResolution.message
+              ?? `Knowledge anchor ${step.anchor} did not resolve`
+          );
+        }
+        if (anchorResolution.point === undefined) {
+          report.locator = {
+            status: "failed",
+            anchorId: step.anchor,
+            fallbackUsed: false,
+            anchor: { status: "failed", message: "anchor element has no bounds" },
+            message: "anchor element has no bounds"
+          };
+          return fail(
+            "ANCHOR_NOT_FOUND",
+            `Knowledge anchor ${step.anchor} resolved to an element without bounds`
+          );
+        }
+        const tapped = await this.options.adb.tap(
+          anchorResolution.point,
+          this.options.deviceSerial,
+          signal
+        );
+        if (tapped.exitCode !== 0) {
+          return fail(
+            "ACTION_FAILED",
+            tapped.stderr.trim() || "Failed to focus the input anchor"
+          );
+        }
+        target = {
+          point: anchorResolution.point,
+          ...(anchorResolution.bounds === undefined
+            ? {}
+            : { bounds: anchorResolution.bounds })
+        };
+        report.locator = {
+          status: "found",
+          matchedBy: "anchor",
+          anchorId: step.anchor,
+          fallbackUsed: false,
+          anchor: { status: "resolved" }
+        };
+        if (this.options.requireFocusedInput === true) {
+          layout = await this.captureLayout("locate", this.options.idle.timeoutMs, signal);
+        }
+      }
       if (
         step.action === "inputText"
         && this.options.requireFocusedInput === true

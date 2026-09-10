@@ -662,4 +662,42 @@ describe("bridge step", () => {
       activity
     })).toThrow();
   });
+
+  it("accepts an inputText step with a semantic anchor", () => {
+    const parsed = JourneyStepSchema.parse({
+      action: "inputText",
+      text: "hello",
+      anchor: "demo.search.input",
+      activity
+    });
+    expect(parsed).toMatchObject({
+      action: "inputText",
+      anchor: "demo.search.input"
+    });
+  });
+
+  it("accepts an anchor-only scrollTo step alongside its container", () => {
+    const parsed = JourneyStepSchema.parse({
+      action: "scrollTo",
+      anchor: "demo.scroll.target",
+      container: { resourceId: "message_list" },
+      direction: "up",
+      activity
+    });
+    expect(parsed).toMatchObject({
+      action: "scrollTo",
+      anchor: "demo.scroll.target",
+      distancePercent: 0.6,
+      durationMs: 300
+    });
+  });
+
+  it("rejects a scrollTo step without anchor or locator", () => {
+    expect(() => JourneyStepSchema.parse({
+      action: "scrollTo",
+      container: { resourceId: "message_list" },
+      direction: "up",
+      activity
+    })).toThrow(/anchor or a runtime locator/);
+  });
 });

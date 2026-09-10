@@ -2,6 +2,7 @@ import type { FailureCode } from "../../domain/failure.js";
 import type { JourneyStep } from "../../domain/journey.js";
 import type { LayoutElement } from "../../domain/layout.js";
 import type { DisplayViewport } from "../../domain/geometry.js";
+import type { AnchorResolverPort } from "../../ports/anchor-resolver.js";
 import type { UiSnapshotProvider } from "../../ports/ui-snapshot.js";
 import { resolveLocator } from "../locator/locator-resolver.js";
 import type {
@@ -39,6 +40,7 @@ export interface ScrollToExecutorOptions {
   idleWaiter: Pick<IdleWaiter, "waitUntilIdle">;
   deviceSerial: string;
   idle: IdleConfig;
+  anchorResolver?: AnchorResolverPort | undefined;
   readLayout?: (() => Promise<readonly LayoutElement[]>) | undefined;
   beforeSwipe?: (() => Promise<readonly LayoutElement[]>) | undefined;
   beforeMutation?: (() => Promise<void>) | undefined;
@@ -77,8 +79,82 @@ function callbackFailure(
   return undefined;
 }
 
+type ScrollTargetResolution =
+  | {
+    status: "found";
+    element: LayoutElement;
+    point: { x: number; y: number };
+  }
+  | { status: "failed"; code: FailureCode; message: string };
+
 export class ScrollToExecutor {
   public constructor(private readonly options: ScrollToExecutorOptions) {}
+
+  private async resolveTarget(
+    step: Extract<JourneyStep, { action: "scrollTo" }>,
+    layout: readonly LayoutElement[],
+    signal?: AbortSignal
+  ): Promise<ScrollTargetResolution> {
+    if (step.anchor !== undefined) {
+      const anchorResolver = this.options.anchorResolver;
+      if (anchorResolver !== undefined) {
+        const anchorResolution = await anchorResolver.resolve({
+          anchorId: step.anchor,
+          layout,
+          ...(this.options.viewport === undefined
+            ? {}
+            : { viewport: this.options.viewport() }),
+          ...(signal === undefined ? {} : { signal })
+        });
+        if (anchorResolution.status === "found") {
+          const fallbackElement: LayoutElement = anchorResolution.element
+            ?? {
+                id: step.anchor,
+                enabled: true,
+                bounds: anchorResolution.bounds,
+                children: []
+              };
+          return {
+            status: "found",
+            element: fallbackElement,
+            point: anchorResolution.point ?? { x: 0, y: 0 }
+          };
+        }
+        if (anchorResolution.status === "ambiguous") {
+          return {
+            status: "failed",
+            code: "ANCHOR_AMBIGUOUS",
+            message: anchorResolution.message
+              ?? `Knowledge anchor ${step.anchor} resolved ambiguously`
+          };
+        }
+      }
+    }
+    if (step.locator === undefined) {
+      return {
+        status: "failed",
+        code: "ANCHOR_NOT_FOUND",
+        message: `Knowledge anchor ${step.anchor ?? "(none)"} was not found and no locator fallback exists`
+      };
+    }
+    const resolution = resolveLocator(
+      layout,
+      step.locator,
+      { requireEnabled: false, viewport: this.options.viewport?.() }
+    );
+    if (resolution.status === "found") {
+      return {
+        status: "found",
+        element: resolution.element,
+        point: resolution.point
+      };
+    }
+    return {
+      status: "failed",
+      code: resolution.code,
+      message: resolution.message
+    };
+  }
 
   public async execute(
     step: Extract<JourneyStep, { action: "scrollTo" }>,
@@ -109,18 +185,17 @@ export class ScrollToExecutor {
       if (isCancelled(signal)) {
         return { status: "cancelled", swipesUsed, idleDurationMs };
       }
-      const target = resolveLocator(
-        layout,
-        step.locator,
-        { requireEnabled: false, viewport: this.options.viewport?.() }
-      );
+      const target = await this.resolveTarget(step, layout, signal);
       if (target.status === "found") {
         return { status: "found", swipesUsed, idleDurationMs };
       }
-      if (target.code === "LOCATOR_AMBIGUOUS") {
+      if (
+        target.code === "LOCATOR_AMBIGUOUS"
+        || target.code === "ANCHOR_AMBIGUOUS"
+      ) {
         return {
           status: "failed",
-          code: "LOCATOR_AMBIGUOUS",
+          code: target.code,
           message: target.message,
           swipesUsed,
           idleDurationMs
@@ -169,18 +244,17 @@ export class ScrollToExecutor {
         if (isCancelled(signal)) {
           return { status: "cancelled", swipesUsed, idleDurationMs };
         }
-        const liveTarget = resolveLocator(
-          layout,
-          step.locator,
-          { requireEnabled: false, viewport: this.options.viewport?.() }
-        );
+        const liveTarget = await this.resolveTarget(step, layout, signal);
         if (liveTarget.status === "found") {
           return { status: "found", swipesUsed, idleDurationMs };
         }
-        if (liveTarget.code === "LOCATOR_AMBIGUOUS") {
+        if (
+          liveTarget.code === "LOCATOR_AMBIGUOUS"
+          || liveTarget.code === "ANCHOR_AMBIGUOUS"
+        ) {
           return {
             status: "failed",
-            code: "LOCATOR_AMBIGUOUS",
+            code: liveTarget.code,
             message: liveTarget.message,
             swipesUsed,
             idleDurationMs

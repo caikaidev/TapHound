@@ -223,6 +223,7 @@ const LongClickStepSchema = z.strictObject({
 const InputTextStepSchema = z.strictObject({
   action: z.literal("inputText"),
   text: z.string().min(1),
+  anchor: KnowledgeIdSchema.optional(),
   ...CommonStepShape
 });
 
@@ -237,14 +238,14 @@ const SwipeStepSchema = z.strictObject({
 
 const ScrollToStepSchema = z.strictObject({
   action: z.literal("scrollTo"),
-  locator: LocatorSchema,
+  ...AnchorLocatorTarget,
   container: LocatorSchema,
   direction: z.enum(["up", "down", "left", "right"]),
   maxSwipes: z.number().int().positive().max(30).default(20),
   distancePercent: z.number().positive().max(1).default(0.6),
   durationMs: z.number().int().positive().default(300),
   ...CommonStepShape
-});
+}).superRefine(AnchorTargetRefine);
 
 const BackStepSchema = z.strictObject({
   action: z.literal("back"),

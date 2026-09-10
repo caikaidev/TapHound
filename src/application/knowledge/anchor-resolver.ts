@@ -63,7 +63,8 @@ export class KnowledgeAnchorResolver implements AnchorResolverPort {
     return {
       status: "found",
       point: resolution.point,
-      bounds: resolution.element.bounds
+      bounds: resolution.element.bounds,
+      element: resolution.element
     };
   };
 }

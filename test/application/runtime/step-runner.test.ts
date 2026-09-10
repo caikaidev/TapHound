@@ -1774,4 +1774,168 @@ describe("StepRunner wait until", () => {
       failure: { code: "ANCHOR_NOT_FOUND" }
     });
   });
+
+  it("resolves a scrollTo through its semantic anchor without swiping", async () => {
+    const anchorResolver = {
+      resolve: vi.fn((input: {
+        anchorId: string;
+        layout: readonly LayoutElement[];
+      }): Promise<{
+        status: "found";
+        point: { x: number; y: number };
+        bounds: { left: number; top: number; right: number; bottom: number };
+        element?: LayoutElement;
+      }> => {
+        void input;
+        return Promise.resolve({
+          status: "found" as const,
+          point: { x: 50, y: 120 },
+          bounds: { left: 0, top: 100, right: 100, bottom: 150 }
+        });
+      })
+    };
+    const test = fixture({
+      adb: mainActivityAdb(),
+      androidCli: scrollCli("absent"),
+      anchorResolver
+    });
+    const step: Extract<JourneyStep, { action: "scrollTo" }> = {
+      action: "scrollTo",
+      anchor: "demo.scroll.target",
+      container: { resourceId: "message_list" },
+      direction: "up",
+      maxSwipes: 3,
+      distancePercent: 0.6,
+      durationMs: 300,
+      activity: {
+        before: "com.example.app.MainActivity",
+        after: "com.example.app.MainActivity"
+      }
+    };
+
+    const result = await test.runner.run(step, 0);
+
+    if (result.status !== "passed") {
+      throw new Error(`expected passed, got ${result.status}: ${JSON.stringify(result)}`);
+    }
+    expect(test.androidCli.layoutDiff).not.toHaveBeenCalled();
+    expect(result.report.scroll).toEqual({ swipesUsed: 0, maxSwipes: 3 });
+  });
+
+  it("fails a scrollTo with ANCHOR_AMBIGUOUS when its anchor resolves ambiguously", async () => {
+    const anchorResolver = {
+      resolve: vi.fn((): Promise<{
+        status: "ambiguous";
+        message?: string;
+      }> => Promise.resolve({
+        status: "ambiguous" as const,
+        message: "two elements match the anchor"
+      }))
+    };
+    const test = fixture({
+      androidCli: scrollCli("absent"),
+      anchorResolver
+    });
+
+    const result = await test.runner.run({
+      ...scrollStep,
+      anchor: "demo.scroll.target",
+      locator: undefined
+    }, 0);
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: {
+        code: "ANCHOR_AMBIGUOUS",
+        message: "two elements match the anchor"
+      }
+    });
+  });
+
+  it("focuses an inputText anchor before typing and reports matchedBy anchor", async () => {
+    const anchorResolver = {
+      resolve: vi.fn((): Promise<{
+        status: "found";
+        point: { x: number; y: number };
+        bounds: { left: number; top: number; right: number; bottom: number };
+        element?: LayoutElement;
+      }> => Promise.resolve({
+        status: "found" as const,
+        point: { x: 50, y: 25 },
+        bounds: { left: 0, top: 0, right: 100, bottom: 50 }
+      }))
+    };
+const test = fixture({
+      adb: mainActivityAdb(),
+      anchorResolver
+    });
+    const step: Extract<JourneyStep, { action: "inputText" }> = {
+      action: "inputText",
+      text: "hello world",
+      anchor: "demo.search.input",
+      activity: {
+        before: "com.example.app.MainActivity",
+        after: "com.example.app.MainActivity"
+      }
+    };
+
+    const result = await test.runner.run(step, 0);
+
+    if (result.status !== "passed") {
+      throw new Error(`expected passed, got ${result.status}: ${JSON.stringify(result)}`);
+    }
+    expect(test.adb.tap).toHaveBeenCalledWith(
+      { x: 50, y: 25 },
+      "emulator-5554",
+      undefined
+    );
+    expect(test.adb.inputText).toHaveBeenCalledWith(
+      "hello world",
+      "emulator-5554",
+      undefined
+    );
+    expect(result.report.locator).toMatchObject({
+      status: "found",
+      matchedBy: "anchor",
+      anchorId: "demo.search.input",
+      anchor: { status: "resolved" }
+    });
+  });
+
+  it("fails an inputText whose anchor does not resolve", async () => {
+    const anchorResolver = {
+      resolve: vi.fn((): Promise<{
+        status: "notFound";
+        message?: string;
+      }> => Promise.resolve({
+        status: "notFound" as const,
+        message: "input field moved"
+      }))
+    };
+    const test = fixture({ anchorResolver });
+const step: Extract<JourneyStep, { action: "inputText" }> = {
+      action: "inputText",
+      text: "hello world",
+      anchor: "demo.search.input",
+      activity: {
+        before: "com.example.app.MainActivity",
+        after: "com.example.app.MainActivity"
+      }
+    };
+
+    const result = await test.runner.run(step, 0);
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { code: "ANCHOR_NOT_FOUND" }
+    });
+    if (result.status !== "failed") {
+      throw new Error("Expected failed result");
+    }
+    expect(result.report.locator).toMatchObject({
+      status: "failed",
+      anchorId: "demo.search.input",
+      anchor: { status: "failed", message: "input field moved" }
+    });
+  });
 });

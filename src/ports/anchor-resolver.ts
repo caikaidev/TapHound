@@ -10,6 +10,7 @@ export interface AnchorResolution {
     right: number;
     bottom: number;
   };
+  element?: LayoutElement;
   message?: string;
 }
 

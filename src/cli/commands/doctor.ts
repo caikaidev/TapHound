@@ -13,7 +13,10 @@ import {
   failureCodeFromUnknown,
   type FailureCode
 } from "../../domain/failure.js";
-import type { ResolvedTarget } from "../../domain/target.js";
+import type {
+  ResolvedTarget,
+  TargetEntry
+} from "../../domain/target.js";
 import { hasAndroidProjectStructure } from "../../adapters/filesystem/android-project-detection.js";
 import { isErrnoException } from "../../shared/errors.js";
 import type { CliDependencies } from "../dependencies.js";
@@ -196,6 +199,7 @@ async function scanApplicationIds(root: string): Promise<string[]> {
 async function buildTargetChecks(
   dependencies: CliDependencies,
   resolved: ResolvedTarget,
+  entry: TargetEntry,
   packageName: string
 ): Promise<TargetCheck[]> {
   const resolvedPath = resolved.resolvedPath;
@@ -217,18 +221,27 @@ async function buildTargetChecks(
         message: `No Android project structure found at ${resolvedPath}`
       };
 
-  const git = await inspectTargetGit(dependencies, resolved.project.gitRoot);
-  const gitCheck: TargetCheck = git === null
+  const gitEnabled = entry.git.enabled;
+  const git = gitEnabled
+    ? await inspectTargetGit(dependencies, resolved.project.gitRoot)
+    : null;
+  const gitCheck: TargetCheck = !gitEnabled
     ? {
         name: "git-state",
         status: "warn",
-        message: "No git repository detected (skipped)"
+        message: `Git integration disabled for target ${resolved.id}`
       }
-    : {
-        name: "git-state",
-        status: "passed",
-        message: `${git.branch} @ ${git.head}${git.dirty ? " (dirty)" : ""}`
-      };
+    : git === null
+      ? {
+          name: "git-state",
+          status: "warn",
+          message: "No git repository detected (skipped)"
+        }
+      : {
+          name: "git-state",
+          status: "passed",
+          message: `${git.branch} @ ${git.head}${git.dirty ? " (dirty)" : ""}`
+        };
 
   const applicationIds = await scanApplicationIds(resolvedPath);
   let packageIdentity: TargetCheck;
@@ -247,6 +260,12 @@ async function buildTargetChecks(
       status: "failed",
       message: `Project applicationId ${String(applicationIds[0])} does not match configured packageName ${packageName}. Rebuild and install the target, or fix the configured packageName.`
     };
+  } else if (applicationIds.length > 1) {
+    packageIdentity = {
+      name: "package-identity",
+      status: "passed",
+      message: `${applicationIds.join(", ")} ambiguous; none matched configured packageName ${packageName}`
+    };
   } else {
     packageIdentity = {
       name: "package-identity",
@@ -256,16 +275,29 @@ async function buildTargetChecks(
   }
 
   const workspacePresent = await pathExists(resolved.workspaceRoot);
-  const identityPresent = await pathExists(
-    join(resolved.workspaceRoot, "identity.json")
-  );
-  const localWorkspace: TargetCheck = workspacePresent && identityPresent
-    ? { name: "local-workspace", status: "passed", message: resolved.workspaceRoot }
-    : {
+  const identity = workspacePresent
+    ? await dependencies.localTargets.workspace.readIdentity(
+        dependencies.localTargets.targetsHome(),
+        resolved.id
+      )
+    : null;
+  const localWorkspace: TargetCheck = !workspacePresent
+    ? {
         name: "local-workspace",
-        status: "failed",
-        message: "Local target workspace or identity.json is missing"
-      };
+        status: "warn",
+        message: "Local target workspace has not been created yet (taphound local add will create it)"
+      }
+    : identity === null
+      ? {
+          name: "local-workspace",
+          status: "warn",
+          message: "Target is registered but has no identity yet; run taphound local add to record one"
+        }
+      : {
+          name: "local-workspace",
+          status: "passed",
+          message: resolved.workspaceRoot
+        };
 
   return [targetPath, androidProject, gitCheck, packageIdentity, localWorkspace];
 }
@@ -335,13 +367,18 @@ async function runTargetDoctor(
   const targetChecks = await buildTargetChecks(
     dependencies,
     resolved,
+    entry,
     packageName
   );
   const failed = targetChecks.find((check) => check.status === "failed");
   if (failed !== undefined) {
-    const code: FailureCode = failed.name === "package-identity"
-      ? "PACKAGE_IDENTITY_MISMATCH"
-      : "INTERNAL_ERROR";
+    const code: FailureCode = failed.name === "target-path"
+      ? "LOCAL_TARGET_PATH_INVALID"
+      : failed.name === "android-project"
+        ? "LOCAL_TARGET_NOT_ANDROID_PROJECT"
+        : failed.name === "package-identity"
+          ? "PACKAGE_IDENTITY_MISMATCH"
+          : "INTERNAL_ERROR";
     writeFailure(
       dependencies,
       json,
@@ -351,9 +388,9 @@ async function runTargetDoctor(
     return;
   }
 
-  const git = resolved.project.gitRoot === undefined
-    ? null
-    : await inspectTargetGit(dependencies, resolved.project.gitRoot);
+  const git = entry.git.enabled && resolved.project.gitRoot !== undefined
+    ? await inspectTargetGit(dependencies, resolved.project.gitRoot)
+    : null;
 
   const report = await dependencies.doctor.run({
     packageName,

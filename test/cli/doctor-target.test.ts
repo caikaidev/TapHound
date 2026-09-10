@@ -1,6 +1,7 @@
 import {
   mkdir,
   mkdtemp,
+  readFile,
   rm,
   writeFile
 } from "node:fs/promises";
@@ -12,6 +13,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createProgram } from "../../src/cli/program.js";
 import { TapHoundConfigSchema } from "../../src/domain/config.js";
 import { TargetError } from "../../src/domain/target.js";
+import type { LocalTargetIdentity } from "../../src/domain/target.js";
 import type {
   CliDependencies,
   LocalTargets,
@@ -47,26 +49,52 @@ interface TargetFixture {
   id: string;
 }
 
-async function makeTargetProject(applicationId?: string): Promise<TargetFixture> {
+function identityJson(fixture: TargetFixture): string {
+  return `${JSON.stringify({
+    schemaVersion: 1,
+    targetId: fixture.id,
+    sourceType: "local",
+    configuredPath: fixture.projectRoot,
+    resolvedPath: fixture.projectRoot,
+    fingerprint: {
+      schemaVersion: 1,
+      hash: "a".repeat(64)
+    },
+    createdAt: "2024-01-01T00:00:00.000Z",
+    updatedAt: "2024-01-01T00:00:00.000Z"
+  }, null, 2)}\n`;
+}
+
+async function makeTargetProject(
+  applicationId?: string,
+  options: { androidProject?: boolean; withIdentity?: boolean } = {}
+): Promise<TargetFixture> {
   const id = "work-app";
   const root = await mkdtemp(join(tmpdir(), "taphound-doctor-target-"));
   temporaryRoots.push(root);
   const projectRoot = join(root, "project");
   await mkdir(projectRoot, { recursive: true });
-  await mkdir(join(projectRoot, "app"), { recursive: true });
-  await writeFile(
-    join(projectRoot, "settings.gradle.kts"),
-    "rootProject.name = \"work-app\"\n"
-  );
-  if (applicationId !== undefined) {
+  if (options.androidProject !== false) {
+    await mkdir(join(projectRoot, "app"), { recursive: true });
     await writeFile(
-      join(projectRoot, "app", "build.gradle.kts"),
-      `android {\n  defaultConfig {\n    applicationId = "${applicationId}"\n  }\n}\n`
+      join(projectRoot, "settings.gradle.kts"),
+      "rootProject.name = \"work-app\"\n"
     );
+    if (applicationId !== undefined) {
+      await writeFile(
+        join(projectRoot, "app", "build.gradle.kts"),
+        `android {\n  defaultConfig {\n    applicationId = "${applicationId}"\n  }\n}\n`
+      );
+    }
   }
   const workspaceRoot = join(root, "ws", id);
   await mkdir(workspaceRoot, { recursive: true });
-  await writeFile(join(workspaceRoot, "identity.json"), "{}\n");
+  if (options.withIdentity !== false) {
+    await writeFile(
+      join(workspaceRoot, "identity.json"),
+      identityJson({ projectRoot, workspaceRoot, id })
+    );
+  }
   return { projectRoot, workspaceRoot, id };
 }
 
@@ -105,7 +133,11 @@ const gitResult = (stdout: string): {
   cancelled: false
 });
 
-function fakeLocalTargets(fixture: TargetFixture, overrides: Partial<LocalTargets> = {}): {
+function fakeLocalTargets(
+  fixture: TargetFixture,
+  overrides: Partial<LocalTargets> = {},
+  gitEnabled = true
+): {
   bundle: LocalTargets;
   resolve: ReturnType<typeof vi.fn>;
   loadTargets: ReturnType<typeof vi.fn>;
@@ -121,7 +153,7 @@ function fakeLocalTargets(fixture: TargetFixture, overrides: Partial<LocalTarget
           id: fixture.id,
           source: { type: "local", path: fixture.projectRoot },
           run: { packageName: "com.example.app", activity: ".MainActivity" },
-          git: { enabled: true },
+          git: { enabled: gitEnabled },
           override: false
         }
       },
@@ -166,7 +198,16 @@ function fakeLocalTargets(fixture: TargetFixture, overrides: Partial<LocalTarget
     workspace: {
       root: vi.fn(() => fixture.workspaceRoot),
       identityPath: vi.fn(() => join(fixture.workspaceRoot, "identity.json")),
-      readIdentity: vi.fn(() => Promise.resolve(null)),
+      readIdentity: vi.fn(async (): Promise<LocalTargetIdentity | null> => {
+        try {
+          const raw: unknown = JSON.parse(
+            await readFile(join(fixture.workspaceRoot, "identity.json"), "utf8")
+          );
+          return raw as LocalTargetIdentity;
+        } catch {
+          return null;
+        }
+      }),
       writeIdentity: vi.fn(() => Promise.resolve(undefined)),
       ensureWorkspace: vi.fn(() => Promise.resolve(undefined)),
       ensureTaphoundIgnored: vi.fn(() => Promise.resolve(undefined))
@@ -396,5 +437,66 @@ describe("taphound doctor --target", () => {
     expect(dependencies.doctor.run).toHaveBeenCalledWith(
       expect.objectContaining({ requestedDevice: "serial-1234" })
     );
+  });
+
+  it("exits 2 with LOCAL_TARGET_NOT_ANDROID_PROJECT when the target has no Android project structure", async () => {
+    const fixture = await makeTargetProject("com.example.app", {
+      androidProject: false
+    });
+    const fake = fakeLocalTargets(fixture);
+    mockGit(fake.processRun);
+    const exitCodes: number[] = [];
+    const dependencies = baseDependencies(exitCodes, fake.bundle);
+
+    await runDoctor(dependencies, ["doctor", "--target", fixture.id, "--json"]);
+
+    expect(exitCodes).toEqual([2]);
+    const output = jsonOutput(dependencies);
+    expect(output).toMatchObject({
+      status: "error",
+      exitCode: 2,
+      failure: { code: "LOCAL_TARGET_NOT_ANDROID_PROJECT" }
+    });
+  });
+
+  it("warns and still runs the device doctor when identity is missing", async () => {
+    const fixture = await makeTargetProject("com.example.app", {
+      withIdentity: false
+    });
+    const fake = fakeLocalTargets(fixture);
+    mockGit(fake.processRun);
+    const exitCodes: number[] = [];
+    const dependencies = baseDependencies(exitCodes, fake.bundle);
+
+    await runDoctor(dependencies, ["doctor", "--target", fixture.id, "--json"]);
+
+    expect(exitCodes).toEqual([0]);
+    expect(dependencies.doctor.run).toHaveBeenCalled();
+    const report = jsonOutput(dependencies);
+    const checks = report.checks as Array<{ name: string; status: string }>;
+    expect(checks).toContainEqual(
+      expect.objectContaining({ name: "local-workspace", status: "warn" })
+    );
+  });
+
+  it("skips git probes and reports git-state warn when git.enabled is false", async () => {
+    const fixture = await makeTargetProject("com.example.app");
+    const fake = fakeLocalTargets(fixture, {}, false);
+    mockGit(fake.processRun);
+    const exitCodes: number[] = [];
+    const dependencies = baseDependencies(exitCodes, fake.bundle);
+
+    await runDoctor(dependencies, ["doctor", "--target", fixture.id, "--json"]);
+
+    expect(exitCodes).toEqual([0]);
+    expect(fake.processRun).not.toHaveBeenCalled();
+    const report = jsonOutput(dependencies);
+    const checks = report.checks as Array<{ name: string; status: string }>;
+    expect(checks).toContainEqual(
+      expect.objectContaining({ name: "git-state", status: "warn" })
+    );
+    expect(report).toMatchObject({
+      target: { id: fixture.id, git: null }
+    });
   });
 });

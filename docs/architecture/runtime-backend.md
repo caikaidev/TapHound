@@ -139,12 +139,14 @@ from two sources with fixed precedence:
 | `adb` | `AdbRuntimeBackend` |
 | `mobile-mcp` | `MobileMcpRuntimeBackend` |
 
-**Mobile MCP is the preferred runtime path (2026-09-10).** ADB is the
-designated backup driver for capability gaps — notably process discovery,
-which the verify path needs — and remains reachable through
-`runtime.backend: "adb"` or `TAPHOUND_RUNTIME_BACKEND=adb`. The demo project
-keeps pinning `adb` until the Mobile MCP capability matrix covers the core
-commands.
+**Mobile MCP is the preferred runtime path for read-only work (2026-09-10).**
+`observe` and `doctor` run on it by default; ADB is the execute path for
+`verify`, `record`, and `generation`, because the 1.0.3 server audit
+confirmed it still lacks process discovery, foreground Activity, and a
+historical logcat dump (the robot has `listRunningProcesses`, but it is not
+exposed as a tool). ADB stays reachable through `runtime.backend: "adb"` or
+`TAPHOUND_RUNTIME_BACKEND=adb`; the demo project pins `adb`. The capability
+table is re-checked on each server upgrade (see Level 4 below).
 
 An invalid value in either source fails with `CONFIG_INVALID` (exit code 2)
 before any command runs; a missing config or a config without `runtime.backend`
@@ -219,7 +221,7 @@ Known limitations:
 | 1 — session-first orchestrators | done | `ObserveService`, `VerifyRuntime`, `RecorderService`, `RuntimeObserver`, and `GenerationStepExecutor` borrow a session per run through `RuntimeSessionOpener` and fail closed on missing capability members; `VerifyRuntime` feeds its `AdbPort`-shaped helpers through `RuntimeSessionPortViews` (`src/ports/runtime-session-ports.ts`). The bridge remains for device discovery, `align`, and long-tail consumers. |
 | 2 — full session typing | later | Helpers (`ProcessWaiter`, `ActionExecutor`, `LogcatCollector`, …) accept `Pick<RuntimeSession, …>`; `AdbPort` shrinks to the bridge or is deleted. |
 | 3 — Mobile MCP default | done | `MobileMcpRuntimeBackend` passes the shared contract suite and `auto` resolves to it; ADB remains available through `runtime.backend: "adb"` and the environment override. |
-| 4 — Mobile MCP capability completion | next | Re-check the 1.0.3 capability matrix on a real device and close the remaining gaps (process discovery is the hard one; foreground and log evidence may already be covered by `mobile_get_foreground_app` / `mobile_get_device_logs`) so `verify`, `record`, and `generation` run on the default backend without failing closed. |
+| 4 — Mobile MCP capability completion | blocked | 1.0.3 audit confirmed no new capability can be enabled: `mobile_get_foreground_app` returns package name only (no Activity), `mobile_get_device_logs` is non-historical, and no process-list tool is exposed even though `AndroidRobot.listRunningProcesses` exists. `verify`/`record`/`generation` keep the ADB execute path; re-check on each upstream server release and flip once process discovery, foreground Activity, and logcat dump are available. |
 
 ## Phase 2 flip checklist
 

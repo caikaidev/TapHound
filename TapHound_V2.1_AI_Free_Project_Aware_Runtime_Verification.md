@@ -555,20 +555,28 @@ V2.1 should establish a preferred path.
 Adopted priority (2026-09-10):
 
 ```text
-P0:
+P0 observe path:
   Mobile MCP (@mobilenext/mobile-mcp)
-  — the preferred deterministic runtime path (`auto` resolves here)
+  — preferred for read-only runtime work (observe, doctor)
+  — `auto` resolves here
   — no bundled LLM, stable protocol, one maintained driver path
-  — capability gaps are being closed so the core commands run on it
 
-P0 backup:
+P0 execute path:
   direct ADB + system UIAutomator
-  — kept available via `runtime.backend: "adb"` / `TAPHOUND_RUNTIME_BACKEND=adb`
-  — the designated fallback while Mobile MCP still lacks process discovery
+  — used for verify / record / generation
+  — reached via `runtime.backend: "adb"` / `TAPHOUND_RUNTIME_BACKEND=adb`
+  — required until the Mobile MCP server exposes process discovery,
+    foreground activity, and logcat dump tools (upstream, not TapHound)
 
 Maintenance only:
   Appium UiAutomator2
 ```
+
+The 2026-09-10 server (1.0.3) audit confirmed the execute-path gaps:
+no process-list tool (the robot has `listRunningProcesses` but it is not
+exposed), no foreground Activity (only package name), and no historical
+logcat dump. TapHound keeps the ADB execute path and fails closed under
+mobile-mcp until an upstream server release covers them.
 
 The goal is not backend breadth.
 
@@ -2791,8 +2799,8 @@ This is complementary without creating a hard dependency.
 
 # 65. Relationship With Mobile MCP / Other Drivers
 
-Mobile MCP is the **adopted** deterministic Runtime Driver (decision
-2026-09-10). It qualifies on every criterion:
+Mobile MCP is the **adopted** deterministic Runtime Driver for the observe
+path (decision 2026-09-10). It qualifies on every criterion:
 
 ```text
 it reduces maintenance — yes
@@ -2801,9 +2809,10 @@ its protocol is sufficiently stable — yes
 it improves reliability — yes
 ```
 
-ADB remains the backup path for capability gaps
-(`runtime.backend: "adb"` / `TAPHOUND_RUNTIME_BACKEND=adb`) — a supported
-deterministic driver, not the primary one.
+ADB is the execute path for verify / record / generation until the Mobile
+MCP server exposes process discovery, foreground Activity, and logcat dump
+tools (`runtime.backend: "adb"` / `TAPHOUND_RUNTIME_BACKEND=adb`) — a
+supported deterministic driver, not a downgrade.
 
 No third-party runtime reference should leak into persistent semantic identity.
 

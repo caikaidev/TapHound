@@ -213,6 +213,71 @@ describe("taphound local", () => {
     expect(fake.bundle.workspace.ensureWorkspace).toHaveBeenCalled();
   });
 
+  it("add without --package reuses an existing stored packageName", async () => {
+    const exitCodes: number[] = [];
+    const fake = fakeLocalTargets();
+    vi.mocked(fake.loadTargets).mockResolvedValue({
+      targets: {
+        "work-app": {
+          id: "work-app",
+          source: { type: "local", path: "/tmp/work-app" },
+          run: { packageName: "com.example.app" },
+          override: false
+        }
+      },
+      official: undefined,
+      local: undefined
+    });
+    vi.mocked(fake.resolveByPath).mockResolvedValue(RESOLUTION);
+    const dependencies = baseDependencies(exitCodes, fake.bundle);
+
+    await runLocal(dependencies, [
+      "local", "add", "work-app",
+      "--path", "/tmp/work-app",
+      "--json"
+    ]);
+
+    const output = JSON.parse(
+      (dependencies.stdout as BufferOutput).value
+    ) as { id: string; detected: { packageName: string }; config: string };
+    expect(output.id).toBe("work-app");
+    expect(output.detected.packageName).toBe("com.example.app");
+    expect(output.config).toBe("benchmarks/targets.local.json");
+    expect(exitCodes).toEqual([0]);
+    expect(fake.appendLocalTarget).toHaveBeenCalledWith(
+      "/targets",
+      "work-app",
+      expect.objectContaining({
+        run: { packageName: "com.example.app", activity: ".MainActivity" }
+      })
+    );
+  });
+
+  it("add without --package and without a stored package fails with TARGET_CONFIG_INVALID", async () => {
+    const exitCodes: number[] = [];
+    const fake = fakeLocalTargets();
+    vi.mocked(fake.loadTargets).mockResolvedValue({
+      targets: {},
+      official: undefined,
+      local: undefined
+    });
+    const dependencies = baseDependencies(exitCodes, fake.bundle);
+
+    await runLocal(dependencies, [
+      "local", "add", "work-app",
+      "--path", "/tmp/work-app",
+      "--json"
+    ]);
+
+    const output = JSON.parse(
+      (dependencies.stdout as BufferOutput).value
+    ) as { exitCode: number; failure: { code: string } };
+    expect(output.exitCode).toBe(2);
+    expect(output.failure.code).toBe("TARGET_CONFIG_INVALID");
+    expect(exitCodes).toEqual([2]);
+    expect(fake.resolveByPath).not.toHaveBeenCalled();
+  });
+
   it("list marks targets READY and MISSING without throwing", async () => {
     const exitCodes: number[] = [];
     const fake = fakeLocalTargets();

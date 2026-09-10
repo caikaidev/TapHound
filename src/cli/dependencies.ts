@@ -1016,10 +1016,12 @@ function buildLocalTargets(
     clock
   });
   return {
-    targetsHome: (): string => resolvePath(
-      process.cwd(),
-      process.env.TAPHOUND_TARGETS_HOME ?? "benchmarks"
-    ),
+    targetsHome: (): string => {
+      const explicit = process.env.TAPHOUND_TARGETS_HOME;
+      return explicit === undefined
+        ? process.cwd()
+        : resolvePath(process.cwd(), explicit);
+    },
     configStore,
     pathResolver,
     workspace,

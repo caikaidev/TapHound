@@ -29,7 +29,7 @@ interface LocalOptions {
 
 interface AddOptions extends LocalOptions {
   path: string;
-  package: string;
+  package?: string | undefined;
 }
 
 interface GitInfo {
@@ -125,7 +125,7 @@ async function countJourneys(
 
 export function createLocalCommand(dependencies: CliDependencies): Command {
   const withTargetsAndJson = (command: Command): Command => command
-    .option("--targets <path>", "Targets workspace path (defaults to benchmarks)")
+    .option("--targets <path>", "Targets workspace base path")
     .option("--json", "Emit one machine-readable JSON value");
 
   return new Command("local")
@@ -134,7 +134,7 @@ export function createLocalCommand(dependencies: CliDependencies): Command {
       .description("Register a local Android target")
       .argument("<id>", "Target id")
       .requiredOption("--path <path>", "Path to the Android project")
-      .requiredOption("--package <name>", "Android application package name")
+      .option("--package <name>", "Android application package name")
       .action(async (id: string, options: AddOptions): Promise<void> => {
         const json = options.json === true;
         const home = targetsHome(dependencies, options.targets);
@@ -143,16 +143,28 @@ export function createLocalCommand(dependencies: CliDependencies): Command {
         const configStore = dependencies.localTargets.configStore;
         let resolved;
         try {
+          const existing = (await configStore.loadTargets(home)).targets[id];
+          const packageName = options.package ?? existing?.run.packageName;
+          if (packageName === undefined) {
+            writeFailure(
+              dependencies,
+              json,
+              "TARGET_CONFIG_INVALID",
+              `Target ${id} has no packageName. Run: taphound local add ${id} --path '${options.path}' --package <name>`,
+              2
+            );
+            return;
+          }
           const probe = await resolver.resolveByPath(options.path);
           const fingerprint = await resolver.fingerprint(
             probe.project,
-            options.package
+            packageName
           );
           const workspaceRoot = workspace.root(home, id);
           await configStore.appendLocalTarget(home, id, {
             source: { type: "local", path: probe.configuredPath },
             run: {
-              packageName: options.package,
+              packageName,
               activity: DEFAULT_TARGET_ACTIVITY
             }
           });
@@ -165,7 +177,7 @@ export function createLocalCommand(dependencies: CliDependencies): Command {
             configuredPath: probe.configuredPath,
             resolvedPath: probe.resolvedPath,
             fingerprint,
-            packageName: options.package,
+            packageName,
             createdAt: now,
             updatedAt: now
           };
@@ -178,7 +190,7 @@ export function createLocalCommand(dependencies: CliDependencies): Command {
             detected: {
               gradleRoot: probe.project.rootDir,
               gitRepo: probe.project.gitRoot ?? null,
-              packageName: options.package
+              packageName
             },
             config: TARGETS_LOCAL_CONFIG_PATH
           };

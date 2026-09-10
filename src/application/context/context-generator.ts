@@ -9,7 +9,7 @@ import {
   type ProjectContext,
   type ProjectContextModule
 } from "../../domain/project-context.js";
-import { CONTEXT_DIR } from "../../domain/workspace.js";
+import { CONTEXT_DIR, TAPHOUND_DIR } from "../../domain/workspace.js";
 import type {
   ProjectIdentityInspector
 } from "../../ports/project-identity-inspector.js";
@@ -51,6 +51,7 @@ export class ContextGenerateError extends Error {
 
 export interface ContextGenerateInput {
   readonly projectRoot: string;
+  readonly contextRoot?: string | undefined;
   readonly contextPath: string;
   readonly force?: boolean;
 }
@@ -224,26 +225,34 @@ export class ContextGenerator {
   public readonly generate = async (
     input: ContextGenerateInput
   ): Promise<ContextGenerateResult> => {
+    const contextRoot = input.contextRoot ?? input.projectRoot;
+    const inWorkspace = input.contextRoot !== undefined;
     const contextPath = isAbsolute(input.contextPath)
       ? input.contextPath
-      : resolve(input.projectRoot, input.contextPath);
+      : resolve(contextRoot, input.contextPath);
 
     const contextRelativePath = projectRelativePath(
-      input.projectRoot,
+      contextRoot,
       contextPath,
       (message) => new ContextGenerateError("CONTEXT_INVALID", message)
     );
 
+    const reduce = (relativePath: string): string =>
+      inWorkspace && relativePath.startsWith(`${TAPHOUND_DIR}/`)
+        ? relativePath.slice(TAPHOUND_DIR.length + 1)
+        : relativePath;
+    const documentRelativePath = reduce(contextRelativePath);
+
     if (input.force !== true) {
       const existing = await this.dependencies.files.inspectProjectFile({
-        projectRoot: input.projectRoot,
-        relativePath: contextRelativePath,
+        projectRoot: contextRoot,
+        relativePath: documentRelativePath,
         maximumBytes: 1
       });
       if (existing.status === "inspected") {
         throw new ContextGenerateError(
           "CONTEXT_ALREADY_EXISTS",
-          `Project Context already exists: ${contextRelativePath} (use --force to overwrite)`
+          `Project Context already exists: ${documentRelativePath} (use --force to overwrite)`
         );
       }
     }
@@ -328,8 +337,8 @@ export class ContextGenerator {
 
       const shardSha256 = await writeDocument(
         this.dependencies.writer,
-        input.projectRoot,
-        shardPath,
+        contextRoot,
+        reduce(shardPath),
         parsed.data
       );
 
@@ -339,12 +348,12 @@ export class ContextGenerator {
         kind: module.kind,
         status: "notAnalyzed",
         evidenceCount: evidence.length,
-        contextPath: shardPath,
+        contextPath: reduce(shardPath),
         sha256: shardSha256
       });
 
       moduleReferences.push(
-        buildModuleReference(module, shardPath, shardSha256, module.dependsOn)
+        buildModuleReference(module, reduce(shardPath), shardSha256, module.dependsOn)
       );
     }
 
@@ -388,8 +397,8 @@ export class ContextGenerator {
 
     const indexHash = await writeDocument(
       this.dependencies.writer,
-      input.projectRoot,
-      contextRelativePath,
+      contextRoot,
+      documentRelativePath,
       parsedIndex.data
     );
 

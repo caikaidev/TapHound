@@ -165,6 +165,90 @@ async function fixture(): Promise<{
 }
 
 describe("ContextLoader", () => {
+  it("loads from a workspace context root while validating evidence against the project root", async () => {
+    const test = await fixture();
+    const projectRoot = join(test.root, "real-app");
+    const workspaceRoot = join(test.root, "ws");
+    const appSource = "app/src/main/java/com/example/app/MainActivity.kt";
+    await mkdir(join(projectRoot, dirname(appSource)), { recursive: true });
+    await writeFile(
+      join(projectRoot, appSource),
+      "class MainActivity"
+    );
+    const appSourceHash = sha256("class MainActivity");
+    const module = {
+      version: 2,
+      moduleId: ":app",
+      projectDir: "app",
+      status: "complete",
+      inventory: {
+        version: 2,
+        pathSetSha256: sha256(appSource),
+        categories: ["sources"]
+      },
+      manifest: {
+        version: 1,
+        files: [{
+          path: appSource,
+          sha256: appSourceHash,
+          confidence: "sourceConfirmed"
+        }]
+      },
+      summary: {
+        features: ["launch"],
+        activities: [{ name: "com.example.app.MainActivity", entryPoints: [], screens: [] }],
+        elements: [],
+        transitions: [],
+        logcat: []
+      }
+    };
+    const shardHash = await writeJson(workspaceRoot, "context/modules/app.json", module);
+    await writeJson(workspaceRoot, "context/project-context.json", {
+      version: 2,
+      packageName: "com.example.app",
+      launchActivity: "com.example.app.MainActivity",
+      manifest: {
+        version: 1,
+        files: [{
+          path: "settings.gradle.kts",
+          sha256: sha256("include(\":app\", \":chat\")"),
+          confidence: "sourceConfirmed"
+        }]
+      },
+      interactionPolicy: {
+        allowedActions: ["click", "wait"],
+        confirmationRequiredActions: [],
+        forbiddenActions: []
+      },
+      modules: [
+        {
+          id: ":app",
+          projectDir: "app",
+          kind: "application",
+          contextPath: ".taphound/context/modules/app.json",
+          sha256: shardHash,
+          features: ["launch"],
+          activities: ["com.example.app.MainActivity"],
+          dependsOn: [],
+          status: "complete"
+        }
+      ]
+    });
+
+    await expect(loader().load({
+      projectRoot,
+      workspaceRoot,
+      contextPath: join(workspaceRoot, "context/project-context.json"),
+      moduleIds: [":app"]
+    })).resolves.toMatchObject({
+      context: {
+        packageName: "com.example.app",
+        launchActivity: "com.example.app.MainActivity"
+      },
+      modules: [{ moduleId: ":app", status: "complete" }]
+    });
+  });
+
   it("loads the application module plus selected feature modules", async () => {
     const test = await fixture();
 

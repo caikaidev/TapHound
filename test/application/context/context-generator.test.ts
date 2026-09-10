@@ -83,6 +83,8 @@ const ROOT_EVIDENCE_FILES = [
 class FakeEnvironment {
   public readonly writtenDocuments = new Map<string, unknown>();
   public readonly writtenOrder: string[] = [];
+  public readonly discoveredRoots: string[] = [];
+  public readonly writeRoots = new Map<string, string>();
   private readonly fileContents = new Map<string, string>();
   private discoverResult: ProjectModuleDiscovery = DEFAULT_DISCOVERY;
   private identityResult: ProjectIdentityInspection = DEFAULT_IDENTITY;
@@ -118,7 +120,10 @@ class FakeEnvironment {
 
   public readonly buildDependencies = (): ContextGeneratorDependencies => ({
     discoverer: {
-      discoverModules: () => Promise.resolve(this.discoverResult)
+      discoverModules: (input): Promise<ProjectModuleDiscovery> => {
+        this.discoveredRoots.push(input.projectRoot);
+        return Promise.resolve(this.discoverResult);
+      }
     },
     identity: {
       inspectIdentity: () => Promise.resolve(this.identityResult)
@@ -148,6 +153,7 @@ class FakeEnvironment {
           return Promise.resolve(override);
         }
         this.writtenDocuments.set(input.relativePath, input.document);
+        this.writeRoots.set(input.relativePath, input.projectRoot);
         this.writtenOrder.push(input.relativePath);
         return Promise.resolve<ContextDocumentWrite>({
           status: "written",
@@ -599,6 +605,64 @@ describe("ContextGenerator", () => {
       expect(env.writtenOrder[lastIndex]).toBe(CONTEXT_PATH);
       expect(env.writtenOrder.slice(0, -1)).toContain(".taphound/context/modules/app.json");
       expect(env.writtenOrder.slice(0, -1)).toContain(".taphound/context/modules/lib.json");
+    });
+  });
+
+  describe("workspace-rooted generation", () => {
+    it("roots context documents at contextRoot while discovery stays on projectRoot", async () => {
+      const env = standardEnvironment();
+
+      const result = await env.generator().generate({
+        projectRoot: PROJECT_ROOT,
+        contextRoot: "/ws",
+        contextPath: ".taphound/context/project-context.json"
+      });
+
+      expect(result.status).toBe("generated");
+      expect(env.discoveredRoots).toEqual([PROJECT_ROOT]);
+      expect(env.writeRoots.get("context/project-context.json")).toBe("/ws");
+      expect(env.writeRoots.get("context/modules/app.json")).toBe("/ws");
+      expect(env.writtenDocuments.has("context/project-context.json")).toBe(true);
+      expect(env.writtenDocuments.has(".taphound/context/project-context.json")).toBe(false);
+      expect(env.writtenDocuments.has("context/modules/app.json")).toBe(true);
+      expect(env.writtenDocuments.has(".taphound/context/modules/app.json")).toBe(false);
+    });
+
+    it("derives the context document path from the contextRoot", async () => {
+      const env = standardEnvironment();
+
+      const result = await env.generator().generate({
+        projectRoot: PROJECT_ROOT,
+        contextRoot: "/ws/other",
+        contextPath: "/ws/other/.taphound/context/project-context.json"
+      });
+
+      expect(result.status).toBe("generated");
+      expect(env.writeRoots.get("context/project-context.json")).toBe("/ws/other");
+      expect(env.writeRoots.get("context/modules/app.json")).toBe("/ws/other");
+    });
+
+    it("rejects a context document that escapes contextRoot", async () => {
+      const env = standardEnvironment();
+
+      await expect(env.generator().generate({
+        projectRoot: PROJECT_ROOT,
+        contextRoot: "/ws",
+        contextPath: "../../../etc/passwd"
+      })).rejects.toMatchObject({ code: "CONTEXT_INVALID" });
+    });
+
+    it("keeps discovery and evidence inspection on projectRoot in workspace mode", async () => {
+      const env = standardEnvironment();
+      env.setFile("app/src/main/AndroidManifest.xml", "<manifest />");
+
+      await env.generator().generate({
+        projectRoot: PROJECT_ROOT,
+        contextRoot: "/ws",
+        contextPath: CONTEXT_PATH
+      });
+
+      expect(env.discoveredRoots).toEqual([PROJECT_ROOT]);
     });
   });
 });

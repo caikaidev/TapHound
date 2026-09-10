@@ -20,7 +20,11 @@ import {
 import type {
   ContextValidationResult
 } from "../../application/context/context-validator.js";
-import { TapHoundConfigSchema } from "../../domain/config.js";
+import { TapHoundConfigSchema, type TapHoundConfig } from "../../domain/config.js";
+import {
+  exitCodeForFailure
+} from "../../domain/failure.js";
+import { TargetError } from "../../domain/target.js";
 import { CONFIG_PATH } from "../../domain/workspace.js";
 import type { CliDependencies } from "../dependencies.js";
 import {
@@ -35,7 +39,69 @@ interface ContextOptions {
   config: string;
   context: string;
   module?: string[] | undefined;
+  target?: string | undefined;
+  targets?: string | undefined;
   json?: boolean | undefined;
+}
+
+interface ResolvedTargetContext {
+  projectRoot: string;
+  contextRoot: string;
+  config: TapHoundConfig;
+}
+
+function targetsHome(
+  dependencies: CliDependencies,
+  explicit: string | undefined
+): string {
+  if (explicit !== undefined) {
+    return resolve(dependencies.cwd(), explicit);
+  }
+  return dependencies.localTargets.targetsHome();
+}
+
+async function resolveTargetContext(
+  dependencies: CliDependencies,
+  options: Pick<ContextOptions, "target" | "targets">
+): Promise<ResolvedTargetContext> {
+  const id = options.target as string;
+  const home = targetsHome(dependencies, options.targets);
+  const resolver = dependencies.localTargets.targetResolver(home);
+  const resolved = await resolver.resolve(id);
+  const loaded = await dependencies.localTargets.configStore.loadTargets(home);
+  const entry = loaded.targets[id];
+  if (entry === undefined) {
+    throw new TargetError(
+      "LOCAL_TARGET_NOT_FOUND",
+      `Local target "${id}" is not registered. Add it with: taphound local add ${id} --path <path>`
+    );
+  }
+  const config = dependencies.localTargets.localTargetService(home).configForTarget({
+    entry,
+    resolvedPath: resolved.resolvedPath,
+    workspaceRoot: resolved.workspaceRoot
+  });
+  return {
+    projectRoot: resolved.resolvedPath,
+    contextRoot: resolved.workspaceRoot,
+    config
+  };
+}
+
+function writeContextFailure(
+  dependencies: CliDependencies,
+  json: boolean,
+  code: Parameters<typeof failureOutput>[1],
+  message: string
+): void {
+  const exitCode = exitCodeForFailure(code);
+  const output = failureOutput(exitCode, code, message);
+  if (json) {
+    writeJson(dependencies.stdout, output);
+  } else {
+    writeLine(dependencies.stderr, output.failure.message);
+  }
+  dependencies.setExitCode(exitCode);
 }
 
 type ContextCommandName = "validate" | "status";
@@ -108,16 +174,32 @@ function createContextOperation(
       ".taphound/context/project-context.json"
     )
     .option("--module <id...>", "Select Context modules")
+    .option("--target <id>", "Registered local target id")
+    .option("--targets <path>", "Targets workspace base path")
     .option("--json", "Emit one machine-readable JSON value")
     .action(async (options: ContextOptions): Promise<void> => {
-      let config;
+      const json = options.json === true;
+      let projectRoot = options.project;
+      let contextRoot: string | undefined;
+      let config: TapHoundConfig;
       try {
-        config = TapHoundConfigSchema.parse(await dependencies.readJson(
-          resolve(options.project, options.config)
-        ));
+        if (options.target !== undefined) {
+          const target = await resolveTargetContext(dependencies, options);
+          projectRoot = target.projectRoot;
+          contextRoot = target.contextRoot;
+          config = target.config;
+        } else {
+          config = TapHoundConfigSchema.parse(await dependencies.readJson(
+            resolve(projectRoot, options.config)
+          ));
+        }
       } catch (error) {
+        if (error instanceof TargetError) {
+          writeContextFailure(dependencies, json, error.code, error.message);
+          return;
+        }
         const output = failureOutput(2, "CONFIG_INVALID", errorMessage(error));
-        if (options.json === true) {
+        if (json) {
           writeJson(dependencies.stdout, output);
         } else {
           writeLine(dependencies.stderr, output.failure.message);
@@ -128,14 +210,15 @@ function createContextOperation(
 
       try {
         const loaded = await dependencies.contextLoader.load({
-          projectRoot: options.project,
-          contextPath: resolve(options.project, options.context),
+          projectRoot,
+          ...(contextRoot === undefined ? {} : { workspaceRoot: contextRoot }),
+          contextPath: resolve(contextRoot ?? projectRoot, options.context),
           ...(options.module === undefined ? {} : { moduleIds: options.module }),
           allowIncomplete: name === "status"
         });
         const result = await dependencies.contextValidator.validate({
           context: loaded.context,
-          projectRoot: options.project,
+          projectRoot,
           config,
           ...(name === "status" ? { modules: loaded.modules } : {}),
           ...(name === "status" ? { reportScopes: true } : {})
@@ -344,6 +427,8 @@ interface ContextGenerateOptions {
   project: string;
   context: string;
   force?: boolean | undefined;
+  target?: string | undefined;
+  targets?: string | undefined;
   json?: boolean | undefined;
 }
 
@@ -381,22 +466,37 @@ function createContextGenerateCommand(dependencies: CliDependencies): Command {
       ".taphound/context/project-context.json"
     )
     .option("--force", "Overwrite an existing Project Context")
+    .option("--target <id>", "Registered local target id")
+    .option("--targets <path>", "Targets workspace base path")
     .option("--json", "Emit one machine-readable JSON value")
     .action(async (options: ContextGenerateOptions): Promise<void> => {
+      const json = options.json === true;
+      let projectRoot = options.project;
+      let contextRoot: string | undefined;
       try {
+        if (options.target !== undefined) {
+          const target = await resolveTargetContext(dependencies, options);
+          projectRoot = target.projectRoot;
+          contextRoot = target.contextRoot;
+        }
         const result = await dependencies.contextGenerator.generate({
-          projectRoot: options.project,
-          contextPath: resolve(options.project, options.context),
+          projectRoot,
+          ...(contextRoot === undefined ? {} : { contextRoot }),
+          contextPath: resolve(contextRoot ?? projectRoot, options.context),
           ...(options.force === undefined ? {} : { force: options.force })
         });
         const output = { ...result, exitCode: 0 };
-        if (options.json === true) {
+        if (json) {
           writeJson(dependencies.stdout, output);
         } else {
           writeGenerateText(dependencies, result);
         }
         dependencies.setExitCode(0);
       } catch (error) {
+        if (error instanceof TargetError) {
+          writeContextFailure(dependencies, json, error.code, error.message);
+          return;
+        }
         const output = error instanceof ContextGenerateError
           ? {
               status: "error" as const,
@@ -404,7 +504,7 @@ function createContextGenerateCommand(dependencies: CliDependencies): Command {
               failure: { code: error.code, message: error.message }
             }
           : failureOutput(4, "INTERNAL_ERROR", errorMessage(error));
-        if (options.json === true) {
+        if (json) {
           writeJson(dependencies.stdout, output);
         } else {
           writeLine(dependencies.stderr, output.failure.message);

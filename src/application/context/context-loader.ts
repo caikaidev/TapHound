@@ -17,6 +17,7 @@ import type {
   ProjectInventoryInspector
 } from "../../ports/project-inventory-inspector.js";
 import { projectRelativePath } from "../../shared/paths.js";
+import { TAPHOUND_DIR } from "../../domain/workspace.js";
 import { compareStrings } from "../../shared/strings.js";
 import { assertShardIdentity } from "./shard-identity.js";
 
@@ -52,6 +53,7 @@ export interface LoadedContextIndex {
 
 export interface ContextLoadInput {
   projectRoot: string;
+  workspaceRoot?: string | undefined;
   contextPath: string;
   moduleIds?: string[] | undefined;
   allowIncomplete?: boolean | undefined;
@@ -204,12 +206,12 @@ export class ContextLoader {
   public constructor(private readonly dependencies: ContextLoaderDependencies) {}
 
   private readonly readStableDocument = async (input: {
-    projectRoot: string;
+    root: string;
     relativePath: string;
     label: string;
   }): Promise<StableContextDocument> => {
     const before = await this.dependencies.files.inspectProjectFile({
-      projectRoot: input.projectRoot,
+      projectRoot: input.root,
       relativePath: input.relativePath,
       maximumBytes: MAX_CONTEXT_SHARD_BYTES
     });
@@ -222,7 +224,7 @@ export class ContextLoader {
     let document: unknown;
     try {
       document = await this.dependencies.readJson(
-        resolve(input.projectRoot, input.relativePath)
+        resolve(input.root, input.relativePath)
       );
     } catch (error) {
       throw new ContextLoadError(
@@ -231,7 +233,7 @@ export class ContextLoader {
       );
     }
     const after = await this.dependencies.files.inspectProjectFile({
-      projectRoot: input.projectRoot,
+      projectRoot: input.root,
       relativePath: input.relativePath,
       maximumBytes: MAX_CONTEXT_SHARD_BYTES
     });
@@ -247,18 +249,28 @@ export class ContextLoader {
     return { document, sha256: before.sha256 };
   };
 
+  private readonly contextRelativePath = (
+    workspaceRoot: string | undefined,
+    relativePath: string
+  ): string =>
+    workspaceRoot !== undefined && relativePath.startsWith(`${TAPHOUND_DIR}/`)
+      ? relativePath.slice(TAPHOUND_DIR.length + 1)
+      : relativePath;
+
   public readonly readIndex = async (input: {
     projectRoot: string;
+    workspaceRoot?: string | undefined;
     contextPath: string;
   }): Promise<LoadedContextIndex> => {
+    const contextRoot = input.workspaceRoot ?? input.projectRoot;
     const contextPath = projectRelativePath(
-      input.projectRoot,
+      contextRoot,
       input.contextPath,
       (message) => new ContextLoadError("CONTEXT_INVALID", message)
     );
     const loaded = await this.readStableDocument({
-      projectRoot: input.projectRoot,
-      relativePath: contextPath,
+      root: contextRoot,
+      relativePath: this.contextRelativePath(input.workspaceRoot, contextPath),
       label: "Project Context index"
     });
     const parsedBundle = ProjectContextSchema.safeParse(loaded.document);
@@ -292,11 +304,15 @@ export class ContextLoader {
       }
     }
 
+    const contextRoot = input.workspaceRoot ?? input.projectRoot;
     const modules: ProjectContextModule[] = [];
     for (const reference of references) {
       const loaded = await this.readStableDocument({
-        projectRoot: input.projectRoot,
-        relativePath: reference.contextPath,
+        root: contextRoot,
+        relativePath: this.contextRelativePath(
+          input.workspaceRoot,
+          reference.contextPath
+        ),
         label: `Context shard ${reference.contextPath}`
       });
       if (loaded.sha256 !== reference.sha256) {

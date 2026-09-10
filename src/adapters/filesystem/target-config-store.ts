@@ -20,13 +20,22 @@ import type {
 import { isErrnoException } from "../../shared/errors.js";
 
 async function readOptionalJson(path: string): Promise<unknown> {
+  let raw: string;
   try {
-    return JSON.parse(await readFile(path, "utf8"));
+    raw = await readFile(path, "utf8");
   } catch (error) {
-    if (!isErrnoException(error) || error.code !== "ENOENT") {
-      throw error;
+    if (isErrnoException(error) && error.code === "ENOENT") {
+      return undefined;
     }
-    return undefined;
+    throw error;
+  }
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch (error) {
+    throw new TargetError(
+      "TARGET_CONFIG_INVALID",
+      `Invalid JSON in ${path}: ${(error as Error).message}`
+    );
   }
 }
 

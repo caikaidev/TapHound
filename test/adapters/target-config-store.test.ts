@@ -75,4 +75,13 @@ describe("FileSystemTargetConfigStore", () => {
     const loaded = await store.loadTargets(home);
     expect(loaded.targets).toEqual({});
   });
+
+  it("rejects with TARGET_CONFIG_INVALID when a config file contains invalid JSON", async () => {
+    await makeHome();
+    await writeFile(join(home, "benchmarks/targets.json"), '{ "version": 1,');
+    const store = new FileSystemTargetConfigStore();
+    await expect(store.loadTargets(home)).rejects.toMatchObject({
+      code: "TARGET_CONFIG_INVALID"
+    });
+  });
 });

@@ -7,5 +7,8 @@
   ],
   "optionalAnchors": [],
   "forbiddenAnchors": [],
-  "predicates": []
+  "predicates": [],
+  "sourceFiles": [
+    "app/src/main/java/dev/taphound/demo/MainActivity.kt"
+  ]
 }

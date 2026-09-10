@@ -28,6 +28,7 @@ describe("createProgram", () => {
       "benchmark",
       "init",
       "align",
+      "impact",
       "ui-cache"
     ]);
     expect(

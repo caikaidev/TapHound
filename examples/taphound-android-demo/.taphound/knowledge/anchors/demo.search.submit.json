@@ -1,7 +1,7 @@
 {
   "version": 1,
   "id": "demo.search.submit",
-  "status": "observed",
+  "status": "verified",
   "roles": [
     "actionable"
   ],
@@ -11,5 +11,9 @@
       "resourceId": "submit_search"
     }
   },
-  "description": "Submits the search query"
+  "description": "Submits the search query",
+  "sourceFiles": [
+    "app/src/main/res/layout/activity_search.xml",
+    "app/src/main/java/dev/taphound/demo/SearchActivity.kt"
+  ]
 }

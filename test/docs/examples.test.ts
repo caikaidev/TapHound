@@ -284,6 +284,7 @@ describe("TapHound documentation examples", () => {
       "benchmark",
       "init",
       "align",
+      "impact",
       "ui-cache"
     ]);
     for (const doc of [readme, readmeZh]) {

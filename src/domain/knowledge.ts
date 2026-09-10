@@ -53,6 +53,17 @@ export const AnchorIdentitySchema = z.discriminatedUnion("kind", [
   })
 ]);
 
+export const KnowledgeSourceFilesSchema = z.array(
+  ProjectRelativePathSchema
+).superRefine((paths, context) => {
+  if (new Set(paths).size !== paths.length) {
+    context.addIssue({
+      code: "custom",
+      message: "Knowledge source files must be unique"
+    });
+  }
+});
+
 export const AnchorDefinitionSchema = z.strictObject({
   version: z.literal(1),
   id: KnowledgeIdSchema,
@@ -66,7 +77,8 @@ export const AnchorDefinitionSchema = z.strictObject({
     }
   }),
   identity: AnchorIdentitySchema,
-  description: z.string().trim().min(1).optional()
+  description: z.string().trim().min(1).optional(),
+  sourceFiles: KnowledgeSourceFilesSchema.optional()
 });
 
 export const StatePredicateSchema = z.discriminatedUnion("kind", [
@@ -96,7 +108,8 @@ export const ScreenDefinitionSchema = z.strictObject({
   optionalAnchors: z.array(KnowledgeIdSchema).default([]),
   forbiddenAnchors: z.array(KnowledgeIdSchema).default([]),
   predicates: z.array(StatePredicateSchema).default([]),
-  description: z.string().trim().min(1).optional()
+  description: z.string().trim().min(1).optional(),
+  sourceFiles: KnowledgeSourceFilesSchema.optional()
 }).superRefine((screen, context) => {
   const groups = [
     screen.requiredAnchors,
@@ -158,6 +171,7 @@ export const TransitionDefinitionSchema = z.strictObject({
     targetScreen: KnowledgeIdSchema,
     timeoutMs: z.number().int().positive()
   }),
+  sourceFiles: KnowledgeSourceFilesSchema.optional(),
   observations: z.strictObject({
     attempts: z.number().int().nonnegative(),
     successes: z.number().int().nonnegative(),

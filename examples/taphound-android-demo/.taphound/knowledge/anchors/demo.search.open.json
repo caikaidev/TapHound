@@ -1,7 +1,7 @@
 {
   "version": 1,
   "id": "demo.search.open",
-  "status": "observed",
+  "status": "verified",
   "roles": [
     "actionable"
   ],
@@ -11,5 +11,9 @@
       "resourceId": "open_search"
     }
   },
-  "description": "Opens the search screen from the main screen"
+  "description": "Opens the search screen from the main screen",
+  "sourceFiles": [
+    "app/src/main/res/layout/activity_main.xml",
+    "app/src/main/java/dev/taphound/demo/MainActivity.kt"
+  ]
 }

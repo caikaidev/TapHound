@@ -376,7 +376,7 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
       )
     );
 
-    expect(configOptions).toHaveLength(24);
+    expect(configOptions).toHaveLength(25);
     expect(configOptions.every(
       (option) => option.defaultValue === CONFIG_PATH
     )).toBe(true);

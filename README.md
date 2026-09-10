@@ -102,6 +102,10 @@ See the [local testing guide](docs/local-testing.md) for source, npm tarball, an
 - `ui-cache status` / `ui-cache clear --yes`: inspect or delete only the
   rebuildable `.taphound/build/cache/ui/` indexes; Journeys, reports, and
   Generation evidence are never touched.
+- `impact --base <ref> --head <ref>`: map a Git change set onto modules,
+  Knowledge screens/anchors/transitions, and Journey selection (P0 directly
+  affected, P1 shared screen, P2 adjacent) through read-only analysis of
+  `.taphound/context`, `.taphound/knowledge`, and `.taphound/journeys`.
 - `knowledge status` / `bootstrap` / `goal` / `plan` / `receipts` / `promote` /
   `evolve`: manage committed Anchor, Screen, and Transition knowledge. Runtime
   commands write immutable receipts; only explicit bootstrap, promotion, or

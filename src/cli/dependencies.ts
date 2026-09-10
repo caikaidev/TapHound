@@ -128,7 +128,10 @@ import {
   type GenerationStartInput
 } from "../application/generation/generation-starter.js";
 import { readGenerationContextSnapshot } from "../application/generation/generation-context-snapshot.js";
-import type { ResolvedProjectContext } from "../domain/project-context.js";
+import type {
+  ResolvedProjectContext,
+  ProjectContextModule
+} from "../domain/project-context.js";
 import {
   GenerationStepExecutor
 } from "../application/generation/generation-step-executor.js";
@@ -147,6 +150,10 @@ import { KnowledgeLoader } from "../application/knowledge/knowledge-loader.js";
 import {
   KnowledgeAnchorResolver
 } from "../application/knowledge/anchor-resolver.js";
+import {
+  ImpactResolver
+} from "../application/impact/impact-resolver.js";
+import { NodeGitDiff } from "../adapters/git/node-git-diff.js";
 import {
   KnowledgeReceiptRecorder
 } from "../application/knowledge/receipt-recorder.js";
@@ -175,6 +182,14 @@ import {
 } from "../domain/runtime.js";
 import type { AdbPort } from "../ports/adb.js";
 import type { AnchorResolverPort } from "../ports/anchor-resolver.js";
+import type {
+  GitDiffPort
+} from "../ports/git-diff.js";
+import type {
+  ImpactSet,
+  ChangeSet
+} from "../domain/impact.js";
+import type { Journey } from "../domain/journey.js";
 import type { RuntimeSessionOpener } from "../ports/runtime-backend.js";
 import type { ScreenshotPort } from "../ports/screenshot.js";
 import type { UiSnapshotProviderFactory } from "../ports/ui-snapshot.js";
@@ -207,6 +222,8 @@ import type {
 } from "../ports/knowledge-registry.js";
 import { isErrnoException } from "../shared/errors.js";
 import { readRuntimeBackendChoice } from "./runtime-selection.js";
+import { CONTEXT_INDEX_PATH } from "../domain/workspace.js";
+import { JourneySchema } from "../domain/journey.js";
 
 export interface TextOutput {
   write: (content: string) => void;
@@ -314,6 +331,13 @@ export interface CliDependencies {
     observe: (input: ObserveInput) => Promise<ObserveReport>;
   };
   workspaceLayout: WorkspaceLayoutPort;
+  impact?: {
+    resolve: (
+      projectRoot: string,
+      changeSet: ChangeSet
+    ) => Promise<ImpactSet>;
+  } | undefined;
+  gitDiff?: GitDiffPort | undefined;
   uiCache?: {
     status: (projectRoot: string) => Promise<{
       directory: string;
@@ -508,6 +532,36 @@ export function createProductionDependencies(
     receipts: knowledgeReceiptStore
   });
   const benchmarkStore = new FileSystemBenchmarkStore();
+  const gitDiff = new NodeGitDiff(runner);
+  const impactResolver = new ImpactResolver({
+    loadContext: async (projectRoot): Promise<{
+      context: ResolvedProjectContext;
+      modules: ProjectContextModule[];
+    }> => {
+      const loaded = await contextLoader.load({
+        projectRoot,
+        contextPath: resolvePath(projectRoot, CONTEXT_INDEX_PATH)
+      });
+      return { context: loaded.context, modules: loaded.modules };
+    },
+    loadKnowledge: (projectRoot): Promise<LoadedKnowledgeBundle> => (
+      knowledgeLoader.load({ projectRoot })
+    ),
+    listJourneyPaths: (projectRoot): Promise<readonly string[]> => (
+      journeyCompositionStore.listJourneyPaths(projectRoot)
+    ),
+    readJourney: async (input): Promise<Journey | null> => {
+      const bytes = await journeyCompositionStore.read({
+        projectRoot: input.projectRoot,
+        relativePath: input.path
+      });
+      try {
+        return JourneySchema.parse(JSON.parse(bytes.toString("utf8")));
+      } catch {
+        return null;
+      }
+    }
+  });
   return {
     ...(signal === undefined ? {} : { signal }),
     ...(sharedBackend === undefined
@@ -653,6 +707,12 @@ export function createProductionDependencies(
       };
     },
     workspaceLayout: new FileSystemWorkspaceLayout(),
+    impact: {
+      resolve: (projectRoot, changeSet): Promise<ImpactSet> => (
+        impactResolver.resolve(projectRoot, changeSet)
+      )
+    },
+    gitDiff,
     uiCache: {
       status: async (projectRoot) => new FileSystemUiCacheStore(projectRoot).status(),
       clear: async (projectRoot) => new FileSystemUiCacheStore(projectRoot).clear()

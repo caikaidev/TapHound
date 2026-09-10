@@ -9,5 +9,9 @@
   "forbiddenAnchors": [
     "demo.search.open"
   ],
-  "predicates": []
+  "predicates": [],
+  "sourceFiles": [
+    "app/src/main/java/dev/taphound/demo/SearchActivity.kt",
+    "app/src/main/res/layout/activity_search.xml"
+  ]
 }

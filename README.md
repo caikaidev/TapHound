@@ -106,6 +106,10 @@ See the [local testing guide](docs/local-testing.md) for source, npm tarball, an
   Knowledge screens/anchors/transitions, and Journey selection (P0 directly
   affected, P1 shared screen, P2 adjacent) through read-only analysis of
   `.taphound/context`, `.taphound/knowledge`, and `.taphound/journeys`.
+- `verify-changes --base <ref> --head <ref> [--scope p0,p1]`: replay the
+  selected Journeys on a real device and report a per-Journey verdict plus an
+  overall pass/fail; skips locator-only Journeys (no semantic binding) and
+  documents the reason for every skip.
 - `knowledge status` / `bootstrap` / `goal` / `plan` / `receipts` / `promote` /
   `evolve`: manage committed Anchor, Screen, and Transition knowledge. Runtime
   commands write immutable receipts; only explicit bootstrap, promotion, or

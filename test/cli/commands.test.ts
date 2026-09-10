@@ -376,7 +376,7 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
       )
     );
 
-    expect(configOptions).toHaveLength(25);
+    expect(configOptions).toHaveLength(26);
     expect(configOptions.every(
       (option) => option.defaultValue === CONFIG_PATH
     )).toBe(true);
@@ -416,6 +416,93 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
     ]);
     expect(JSON.parse(test.stdout.value)).toEqual({ status: "cleared" });
     expect(test.value.uiCache?.clear).toHaveBeenCalledWith("/project");
+  });
+
+  it("replays the Journeys selected by impact and reports the verdict", async () => {
+    const test = dependencies();
+    test.value.gitDiff = {
+      diff: vi.fn(() => Promise.resolve({
+        version: 1 as const,
+        base: "origin/main",
+        head: "HEAD",
+        files: [{
+          path: "app/src/main/res/layout/activity_main.xml",
+          status: "modified" as const
+        }]
+      }))
+    };
+    test.value.impact = {
+      resolve: vi.fn((projectRoot: string, changeSet: Awaited<
+        ReturnType<NonNullable<CliDependencies["gitDiff"]>["diff"]>
+      >) => Promise.resolve({
+        version: 1 as const,
+        base: changeSet.base,
+        head: changeSet.head,
+        affectedModules: ["app"],
+        affectedFeatures: [],
+        affectedScreens: ["demo.main.screen"],
+        affectedAnchors: ["demo.search.open"],
+        affectedTransitions: [],
+        selectedJourneys: {
+          p0: [{
+            id: ".taphound/journeys/anchored-search.json",
+            reason: "journey resolves affected Knowledge anchor demo.search.open"
+          }],
+          p1: [],
+          p2: []
+        },
+        skippedJourneys: [],
+        provenance: {
+          contextHash: "a".repeat(64),
+          knowledgeHash: "b".repeat(64)
+        }
+      }))
+    };
+    test.value.journeyCompositionStore = {
+      read: vi.fn(() => Promise.resolve(Buffer.from(JSON.stringify({
+        version: 2,
+        name: "anchored-search",
+        devices: [{ role: "default" }],
+        steps: [{
+          action: "click",
+          anchor: "demo.search.open",
+          locator: { resourceId: "open_search" },
+          activity: {
+            before: "com.example.app.MainActivity",
+            after: "com.example.app.SearchActivity"
+          }
+        }]
+      })))),
+      listJourneyPaths: vi.fn(() => Promise.resolve([
+        ".taphound/journeys/anchored-search.json"
+      ])),
+      readJourneyMeta: vi.fn(() => Promise.resolve(null)),
+      writeText: vi.fn(() => Promise.resolve())
+    };
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "verify-changes",
+      "--project", "/project",
+      "--config", "/project/.taphound/config.json",
+      "--base", "origin/main",
+      "--head", "HEAD",
+      "--json"
+    ]);
+
+    const payload = JSON.parse(test.stdout.value) as {
+      overall: string;
+      results: { name: string; selection: string; status: string }[];
+    };
+    expect(payload.overall).toBe("passed");
+    expect(payload.results).toEqual([{
+      path: ".taphound/journeys/anchored-search.json",
+      name: "anchored-search",
+      selection: "p0",
+      status: "passed",
+      exitCode: 0,
+      reportPath: "/reports/run/report.json"
+    }]);
+    expect(test.exitCodes).toEqual([0]);
   });
 
   it("loads config and invokes the interactive Recorder after preflight", async () => {

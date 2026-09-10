@@ -138,6 +138,13 @@ function knowledgeFixture(): LoadedKnowledgeBundle {
 
 function resolver(overrides: {
   journeys?: Record<string, unknown>;
+  workspaceRoot?: string;
+  seen?: {
+    context?: string[];
+    knowledge?: string[];
+    journeys?: string[];
+    reads?: Array<{ projectRoot: string; workspaceRoot?: string; path: string }>;
+  };
 } = {}): ImpactResolver {
   const journeys = overrides.journeys ?? {
     ".taphound/journeys/anchored-search.json": {
@@ -168,23 +175,49 @@ function resolver(overrides: {
       }]
     }
   };
+  const seen = overrides.seen;
   return new ImpactResolver({
-    loadContext: (): Promise<{
+    loadContext: (input: {
+      projectRoot: string;
+      workspaceRoot?: string | undefined;
+    }): Promise<{
       context: never;
       modules: ProjectContextModule[];
-    }> => Promise.resolve({
-      context: {} as never,
-      modules: [moduleFixture]
-    }),
-    loadKnowledge: (): Promise<LoadedKnowledgeBundle> => (
-      Promise.resolve(knowledgeFixture())
-    ),
-    listJourneyPaths: (): Promise<readonly string[]> => (
-      Promise.resolve(Object.keys(journeys))
-    ),
-    readJourney: ({ path }): Promise<never> => Promise.resolve(
-      (journeys[path] ?? null) as never
-    )
+    }> => {
+      seen?.context?.push(input.workspaceRoot ?? input.projectRoot);
+      return Promise.resolve({
+        context: {} as never,
+        modules: [moduleFixture]
+      });
+    },
+    loadKnowledge: (input: {
+      projectRoot: string;
+      workspaceRoot?: string | undefined;
+    }): Promise<LoadedKnowledgeBundle> => {
+      seen?.knowledge?.push(input.workspaceRoot ?? input.projectRoot);
+      return Promise.resolve(knowledgeFixture());
+    },
+    listJourneyPaths: (input: {
+      projectRoot: string;
+      workspaceRoot?: string | undefined;
+    }): Promise<readonly string[]> => {
+      seen?.journeys?.push(input.workspaceRoot ?? input.projectRoot);
+      return Promise.resolve(Object.keys(journeys));
+    },
+    readJourney: (input: {
+      projectRoot: string;
+      workspaceRoot?: string | undefined;
+      path: string;
+    }): Promise<never> => {
+      seen?.reads?.push({
+        projectRoot: input.projectRoot,
+        ...(input.workspaceRoot === undefined
+          ? {}
+          : { workspaceRoot: input.workspaceRoot }),
+        path: input.path
+      });
+      return Promise.resolve((journeys[input.path] ?? null) as never);
+    }
   });
 }
 
@@ -199,7 +232,10 @@ describe("ImpactResolver", () => {
         status: "modified"
       }]
     };
-    const impact = await resolver().resolve("/project", changeSet);
+    const impact = await resolver().resolve({
+      projectRoot: "/project",
+      changeSet
+    });
 
     expect(impact.affectedModules).toEqual(["app"]);
     expect(impact.affectedFeatures).toEqual(["search"]);
@@ -225,7 +261,10 @@ describe("ImpactResolver", () => {
         status: "modified"
       }]
     };
-    const impact = await resolver().resolve("/project", changeSet);
+    const impact = await resolver().resolve({
+      projectRoot: "/project",
+      changeSet
+    });
 
     expect(impact.skippedJourneys).toEqual([{
       id: ".taphound/journeys/generated-search.json",
@@ -243,7 +282,10 @@ describe("ImpactResolver", () => {
         status: "modified"
       }]
     };
-    const impact = await resolver().resolve("/project", changeSet);
+    const impact = await resolver().resolve({
+      projectRoot: "/project",
+      changeSet
+    });
 
     expect(impact.affectedModules).toEqual([]);
     expect(impact.affectedAnchors).toEqual([]);
@@ -261,9 +303,53 @@ describe("ImpactResolver", () => {
       }]
     };
     const resolverInstance = resolver();
-    const impact = await resolverInstance.resolve("/project", changeSet);
+    const impact = await resolverInstance.resolve({
+      projectRoot: "/project",
+      changeSet
+    });
 
     expect(impact.affectedAnchors).toContain("demo.search.open");
+    expect(impact.selectedJourneys.p0[0]?.id)
+      .toBe(".taphound/journeys/anchored-search.json");
+  });
+
+  it("threads workspaceRoot through every dependency and uses it for reads", async () => {
+    const seen = {
+      context: [] as string[],
+      knowledge: [] as string[],
+      journeys: [] as string[],
+      reads: [] as Array<{
+        projectRoot: string;
+        workspaceRoot?: string;
+        path: string;
+      }>
+    };
+    const changeSet: ChangeSet = {
+      version: 1,
+      base: "origin/main",
+      head: "WORKTREE",
+      files: [{
+        path: "app/src/main/res/layout/activity_main.xml",
+        status: "modified"
+      }]
+    };
+    const impact = await resolver({
+      workspaceRoot: "/targets/ws",
+      seen
+    }).resolve({
+      projectRoot: "/real/app",
+      workspaceRoot: "/targets/ws",
+      changeSet
+    });
+
+    expect(seen.context).toEqual(["/targets/ws"]);
+    expect(seen.knowledge).toEqual(["/targets/ws"]);
+    expect(seen.journeys).toEqual(["/targets/ws"]);
+    expect(seen.reads).toContainEqual({
+      projectRoot: "/real/app",
+      workspaceRoot: "/targets/ws",
+      path: ".taphound/journeys/anchored-search.json"
+    });
     expect(impact.selectedJourneys.p0[0]?.id)
       .toBe(".taphound/journeys/anchored-search.json");
   });

@@ -237,7 +237,7 @@ import type {
 } from "../ports/knowledge-registry.js";
 import { isErrnoException } from "../shared/errors.js";
 import { readRuntimeBackendChoice } from "./runtime-selection.js";
-import { CONTEXT_INDEX_PATH } from "../domain/workspace.js";
+import { CONTEXT_INDEX_PATH, tapHoundPath } from "../domain/workspace.js";
 import { JourneySchema } from "../domain/journey.js";
 
 export interface TextOutput {
@@ -359,10 +359,11 @@ export interface CliDependencies {
   };
   workspaceLayout: WorkspaceLayoutPort;
   impact?: {
-    resolve: (
-      projectRoot: string,
-      changeSet: ChangeSet
-    ) => Promise<ImpactSet>;
+    resolve: (input: {
+      projectRoot: string;
+      workspaceRoot?: string | undefined;
+      changeSet: ChangeSet;
+    }) => Promise<ImpactSet>;
   } | undefined;
   gitDiff?: GitDiffPort | undefined;
   uiCache?: {
@@ -561,25 +562,54 @@ export function createProductionDependencies(
   const benchmarkStore = new FileSystemBenchmarkStore();
   const gitDiff = new NodeGitDiff(runner);
   const impactResolver = new ImpactResolver({
-    loadContext: async (projectRoot): Promise<{
+    loadContext: async (input: {
+      projectRoot: string;
+      workspaceRoot?: string | undefined;
+    }): Promise<{
       context: ResolvedProjectContext;
       modules: ProjectContextModule[];
     }> => {
       const loaded = await contextLoader.load({
-        projectRoot,
-        contextPath: resolvePath(projectRoot, CONTEXT_INDEX_PATH)
+        projectRoot: input.projectRoot,
+        ...(input.workspaceRoot === undefined
+          ? {}
+          : { workspaceRoot: input.workspaceRoot }),
+        contextPath: tapHoundPath(
+          input.projectRoot,
+          input.workspaceRoot,
+          CONTEXT_INDEX_PATH
+        )
       });
       return { context: loaded.context, modules: loaded.modules };
     },
-    loadKnowledge: (projectRoot): Promise<LoadedKnowledgeBundle> => (
-      knowledgeLoader.load({ projectRoot })
+    loadKnowledge: (input: {
+      projectRoot: string;
+      workspaceRoot?: string | undefined;
+    }): Promise<LoadedKnowledgeBundle> => knowledgeLoader.load({
+      projectRoot: input.projectRoot,
+      ...(input.workspaceRoot === undefined
+        ? {}
+        : { workspaceRoot: input.workspaceRoot })
+    }),
+    listJourneyPaths: (input: {
+      projectRoot: string;
+      workspaceRoot?: string | undefined;
+    }): Promise<readonly string[]> => (
+      journeyCompositionStore.listJourneyPaths(
+        input.projectRoot,
+        input.workspaceRoot
+      )
     ),
-    listJourneyPaths: (projectRoot): Promise<readonly string[]> => (
-      journeyCompositionStore.listJourneyPaths(projectRoot)
-    ),
-    readJourney: async (input): Promise<Journey | null> => {
+    readJourney: async (input: {
+      projectRoot: string;
+      workspaceRoot?: string | undefined;
+      path: string;
+    }): Promise<Journey | null> => {
       const bytes = await journeyCompositionStore.read({
         projectRoot: input.projectRoot,
+        ...(input.workspaceRoot === undefined
+          ? {}
+          : { workspaceRoot: input.workspaceRoot }),
         relativePath: input.path
       });
       try {
@@ -738,9 +768,7 @@ export function createProductionDependencies(
     },
     workspaceLayout: new FileSystemWorkspaceLayout(),
     impact: {
-      resolve: (projectRoot, changeSet): Promise<ImpactSet> => (
-        impactResolver.resolve(projectRoot, changeSet)
-      )
+      resolve: (input): Promise<ImpactSet> => impactResolver.resolve(input)
     },
     gitDiff,
     uiCache: {

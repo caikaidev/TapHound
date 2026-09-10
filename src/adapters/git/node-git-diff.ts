@@ -1,6 +1,7 @@
 import { ChangeSetSchema, type ChangeSet, type ChangedFile } from "../../domain/impact.js";
+import type { FailureCode } from "../../domain/failure.js";
 import type { GitDiffPort } from "../../ports/git-diff.js";
-import type { ProcessRunner } from "../../ports/process-runner.js";
+import type { ProcessRunner, CommandResult } from "../../ports/process-runner.js";
 
 const NAME_STATUS_RE = /^(\w+)\t(.*)$/;
 
@@ -12,6 +13,33 @@ function parseStatus(token: string): ChangedFile["status"] {
   return "modified";
 }
 
+class GitDiffError extends Error {
+  public readonly code: FailureCode;
+
+  public constructor(code: FailureCode, message: string) {
+    super(message);
+    this.name = "GitDiffError";
+    this.code = code;
+  }
+}
+
+function failed(
+  result: {
+    exitCode: number | null;
+    stderr: string;
+    spawnError?: string | undefined;
+    timedOut: boolean;
+    cancelled: boolean;
+  }
+): string | undefined {
+  if (result.exitCode !== 0 || result.timedOut || result.cancelled) {
+    return result.stderr.trim()
+      || result.spawnError
+      || "git command failed";
+  }
+  return undefined;
+}
+
 export class NodeGitDiff implements GitDiffPort {
   public constructor(private readonly runner: ProcessRunner) {}
 
@@ -21,28 +49,86 @@ export class NodeGitDiff implements GitDiffPort {
     head: string;
     signal?: AbortSignal | undefined;
   }): Promise<ChangeSet> {
-    const result = await this.runner.run({
-      executable: "git",
-      args: [
-        "-C",
-        input.projectRoot,
-        "diff",
-        "--name-status",
-        "-M",
-        "--no-ext-diff",
-        `${input.base}...${input.head}`
-      ],
-      ...(input.signal === undefined ? {} : { signal: input.signal })
+    const root = input.projectRoot;
+    const signal = input.signal;
+    await this.assertGitRoot(root, signal);
+    await this.assertRef(root, input.base, signal);
+
+    const head = input.head;
+    const diffArg = head === "WORKTREE"
+      ? input.base
+      : `${input.base}...${head}`;
+    const result = await this.runGit(
+      root,
+      ["diff", "--name-status", "-M", "--no-ext-diff", diffArg],
+      signal
+    );
+    const message = failed(result);
+    if (message !== undefined) {
+      throw new Error(message);
+    }
+    const files = this.parse(result.stdout);
+    if (files.length === 0) {
+      return { version: 1, base: input.base, head, files };
+    }
+    return ChangeSetSchema.parse({
+      version: 1,
+      base: input.base,
+      head,
+      files
     });
-    if (result.exitCode !== 0 || result.timedOut || result.cancelled) {
-      throw new Error(
-        result.stderr.trim()
-          || result.spawnError
-          || `git diff ${input.base}...${input.head} failed`
+  }
+
+  private readonly assertGitRoot = async (
+    root: string,
+    signal?: AbortSignal
+  ): Promise<void> => {
+    const result = await this.runGit(
+      root,
+      ["rev-parse", "--is-inside-work-tree"],
+      signal
+    );
+    const message = failed(result);
+    if (message !== undefined) {
+      throw new GitDiffError(
+        "GIT_ROOT_NOT_FOUND",
+        `${root} is not inside a Git work tree`
       );
     }
+  };
+
+  private readonly assertRef = async (
+    root: string,
+    ref: string,
+    signal?: AbortSignal
+  ): Promise<void> => {
+    const result = await this.runGit(
+      root,
+      ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`],
+      signal
+    );
+    const message = failed(result);
+    if (message !== undefined) {
+      throw new GitDiffError(
+        "GIT_REF_INVALID",
+        `${ref} is not a valid Git ref`
+      );
+    }
+  };
+
+  private readonly runGit = (
+    root: string,
+    args: readonly string[],
+    signal?: AbortSignal
+  ): Promise<CommandResult> => this.runner.run({
+    executable: "git",
+    args: ["-C", root, ...args],
+    ...(signal === undefined ? {} : { signal })
+  });
+
+  private readonly parse = (stdout: string): ChangedFile[] => {
     const files: ChangedFile[] = [];
-    for (const line of result.stdout.split("\n")) {
+    for (const line of stdout.split("\n")) {
       if (line === "") continue;
       const match = NAME_STATUS_RE.exec(line);
       if (match === null) {
@@ -68,11 +154,6 @@ export class NodeGitDiff implements GitDiffPort {
         files.push({ path: rest, status });
       }
     }
-    return ChangeSetSchema.parse({
-      version: 1,
-      base: input.base,
-      head: input.head,
-      files
-    });
-  }
+    return files;
+  };
 }

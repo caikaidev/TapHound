@@ -13,6 +13,11 @@ import {
   assertArtifactDirectory,
   CONFIG_PATH
 } from "../../domain/workspace.js";
+import {
+  exitCodeForFailure,
+  failureCodeFromUnknown,
+  type FailureCode
+} from "../../domain/failure.js";
 import type { CliDependencies } from "../dependencies.js";
 import {
   errorMessage,
@@ -26,9 +31,11 @@ interface VerifyChangesOptions {
   project: string;
   config: string;
   base: string;
-  head: string;
+  head?: string | undefined;
   device?: string | undefined;
   scope?: string | undefined;
+  target?: string | undefined;
+  targets?: string | undefined;
   json?: boolean | undefined;
 }
 
@@ -47,6 +54,10 @@ interface VerifyChangesResult {
   impact: ImpactSet;
   results: JourneyVerdict[];
   overall: "passed" | "failed" | "error";
+  target?: {
+    id: string;
+    resolvedPath: string;
+  };
 }
 
 function selectedScopes(scope: string | undefined): ("p0" | "p1" | "p2")[] {
@@ -71,6 +82,32 @@ function toolVersions(
   )));
 }
 
+function targetsHome(
+  dependencies: CliDependencies,
+  explicit: string | undefined
+): string {
+  if (explicit !== undefined) {
+    return resolve(dependencies.cwd(), explicit);
+  }
+  return dependencies.localTargets.targetsHome();
+}
+
+function writeFailure(
+  dependencies: CliDependencies,
+  json: boolean,
+  code: FailureCode,
+  message: string
+): void {
+  const exitCode = exitCodeForFailure(code);
+  const output = failureOutput(exitCode, code, message);
+  if (json) {
+    writeJson(dependencies.stdout, output);
+  } else {
+    writeLine(dependencies.stderr, output.failure.message);
+  }
+  dependencies.setExitCode(exitCode);
+}
+
 export function createVerifyChangesCommand(
   dependencies: CliDependencies
 ): Command {
@@ -79,9 +116,11 @@ export function createVerifyChangesCommand(
     .option("--project <path>", "Android project root", dependencies.cwd())
     .option("--config <path>", "TapHound config path", CONFIG_PATH)
     .option("--base <ref>", "Base Git ref", "origin/main")
-    .option("--head <ref>", "Head Git ref", "HEAD")
+    .option("--head <ref>", "Head Git ref (defaults to HEAD, or WORKTREE with --target)")
     .option("--device <serial>", "Select an online Android device")
     .option("--scope <p0,p1,p2>", "Selection tiers to replay", "p0,p1")
+    .option("--target <id>", "Registered local target id")
+    .option("--targets <path>", "Targets workspace base path")
     .option("--json", "Emit one machine-readable JSON value")
     .action(async (options: VerifyChangesOptions): Promise<void> => {
       try {
@@ -91,15 +130,40 @@ export function createVerifyChangesCommand(
         ) {
           throw new Error("TapHound change verification is not configured");
         }
-        const changeSet = await dependencies.gitDiff.diff({
-          projectRoot: options.project,
-          base: options.base,
-          head: options.head
-        });
-        const impact = await dependencies.impact.resolve(
-          options.project,
-          changeSet
-        );
+        const head = options.head
+          ?? (options.target === undefined ? "HEAD" : "WORKTREE");
+
+        let changeSet;
+        let impact;
+        let resolvedTarget;
+        if (options.target !== undefined) {
+          const id = options.target;
+          const home = targetsHome(dependencies, options.targets);
+          const resolver = dependencies.localTargets.targetResolver(home);
+          resolvedTarget = await resolver.resolve(id);
+          const gitRoot = resolvedTarget.project.gitRoot
+            ?? resolvedTarget.resolvedPath;
+          changeSet = await dependencies.gitDiff.diff({
+            projectRoot: gitRoot,
+            base: options.base,
+            head
+          });
+          impact = await dependencies.impact.resolve({
+            projectRoot: resolvedTarget.resolvedPath,
+            workspaceRoot: resolvedTarget.workspaceRoot,
+            changeSet
+          });
+        } else {
+          changeSet = await dependencies.gitDiff.diff({
+            projectRoot: options.project,
+            base: options.base,
+            head
+          });
+          impact = await dependencies.impact.resolve({
+            projectRoot: options.project,
+            changeSet
+          });
+        }
         const scopes = selectedScopes(options.scope);
         const selected = scopes.flatMap((tier) => (
           impact.selectedJourneys[tier].map((entry) => ({
@@ -108,12 +172,39 @@ export function createVerifyChangesCommand(
           }))
         ));
 
-        const rawConfig = await dependencies.readJson(
-          resolve(options.project, options.config)
-        );
-        const config = TapHoundConfigSchema.parse(rawConfig);
-        assertArtifactDirectory(options.project, config.artifactsDir);
-        await assertNoLegacyWorkspace(dependencies, options.project);
+        const workspaceRoot = resolvedTarget?.workspaceRoot;
+        const projectRoot = resolvedTarget?.resolvedPath ?? options.project;
+        let config;
+        if (resolvedTarget !== undefined) {
+          const loaded = await dependencies.localTargets.configStore
+            .loadTargets(targetsHome(dependencies, options.targets));
+          const entry = loaded.targets[resolvedTarget.id];
+          if (entry === undefined) {
+            writeFailure(
+              dependencies,
+              options.json === true,
+              "LOCAL_TARGET_NOT_FOUND",
+              `Local target "${resolvedTarget.id}" is not registered. Add it with: taphound local add ${resolvedTarget.id} --path <path>`
+            );
+            return;
+          }
+          config = TapHoundConfigSchema.parse(
+            dependencies.localTargets.localTargetService(
+              targetsHome(dependencies, options.targets)
+            ).configForTarget({
+              entry,
+              resolvedPath: resolvedTarget.resolvedPath,
+              workspaceRoot: resolvedTarget.workspaceRoot
+            })
+          );
+        } else {
+          const rawConfig = await dependencies.readJson(
+            resolve(options.project, options.config)
+          );
+          config = TapHoundConfigSchema.parse(rawConfig);
+          assertArtifactDirectory(options.project, config.artifactsDir);
+          await assertNoLegacyWorkspace(dependencies, options.project);
+        }
 
         const doctor = await dependencies.doctor.run({
           packageName: config.run.packageName,
@@ -155,24 +246,20 @@ export function createVerifyChangesCommand(
         const results: JourneyVerdict[] = [];
         for (const entry of selected) {
           const bytes = await dependencies.journeyCompositionStore.read({
-            projectRoot: options.project,
-            relativePath: entry.path
+            projectRoot,
+            relativePath: entry.path,
+            ...(workspaceRoot === undefined ? {} : { workspaceRoot })
           });
           const journey: Journey = JourneySchema.parse(
             JSON.parse(bytes.toString("utf8"))
           );
           if (journey.devices.length > 1) {
-            const output = failureOutput(
-              3,
+            writeFailure(
+              dependencies,
+              options.json === true,
               "DEVICE_ROLE_UNMAPPED",
               `Journey ${journey.name} declares multiple devices; map each role with --device <role>=<serial>`
             );
-            if (options.json === true) {
-              writeJson(dependencies.stdout, output);
-            } else {
-              writeLine(dependencies.stderr, output.failure.message);
-            }
-            dependencies.setExitCode(3);
             return;
           }
           writeLine(
@@ -182,7 +269,8 @@ export function createVerifyChangesCommand(
           const result = await dependencies.verifier.verify({
             config,
             journey,
-            projectRoot: options.project,
+            projectRoot,
+            ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
             devices: [{
               role: journey.devices[0]?.role ?? DEFAULT_DEVICE_ROLE,
               deviceSerial
@@ -211,16 +299,24 @@ export function createVerifyChangesCommand(
             : "failed";
         const payload: VerifyChangesResult = {
           base: options.base,
-          head: options.head,
+          head,
           impact,
           results,
-          overall
+          overall,
+          ...(resolvedTarget === undefined
+            ? {}
+            : {
+              target: {
+                id: resolvedTarget.id,
+                resolvedPath: resolvedTarget.resolvedPath
+              }
+            })
         };
         if (options.json === true) {
           writeJson(dependencies.stdout, payload);
         } else {
           const lines = [
-            `TapHound verify-changes: ${options.base}...${options.head}`,
+            `TapHound verify-changes: ${options.base}...${head}`,
             ...results.map((result) => (
               `  ${result.selection.toUpperCase()} ${result.name}: ${result.status.toUpperCase()}`
             )),
@@ -234,6 +330,16 @@ export function createVerifyChangesCommand(
         }
         dependencies.setExitCode(failed === undefined ? 0 : failed.exitCode);
       } catch (error) {
+        const code = failureCodeFromUnknown(error);
+        if (code !== undefined) {
+          writeFailure(
+            dependencies,
+            options.json === true,
+            code,
+            errorMessage(error)
+          );
+          return;
+        }
         const output = failureOutput(4, "INTERNAL_ERROR", errorMessage(error));
         if (options.json === true) {
           writeJson(dependencies.stdout, output);

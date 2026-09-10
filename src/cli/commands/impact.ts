@@ -1,7 +1,14 @@
+import { resolve } from "node:path";
+
 import { Command } from "commander";
 
 import { CONFIG_PATH } from "../../domain/workspace.js";
 import type { ImpactSet } from "../../domain/impact.js";
+import {
+  exitCodeForFailure,
+  failureCodeFromUnknown,
+  type FailureCode
+} from "../../domain/failure.js";
 import {
   failureOutput,
   writeJson,
@@ -13,8 +20,20 @@ interface ImpactOptions {
   project: string;
   config: string;
   base: string;
-  head: string;
+  head?: string | undefined;
+  target?: string | undefined;
+  targets?: string | undefined;
   json?: boolean | undefined;
+}
+
+function targetsHome(
+  dependencies: CliDependencies,
+  explicit: string | undefined
+): string {
+  if (explicit !== undefined) {
+    return resolve(dependencies.cwd(), explicit);
+  }
+  return dependencies.localTargets.targetsHome();
 }
 
 function summarize(impact: ImpactSet): string {
@@ -37,13 +56,31 @@ function summarize(impact: ImpactSet): string {
   return lines.join("\n");
 }
 
+function writeFailure(
+  dependencies: CliDependencies,
+  json: boolean,
+  code: FailureCode,
+  message: string
+): void {
+  const exitCode = exitCodeForFailure(code);
+  const output = failureOutput(exitCode, code, message);
+  if (json) {
+    writeJson(dependencies.stdout, output);
+  } else {
+    writeLine(dependencies.stderr, output.failure.message);
+  }
+  dependencies.setExitCode(exitCode);
+}
+
 export function createImpactCommand(dependencies: CliDependencies): Command {
   return new Command("impact")
     .description("Compute which Knowledge and Journeys a Git change affects")
     .option("--project <path>", "Android project root", dependencies.cwd())
     .option("--config <path>", "TapHound config path", CONFIG_PATH)
     .option("--base <ref>", "Base Git ref", "origin/main")
-    .option("--head <ref>", "Head Git ref", "HEAD")
+    .option("--head <ref>", "Head Git ref (defaults to HEAD, or WORKTREE with --target)")
+    .option("--target <id>", "Registered local target id")
+    .option("--targets <path>", "Targets workspace base path")
     .option("--json", "Emit one machine-readable JSON value")
     .action(async (options: ImpactOptions): Promise<void> => {
       try {
@@ -53,15 +90,38 @@ export function createImpactCommand(dependencies: CliDependencies): Command {
         ) {
           throw new Error("TapHound impact is not configured");
         }
-        const changeSet = await dependencies.gitDiff.diff({
-          projectRoot: options.project,
-          base: options.base,
-          head: options.head
-        });
-        const impact = await dependencies.impact.resolve(
-          options.project,
-          changeSet
-        );
+        const head = options.head
+          ?? (options.target === undefined ? "HEAD" : "WORKTREE");
+
+        let changeSet;
+        let impact;
+        if (options.target !== undefined) {
+          const id = options.target;
+          const home = targetsHome(dependencies, options.targets);
+          const resolved = await dependencies.localTargets
+            .targetResolver(home).resolve(id);
+          const gitRoot = resolved.project.gitRoot ?? resolved.resolvedPath;
+          changeSet = await dependencies.gitDiff.diff({
+            projectRoot: gitRoot,
+            base: options.base,
+            head
+          });
+          impact = await dependencies.impact.resolve({
+            projectRoot: resolved.resolvedPath,
+            workspaceRoot: resolved.workspaceRoot,
+            changeSet
+          });
+        } else {
+          changeSet = await dependencies.gitDiff.diff({
+            projectRoot: options.project,
+            base: options.base,
+            head
+          });
+          impact = await dependencies.impact.resolve({
+            projectRoot: options.project,
+            changeSet
+          });
+        }
         if (options.json === true) {
           writeJson(dependencies.stdout, impact);
         } else {
@@ -71,6 +131,11 @@ export function createImpactCommand(dependencies: CliDependencies): Command {
         const message = error instanceof Error
           ? error.message
           : String(error);
+        const code = failureCodeFromUnknown(error);
+        if (code !== undefined) {
+          writeFailure(dependencies, options.json === true, code, message);
+          return;
+        }
         const output = failureOutput(2, "CONFIG_INVALID", message);
         if (options.json === true) {
           writeJson(dependencies.stdout, output);

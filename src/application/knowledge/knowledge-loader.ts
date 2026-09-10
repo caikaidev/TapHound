@@ -27,12 +27,16 @@ export class KnowledgeLoader {
 
   public readonly load = async (input: {
     projectRoot: string;
+    workspaceRoot?: string | undefined;
     packageName?: string | undefined;
     expectedKnowledgeHash?: string | undefined;
   }): Promise<LoadedKnowledgeBundle> => {
     let bundle: LoadedKnowledgeBundle;
     try {
-      bundle = await this.registry.load(input.projectRoot);
+      bundle = await this.registry.load(
+        input.projectRoot,
+        input.workspaceRoot
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const notFound = (

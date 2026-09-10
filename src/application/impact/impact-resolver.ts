@@ -19,14 +19,24 @@ import type {
 } from "../../ports/knowledge-registry.js";
 
 export interface ImpactResolverDependencies {
-  loadContext: (projectRoot: string) => Promise<{
+  loadContext: (input: {
+    projectRoot: string;
+    workspaceRoot?: string | undefined;
+  }) => Promise<{
     context: ResolvedProjectContext;
     modules: ProjectContextModule[];
   }>;
-  loadKnowledge: (projectRoot: string) => Promise<LoadedKnowledgeBundle>;
-  listJourneyPaths: (projectRoot: string) => Promise<readonly string[]>;
+  loadKnowledge: (input: {
+    projectRoot: string;
+    workspaceRoot?: string | undefined;
+  }) => Promise<LoadedKnowledgeBundle>;
+  listJourneyPaths: (input: {
+    projectRoot: string;
+    workspaceRoot?: string | undefined;
+  }) => Promise<readonly string[]>;
   readJourney: (input: {
     projectRoot: string;
+    workspaceRoot?: string | undefined;
     path: string;
   }) => Promise<Journey | null>;
 }
@@ -94,14 +104,26 @@ export class ImpactResolver {
     private readonly dependencies: ImpactResolverDependencies
   ) {}
 
-  public readonly resolve = async (
-    projectRoot: string,
-    changeSet: ChangeSet
-  ): Promise<ImpactSet> => {
+  public readonly resolve = async (input: {
+    projectRoot: string;
+    workspaceRoot?: string | undefined;
+    changeSet: ChangeSet;
+  }): Promise<ImpactSet> => {
+    const { projectRoot, changeSet } = input;
+    const workspaceRoot = input.workspaceRoot;
     const [context, knowledge, journeyPaths] = await Promise.all([
-      this.dependencies.loadContext(projectRoot),
-      this.dependencies.loadKnowledge(projectRoot),
-      this.dependencies.listJourneyPaths(projectRoot)
+      this.dependencies.loadContext({
+        projectRoot,
+        ...(workspaceRoot === undefined ? {} : { workspaceRoot })
+      }),
+      this.dependencies.loadKnowledge({
+        projectRoot,
+        ...(workspaceRoot === undefined ? {} : { workspaceRoot })
+      }),
+      this.dependencies.listJourneyPaths({
+        projectRoot,
+        ...(workspaceRoot === undefined ? {} : { workspaceRoot })
+      })
     ]);
     const contextModules = context.modules;
     const changedPathSet = new Set(
@@ -165,6 +187,7 @@ export class ImpactResolver {
     for (const path of journeyPaths) {
       const journey = await this.dependencies.readJourney({
         projectRoot,
+        ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
         path
       });
       if (journey === null) {

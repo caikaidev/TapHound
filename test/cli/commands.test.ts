@@ -434,12 +434,16 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
       }))
     };
     test.value.impact = {
-      resolve: vi.fn((projectRoot: string, changeSet: Awaited<
-        ReturnType<NonNullable<CliDependencies["gitDiff"]>["diff"]>
-      >) => Promise.resolve({
+      resolve: vi.fn((input: {
+        projectRoot: string;
+        workspaceRoot?: string | undefined;
+        changeSet: Awaited<
+          ReturnType<NonNullable<CliDependencies["gitDiff"]>["diff"]>
+        >;
+      }) => Promise.resolve({
         version: 1 as const,
-        base: changeSet.base,
-        head: changeSet.head,
+        base: input.changeSet.base,
+        head: input.changeSet.head,
         affectedModules: ["app"],
         affectedFeatures: [],
         affectedScreens: ["demo.main.screen"],

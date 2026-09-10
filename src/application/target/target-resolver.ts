@@ -196,7 +196,7 @@ export class TargetResolver {
     file: string
   ): Promise<string | undefined> => {
     try {
-      return createHash("sha256").update(await readFile(file, "utf8")).digest("hex");
+      return createHash("sha256").update(await readFile(join(root, file), "utf8")).digest("hex");
     } catch {
       return undefined;
     }

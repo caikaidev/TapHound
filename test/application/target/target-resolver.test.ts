@@ -23,29 +23,32 @@ function fakeRunner(results: Record<string, string>): ProcessRunner {
   };
 }
 
-let projectRoot = "";
+let projectRoots: string[] = [];
 
 afterEach(async () => {
-  if (projectRoot !== "") {
-    await rm(projectRoot, { recursive: true, force: true });
-    projectRoot = "";
+  for (const root of projectRoots) {
+    await rm(root, { recursive: true, force: true });
   }
+  projectRoots = [];
 });
 
-async function createProject(): Promise<string> {
-  projectRoot = await mkdtemp(join(tmpdir(), "taphound-target-"));
+async function createProject(
+  settingsContent = 'rootProject.name = "mail"\n'
+): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "taphound-target-"));
+  projectRoots.push(root);
   await writeFile(
-    join(projectRoot, "settings.gradle.kts"),
-    'rootProject.name = "mail"\n',
+    join(root, "settings.gradle.kts"),
+    settingsContent,
     "utf8"
   );
-  await mkdir(join(projectRoot, "gradle", "wrapper"), { recursive: true });
+  await mkdir(join(root, "gradle", "wrapper"), { recursive: true });
   await writeFile(
-    join(projectRoot, "gradle", "wrapper", "gradle-wrapper.properties"),
+    join(root, "gradle", "wrapper", "gradle-wrapper.properties"),
     "distributionUrl=https://services.gradle.org/distributions/gradle-8.9-bin.zip\n",
     "utf8"
   );
-  return projectRoot;
+  return root;
 }
 
 function configStore(targets: Record<string, unknown>): LoadedTargets {
@@ -140,5 +143,56 @@ describe("TargetResolver", () => {
     const fingerprint = await resolver.fingerprint(target.project, "com.example.app");
     expect(fingerprint.hash).toMatch(/^[0-9a-f]{64}$/);
     expect(fingerprint.gitRemote).toBe("git@github.com:acme/mail.git");
+  });
+
+  it("hashes settings content from the target root, independent of cwd", async () => {
+    const rootA = await createProject('rootProject.name = "mail"\n');
+    const rootB = await createProject('rootProject.name = "webmail"\n');
+    const resolverFor = (root: string): TargetResolver =>
+      new TargetResolver({
+        targetsHome: "/repo/benchmarks",
+        configStore: {
+          loadTargets: vi.fn((): Promise<LoadedTargets> => Promise.resolve(
+            configStore({
+              app: {
+                id: "app",
+                source: { type: "local", path: root },
+                run: { packageName: "com.example.app" },
+                override: false
+              }
+            })
+          )),
+          appendLocalTarget: vi.fn((): Promise<void> => Promise.resolve()),
+          removeLocalTarget: vi.fn((): Promise<boolean> => Promise.resolve(false))
+        },
+        pathResolver: {
+          resolve: vi.fn((): Promise<ResolvedPath> => Promise.resolve({ configuredPath: root, resolvedPath: root }))
+        },
+        processRunner: fakeRunner({
+          [`git -C ${root} rev-parse --show-toplevel`]: `${root}\n`,
+          [`git -C ${root} config --get remote.origin.url`]: "git@github.com:acme/mail.git\n",
+          [`git -C ${root} rev-parse HEAD`]: "abc123\n"
+        }),
+        clock: { now: (): Date => new Date() }
+      });
+    const originalCwd = process.cwd();
+    const cwdRoot = await mkdtemp(join(tmpdir(), "taphound-cwd-"));
+    projectRoots.push(cwdRoot);
+    try {
+      process.chdir(cwdRoot);
+      const resolverA = resolverFor(rootA);
+      const resolverB = resolverFor(rootB);
+      const [targetA, targetB] = [
+        await resolverA.resolve("app"),
+        await resolverB.resolve("app")
+      ];
+      const fingerprintA = await resolverA.fingerprint(targetA.project, "com.example.app");
+      const fingerprintB = await resolverB.fingerprint(targetB.project, "com.example.app");
+      expect(fingerprintA.rootProjectName).toBe("mail");
+      expect(fingerprintB.rootProjectName).toBe("webmail");
+      expect(fingerprintA.hash).not.toBe(fingerprintB.hash);
+    } finally {
+      process.chdir(originalCwd);
+    }
   });
 });

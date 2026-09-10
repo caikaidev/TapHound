@@ -9,7 +9,10 @@ import {
   KNOWLEDGE_RECEIPTS_DIR,
   activeGenerationBundleName,
   legacyWorkspaceMessage,
-  parseSnapshotEvidenceReference
+  localTargetWorkspaceRoot,
+  parseSnapshotEvidenceReference,
+  tapHoundPath,
+  TARGETS_DIR
 } from "../../src/domain/workspace.js";
 
 describe("workspace paths", () => {
@@ -82,5 +85,29 @@ describe("legacyWorkspaceMessage", () => {
     expect(legacyWorkspaceMessage([run])).toContain(
       `mv ${run} .taphound/build/runs/${run.slice(".taphound/".length)}`
     );
+  });
+});
+
+describe("local target workspace", () => {
+  it("derives the per-target workspace root", () => {
+    expect(localTargetWorkspaceRoot("/repo/benchmarks", "work-app")).toBe(
+      "/repo/benchmarks/.taphound/local/work-app"
+    );
+  });
+
+  it("tapHoundPath is identity when no workspace root is set", () => {
+    expect(tapHoundPath("/proj", undefined, ".taphound/knowledge")).toBe(
+      "/proj/.taphound/knowledge"
+    );
+  });
+
+  it("tapHoundPath rebases TapHound-owned data onto the workspace root", () => {
+    expect(tapHoundPath("/real/app", "/ws", ".taphound/journeys/x.json")).toBe(
+      "/ws/journeys/x.json"
+    );
+  });
+
+  it("exposes the benchmarks targets directory constant", () => {
+    expect(TARGETS_DIR).toBe("benchmarks");
   });
 });

@@ -1,5 +1,6 @@
 import {
   isAbsolute,
+  join,
   relative,
   resolve
 } from "node:path";
@@ -27,6 +28,32 @@ export const DEFAULT_ARTIFACTS_DIR = `${BUILD_DIR}/runs`;
 export const UI_CACHE_DIR = `${BUILD_DIR}/cache/ui`;
 export const KNOWLEDGE_RECEIPTS_DIR = `${BUILD_DIR}/knowledge-receipts`;
 export const BENCHMARK_RUNS_DIR = `${BUILD_DIR}/benchmark-runs`;
+export const TARGETS_DIR = "benchmarks";
+export const TARGETS_CONFIG_PATH = `${TARGETS_DIR}/targets.json`;
+export const TARGETS_LOCAL_CONFIG_PATH = `${TARGETS_DIR}/targets.local.json`;
+export const LOCAL_WORKSPACE_DIR = `${TAPHOUND_DIR}/local`;
+export const LOCAL_WORKSPACE_IGNORE = "local/\n";
+
+export function localTargetWorkspaceRoot(
+  targetsHome: string,
+  targetId: string
+): string {
+  return join(targetsHome, LOCAL_WORKSPACE_DIR, targetId);
+}
+
+export function tapHoundPath(
+  projectRoot: string,
+  workspaceRoot: string | undefined,
+  relative: string
+): string {
+  const base = workspaceRoot ?? projectRoot;
+  const reduced = workspaceRoot !== undefined
+    && relative.startsWith(`${TAPHOUND_DIR}/`)
+    ? relative.slice(TAPHOUND_DIR.length + 1)
+    : relative;
+  return join(base, reduced);
+}
+
 export const BUILD_IGNORE_FILE = `${TAPHOUND_DIR}/.gitignore`;
 export const BUILD_IGNORE_CONTENT = "build/\n";
 export const GENERATION_CONTEXT_SNAPSHOT_PATH = "context/resolved.json";

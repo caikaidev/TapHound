@@ -68,6 +68,27 @@ describe("FileSystemArtifactStore", () => {
     expect(await readdir(root)).toEqual([]);
   });
 
+  it("allows artifacts under .taphound/local/<id>/", async () => {
+    const root = await temporaryRoot();
+    const runs = join(root, ".taphound", "local", "app", "runs");
+    const session = await new FileSystemArtifactStore().begin(runs, "run-1");
+    expect(session).toBeDefined();
+    await session.discard();
+  });
+
+  it("rejects .taphound/local without a target id and .taphound/foo", async () => {
+    const root = await temporaryRoot();
+    const bare = join(root, ".taphound", "local");
+    await expect(
+      new FileSystemArtifactStore().begin(bare, "run-1")
+    ).rejects.toThrow(/must stay under \.taphound\/build/);
+    const foo = join(root, ".taphound", "foo");
+    await mkdir(foo, { recursive: true });
+    await expect(
+      new FileSystemArtifactStore().begin(foo, "run-1")
+    ).rejects.toThrow(/must stay under \.taphound\/build/);
+  });
+
   it("rejects a symlink alias into authoritative workspace content", async () => {
     const root = await temporaryRoot();
     const authority = join(root, ".taphound", "journeys");

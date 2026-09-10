@@ -12,7 +12,8 @@ import { resolveLocator } from "../locator/locator-resolver.js";
 export class KnowledgeAnchorResolver implements AnchorResolverPort {
   public constructor(
     private readonly registry: Pick<KnowledgeRegistryPort, "load">,
-    private readonly projectRoot: string
+    private readonly projectRoot: string,
+    private readonly workspaceRoot?: string | undefined
   ) {}
 
   public readonly resolve = async (
@@ -24,7 +25,7 @@ export class KnowledgeAnchorResolver implements AnchorResolverPort {
     }
   ): Promise<AnchorResolution> => {
     void input.signal;
-    const bundle = await this.registry.load(this.projectRoot);
+    const bundle = await this.registry.load(this.projectRoot, this.workspaceRoot);
     const anchor = bundle.anchors.find(
       (candidate) => candidate.id === input.anchorId
     );

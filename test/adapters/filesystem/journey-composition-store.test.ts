@@ -134,6 +134,24 @@ describe("FileSystemJourneyCompositionStore", () => {
     ).rejects.toThrow(/escape|safe directory/i);
   });
 
+  it("reads Journey bytes from the workspace root when provided", async () => {
+    const app = await root();
+    const workspace = await root();
+    const journeys = join(workspace, "journeys");
+    await mkdir(journeys, { recursive: true });
+    await writeFile(join(journeys, "search.json"), "{\"version\":2}\n");
+    const store = new FileSystemJourneyCompositionStore();
+
+    await expect(store.read({
+      projectRoot: app,
+      relativePath: ".taphound/journeys/search.json",
+      workspaceRoot: workspace
+    })).resolves.toEqual(Buffer.from("{\"version\":2}\n"));
+    await expect(store.listJourneyPaths(app, workspace)).resolves.toEqual([
+      "journeys/search.json"
+    ]);
+  });
+
   it("reads Journey meta sidecars and returns null when absent", async () => {
     const projectRoot = await root();
     const journeysRoot = join(projectRoot, ".taphound/journeys");

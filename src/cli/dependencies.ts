@@ -681,8 +681,11 @@ export function createProductionDependencies(
       reportWriter: new ReportWriter(),
       now: () => new Date(),
       createRunId: runId,
-      anchorResolverFor: (projectRoot): AnchorResolverPort => (
-        new KnowledgeAnchorResolver(knowledgeRegistry, projectRoot)
+      anchorResolverFor: (
+        projectRoot: string,
+        workspaceRoot?: string  
+      ): AnchorResolverPort => (
+        new KnowledgeAnchorResolver(knowledgeRegistry, projectRoot, workspaceRoot)
       )
     }),
     projectDescriber: new ProjectDescriber({
@@ -879,8 +882,11 @@ export function createProductionDependencies(
         reportWriter: new ReportWriter(),
         now: (): Date => new Date(),
         createRunId: runId,
-        anchorResolverFor: (projectRoot): AnchorResolverPort => (
-          new KnowledgeAnchorResolver(knowledgeRegistry, projectRoot)
+        anchorResolverFor: (
+          projectRoot: string,
+          workspaceRoot?: string  
+        ): AnchorResolverPort => (
+          new KnowledgeAnchorResolver(knowledgeRegistry, projectRoot, workspaceRoot)
         )
       });
       const finalizer = new GenerationFinalizer({

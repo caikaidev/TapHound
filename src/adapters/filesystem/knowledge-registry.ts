@@ -26,7 +26,8 @@ import {
 import {
   KNOWLEDGE_DIR,
   KNOWLEDGE_INDEX_PATH,
-  TAPHOUND_DIR
+  TAPHOUND_DIR,
+  tapHoundPath
 } from "../../domain/workspace.js";
 import type {
   KnowledgeRegistryPort,
@@ -241,29 +242,36 @@ export class FileSystemKnowledgeRegistry implements KnowledgeRegistryPort {
   private queue: Promise<void> = Promise.resolve();
 
   public readonly load = async (
-    projectRoot: string
+    projectRoot: string,
+    workspaceRoot?: string  
   ): Promise<LoadedKnowledgeBundle> => {
     const canonicalProject = await realpath(projectRoot);
-    const indexPath = resolve(canonicalProject, KNOWLEDGE_INDEX_PATH);
-    if (!isContained(canonicalProject, indexPath)) {
+    const indexPath = resolve(
+      tapHoundPath(canonicalProject, workspaceRoot, KNOWLEDGE_INDEX_PATH)
+    );
+    const base = workspaceRoot ?? canonicalProject;
+    if (!isContained(base, indexPath)) {
       throw new Error("Knowledge index escapes the project root");
     }
     const loadedIndex = await readBoundedJson(indexPath);
     const index = KnowledgeBundleIndexSchema.parse(loadedIndex.value);
     const anchors = await this.readDocuments(
       canonicalProject,
+      workspaceRoot,
       "anchors",
       index.anchors,
       AnchorDefinitionSchema
     );
     const screens = await this.readDocuments(
       canonicalProject,
+      workspaceRoot,
       "screens",
       index.screens,
       ScreenDefinitionSchema
     );
     const transitions = await this.readDocuments(
       canonicalProject,
+      workspaceRoot,
       "transitions",
       index.transitions,
       TransitionDefinitionSchema
@@ -452,15 +460,19 @@ export class FileSystemKnowledgeRegistry implements KnowledgeRegistryPort {
 
   private async readDocuments<T extends KnowledgeDocument>(
     canonicalProject: string,
+    workspaceRoot: string | undefined,
     kind: "anchors" | "screens" | "transitions",
     references: KnowledgeBundleIndex[typeof kind],
     schema: { parse: (value: unknown) => T }
   ): Promise<T[]> {
     const documents: T[] = [];
+    const base = workspaceRoot ?? canonicalProject;
     for (const reference of references) {
       assertReferencePath(kind, reference.id, reference.path);
-      const path = resolve(canonicalProject, reference.path);
-      if (!isContained(canonicalProject, path)) {
+      const path = resolve(
+        tapHoundPath(canonicalProject, workspaceRoot, reference.path)
+      );
+      if (!isContained(base, path)) {
         throw new Error(`Knowledge reference escapes the project: ${reference.id}`);
       }
       const loaded = await readBoundedJson(path);

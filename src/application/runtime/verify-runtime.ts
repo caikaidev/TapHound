@@ -51,6 +51,7 @@ export interface VerifyInput {
   config: TapHoundConfig;
   journey: Journey;
   projectRoot: string;
+  workspaceRoot?: string | undefined;
   devices: DeviceAssignment[];
   toolVersions: Record<string, string>;
   requireFocusedInput?: boolean | undefined;
@@ -77,7 +78,7 @@ export interface VerifyRuntimeDependencies {
   now: () => Date;
   createRunId: () => string;
   createStepRunner?: ((options: StepRunnerOptions) => StepRunnerLike) | undefined;
-  anchorResolverFor?: ((projectRoot: string) => AnchorResolverPort) | undefined;
+  anchorResolverFor?: ((projectRoot: string, workspaceRoot?: string  ) => AnchorResolverPort) | undefined;
 }
 
 export interface VerifyResult {
@@ -502,7 +503,7 @@ export class VerifyRuntime {
             idle: input.config.idle,
             ...(this.dependencies.anchorResolverFor === undefined
               ? {}
-              : { anchorResolver: this.dependencies.anchorResolverFor(input.projectRoot) }),
+              : { anchorResolver: this.dependencies.anchorResolverFor(input.projectRoot, input.workspaceRoot) }),
             ...(input.requireFocusedInput === undefined
               ? {}
               : { requireFocusedInput: input.requireFocusedInput }),

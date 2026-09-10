@@ -51,14 +51,22 @@ async function assertArtifactAuthorityBoundary(path: string): Promise<void> {
   const canonical = await projectedRealPath(path);
   const segments = canonical.split(/[\\/]+/);
   const workspaceIndex = segments.lastIndexOf(".taphound");
-  if (
-    workspaceIndex >= 0
-    && segments[workspaceIndex + 1] !== "build"
-  ) {
-    throw new Error(
-      `Artifact path inside .taphound/ must stay under .taphound/build/: ${path}`
-    );
+  if (workspaceIndex < 0) {
+    return;
   }
+  const namespace = segments[workspaceIndex + 1];
+  if (namespace === "build") {
+    return;
+  }
+  if (
+    namespace === "local"
+    && segments[workspaceIndex + 2] !== undefined
+  ) {
+    return;
+  }
+  throw new Error(
+    `Artifact path inside .taphound/ must stay under .taphound/build/ or .taphound/local/<id>/: ${path}`
+  );
 }
 
 function safePath(root: string, relativePath: string): string {

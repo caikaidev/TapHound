@@ -1,4 +1,6 @@
+import { createHash } from "node:crypto";
 import {
+  mkdir,
   mkdtemp,
   readFile,
   rm,
@@ -96,6 +98,52 @@ describe("FileSystemKnowledgeRegistry", () => {
       screens: [screen],
       transitions: []
     })).rejects.toThrow(/stale/);
+  });
+
+  it("loads knowledge from the workspace root when provided", async () => {
+    const app = await projectRoot();
+    const workspace = await projectRoot();
+    const registry = new FileSystemKnowledgeRegistry();
+    const anchorBytes = Buffer.from(`${JSON.stringify(anchor, null, 2)}\n`);
+    const screenBytes = Buffer.from(`${JSON.stringify(screen, null, 2)}\n`);
+    await mkdir(join(workspace, "knowledge", "anchors"), { recursive: true });
+    await mkdir(join(workspace, "knowledge", "screens"), { recursive: true });
+    await writeFile(
+      join(workspace, "knowledge", "anchors", "home-activity.json"),
+      anchorBytes
+    );
+    await writeFile(
+      join(workspace, "knowledge", "screens", "home.json"),
+      screenBytes
+    );
+    const sha256 = (value: Buffer): string => (
+      createHash("sha256").update(value).digest("hex")
+    );
+    await writeFile(join(workspace, "knowledge", "index.json"),
+      `${JSON.stringify({
+        version: 1,
+        packageName: "com.example.app",
+        revision: 1,
+        anchors: [{
+          id: "home-activity",
+          path: ".taphound/knowledge/anchors/home-activity.json",
+          sha256: sha256(anchorBytes),
+          status: "inferred"
+        }],
+        screens: [{
+          id: "home",
+          path: ".taphound/knowledge/screens/home.json",
+          sha256: sha256(screenBytes),
+          status: "inferred"
+        }],
+        transitions: []
+      }, null, 2)}\n`
+    );
+
+    const loaded = await registry.load(app, workspace);
+
+    expect(loaded.screens).toEqual([screen]);
+    expect(loaded.anchors).toEqual([anchor]);
   });
 
   it("rejects unresolved cross-references before writing", async () => {

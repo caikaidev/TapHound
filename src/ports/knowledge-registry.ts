@@ -30,7 +30,10 @@ export interface WriteKnowledgeBundleResult {
 }
 
 export interface KnowledgeRegistryPort {
-  load: (projectRoot: string) => Promise<LoadedKnowledgeBundle>;
+  load: (
+    projectRoot: string,
+    workspaceRoot?: string  
+  ) => Promise<LoadedKnowledgeBundle>;
   writePromoted: (
     input: WriteKnowledgeBundleInput
   ) => Promise<WriteKnowledgeBundleResult>;

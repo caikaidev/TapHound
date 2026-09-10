@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "targets": {
+    "my-app": {
+      "source": {
+        "type": "local",
+        "path": "${TAPHOUND_WORK_APP}"
+      },
+      "run": {
+        "packageName": "com.example.myapp",
+        "activity": ".MainActivity"
+      },
+      "git": {
+        "enabled": true
+      }
+    }
+  }
+}

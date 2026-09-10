@@ -110,6 +110,12 @@ See the [local testing guide](docs/local-testing.md) for source, npm tarball, an
   selected Journeys on a real device and report a per-Journey verdict plus an
   overall pass/fail; skips locator-only Journeys (no semantic binding) and
   documents the reason for every skip.
+- `local add` / `list` / `inspect` / `remove`: register an unrelated Android
+  repository as a Local Target and inspect its resolved path, Git metadata,
+  Context state, and Journey count. Local Target validation is dogfooding and
+  never publishable. `--target <id>` runs `doctor`, `context
+  generate/status/validate`, `verify`, `impact`, and `verify-changes` against a
+  registered target; see [Local Target](docs/local-target.md).
 - `knowledge status` / `bootstrap` / `goal` / `plan` / `receipts` / `promote` /
   `evolve`: manage committed Anchor, Screen, and Transition knowledge. Runtime
   commands write immutable receipts; only explicit bootstrap, promotion, or
@@ -386,6 +392,25 @@ taphound verify --project . --journey .taphound/journeys/search.json --json
 ```
 
 `--json` mode guarantees exactly one final JSON value on stdout; progress and diagnostics go to stderr. See [Agent Integration](docs/agent-integration.md) and [Report Schema](docs/report-schema.md).
+
+## Local Target (real-app validation)
+
+A Local Target is an unrelated Android repository registered with
+`taphound local add <id> --path <path> [--package <name>]`, so you can run
+TapHound against your own app without copying any TapHound files into it.
+Targets are registered in JSON under `benchmarks/` and each keeps a git-ignored
+workspace at `.taphound/local/<id>/`. `doctor`, `context`, `verify`, `impact`,
+and `verify-changes` accept `--target <id>` to operate on a registered target.
+This is dogfooding: the produced Context, Journeys, and reports are working
+evidence for the developer loop and **are never publishable**. `generation
+--target` is deferred. See [docs/local-target.md](docs/local-target.md).
+
+```bash
+taphound local add my-app --path /path/to/app --package com.example.myapp
+taphound doctor --target my-app
+taphound verify --target my-app --journey search
+taphound verify-changes --target my-app --base origin/main --head WORKTREE
+```
 
 ## Reports
 

@@ -102,6 +102,11 @@ git diff --exit-code -- assets/brand/png
 - `knowledge status` / `bootstrap` / `plan` / `receipts` / `promote`：
   管理已提交的 Anchor、Screen 与 Transition 知识。运行时只写不可变收据；
   只有显式 bootstrap 或 promote 才会更新权威知识。
+- `local add` / `list` / `inspect` / `remove`：将某个不相关的 Android 仓库注册为
+  Local Target，并查看其解析路径、Git 元数据、Context 状态与 Journey 数量。
+  Local Target 验证属于 dogfooding，绝不发布。`--target <id>` 使 `doctor`、
+  `context generate/status/validate`、`verify`、`impact` 与 `verify-changes`
+  针对已注册目标运行；详见 [Local Target](docs/local-target.md)。
 - `generation start --goal <goal.json>` / `generation next`：绑定 Knowledge
   与严格 Goal，并通过现有 proposal、风险、证据和 Replay 控制执行一个已知
   Transition。
@@ -336,6 +341,23 @@ taphound verify --project . --journey .taphound/journeys/search.json --json
 `--json` 模式保证 stdout 只有一个最终 JSON 值，进度和诊断写入 stderr。详见 [Agent 集成](docs/agent-integration.md) 与 [报告协议](docs/report-schema.md)。
 
 ## 报告
+
+## Local Target（真实应用验证）
+
+Local Target 是指通过 `taphound local add <id> --path <path> [--package <name>]`
+注册的一个不相关 Android 仓库，使你可以针对自己的应用运行 TapHound，而无需把任何
+TapHound 文件复制进该仓库。目标注册信息以 JSON 存放在 `benchmarks/` 下，每个目标
+在 `.taphound/local/<id>/` 维护一个被 Git 忽略的工作目录。`doctor`、`context`、
+`verify`、`impact` 与 `verify-changes` 都支持 `--target <id>` 以针对已注册目标运行。
+这属于 dogfooding：生成的 Context、Journey 与报告只是给开发者循环使用的工作证据，
+**绝不发布**；`generation --target` 暂缓。详见 [docs/local-target.md](docs/local-target.md)。
+
+```bash
+taphound local add my-app --path /path/to/app --package com.example.myapp
+taphound doctor --target my-app
+taphound verify --target my-app --journey search
+taphound verify-changes --target my-app --base origin/main --head WORKTREE
+```
 
 每次验证写入独立目录，固定包含 `report.json` 与 `summary.txt`，按实际执行结果提供步骤日志，并尽力采集最终截图和完整 Logcat。原始验证失败保存在 `primaryFailure`；截图或日志采集问题进入 `secondaryErrors`，不会覆盖已存在的原始失败。当验证本身通过但采集失败时，首个采集错误会成为 `primaryFailure`（错误码 `COLLECTION_FAILED`），其余进入 `secondaryErrors`；对应可选产物也可能缺失。
 

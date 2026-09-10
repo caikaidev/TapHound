@@ -51,3 +51,9 @@ docs/feedback/
 docs/verification/
 docs/superpowers/
 docs/archive/
+
+# Local target registrations and workspaces
+benchmarks/targets.local.json
+benchmarks/apps/local/
+benchmarks/cases/local/
+benchmarks/.taphound/

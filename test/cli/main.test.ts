@@ -9,6 +9,7 @@ import {
 import type { CliDependencies, TextOutput } from "../../src/cli/dependencies.js";
 import { runtimeConfig, runtimeJourney } from "../fakes/runtime-fixture.js";
 import { fakeWorkspaceLayout } from "../fakes/workspace-layout.js";
+import { defaultLocalTargets } from "../fakes/local-targets.js";
 
 class BufferOutput implements TextOutput {
   public value = "";
@@ -60,6 +61,7 @@ function dependencies(exitCodes: number[]): CliDependencies {
       observe: () => Promise.reject(new Error("unused"))
     },
     workspaceLayout: fakeWorkspaceLayout(),
+    localTargets: defaultLocalTargets(),
     readJson: (path) => Promise.resolve(
       path.includes("journey") ? runtimeJourney : runtimeConfig
     ),

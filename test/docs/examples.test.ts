@@ -282,6 +282,7 @@ describe("TapHound documentation examples", () => {
       "generation",
       "knowledge",
       "benchmark",
+      "local",
       "init",
       "align",
       "impact",

@@ -4,6 +4,7 @@ import { createProgram } from "../../src/cli/program.js";
 import type { CliDependencies, TextOutput } from "../../src/cli/dependencies.js";
 import type { AlignCameraResult } from "../../src/application/align/align-service.js";
 import { fakeWorkspaceLayout } from "../fakes/workspace-layout.js";
+import { defaultLocalTargets } from "../fakes/local-targets.js";
 
 class BufferOutput implements TextOutput {
   public value = "";
@@ -44,6 +45,7 @@ function harness(result: AlignCameraResult): AlignTestHarness {
     generationStarter: { start: vi.fn(() => Promise.reject(new Error("unused"))) },
     runtimeObserver: { observe: vi.fn(() => Promise.reject(new Error("unused"))) },
     workspaceLayout: fakeWorkspaceLayout(),
+    localTargets: defaultLocalTargets(),
     readJson: vi.fn(() => Promise.resolve({
       version: 1,
       run: { packageName: "com.example.app", activity: ".MainActivity" },

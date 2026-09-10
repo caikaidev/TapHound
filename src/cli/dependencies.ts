@@ -75,6 +75,17 @@ import {
   FileSystemWorkspaceLayout
 } from "../adapters/filesystem/workspace-layout.js";
 import { NodeProcessRunner } from "../adapters/process/node-process-runner.js";
+import { FileSystemTargetConfigStore } from "../adapters/filesystem/target-config-store.js";
+import { TargetPathResolver } from "../adapters/filesystem/target-path-resolver.js";
+import {
+  FileSystemLocalTargetWorkspace,
+  type LocalTargetWorkspacePort
+} from "../adapters/filesystem/local-target-workspace.js";
+import { TargetResolver } from "../application/target/target-resolver.js";
+import { LocalTargetService } from "../application/target/local-target-service.js";
+import type { ProcessRunner } from "../ports/process-runner.js";
+import type { TargetConfigStorePort } from "../ports/target-config-store.js";
+import type { TargetPathResolverPort } from "../ports/path-resolver.js";
 import {
   NodeDetachedProcessLauncher
 } from "../adapters/process/node-detached-process-launcher.js";
@@ -176,6 +187,10 @@ import { ReportWriter } from "../application/report/report-writer.js";
 import { VerifyRuntime, type VerifyInput, type VerifyResult } from "../application/runtime/verify-runtime.js";
 import { IdleWaiter } from "../application/wait/idle-waiter.js";
 import type { TapHoundConfig } from "../domain/config.js";
+import type {
+  LocalTargetIdentity,
+  ProjectFingerprint
+} from "../domain/target.js";
 import {
   resolveRuntimeBackendId,
   type RuntimeBackendChoice
@@ -264,8 +279,20 @@ export interface GenerationCliRuntime {
   }) => Promise<ActionResolutionResult>) | undefined;
 }
 
+export interface LocalTargets {
+  targetsHome: () => string;
+  configStore: TargetConfigStorePort;
+  pathResolver: TargetPathResolverPort;
+  workspace: LocalTargetWorkspacePort;
+  targetResolver: (targetsHome: string) => TargetResolver;
+  localTargetService: (targetsHome: string) => LocalTargetService;
+  processRunner: ProcessRunner;
+  clock: { now: () => Date };
+}
+
 export interface CliDependencies {
   signal?: AbortSignal | undefined;
+  localTargets: LocalTargets;
   doctor: {
     run: (input?: DoctorRunInput) => Promise<DoctorReport>;
   };
@@ -953,6 +980,7 @@ export function createProductionDependencies(
     ...(process.argv[1] === undefined
       ? {}
       : { cliEntryPath: process.argv[1] }),
+    localTargets: buildLocalTargets(runner, { now: (): Date => new Date() }),
     readJson: async (path): Promise<unknown> => JSON.parse(
       await readFile(path, "utf8")
     ) as unknown,
@@ -970,5 +998,58 @@ export function createProductionDependencies(
     setExitCode: (code): void => {
       process.exitCode = code;
     }
+  };
+}
+
+function buildLocalTargets(
+  runner: ProcessRunner,
+  clock: { now: () => Date }
+): LocalTargets {
+  const configStore = new FileSystemTargetConfigStore();
+  const pathResolver = new TargetPathResolver({ env: process.env });
+  const workspace = new FileSystemLocalTargetWorkspace();
+  const makeResolver = (targetsHome: string): TargetResolver => new TargetResolver({
+    targetsHome,
+    configStore,
+    pathResolver,
+    processRunner: runner,
+    clock
+  });
+  return {
+    targetsHome: (): string => resolvePath(
+      process.cwd(),
+      process.env.TAPHOUND_TARGETS_HOME ?? "benchmarks"
+    ),
+    configStore,
+    pathResolver,
+    workspace,
+    targetResolver: makeResolver,
+    localTargetService: (
+      targetsHome: string
+    ): LocalTargetService => new LocalTargetService({
+      identityStore: {
+        readIdentity: async (
+          targetId: string
+        ): Promise<LocalTargetIdentity | null> => (
+          workspace.readIdentity(targetsHome, targetId)
+        ),
+        writeIdentity: async (
+          identity: LocalTargetIdentity
+        ): Promise<void> => (
+          workspace.writeIdentity(targetsHome, identity.targetId, identity)
+        ),
+        ensureWorkspace: async (targetId: string): Promise<void> => (
+          workspace.ensureWorkspace(targetsHome, targetId)
+        )
+      },
+      fingerprint: (
+        project,
+        packageName?: string
+      ): Promise<Pick<ProjectFingerprint, "hash">> => (
+        makeResolver(targetsHome).fingerprint(project, packageName)
+      )
+    }),
+    processRunner: runner,
+    clock
   };
 }

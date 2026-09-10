@@ -32,6 +32,7 @@ import {
 } from "../../src/ports/generation-session-store.js";
 import { runtimeConfig, runtimeJourney } from "../fakes/runtime-fixture.js";
 import { fakeWorkspaceLayout } from "../fakes/workspace-layout.js";
+import { defaultLocalTargets } from "../fakes/local-targets.js";
 import { validReport } from "../fixtures/report.js";
 import {
   uiSnapshotFactory,
@@ -205,6 +206,7 @@ function dependencies(): {
         }))
       },
       workspaceLayout: fakeWorkspaceLayout(),
+      localTargets: defaultLocalTargets(),
       uiCache: {
         status: vi.fn(() => Promise.resolve({
           directory: ".taphound/build/cache/ui",

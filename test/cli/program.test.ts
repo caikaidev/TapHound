@@ -26,6 +26,7 @@ describe("createProgram", () => {
       "generation",
       "knowledge",
       "benchmark",
+      "local",
       "init",
       "align",
       "impact",

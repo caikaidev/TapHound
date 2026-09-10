@@ -19,6 +19,7 @@ import { createVerifyChangesCommand } from "./commands/verify-changes.js";
 import { createUiCacheCommand } from "./commands/ui-cache.js";
 import { createKnowledgeCommand } from "./commands/knowledge.js";
 import { createBenchmarkCommand } from "./commands/benchmark.js";
+import { createLocalCommand } from "./commands/local.js";
 import {
   createProductionDependencies,
   type CliDependencies
@@ -76,6 +77,7 @@ export function createProgram(
     .addCommand(configureOutput(createGenerationCommand(dependencies)))
     .addCommand(configureOutput(createKnowledgeCommand(dependencies)))
     .addCommand(configureOutput(createBenchmarkCommand(dependencies)))
+    .addCommand(configureOutput(createLocalCommand(dependencies)))
     .addCommand(configureOutput(createInitCommand(dependencies)))
     .addCommand(configureOutput(createAlignCommand(dependencies)))
     .addCommand(configureOutput(createImpactCommand(dependencies)))

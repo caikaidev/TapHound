@@ -438,7 +438,7 @@ describe("TapHound documentation examples", () => {
     expect(testing).toContain("npm test");
     expect(testing).toContain("npm run acceptance:device");
     expect(testing).toContain("npm run acceptance:generation");
-    expect(testing).toContain("taphound-0.2.0-dev.5.tgz");
+    expect(testing).toContain("taphound-0.2.0-dev.6.tgz");
     expect(testing).toContain("examples/taphound-android-demo");
     for (const command of [
       "doctor",

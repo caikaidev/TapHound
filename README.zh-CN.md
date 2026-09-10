@@ -200,7 +200,7 @@ taphound record \
 
 Recorder 不自动生成业务 `expect`。Activity、Element 或 Logcat 断言应由开发者或外部 Agent 显式补充。协议细节见 [Journey Schema](docs/journey-schema.md)。
 
-支持的 Action 包括 `click`、`longClick`、`inputText`、`swipe`、`scrollTo`、`back` 和 `wait`。`scrollTo` 在确定的 `container` 中最多滑动 `maxSwipes` 次，目标 `locator` 唯一解析成功后停止，不会继续点击目标。
+支持的 Action 包括 `click`、`longClick`、`inputText`、`swipe`、`scrollTo`、`back` 和 `wait`。`click`、`longClick`、`swipe`、`scrollTo` 与 `inputText` 可同时使用 Knowledge `anchor` 作为目标（或替代运行时 `locator`）。`scrollTo` 在确定的 `container` 中最多滑动 `maxSwipes` 次，目标 `anchor` 或 `locator` 唯一解析成功后停止，不会继续点击目标。
 
 ## AI 驱动的 Android 测试路径生成 (Agent-Driven Generation)
 

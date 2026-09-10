@@ -108,11 +108,23 @@ whether hybrid structural fallback was used, and whether frame activity was
 detected. The Locator report
 includes matched fields and fallback evidence; on Idle timeout the last Layout
 Diff is saved; Activity and Expect each record the expected value, actual
-result, and fixed failure code. A `scrollTo` step records a
+result, and fixed failure code.
+
+When a step targets a semantic Knowledge `anchor`, the Locator report records
+`matchedBy: "anchor"`, the resolved `anchorId`, and an `anchor` sub-report whose
+`status` is one of `"resolved"`, `"locatorFallback"`, or `"failed"`
+(optionally with a `message`). `"resolved"` means the anchor mapped to an
+element and no `locator` fallback ran; `"locatorFallback"` means the anchor did
+not resolve and the step's `locator` was used as an explicit fallback;
+`"failed"` means an anchor-only step could not resolve (reported as
+`ANCHOR_NOT_FOUND` or `ANCHOR_AMBIGUOUS`). This evidence is written for
+`click`, `longClick`, `swipe`, and `inputText` steps.
+
+A `scrollTo` step records a
 `scroll: { swipesUsed, maxSwipes }` summary and does not populate `locator`;
 `idle` is populated only when an Idle timeout occurs during scrolling (and the
 corresponding `steps/NNN-layout-diff.json` is written), while other scroll
-failures (such as `SCROLL_TARGET_NOT_FOUND`, `LOCATOR_AMBIGUOUS`, or a missing
+failures (such as `SCROLL_TARGET_NOT_FOUND`, `ANCHOR_AMBIGUOUS`, or a missing
 container) do not populate `idle`.
 
 ### Bridge and External Step Evidence

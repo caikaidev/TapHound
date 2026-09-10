@@ -114,11 +114,26 @@ themselves.
 
 ## Action
 
-- `click`: requires `locator`, performs an ADB tap.
-- `longClick`: requires `locator`, accepts a positive integer `durationMs`, default 800.
-- `inputText`: requires non-empty `text`, typed into the current focus.
-- `swipe`: requires `locator`, `direction`; `distancePercent` is in `(0, 1]`, default 0.6; `durationMs` default 300. The Recorder only shows elements that Android CLI marks as scrollable and that provide bounds; a hand-written Journey that only locates an element without bounds will terminate with `ACTION_FAILED` and will not guess a swipe region.
-- `scrollTo`: requires a target `locator`, a scroll container `container`, and `direction`; `maxSwipes` ranges from 1 to 30, default 20; `distancePercent` and `durationMs` default to 0.6 and 300 respectively. Replay deterministically resolves the target before and after each swipe, stopping once the target appears uniquely, without clicking the target; exceeding the limit returns `SCROLL_TARGET_NOT_FOUND`. The container must be unique and provide bounds; annotated fallback is not supported.
+- `click`: targets a `locator` or a semantic `anchor`, performs an ADB tap.
+- `longClick`: targets a `locator` or a semantic `anchor`, accepts a positive
+  integer `durationMs`, default 800.
+- `inputText`: requires non-empty `text`, typed into the current focus. When an
+  `anchor` is supplied, Core resolves it first and taps the anchor point to
+  focus the field before typing; an anchor without bounds fails with
+  `ANCHOR_NOT_FOUND`.
+- `swipe`: targets a `locator` or a semantic `anchor`, plus `direction`;
+  `distancePercent` is in `(0, 1]`, default 0.6; `durationMs` default 300. The
+  Recorder only shows elements that Android CLI marks as scrollable and that
+  provide bounds; a hand-written Journey that only locates an element without
+  bounds will terminate with `ACTION_FAILED` and will not guess a swipe region.
+- `scrollTo`: targets a `locator` or a semantic `anchor`, plus a scroll
+  container `container` and `direction`; `maxSwipes` ranges from 1 to 30,
+  default 20; `distancePercent` and `durationMs` default to 0.6 and 300
+  respectively. Replay deterministically resolves the target (resolving an
+  `anchor` to its element bounds) before and after each swipe, stopping once the
+  target appears uniquely, without clicking the target; exceeding the limit
+  returns `SCROLL_TARGET_NOT_FOUND`. The container must be unique and provide
+  bounds; annotated fallback is not supported.
 - `back`: performs the ADB BACK keyevent.
 - `wait`: performs only Layout stability detection, with no fixed sleep. A
   conditional wait adds `until: { "element": <locator> }` together with a
@@ -170,6 +185,31 @@ Example:
 ```
 
 For a full example see [`examples/scroll-to.journey.json`](../examples/scroll-to.journey.json).
+
+## Semantic Anchor Targeting
+
+`click`, `longClick`, `swipe`, `scrollTo`, and `inputText` steps may express
+their target with a semantic Knowledge `anchor` (an id from
+`.taphound/knowledge/anchors/`) instead of, or alongside, `locator`. Replay
+resolves the anchor against the fresh layout first using alias-free element
+locator identity (window and Activity identities fail closed); when the anchor
+does not resolve and the step also carries a `locator`, that locator is used as
+an explicit fallback and the report records
+`anchor: { status: "locatorFallback" }`. An anchor-only step that fails resolves
+with `ANCHOR_NOT_FOUND` (or `ANCHOR_AMBIGUOUS` when more than one element
+matches); a step that targets an anchor while verify has no anchor resolver
+configured also fails closed.
+
+- `click`, `longClick`, and `swipe` resolve the anchor to a point (and bounds)
+  before executing the mutation; `swipe` still requires bounds.
+- `scrollTo` resolves the anchor target to its element bounds before swiping,
+  stopping once it appears uniquely. An anchor-only scroll target that never
+  appears resolves with `SCROLL_TARGET_NOT_FOUND` after `maxSwipes`; an
+  ambiguous anchor returns `ANCHOR_AMBIGUOUS`.
+- `inputText` resolves the anchor and taps its point to focus the field before
+  typing; an anchor element without bounds fails with `ANCHOR_NOT_FOUND`.
+
+`anchor` is not allowed on `back`, `wait`, or `bridge` steps.
 
 ## Replay Mode
 

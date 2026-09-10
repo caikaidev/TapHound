@@ -233,7 +233,7 @@ taphound record \
 
 The Recorder does not auto-generate business `expect` assertions. Activity, Element, or Logcat assertions should be added explicitly by developers or external agents. See [Journey Schema](docs/journey-schema.md) for protocol details.
 
-Supported actions include `click`, `longClick`, `inputText`, `swipe`, `scrollTo`, `back`, and `wait`. `scrollTo` swipes within a deterministic `container` up to `maxSwipes` times, stopping once the target `locator` resolves uniquely without clicking it.
+Supported actions include `click`, `longClick`, `inputText`, `swipe`, `scrollTo`, `back`, and `wait`. `click`, `longClick`, `swipe`, `scrollTo`, and `inputText` may target a Knowledge `anchor` in addition to (or instead of) a runtime `locator`. `scrollTo` swipes within a deterministic `container` up to `maxSwipes` times, stopping once the target `anchor` or `locator` resolves uniquely without clicking it.
 
 ## AI-Agent-Driven Android Test Path Generation
 

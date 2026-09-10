@@ -25,11 +25,18 @@ taphound observe --project <path> [--config <path>] [--device <serial>] \
 
 ## Preflight and Exit Codes
 
-`taphound observe` runs the same `doctor` preflight as `record` and `verify`:
-it validates the config, checks that ADB, Android CLI, and an online device
-are available, and selects a device. A config validation failure exits with
-code `2` (`CONFIG_INVALID`). A doctor failure exits with code `3`
-(`ENVIRONMENT_MISSING_TOOL` or the specific failing check). Provider
+`taphound observe` runs the same `doctor` preflight as `record` and `verify`.
+The doctor check is runtime-backend-aware: the default `runtime.backend=auto`
+resolves to the Mobile MCP backend, so it verifies the Mobile MCP server and
+diagnoses the device through Mobile MCP tools; set `runtime.backend=adb` (or
+`TAPHOUND_RUNTIME_BACKEND=adb`) to check the ADB + Android CLI toolchain
+instead. It then validates the config, confirms the selected backend and an
+online device are available, and chooses a device. A config validation failure
+exits with code `2` (`CONFIG_INVALID`). A doctor failure exits with code `3`
+(`ENVIRONMENT_MISSING_TOOL` or the specific failing check). When the selected
+runtime backend lacks a capability the observation needs (for example an
+`annotatedScreens` or `startActivityByIntent` member that is `undefined`),
+observe fails closed with `RUNTIME_CAPABILITY_MISSING`/exit `3`. Provider
 availability failures use `UI_BACKEND_UNAVAILABLE`/exit `3`; capture or source
 validation failures use `UI_SNAPSHOT_FAILED` or `UI_SNAPSHOT_INVALID`/exit `1`.
 An internal error during observation exits with code `4` (`INTERNAL_ERROR`). A successful

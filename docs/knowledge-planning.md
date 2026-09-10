@@ -167,6 +167,19 @@ Knowledge, no Route, and exhausted budgets fail closed.
 Continue until `status: "goalReached"`, then use the existing `generation
 finalize`. Final replay never changes route and never consults the planner.
 
+## Anchors in Journey steps
+
+Committed `anchor` ids may be used directly as an action target, so a Journey
+step is not tied to a single UI resource id. `click`, `longClick`, `swipe`,
+`scrollTo`, and `inputText` steps accept an `anchor` instead of, or alongside,
+`locator`; `scrollTo` resolves the anchor to element bounds before swiping and
+`inputText` taps the anchor point to focus the field before typing. Replay
+resolves the anchor against the fresh layout first and falls back to the
+`locator` only when the step carries one, recording
+`anchor: { status: "locatorFallback" }` in the report. See
+[`docs/journey-schema.md`](./journey-schema.md) and
+[`docs/report-schema.md`](./report-schema.md) for the full protocol.
+
 ## Journey promotion
 
 `generation finalize` exports each verified Journey with a

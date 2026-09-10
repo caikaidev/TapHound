@@ -134,8 +134,7 @@ describe("TargetResolver", () => {
       },
       processRunner: fakeRunner({
         [`git -C ${root} rev-parse --show-toplevel`]: `${root}\n`,
-        [`git -C ${root} config --get remote.origin.url`]: "git@github.com:acme/mail.git\n",
-        [`git -C ${root} rev-parse HEAD`]: "abc123\n"
+        [`git -C ${root} config --get remote.origin.url`]: "git@github.com:acme/mail.git\n"
       }),
       clock: { now: (): Date => new Date() }
     });
@@ -170,8 +169,7 @@ describe("TargetResolver", () => {
         },
         processRunner: fakeRunner({
           [`git -C ${root} rev-parse --show-toplevel`]: `${root}\n`,
-          [`git -C ${root} config --get remote.origin.url`]: "git@github.com:acme/mail.git\n",
-          [`git -C ${root} rev-parse HEAD`]: "abc123\n"
+          [`git -C ${root} config --get remote.origin.url`]: "git@github.com:acme/mail.git\n"
         }),
         clock: { now: (): Date => new Date() }
       });

@@ -55,6 +55,9 @@ export class NodeGitDiff implements GitDiffPort {
     await this.assertRef(root, input.base, signal);
 
     const head = input.head;
+    if (head !== "WORKTREE") {
+      await this.assertRef(root, head, signal);
+    }
     const diffArg = head === "WORKTREE"
       ? input.base
       : `${input.base}...${head}`;

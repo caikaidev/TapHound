@@ -10,7 +10,7 @@ import { TargetError } from "../../domain/target.js";
 import { isErrnoException } from "../../shared/errors.js";
 import { hasAndroidProjectStructure } from "./android-project-detection.js";
 
-const ENV_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/;
+const ENV_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
 
 export interface TargetPathResolverDependencies {
   env: Record<string, string | undefined>;

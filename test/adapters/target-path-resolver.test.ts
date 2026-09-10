@@ -1,6 +1,6 @@
 import { mkdtemp, mkdir, realpath, symlink, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { TargetPathResolver } from "../../src/adapters/filesystem/target-path-resolver.js";
@@ -40,6 +40,19 @@ describe("TargetPathResolver", () => {
     await expect(resolver.resolve("$TAPHOUND_WORK_APP", "/")).resolves.toMatchObject({
       resolvedPath: await realpath(project)
     });
+  });
+
+  it("expands multiple environment variables in one path", async () => {
+    const project = await androidProject();
+    const resolver = new TargetPathResolver({
+      env: {
+        TAPHOUND_ROOT: dirname(project),
+        TAPHOUND_APP: basename(project)
+      }
+    });
+    await expect(
+      resolver.resolve("${TAPHOUND_ROOT}/${TAPHOUND_APP}", "/")
+    ).resolves.toMatchObject({ resolvedPath: await realpath(project) });
   });
 
   it("fails with LOCAL_TARGET_ENV_MISSING for an unset variable", async () => {

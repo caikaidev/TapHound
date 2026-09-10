@@ -151,17 +151,13 @@ export class TargetResolver {
   ): Promise<ProjectFingerprint> => {
     const runner = this.dependencies.processRunner;
     const root = project.rootDir;
-    const [remote, head] = await Promise.all([
-      gitValue(runner, root, ["config", "--get", "remote.origin.url"]),
-      gitValue(runner, root, ["rev-parse", "HEAD"])
-    ]);
+    const remote = await gitValue(runner, root, ["config", "--get", "remote.origin.url"]);
     const rootProjectName = await this.rootProjectName(root);
     const settingsHash = await this.fileHash(root, project.settingsFile);
     const parts = [
       remote === undefined ? "no-remote" : remote,
       rootProjectName === undefined ? "no-name" : rootProjectName,
       settingsHash === undefined ? "no-settings-hash" : settingsHash,
-      head === undefined ? "no-head" : head,
       packageName === undefined ? "no-package" : packageName
     ];
     const hash = createHash("sha256").update(parts.join("\n")).digest("hex");

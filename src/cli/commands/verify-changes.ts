@@ -54,6 +54,7 @@ interface VerifyChangesResult {
   impact: ImpactSet;
   results: JourneyVerdict[];
   overall: "passed" | "failed" | "error";
+  note?: string | undefined;
   target?: {
     id: string;
     resolvedPath: string;
@@ -188,6 +189,22 @@ export function createVerifyChangesCommand(
             );
             return;
           }
+          const fingerprint = await dependencies.localTargets
+            .targetResolver(targetsHome(dependencies, options.targets))
+            .fingerprint(resolvedTarget.project, entry.run.packageName);
+          try {
+            await dependencies.localTargets.localTargetService(
+              targetsHome(dependencies, options.targets)
+            ).assertProjectUnchanged(resolvedTarget, fingerprint.hash);
+          } catch (error) {
+            writeFailure(
+              dependencies,
+              options.json === true,
+              failureCodeFromUnknown(error) ?? "INTERNAL_ERROR",
+              errorMessage(error)
+            );
+            return;
+          }
           config = TapHoundConfigSchema.parse(
             dependencies.localTargets.localTargetService(
               targetsHome(dependencies, options.targets)
@@ -292,17 +309,25 @@ export function createVerifyChangesCommand(
         }
 
         const failed = results.find((result) => result.status !== "passed");
-        const overall = results.length === 0
-          ? "error"
-          : failed === undefined
-            ? "passed"
-            : "failed";
+        let overall: "passed" | "failed" | "error";
+        let note: string | undefined;
+        if (changeSet.files.length === 0) {
+          overall = "passed";
+          note = "No changes; nothing to verify";
+        } else {
+          overall = results.length === 0
+            ? "error"
+            : failed === undefined
+              ? "passed"
+              : "failed";
+        }
         const payload: VerifyChangesResult = {
           base: options.base,
           head,
           impact,
           results,
           overall,
+          ...(note === undefined ? {} : { note }),
           ...(resolvedTarget === undefined
             ? {}
             : {

@@ -173,7 +173,10 @@ function targetDependencies(exitCodes: number[]): ImpactDependencies {
       workspaceRoot: TARGET_WORKSPACE
     })),
     resolveByPath: vi.fn(),
-    fingerprint: vi.fn()
+    fingerprint: vi.fn(() => Promise.resolve({
+      schemaVersion: 1 as const,
+      hash: "a".repeat(64)
+    }))
   } as unknown as TargetResolver);
   dependencies.localTargets.configStore = {
     ...dependencies.localTargets.configStore,
@@ -212,7 +215,8 @@ function targetDependencies(exitCodes: number[]): ImpactDependencies {
         timeoutMs: 5000
       },
       artifactsDir: `${input.workspaceRoot}/runs`
-    })
+    }),
+    assertProjectUnchanged: vi.fn(() => Promise.resolve(undefined))
   } as unknown as LocalTargetService);
   return dependencies;
 }
@@ -247,8 +251,10 @@ describe("verify-changes", () => {
 
     const payload = JSON.parse(
       (dependencies.stdout as BufferOutput).value
-    ) as { overall: string; results: unknown[]; exitCode: number };
+    ) as { overall: string; results: unknown[]; note?: string };
     expect(payload.results).toEqual([]);
+    expect(payload.overall).toBe("passed");
+    expect(payload.note).toBe("No changes; nothing to verify");
     expect(exitCodes).toEqual([0]);
     expect(dependencies.verifier.verify).not.toHaveBeenCalled();
   });

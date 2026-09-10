@@ -200,7 +200,8 @@ async function buildTargetChecks(
   dependencies: CliDependencies,
   resolved: ResolvedTarget,
   entry: TargetEntry,
-  packageName: string
+  packageName: string,
+  home: string
 ): Promise<TargetCheck[]> {
   const resolvedPath = resolved.resolvedPath;
 
@@ -276,10 +277,7 @@ async function buildTargetChecks(
 
   const workspacePresent = await pathExists(resolved.workspaceRoot);
   const identity = workspacePresent
-    ? await dependencies.localTargets.workspace.readIdentity(
-        dependencies.localTargets.targetsHome(),
-        resolved.id
-      )
+    ? await dependencies.localTargets.workspace.readIdentity(home, resolved.id)
     : null;
   const localWorkspace: TargetCheck = !workspacePresent
     ? {
@@ -299,7 +297,28 @@ async function buildTargetChecks(
           message: resolved.workspaceRoot
         };
 
-  return [targetPath, androidProject, gitCheck, packageIdentity, localWorkspace];
+  const fingerprint = await dependencies.localTargets
+    .targetResolver(home)
+    .fingerprint(resolved.project, packageName);
+  const projectIdentity: TargetCheck = !workspacePresent || identity === null
+    ? {
+        name: "project-identity",
+        status: "warn",
+        message: "Target has no registered fingerprint yet; run taphound local add to record one"
+      }
+    : identity.fingerprint.hash !== fingerprint.hash
+      ? {
+          name: "project-identity",
+          status: "failed",
+          message: `Target now resolves to a different project (fingerprint ${identity.fingerprint.hash} != ${fingerprint.hash}). Re-register or point the path at the original repository.`
+        }
+      : {
+          name: "project-identity",
+          status: "passed",
+          message: "Project fingerprint matches the registered identity"
+        };
+
+  return [targetPath, androidProject, gitCheck, packageIdentity, localWorkspace, projectIdentity];
 }
 
 function targetMessage(report: {
@@ -368,7 +387,8 @@ async function runTargetDoctor(
     dependencies,
     resolved,
     entry,
-    packageName
+    packageName,
+    home
   );
   const failed = targetChecks.find((check) => check.status === "failed");
   if (failed !== undefined) {
@@ -378,7 +398,9 @@ async function runTargetDoctor(
         ? "LOCAL_TARGET_NOT_ANDROID_PROJECT"
         : failed.name === "package-identity"
           ? "PACKAGE_IDENTITY_MISMATCH"
-          : "INTERNAL_ERROR";
+          : failed.name === "project-identity"
+            ? "LOCAL_TARGET_PROJECT_CHANGED"
+            : "INTERNAL_ERROR";
     writeFailure(
       dependencies,
       json,

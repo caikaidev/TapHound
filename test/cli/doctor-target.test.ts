@@ -145,7 +145,13 @@ function fakeLocalTargets(
   configForTarget: ReturnType<typeof vi.fn>;
 } {
   const resolve = vi.fn(() => Promise.resolve(resolvedTarget(fixture)));
-  const resolver = { resolve } as unknown as TargetResolver;
+  const resolver = {
+    resolve,
+    fingerprint: vi.fn(() => Promise.resolve({
+      schemaVersion: 1 as const,
+      hash: "a".repeat(64)
+    }))
+  } as unknown as TargetResolver;
   const loadTargets = vi.fn<(targetsHome: string) => Promise<LoadedTargets>>(
     () => Promise.resolve({
       targets: {
@@ -497,6 +503,33 @@ describe("taphound doctor --target", () => {
     );
     expect(report).toMatchObject({
       target: { id: fixture.id, git: null }
+    });
+  });
+
+  it("exits 2 with LOCAL_TARGET_PROJECT_CHANGED when the saved fingerprint no longer matches", async () => {
+    const fixture = await makeTargetProject("com.example.app");
+    const resolver = {
+      resolve: vi.fn(() => Promise.resolve(resolvedTarget(fixture))),
+      fingerprint: vi.fn(() => Promise.resolve({
+        schemaVersion: 1 as const,
+        hash: "b".repeat(64)
+      }))
+    } as unknown as TargetResolver;
+    const fake = fakeLocalTargets(fixture, {
+      targetResolver: (): TargetResolver => resolver
+    });
+    mockGit(fake.processRun);
+    const exitCodes: number[] = [];
+    const dependencies = baseDependencies(exitCodes, fake.bundle);
+
+    await runDoctor(dependencies, ["doctor", "--target", fixture.id, "--json"]);
+
+    expect(exitCodes).toEqual([2]);
+    const output = jsonOutput(dependencies);
+    expect(output).toMatchObject({
+      status: "error",
+      exitCode: 2,
+      failure: { code: "LOCAL_TARGET_PROJECT_CHANGED" }
     });
   });
 });

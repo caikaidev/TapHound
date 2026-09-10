@@ -209,6 +209,20 @@ async function runTargetVerify(
     return;
   }
 
+  const fingerprint = await resolver.fingerprint(resolved.project, entry.run.packageName);
+  try {
+    await dependencies.localTargets.localTargetService(home)
+      .assertProjectUnchanged(resolved, fingerprint.hash);
+  } catch (error) {
+    writeFailure(
+      dependencies,
+      json,
+      failureCodeFromUnknown(error) ?? "INTERNAL_ERROR",
+      errorMessage(error)
+    );
+    return;
+  }
+
   const workspaceRoot = resolved.workspaceRoot;
   const synthesized = dependencies.localTargets.localTargetService(home)
     .configForTarget({

@@ -109,6 +109,7 @@ describe("NodeGitDiff", () => {
       run: vi.fn()
         .mockResolvedValueOnce(commandResult({ exitCode: 0 }))
         .mockResolvedValueOnce(commandResult({ exitCode: 0 }))
+        .mockResolvedValueOnce(commandResult({ exitCode: 0 }))
         .mockResolvedValueOnce(commandResult({
           exitCode: 128,
           stderr: "fatal: bad ref"
@@ -121,6 +122,25 @@ describe("NodeGitDiff", () => {
       base: "origin/main",
       head: "HEAD"
     })).rejects.toThrow("fatal: bad ref");
+  });
+
+  it("reports GIT_REF_INVALID for an unknown head ref", async () => {
+    const processRunner = {
+      run: vi.fn()
+        .mockResolvedValueOnce(commandResult({ exitCode: 0 }))
+        .mockResolvedValueOnce(commandResult({ exitCode: 0 }))
+        .mockResolvedValueOnce(commandResult({
+          exitCode: 128,
+          stderr: "fatal: ambiguous argument"
+        }))
+    };
+    const diff = new NodeGitDiff(processRunner as never);
+
+    await expect(diff.diff({
+      projectRoot: "/project",
+      base: "origin/main",
+      head: "does-not-exist"
+    })).rejects.toMatchObject({ code: "GIT_REF_INVALID" });
   });
 
   it("diff(base, WORKTREE) includes staged and unstaged changes in one run", async () => {

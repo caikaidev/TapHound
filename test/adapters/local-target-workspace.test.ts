@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -49,5 +49,20 @@ describe("FileSystemLocalTargetWorkspace", () => {
     await workspace.ensureWorkspace(home, "app");
     const gitignore = await readFile(join(home, ".taphound", ".gitignore"), "utf8");
     expect(gitignore).toContain("local/");
+  });
+
+  it("appends local/ to an existing project .gitignore without duplicating", async () => {
+    home = await mkdtemp(join(tmpdir(), "taphound-workspace-"));
+    await mkdir(join(home, ".taphound"), { recursive: true });
+    await writeFile(join(home, ".taphound", ".gitignore"), "build/", "utf8");
+    const workspace = new FileSystemLocalTargetWorkspace();
+    await workspace.ensureWorkspace(home, "app");
+    const first = await readFile(join(home, ".taphound", ".gitignore"), "utf8");
+    expect(first).toContain("build/");
+    expect(first).toContain("local/");
+    await workspace.ensureWorkspace(home, "app");
+    const second = await readFile(join(home, ".taphound", ".gitignore"), "utf8");
+    expect(second).toBe(first);
+    expect(second.match(/local\/\n/g)).toHaveLength(1);
   });
 });

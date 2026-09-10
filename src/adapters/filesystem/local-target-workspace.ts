@@ -75,12 +75,25 @@ export class FileSystemLocalTargetWorkspace implements LocalTargetWorkspacePort 
     const taphoundDir = join(targetsHome, TAPHOUND_DIR);
     const ignorePath = join(targetsHome, TAPHOUND_DIR, ".gitignore");
     await mkdir(taphoundDir, { recursive: true });
+    let existing: string;
     try {
-      await writeFile(ignorePath, LOCAL_WORKSPACE_IGNORE, { flag: "wx" });
+      existing = await readFile(ignorePath, "utf8");
     } catch (error) {
-      if (!isErrnoException(error) || error.code !== "EEXIST") {
+      if (!isErrnoException(error) || error.code !== "ENOENT") {
         throw error;
       }
+      await writeFile(ignorePath, LOCAL_WORKSPACE_IGNORE, "utf8");
+      return;
     }
+    const lines = existing.split("\n");
+    if (lines.includes("local/")) {
+      return;
+    }
+    const separator = existing.length === 0 || existing.endsWith("\n") ? "" : "\n";
+    await writeFile(
+      ignorePath,
+      `${existing}${separator}${LOCAL_WORKSPACE_IGNORE}`,
+      "utf8"
+    );
   };
 }

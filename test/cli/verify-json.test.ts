@@ -236,7 +236,10 @@ describe("verify --json", () => {
         workspaceRoot: TARGET_WORKSPACE
       })),
       resolveByPath: vi.fn(),
-      fingerprint: vi.fn()
+      fingerprint: vi.fn(() => Promise.resolve({
+        schemaVersion: 1 as const,
+        hash: "a".repeat(64)
+      }))
     } as unknown as TargetResolver);
     dependencies.localTargets.configStore = {
       ...dependencies.localTargets.configStore,
@@ -275,7 +278,8 @@ describe("verify --json", () => {
           timeoutMs: 5000
         },
         artifactsDir: `${input.workspaceRoot}/runs`
-      })
+      }),
+      assertProjectUnchanged: vi.fn(() => Promise.resolve(undefined))
     } as unknown as LocalTargetService);
     return dependencies;
   }
@@ -396,6 +400,33 @@ describe("verify --json", () => {
     ) as { exitCode: number; failure: { code: string } };
     expect(output.exitCode).toBe(2);
     expect(output.failure.code).toBe("CONFIG_INVALID");
+    expect(exitCodes).toEqual([2]);
+    expect(dependencies.verifier.verify).not.toHaveBeenCalled();
+  });
+
+  it("verify --target uses exit 2 when the project fingerprint drifted", async () => {
+    const exitCodes: number[] = [];
+    const dependencies = targetDependencies(exitCodes);
+    dependencies.localTargets.localTargetService = (): LocalTargetService => ({
+      configForTarget: vi.fn(),
+      assertProjectUnchanged: vi.fn(() => Promise.reject(new TargetError(
+        "LOCAL_TARGET_PROJECT_CHANGED",
+        "Target app now resolves to a different project"
+      )))
+    } as unknown as LocalTargetService);
+
+    await createProgram(dependencies).parseAsync([
+      "node", "taphound", "verify",
+      "--target", "app",
+      "--journey", "search",
+      "--json"
+    ]);
+
+    const output = JSON.parse(
+      (dependencies.stdout as BufferOutput).value
+    ) as { exitCode: number; failure: { code: string } };
+    expect(output.exitCode).toBe(2);
+    expect(output.failure.code).toBe("LOCAL_TARGET_PROJECT_CHANGED");
     expect(exitCodes).toEqual([2]);
     expect(dependencies.verifier.verify).not.toHaveBeenCalled();
   });

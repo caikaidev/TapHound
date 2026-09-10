@@ -211,6 +211,11 @@ node dist/cli/main.js verify-changes --target my-app --base origin/main --head W
 - The target project's sources are read-only. TapHound never writes into the
   target repository; generated Context, Journeys, reports, fingerprints, and
   Git metadata all live under the targets home.
+- The project fingerprint hashes the git remote, `rootProject.name`, the
+  `settings.gradle(.kts)` content, and the configured package name. HEAD is
+  intentionally excluded so the drift guard means "the target switched
+  project", not "a new commit was made"; HEAD is only surfaced separately as
+  Git metadata in `doctor --target`.
 - Paths stored in `identity.json` and the reports are the *resolved* absolute
   paths. If you commit a report you may expose a local absolute path or a
   private Git remote; Local Target evidence is intended for local working

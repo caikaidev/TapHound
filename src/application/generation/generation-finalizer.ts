@@ -220,7 +220,7 @@ function sameJson(left: unknown, right: unknown): boolean {
 }
 
 function locatorMatchIsEligible(
-  matchedBy: "resourceId" | "text" | "contentDescription" | undefined,
+  matchedBy: "resourceId" | "text" | "contentDescription" | "anchor" | undefined,
   step: Journey["steps"][number]
 ): boolean {
   if (
@@ -237,6 +237,9 @@ function locatorMatchIsEligible(
   const locator = step.action === "bridge"
     ? step.triggerLocator
     : step.locator;
+  if (locator === undefined || matchedBy === "anchor") {
+    return false;
+  }
   return locator[matchedBy] !== undefined;
 }
 

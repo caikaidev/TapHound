@@ -347,6 +347,15 @@ promoted sidecar fails closed at exit code 2.
 - Locator priority is fixed: `resourceId`, then `text`, then
   `contentDescription`. Missing or ambiguous matches fail rather than selecting
   heuristically.
+- Journey `click`, `longClick`, and `swipe` steps may express their target as
+  a semantic Knowledge `anchor` (an id from `.taphound/knowledge/anchors/`)
+  instead of or alongside `locator`. Replay resolves the anchor against the
+  fresh snapshot first (alias-free element locator identity; window/activity
+  identities fail closed); when the anchor does not resolve and the step also
+  carries a `locator`, that locator is used as an explicit fallback and the
+  report records `anchor: { status: "locatorFallback" }`. An anchor-only step
+  that fails resolves with `ANCHOR_NOT_FOUND`; a step that targets an anchor
+  while verify has no anchor resolver configured also fails closed.
 - Annotated fallback is explicit and limited to `click` and `longClick`. Swipe
   without element bounds fails rather than guessing a region.
 - `scrollTo` swipes a `container` up to `maxSwipes` until `locator` resolves

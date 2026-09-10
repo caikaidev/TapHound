@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "id": "demo.main.open_search",
+  "status": "observed",
+  "fromScreen": "demo.main.screen",
+  "toScreen": "demo.search.screen",
+  "semantic": "openSearch",
+  "action": {
+    "action": "click",
+    "anchorId": "demo.search.open"
+  },
+  "verification": {
+    "targetScreen": "demo.search.screen",
+    "timeoutMs": 10000
+  },
+  "observations": {
+    "attempts": 0,
+    "successes": 0,
+    "recoveryCost": 0
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "id": "demo.main.screen",
+  "status": "observed",
+  "requiredAnchors": [
+    "demo.search.open"
+  ],
+  "optionalAnchors": [],
+  "forbiddenAnchors": [],
+  "predicates": []
+}

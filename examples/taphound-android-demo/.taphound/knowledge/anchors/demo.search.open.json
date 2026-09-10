@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "id": "demo.search.open",
+  "status": "observed",
+  "roles": [
+    "actionable"
+  ],
+  "identity": {
+    "kind": "element",
+    "locator": {
+      "resourceId": "open_search"
+    }
+  },
+  "description": "Opens the search screen from the main screen"
+}

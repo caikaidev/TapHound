@@ -55,6 +55,8 @@ A post-processing failure must not overwrite `primaryFailure`. For example, when
 - `APP_CRASHED`
 - `LOCATOR_NOT_FOUND`
 - `LOCATOR_AMBIGUOUS`
+- `ANCHOR_NOT_FOUND`
+- `ANCHOR_AMBIGUOUS`
 - `SCROLL_TARGET_NOT_FOUND`
 - `ACTION_FAILED`
 - `IDLE_TIMEOUT`

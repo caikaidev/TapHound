@@ -17,6 +17,7 @@ import type { AdbPort, AppIdentity } from "../../ports/adb.js";
 import type {
   AnnotatedScreenResolverPort
 } from "../../ports/annotated-screen-resolver.js";
+import type { AnchorResolverPort } from "../../ports/anchor-resolver.js";
 import type { ArtifactSession } from "../../ports/artifact-store.js";
 import type { Clock } from "../../ports/clock.js";
 import type { ScreenshotPort } from "../../ports/screenshot.js";
@@ -56,6 +57,7 @@ export interface StepRunnerOptions {
   requireFocusedInput?: boolean;
   generatedReplayPolicy?: boolean | undefined;
   manualReplay?: boolean | undefined;
+  anchorResolver?: AnchorResolverPort | undefined;
 }
 
 const WAIT_UNTIL_POLL_INTERVAL_MS = 100;
@@ -721,6 +723,87 @@ export class StepRunner {
         || step.action === "longClick"
         || step.action === "swipe"
       ) {
+        let anchorFallback: {
+          status: "resolved" | "locatorFallback" | "failed";
+          message?: string | undefined;
+        } | undefined;
+        if (step.anchor !== undefined) {
+          const anchorResolver = this.options.anchorResolver;
+          if (anchorResolver === undefined) {
+            report.locator = {
+              status: "failed",
+              fallbackUsed: false,
+              message: `Step targets Knowledge anchor ${step.anchor} but no anchor resolver is configured`
+            };
+            return fail(
+              "ANCHOR_NOT_FOUND",
+              `Step targets Knowledge anchor ${step.anchor} but no anchor resolver is configured`
+            );
+          }
+          const anchorResolution = await anchorResolver.resolve({
+            anchorId: step.anchor,
+            layout,
+            ...(this.currentViewport === undefined
+              ? {}
+              : { viewport: this.currentViewport }),
+            ...(signal === undefined ? {} : { signal })
+          });
+          if (anchorResolution.status === "found") {
+            target = {
+              point: anchorResolution.point ?? {
+                x: 0,
+                y: 0
+              },
+              ...(anchorResolution.bounds === undefined
+                ? {}
+                : { bounds: anchorResolution.bounds })
+            };
+            report.locator = {
+              status: "found",
+              matchedBy: "anchor",
+              anchorId: step.anchor,
+              fallbackUsed: false,
+              anchor: { status: "resolved" }
+            };
+          } else if (step.locator === undefined) {
+            report.locator = {
+              status: "failed",
+              anchorId: step.anchor,
+              fallbackUsed: false,
+              anchor: {
+                status: "failed",
+                ...(anchorResolution.message === undefined
+                  ? {}
+                  : { message: anchorResolution.message })
+              },
+              message: anchorResolution.message
+            };
+            return fail(
+              "ANCHOR_NOT_FOUND",
+              anchorResolution.message
+                ?? `Knowledge anchor ${step.anchor} did not resolve`
+            );
+          } else {
+            anchorFallback = {
+              status: "locatorFallback",
+              ...(anchorResolution.message === undefined
+                ? {}
+                : { message: anchorResolution.message })
+            };
+          }
+        }
+        if (target === undefined) {
+        if (step.locator === undefined) {
+          report.locator = {
+            status: "failed",
+            fallbackUsed: false,
+            message: "Step has no runtime locator fallback"
+          };
+          return fail(
+            "LOCATOR_NOT_FOUND",
+            "Step has no runtime locator fallback"
+          );
+        }
         const resolution = resolveLocator(layout, step.locator, {
           viewport: this.currentViewport
         });
@@ -734,7 +817,11 @@ export class StepRunner {
           report.locator = {
             status: "found",
             matchedBy: resolution.matchedBy,
-            fallbackUsed: false
+            fallbackUsed: false,
+            ...(step.anchor === undefined ? {} : { anchorId: step.anchor }),
+            ...(anchorFallback === undefined
+              ? {}
+              : { anchor: { status: anchorFallback.status, ...(anchorFallback.message === undefined ? {} : { message: anchorFallback.message }) } })
           };
         } else {
           if (resolution.evidenceMismatch === true) {
@@ -781,6 +868,7 @@ export class StepRunner {
             fallbackLabel: fallback.label,
             annotatedScreenshotPath: annotatedPath
           };
+        }
         }
       }
 

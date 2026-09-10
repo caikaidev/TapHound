@@ -27,6 +27,7 @@ import type {
   RuntimeSessionPortViews,
   RuntimeSessionPortViewsFactory
 } from "../../ports/runtime-session-ports.js";
+import type { AnchorResolverPort } from "../../ports/anchor-resolver.js";
 import type { UiSnapshotProvider } from "../../ports/ui-snapshot.js";
 import type { DeviceAssignment } from "../devices/resolve-device-assignments.js";
 import { LogcatCollector } from "../collector/logcat-collector.js";
@@ -76,6 +77,7 @@ export interface VerifyRuntimeDependencies {
   now: () => Date;
   createRunId: () => string;
   createStepRunner?: ((options: StepRunnerOptions) => StepRunnerLike) | undefined;
+  anchorResolverFor?: ((projectRoot: string) => AnchorResolverPort) | undefined;
 }
 
 export interface VerifyResult {
@@ -498,6 +500,9 @@ export class VerifyRuntime {
             deviceSerial: runtime.deviceSerial,
             deviceRole: runtime.role,
             idle: input.config.idle,
+            ...(this.dependencies.anchorResolverFor === undefined
+              ? {}
+              : { anchorResolver: this.dependencies.anchorResolverFor(input.projectRoot) }),
             ...(input.requireFocusedInput === undefined
               ? {}
               : { requireFocusedInput: input.requireFocusedInput }),

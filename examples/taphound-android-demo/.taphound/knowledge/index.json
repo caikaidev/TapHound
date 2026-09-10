@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "packageName": "dev.taphound.demo",
+  "revision": 1,
+  "anchors": [
+    {
+      "id": "demo.search.input",
+      "path": ".taphound/knowledge/anchors/demo.search.input.json",
+      "sha256": "fb719e3eebd77ca7d3ec2508aaee82d1e4414ed155d21a3e1d157d9a7965f44a",
+      "status": "observed"
+    },
+    {
+      "id": "demo.search.open",
+      "path": ".taphound/knowledge/anchors/demo.search.open.json",
+      "sha256": "003c8461de6f213426b240c39b3fe943ffe926641cdd000a2a4903bbf24df3dc",
+      "status": "observed"
+    },
+    {
+      "id": "demo.search.submit",
+      "path": ".taphound/knowledge/anchors/demo.search.submit.json",
+      "sha256": "f36a8f092c0c6db7a366a4f14f0370c107640211abf2e1eff0e02d43ffd5f244",
+      "status": "observed"
+    }
+  ],
+  "screens": [
+    {
+      "id": "demo.main.screen",
+      "path": ".taphound/knowledge/screens/demo.main.screen.json",
+      "sha256": "54738e9db10b4eb9fbbe213a485620145636f612bc1f2fbe4dd2084ac3f9f403",
+      "status": "observed"
+    },
+    {
+      "id": "demo.search.screen",
+      "path": ".taphound/knowledge/screens/demo.search.screen.json",
+      "sha256": "5752c209d3c73f8eb59fcea073eec404b8b42121d3a025d58929d835b01dd699",
+      "status": "observed"
+    }
+  ],
+  "transitions": [
+    {
+      "id": "demo.main.open_search",
+      "path": ".taphound/knowledge/transitions/demo.main.open_search.json",
+      "sha256": "1b2f344b502cb33f2b38a2e13fb43b1550ab7dbc032ffe05ce48edf1b25985e8",
+      "status": "observed"
+    }
+  ]
+}

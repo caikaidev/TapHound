@@ -95,6 +95,7 @@ function fixture(overrides: {
   generatedReplayPolicy?: boolean;
   manualReplay?: boolean;
   deviceRole?: string;
+  anchorResolver?: StepRunnerOptions["anchorResolver"];
   viewport?: {
     width: number;
     height: number;
@@ -152,7 +153,10 @@ function fixture(overrides: {
         : { manualReplay: overrides.manualReplay }),
       ...(overrides.deviceRole === undefined
         ? {}
-        : { deviceRole: overrides.deviceRole })
+        : { deviceRole: overrides.deviceRole }),
+      ...(overrides.anchorResolver === undefined
+        ? {}
+        : { anchorResolver: overrides.anchorResolver })
     }),
     adb,
     androidCli: cli,
@@ -1643,5 +1647,131 @@ describe("StepRunner wait until", () => {
       throw new Error("Expected passed result");
     }
     expect(result.report.device).toBe("sender");
+  });
+
+  it("resolves a click through its semantic anchor and reports matchedBy anchor", async () => {
+    const anchorResolver = {
+      resolve: vi.fn((input: {
+        anchorId: string;
+        layout: readonly LayoutElement[];
+        viewport?: unknown;
+        signal?: AbortSignal | undefined;
+      }): Promise<{
+        status: "found";
+        point: { x: number; y: number };
+        bounds?: { left: number; top: number; right: number; bottom: number };
+      }> => {
+        void input;
+        return Promise.resolve({
+          status: "found" as const,
+          point: { x: 50, y: 25 },
+          bounds: { left: 0, top: 0, right: 100, bottom: 50 }
+        });
+      })
+    };
+    const test = fixture({ anchorResolver });
+    const step: Extract<JourneyStep, { action: "click" }> = {
+      action: "click",
+      anchor: "demo.search.open",
+      locator: { resourceId: "search" },
+      activity: checkpoint
+    };
+
+    const result = await test.runner.run(step, 0);
+
+    if (result.status !== "passed") {
+      throw new Error("Expected passed result");
+    }
+    const resolveCall = anchorResolver.resolve.mock.calls[0];
+    if (resolveCall === undefined) {
+      throw new Error("Anchor resolver was not called");
+    }
+    expect(resolveCall[0].anchorId).toBe("demo.search.open");
+    expect((resolveCall[0].layout as readonly unknown[]).length).toBeGreaterThan(0);
+    expect(result.report.locator).toMatchObject({
+      status: "found",
+      matchedBy: "anchor",
+      anchorId: "demo.search.open",
+      anchor: { status: "resolved" }
+    });
+  });
+
+  it("falls back to the runtime locator when the anchor does not resolve", async () => {
+    const anchorResolver = {
+      resolve: vi.fn((): Promise<{
+        status: "notFound";
+        message?: string;
+      }> => Promise.resolve({
+        status: "notFound" as const,
+        message: "anchor not on screen"
+      }))
+    };
+    const test = fixture({ anchorResolver });
+
+    const result = await test.runner.run({
+      ...clickStep(),
+      anchor: "demo.search.open"
+    }, 0);
+
+    if (result.status !== "passed") {
+      throw new Error("Expected passed result");
+    }
+    expect(result.report.locator).toMatchObject({
+      status: "found",
+      matchedBy: "resourceId",
+      fallbackUsed: false,
+      anchorId: "demo.search.open",
+      anchor: { status: "locatorFallback", message: "anchor not on screen" }
+    });
+  });
+
+  it("fails with ANCHOR_NOT_FOUND when an anchor-only step cannot resolve", async () => {
+    const anchorResolver = {
+      resolve: vi.fn((): Promise<{
+        status: "notFound";
+        message?: string;
+      }> => Promise.resolve({
+        status: "notFound" as const,
+        message: "anchor is stale"
+      }))
+    };
+    const test = fixture({ anchorResolver });
+    const step: Extract<JourneyStep, { action: "click" }> = {
+      action: "click",
+      anchor: "demo.search.open",
+      activity: checkpoint
+    };
+
+    const result = await test.runner.run(step, 0);
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { code: "ANCHOR_NOT_FOUND" }
+    });
+    if (result.status !== "failed") {
+      throw new Error("Expected failed result");
+    }
+    expect(result.report.locator).toMatchObject({
+      status: "failed",
+      anchorId: "demo.search.open",
+      anchor: { status: "failed", message: "anchor is stale" }
+    });
+  });
+
+  it("fails closed when an anchor step runs without an anchor resolver", async () => {
+    const test = fixture();
+    const step: Extract<JourneyStep, { action: "click" }> = {
+      action: "click",
+      anchor: "demo.search.open",
+      locator: { resourceId: "search" },
+      activity: checkpoint
+    };
+
+    const result = await test.runner.run(step, 0);
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { code: "ANCHOR_NOT_FOUND" }
+    });
   });
 });

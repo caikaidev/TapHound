@@ -77,7 +77,7 @@ describe("TapHound Android acceptance fixture", () => {
     const searchLayout = await text("app/src/main/res/layout/activity_search.xml");
 
     const resourceIds = journey.steps.flatMap((step) => {
-      if ("locator" in step && step.locator.resourceId !== undefined) {
+      if ("locator" in step && step.locator?.resourceId !== undefined) {
         return [step.locator.resourceId];
       }
       if (

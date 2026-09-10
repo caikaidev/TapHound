@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { KnowledgeIdSchema } from "./knowledge.js";
 import { LocatorSchema } from "./layout.js";
 
 const QualifiedActivitySchema = z.string().regex(
@@ -186,20 +187,38 @@ export const AnnotatedLabelFallbackSchema = z.strictObject({
   label: z.string().regex(/^#\d+$/, "Fallback label must use Android CLI #number format")
 });
 
+export const AnchorLocatorTarget = {
+  anchor: KnowledgeIdSchema.optional(),
+  locator: LocatorSchema.optional()
+};
+
+const AnchorTargetRefine = (
+  step: { anchor?: string | undefined; locator?: unknown },
+  context: z.RefinementCtx
+): void => {
+  if (step.anchor === undefined && step.locator === undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["locator"],
+      message: "A step must provide a semantic anchor or a runtime locator"
+    });
+  }
+};
+
 const ClickStepSchema = z.strictObject({
   action: z.literal("click"),
-  locator: LocatorSchema,
+  ...AnchorLocatorTarget,
   fallback: AnnotatedLabelFallbackSchema.optional(),
   ...CommonStepShape
-});
+}).superRefine(AnchorTargetRefine);
 
 const LongClickStepSchema = z.strictObject({
   action: z.literal("longClick"),
-  locator: LocatorSchema,
+  ...AnchorLocatorTarget,
   durationMs: z.number().int().positive().default(800),
   fallback: AnnotatedLabelFallbackSchema.optional(),
   ...CommonStepShape
-});
+}).superRefine(AnchorTargetRefine);
 
 const InputTextStepSchema = z.strictObject({
   action: z.literal("inputText"),
@@ -209,12 +228,12 @@ const InputTextStepSchema = z.strictObject({
 
 const SwipeStepSchema = z.strictObject({
   action: z.literal("swipe"),
-  locator: LocatorSchema,
+  ...AnchorLocatorTarget,
   direction: z.enum(["up", "down", "left", "right"]),
   distancePercent: z.number().positive().max(1).default(0.6),
   durationMs: z.number().int().positive().default(300),
   ...CommonStepShape
-});
+}).superRefine(AnchorTargetRefine);
 
 const ScrollToStepSchema = z.strictObject({
   action: z.literal("scrollTo"),

@@ -145,6 +145,9 @@ import { JourneyResolver } from "../application/journey/journey-resolver.js";
 import { ExternalFlowResolver } from "../application/journey/external-flow-resolver.js";
 import { KnowledgeLoader } from "../application/knowledge/knowledge-loader.js";
 import {
+  KnowledgeAnchorResolver
+} from "../application/knowledge/anchor-resolver.js";
+import {
   KnowledgeReceiptRecorder
 } from "../application/knowledge/receipt-recorder.js";
 import {
@@ -171,6 +174,7 @@ import {
   type RuntimeBackendChoice
 } from "../domain/runtime.js";
 import type { AdbPort } from "../ports/adb.js";
+import type { AnchorResolverPort } from "../ports/anchor-resolver.js";
 import type { RuntimeSessionOpener } from "../ports/runtime-backend.js";
 import type { ScreenshotPort } from "../ports/screenshot.js";
 import type { UiSnapshotProviderFactory } from "../ports/ui-snapshot.js";
@@ -595,7 +599,10 @@ export function createProductionDependencies(
       artifactStore: new FileSystemArtifactStore(),
       reportWriter: new ReportWriter(),
       now: () => new Date(),
-      createRunId: runId
+      createRunId: runId,
+      anchorResolverFor: (projectRoot): AnchorResolverPort => (
+        new KnowledgeAnchorResolver(knowledgeRegistry, projectRoot)
+      )
     }),
     projectDescriber: new ProjectDescriber({
       discoverer: moduleDiscoverer,
@@ -784,7 +791,10 @@ export function createProductionDependencies(
         artifactStore: new FileSystemArtifactStore(),
         reportWriter: new ReportWriter(),
         now: (): Date => new Date(),
-        createRunId: runId
+        createRunId: runId,
+        anchorResolverFor: (projectRoot): AnchorResolverPort => (
+          new KnowledgeAnchorResolver(knowledgeRegistry, projectRoot)
+        )
       });
       const finalizer = new GenerationFinalizer({
         store,

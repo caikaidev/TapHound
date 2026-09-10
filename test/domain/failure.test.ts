@@ -12,6 +12,8 @@ describe("exitCodeForFailure", () => {
     "APP_CRASHED",
     "LOCATOR_NOT_FOUND",
     "LOCATOR_AMBIGUOUS",
+    "ANCHOR_NOT_FOUND",
+    "ANCHOR_AMBIGUOUS",
     "ACTION_FAILED",
     "IDLE_TIMEOUT",
     "ACTIVITY_BEFORE_MISMATCH",
@@ -46,7 +48,7 @@ describe("exitCodeForFailure", () => {
   });
 
   it("defines exactly the approved failure vocabulary", () => {
-    expect(FAILURE_CODES).toHaveLength(43);
+    expect(FAILURE_CODES).toHaveLength(45);
   });
 
   it.each([

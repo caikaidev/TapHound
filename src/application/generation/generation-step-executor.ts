@@ -400,6 +400,9 @@ function requireTarget(
   ) {
     return undefined;
   }
+  if (step.locator === undefined) {
+    return undefined;
+  }
   const resolution = resolveLocator(layout, step.locator, {
     viewport,
     ...(step.action === "click" ? { requiredCapability: "clickable" } : {}),

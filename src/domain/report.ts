@@ -17,13 +17,21 @@ export const ReportFailureSchema = z.strictObject({
   stepIndex: z.number().int().nonnegative().optional()
 });
 
+const AnchorLocatorReportSchema = z.strictObject({
+  status: z.enum(["resolved", "locatorFallback", "failed"]),
+  message: z.string().trim().min(1).optional()
+});
+
 const LocatorReportSchema = z.strictObject({
   status: z.enum(["found", "failed", "notRun"]),
   matchedBy: z.enum([
     "resourceId",
     "text",
-    "contentDescription"
+    "contentDescription",
+    "anchor"
   ]).optional(),
+  anchorId: z.string().trim().min(1).optional(),
+  anchor: AnchorLocatorReportSchema.optional(),
   fallbackUsed: z.boolean(),
   fallbackLabel: z.string().regex(/^#\d+$/).optional(),
   annotatedScreenshotPath: z.string().min(1).optional(),

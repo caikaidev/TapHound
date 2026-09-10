@@ -340,8 +340,6 @@ taphound verify --project . --journey .taphound/journeys/search.json --json
 
 `--json` 模式保证 stdout 只有一个最终 JSON 值，进度和诊断写入 stderr。详见 [Agent 集成](docs/agent-integration.md) 与 [报告协议](docs/report-schema.md)。
 
-## 报告
-
 ## Local Target（真实应用验证）
 
 Local Target 是指通过 `taphound local add <id> --path <path> [--package <name>]`
@@ -358,6 +356,8 @@ taphound doctor --target my-app
 taphound verify --target my-app --journey search
 taphound verify-changes --target my-app --base origin/main --head WORKTREE
 ```
+
+## 报告
 
 每次验证写入独立目录，固定包含 `report.json` 与 `summary.txt`，按实际执行结果提供步骤日志，并尽力采集最终截图和完整 Logcat。原始验证失败保存在 `primaryFailure`；截图或日志采集问题进入 `secondaryErrors`，不会覆盖已存在的原始失败。当验证本身通过但采集失败时，首个采集错误会成为 `primaryFailure`（错误码 `COLLECTION_FAILED`），其余进入 `secondaryErrors`；对应可选产物也可能缺失。
 

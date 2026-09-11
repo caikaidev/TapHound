@@ -4,6 +4,9 @@ import {
   ImpactResolver
 } from "../../../src/application/impact/impact-resolver.js";
 import {
+  KnowledgeLoadError
+} from "../../../src/application/knowledge/knowledge-loader.js";
+import {
   loadKnowledgeResilient
 } from "../../../src/cli/dependencies.js";
 import type { ChangeSet } from "../../../src/domain/impact.js";
@@ -382,6 +385,21 @@ describe("loadKnowledgeResilient", () => {
     expect(bundle.transitions).toEqual([]);
     expect(bundle.indexSha256).toBe("0".repeat(64));
     expect(bundle.knowledgeHash).toBe("0".repeat(64));
+  });
+
+  it("returns an empty Knowledge bundle when the loader reports KNOWLEDGE_NOT_FOUND", async () => {
+    const bundle = await loadKnowledgeResilient(
+      () => Promise.reject(
+        new KnowledgeLoadError(
+          "KNOWLEDGE_NOT_FOUND",
+          "No knowledge bundle"
+        )
+      ),
+      { projectRoot: "/real/app", packageName: "com.example.app" }
+    );
+
+    expect(bundle.index.packageName).toBe("com.example.app");
+    expect(bundle.anchors).toEqual([]);
   });
 
   it("rethrows any other loader error", async () => {

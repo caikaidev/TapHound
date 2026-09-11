@@ -157,7 +157,10 @@ import {
 import { InitService, type InitInput } from "../application/init/init-service.js";
 import { JourneyResolver } from "../application/journey/journey-resolver.js";
 import { ExternalFlowResolver } from "../application/journey/external-flow-resolver.js";
-import { KnowledgeLoader } from "../application/knowledge/knowledge-loader.js";
+import {
+  KnowledgeLoadError,
+  KnowledgeLoader
+} from "../application/knowledge/knowledge-loader.js";
 import {
   KnowledgeAnchorResolver
 } from "../application/knowledge/anchor-resolver.js";
@@ -437,7 +440,13 @@ export function loadKnowledgeResilient(
   }
 ): Promise<LoadedKnowledgeBundle> {
   return load(input).catch((error: unknown) => {
-    if (isErrnoException(error) && error.code === "ENOENT") {
+    if (
+      (isErrnoException(error) && error.code === "ENOENT")
+      || (
+        error instanceof KnowledgeLoadError
+        && error.code === "KNOWLEDGE_NOT_FOUND"
+      )
+    ) {
       return {
         index: {
           version: 1,

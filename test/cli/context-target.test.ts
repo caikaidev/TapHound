@@ -262,6 +262,39 @@ describe("taphound context --target", () => {
     });
   });
 
+  it("status --target threads identityPolicy configured and carries divergence in JSON", async () => {
+    const fake = makeLocalTargets();
+    const exitCodes: number[] = [];
+    const dependencies = baseDependencies(exitCodes, fake.bundle);
+    vi.mocked(dependencies.contextValidator.validate).mockResolvedValueOnce({
+      status: "valid" as const,
+      divergence: {
+        evidencePackageName: "com.example.im",
+        configuredPackageName: "com.example.tchat",
+        launchActivity: "com.example.im.ui.SplashActivity"
+      }
+    });
+
+    await runContext(dependencies, [
+      "context", "status", "--target", TARGET_ID, "--json"
+    ]);
+
+    expect(exitCodes).toEqual([0]);
+    expect(dependencies.contextValidator.validate).toHaveBeenCalledWith(
+      expect.objectContaining({ identityPolicy: "configured" })
+    );
+    const output = jsonOutput(dependencies);
+    expect(output).toMatchObject({
+      status: "valid",
+      divergence: {
+        evidencePackageName: "com.example.im",
+        configuredPackageName: "com.example.tchat",
+        launchActivity: "com.example.im.ui.SplashActivity"
+      },
+      exitCode: 0
+    });
+  });
+
   it("exits 2 with LOCAL_TARGET_NOT_FOUND for an unregistered target id", async () => {
     const fake = makeLocalTargets();
     vi.mocked(fake.resolve).mockRejectedValue(

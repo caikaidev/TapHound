@@ -95,6 +95,18 @@ async function temporaryRoot(): Promise<string> {
   return root;
 }
 
+function contextWithIdentity(
+  base: unknown,
+  packageName: string,
+  launchActivity: string
+): unknown {
+  return {
+    ...(base as Record<string, unknown>),
+    packageName,
+    launchActivity
+  };
+}
+
 async function writeEvidence(
   root: string,
   relativePath: string,
@@ -552,6 +564,96 @@ describe("ContextValidator", () => {
       config: {
         ...config,
         run: mismatchedRun
+      }
+    })).resolves.toEqual({
+      status: "invalid",
+      reason: {
+        code: "CONTEXT_IDENTITY_MISMATCH",
+        message: "Project Context identity does not match the configured project"
+      }
+    });
+  });
+
+  it("configured policy accepts a package/activity suffix match with divergence", async () => {
+    const root = await temporaryRoot();
+    const content = "content";
+    await writeEvidence(root, "source.kt", content);
+    const context = contextWithIdentity(
+      contextFor([{ path: "source.kt", sha256: sha256(content) }]),
+      "com.example.im",
+      "com.example.im.ui.SplashActivity"
+    );
+
+    await expect(validator().validate({
+      context,
+      projectRoot: root,
+      config: {
+        ...config,
+        run: {
+          packageName: "com.example.tchat",
+          activity: ".ui.SplashActivity"
+        }
+      },
+      identityPolicy: "configured"
+    })).resolves.toEqual({
+      status: "valid",
+      divergence: {
+        evidencePackageName: "com.example.im",
+        configuredPackageName: "com.example.tchat",
+        launchActivity: "com.example.im.ui.SplashActivity"
+      }
+    });
+  });
+
+  it("configured policy rejects a mismatched activity suffix", async () => {
+    const root = await temporaryRoot();
+    const content = "content";
+    await writeEvidence(root, "source.kt", content);
+    const context = contextWithIdentity(
+      contextFor([{ path: "source.kt", sha256: sha256(content) }]),
+      "com.example.im",
+      "com.example.im.other.Main"
+    );
+
+    await expect(validator().validate({
+      context,
+      projectRoot: root,
+      config: {
+        ...config,
+        run: {
+          packageName: "com.example.tchat",
+          activity: ".ui.Splash"
+        }
+      },
+      identityPolicy: "configured"
+    })).resolves.toEqual({
+      status: "invalid",
+      reason: {
+        code: "CONTEXT_IDENTITY_MISMATCH",
+        message: "Project Context identity does not match the configured project (evidence package com.example.im, configured package com.example.tchat)"
+      }
+    });
+  });
+
+  it("strict policy rejects a package mismatch even with a matching activity suffix", async () => {
+    const root = await temporaryRoot();
+    const content = "content";
+    await writeEvidence(root, "source.kt", content);
+    const context = contextWithIdentity(
+      contextFor([{ path: "source.kt", sha256: sha256(content) }]),
+      "com.example.im",
+      "com.example.im.ui.SplashActivity"
+    );
+
+    await expect(validator().validate({
+      context,
+      projectRoot: root,
+      config: {
+        ...config,
+        run: {
+          packageName: "com.example.tchat",
+          activity: ".ui.SplashActivity"
+        }
       }
     })).resolves.toEqual({
       status: "invalid",

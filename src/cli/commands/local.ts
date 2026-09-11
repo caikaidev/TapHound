@@ -8,7 +8,6 @@ import {
   type TapHoundExitCode
 } from "../../domain/failure.js";
 import {
-  DEFAULT_TARGET_ACTIVITY,
   TargetError,
   type LocalTargetIdentity
 } from "../../domain/target.js";
@@ -30,6 +29,7 @@ interface LocalOptions {
 interface AddOptions extends LocalOptions {
   path: string;
   package?: string | undefined;
+  activity?: string | undefined;
 }
 
 interface GitInfo {
@@ -135,6 +135,7 @@ export function createLocalCommand(dependencies: CliDependencies): Command {
       .argument("<id>", "Target id")
       .requiredOption("--path <path>", "Path to the Android project")
       .option("--package <name>", "Android application package name")
+      .option("--activity <name>", "Relative or fully-qualified launch activity")
       .action(async (id: string, options: AddOptions): Promise<void> => {
         const json = options.json === true;
         const home = targetsHome(dependencies, options.targets);
@@ -165,7 +166,9 @@ export function createLocalCommand(dependencies: CliDependencies): Command {
             source: { type: "local", path: probe.configuredPath },
             run: {
               packageName,
-              activity: DEFAULT_TARGET_ACTIVITY
+              ...(options.activity === undefined
+                ? {}
+                : { activity: options.activity })
             }
           });
           await workspace.ensureWorkspace(home, id);

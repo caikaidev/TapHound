@@ -1,4 +1,5 @@
 import type {
+  LocalTargetSource,
   TargetEntry,
   TargetsFile
 } from "../domain/target.js";
@@ -13,7 +14,10 @@ export interface LoadedTargets {
   local: TargetsFile | undefined;
 }
 
-export type RegisterTargetInput = Pick<TargetEntry, "source" | "run">;
+export interface RegisterTargetInput {
+  source: LocalTargetSource;
+  run: { packageName: string; activity?: string | undefined };
+}
 
 export interface TargetConfigStorePort {
   loadTargets: (targetsHome: string) => Promise<LoadedTargets>;

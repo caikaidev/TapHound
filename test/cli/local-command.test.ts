@@ -1,6 +1,11 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { createProgram } from "../../src/cli/program.js";
+import { FileSystemTargetConfigStore } from "../../src/adapters/filesystem/target-config-store.js";
 import { TargetError } from "../../src/domain/target.js";
 import type { LocalTargetService } from "../../src/application/target/local-target-service.js";
 import type { TargetResolver } from "../../src/application/target/target-resolver.js";
@@ -248,7 +253,7 @@ describe("taphound local", () => {
       "/targets",
       "work-app",
       expect.objectContaining({
-        run: { packageName: "com.example.app", activity: ".MainActivity" }
+        run: { packageName: "com.example.app" }
       })
     );
   });
@@ -276,6 +281,47 @@ describe("taphound local", () => {
     expect(output.failure.code).toBe("TARGET_CONFIG_INVALID");
     expect(exitCodes).toEqual([2]);
     expect(fake.resolveByPath).not.toHaveBeenCalled();
+  });
+
+  it("add --activity stores the launch activity in the written targets.local.json", async () => {
+    const home = await mkdtemp(join(tmpdir(), "taphound-targets-"));
+    try {
+      const exitCodes: number[] = [];
+      const fake = fakeLocalTargets({
+        configStore: new FileSystemTargetConfigStore()
+      });
+      vi.mocked(fake.resolveByPath).mockResolvedValue(RESOLUTION);
+      const dependencies = baseDependencies(exitCodes, fake.bundle);
+
+      await runLocal(dependencies, [
+        "local", "add", "work-app",
+        "--path", "/tmp/work-app",
+        "--package", "com.example.tchat",
+        "--activity", ".ui.SplashActivity",
+        "--targets", home,
+        "--json"
+      ]);
+
+      const output = JSON.parse(
+        (dependencies.stdout as BufferOutput).value
+      ) as { id: string };
+      expect(output.id).toBe("work-app");
+      expect(exitCodes).toEqual([0]);
+
+      const written = JSON.parse(
+        await readFile(join(home, "benchmarks/targets.local.json"), "utf8")
+      ) as {
+        targets: Record<string, {
+          run: { packageName: string; activity?: string };
+        }>;
+      };
+      expect(written.targets["work-app"]?.run).toEqual({
+        packageName: "com.example.tchat",
+        activity: ".ui.SplashActivity"
+      });
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
   });
 
   it("list marks targets READY and MISSING without throwing", async () => {

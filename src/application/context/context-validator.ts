@@ -42,8 +42,18 @@ export interface ContextValidationScope {
   changedPaths: string[];
 }
 
+export interface ContextIdentityDivergence {
+  evidencePackageName: string;
+  configuredPackageName: string;
+  launchActivity: string;
+}
+
 export type ContextValidationResult =
-  | { status: "valid"; scopes?: ContextValidationScope[] }
+  | {
+    status: "valid";
+    scopes?: ContextValidationScope[] | undefined;
+    divergence?: ContextIdentityDivergence | undefined;
+  }
   | { status: "stale"; reason: ContextValidationReason; scopes?: ContextValidationScope[] }
   | { status: "invalid"; reason: ContextValidationReason; scopes?: ContextValidationScope[] };
 
@@ -53,6 +63,7 @@ export interface ContextValidationInput {
   config: TapHoundConfig;
   modules?: ProjectContextModule[] | undefined;
   reportScopes?: boolean | undefined;
+  identityPolicy?: "strict" | "configured" | undefined;
 }
 
 const SECRET_FILE_NAMES = new Set([
@@ -103,6 +114,19 @@ function isSecretEvidencePath(path: string): boolean {
     || /^service-account(?:\.|$)/.test(fileName)
     || SECRET_FILE_EXTENSIONS.some((extension) => fileName.endsWith(extension))
   );
+}
+
+function relativeActivity(
+  packageName: string,
+  activity: string
+): string | undefined {
+  if (activity === packageName) {
+    return "";
+  }
+  if (activity.startsWith(`${packageName}.`)) {
+    return activity.slice(packageName.length + 1);
+  }
+  return undefined;
 }
 
 function invalid(
@@ -191,7 +215,38 @@ export class ContextValidator {
       );
     }
 
-    if (
+    let divergence: ContextIdentityDivergence | undefined;
+    if (input.identityPolicy === "configured") {
+      if (
+        parsed.data.packageName !== input.config.run.packageName
+        || parsed.data.launchActivity !== configuredActivity
+      ) {
+        const evidenceRelative = relativeActivity(
+          parsed.data.packageName,
+          parsed.data.launchActivity
+        );
+        const configuredRelative = relativeActivity(
+          input.config.run.packageName,
+          configuredActivity
+        );
+        if (
+          evidenceRelative !== undefined
+          && configuredRelative !== undefined
+          && evidenceRelative === configuredRelative
+        ) {
+          divergence = {
+            evidencePackageName: parsed.data.packageName,
+            configuredPackageName: input.config.run.packageName,
+            launchActivity: parsed.data.launchActivity
+          };
+        } else {
+          return invalid(
+            "CONTEXT_IDENTITY_MISMATCH",
+            `Project Context identity does not match the configured project (evidence package ${parsed.data.packageName}, configured package ${input.config.run.packageName})`
+          );
+        }
+      }
+    } else if (
       parsed.data.packageName !== input.config.run.packageName
       || parsed.data.launchActivity !== configuredActivity
     ) {
@@ -270,7 +325,11 @@ export class ContextValidator {
       : undefined;
 
     return staleReason === undefined
-      ? { status: "valid", ...(scopes === undefined ? {} : { scopes }) }
+      ? {
+          status: "valid",
+          ...(scopes === undefined ? {} : { scopes }),
+          ...(divergence === undefined ? {} : { divergence })
+        }
       : {
           status: "stale",
           reason: staleReason,

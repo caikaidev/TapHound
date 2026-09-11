@@ -152,6 +152,12 @@ function writeContextResult(
         ? "Context: valid"
         : `Context: ${result.status} (${result.reason.message})`
     );
+    if (result.status === "valid" && result.divergence !== undefined) {
+      writeLine(
+        dependencies.stderr,
+        `identity divergence: evidence package ${result.divergence.evidencePackageName}, configured package ${result.divergence.configuredPackageName} (activity suffix matches)`
+      );
+    }
   }
   dependencies.setExitCode(exitCode);
 }
@@ -221,7 +227,10 @@ function createContextOperation(
           projectRoot,
           config,
           ...(name === "status" ? { modules: loaded.modules } : {}),
-          ...(name === "status" ? { reportScopes: true } : {})
+          ...(name === "status" ? { reportScopes: true } : {}),
+          ...(options.target === undefined
+            ? {}
+            : { identityPolicy: "configured" as const })
         });
         writeContextResult(dependencies, options, name, result, {
           contextSelection: loaded.context.selection,

@@ -134,47 +134,20 @@ export function createVerifyChangesCommand(
         const head = options.head
           ?? (options.target === undefined ? "HEAD" : "WORKTREE");
 
-        let changeSet;
-        let impact;
         let resolvedTarget;
+        let workspaceRoot;
+        let projectRoot;
         if (options.target !== undefined) {
           const id = options.target;
           const home = targetsHome(dependencies, options.targets);
           const resolver = dependencies.localTargets.targetResolver(home);
           resolvedTarget = await resolver.resolve(id);
-          const gitRoot = resolvedTarget.project.gitRoot
-            ?? resolvedTarget.resolvedPath;
-          changeSet = await dependencies.gitDiff.diff({
-            projectRoot: gitRoot,
-            base: options.base,
-            head
-          });
-          impact = await dependencies.impact.resolve({
-            projectRoot: resolvedTarget.resolvedPath,
-            workspaceRoot: resolvedTarget.workspaceRoot,
-            changeSet
-          });
+          workspaceRoot = resolvedTarget.workspaceRoot;
+          projectRoot = resolvedTarget.resolvedPath;
         } else {
-          changeSet = await dependencies.gitDiff.diff({
-            projectRoot: options.project,
-            base: options.base,
-            head
-          });
-          impact = await dependencies.impact.resolve({
-            projectRoot: options.project,
-            changeSet
-          });
+          projectRoot = options.project;
         }
-        const scopes = selectedScopes(options.scope);
-        const selected = scopes.flatMap((tier) => (
-          impact.selectedJourneys[tier].map((entry) => ({
-            tier,
-            path: entry.id
-          }))
-        ));
 
-        const workspaceRoot = resolvedTarget?.workspaceRoot;
-        const projectRoot = resolvedTarget?.resolvedPath ?? options.project;
         let config;
         if (resolvedTarget !== undefined) {
           const loaded = await dependencies.localTargets.configStore
@@ -222,6 +195,42 @@ export function createVerifyChangesCommand(
           assertArtifactDirectory(options.project, config.artifactsDir);
           await assertNoLegacyWorkspace(dependencies, options.project);
         }
+
+        let changeSet;
+        let impact;
+        if (resolvedTarget !== undefined) {
+          const gitRoot = resolvedTarget.project.gitRoot
+            ?? resolvedTarget.resolvedPath;
+          changeSet = await dependencies.gitDiff.diff({
+            projectRoot: gitRoot,
+            base: options.base,
+            head
+          });
+          impact = await dependencies.impact.resolve({
+            projectRoot: resolvedTarget.resolvedPath,
+            workspaceRoot: resolvedTarget.workspaceRoot,
+            packageName: config.run.packageName,
+            changeSet
+          });
+        } else {
+          changeSet = await dependencies.gitDiff.diff({
+            projectRoot: options.project,
+            base: options.base,
+            head
+          });
+          impact = await dependencies.impact.resolve({
+            projectRoot: options.project,
+            packageName: config.run.packageName,
+            changeSet
+          });
+        }
+        const scopes = selectedScopes(options.scope);
+        const selected = scopes.flatMap((tier) => (
+          impact.selectedJourneys[tier].map((entry) => ({
+            tier,
+            path: entry.id
+          }))
+        ));
 
         const doctor = await dependencies.doctor.run({
           packageName: config.run.packageName,

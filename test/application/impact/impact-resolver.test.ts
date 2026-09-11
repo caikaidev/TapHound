@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   ImpactResolver
 } from "../../../src/application/impact/impact-resolver.js";
+import {
+  loadKnowledgeResilient
+} from "../../../src/cli/dependencies.js";
 import type { ChangeSet } from "../../../src/domain/impact.js";
 import type { ProjectContextModule } from "../../../src/domain/project-context.js";
 import type { LoadedKnowledgeBundle } from "../../../src/ports/knowledge-registry.js";
@@ -193,6 +196,7 @@ function resolver(overrides: {
     loadKnowledge: (input: {
       projectRoot: string;
       workspaceRoot?: string | undefined;
+      packageName: string;
     }): Promise<LoadedKnowledgeBundle> => {
       seen?.knowledge?.push(input.workspaceRoot ?? input.projectRoot);
       return Promise.resolve(knowledgeFixture());
@@ -234,6 +238,7 @@ describe("ImpactResolver", () => {
     };
     const impact = await resolver().resolve({
       projectRoot: "/project",
+      packageName: "dev.taphound.demo",
       changeSet
     });
 
@@ -263,6 +268,7 @@ describe("ImpactResolver", () => {
     };
     const impact = await resolver().resolve({
       projectRoot: "/project",
+      packageName: "dev.taphound.demo",
       changeSet
     });
 
@@ -284,6 +290,7 @@ describe("ImpactResolver", () => {
     };
     const impact = await resolver().resolve({
       projectRoot: "/project",
+      packageName: "dev.taphound.demo",
       changeSet
     });
 
@@ -305,6 +312,7 @@ describe("ImpactResolver", () => {
     const resolverInstance = resolver();
     const impact = await resolverInstance.resolve({
       projectRoot: "/project",
+      packageName: "dev.taphound.demo",
       changeSet
     });
 
@@ -339,6 +347,7 @@ describe("ImpactResolver", () => {
     }).resolve({
       projectRoot: "/real/app",
       workspaceRoot: "/targets/ws",
+      packageName: "dev.taphound.demo",
       changeSet
     });
 
@@ -352,5 +361,43 @@ describe("ImpactResolver", () => {
     });
     expect(impact.selectedJourneys.p0[0]?.id)
       .toBe(".taphound/journeys/anchored-search.json");
+  });
+});
+
+describe("loadKnowledgeResilient", () => {
+  const loaderFailure = (error: Error): (() => Promise<LoadedKnowledgeBundle>) => (
+    (): Promise<LoadedKnowledgeBundle> => Promise.reject(error)
+  );
+
+  it("returns an empty Knowledge bundle when the registry reports ENOENT", async () => {
+    const bundle = await loadKnowledgeResilient(
+      loaderFailure(Object.assign(new Error("absent"), { code: "ENOENT" })),
+      { projectRoot: "/real/app", packageName: "com.example.app" }
+    );
+
+    expect(bundle.index.packageName).toBe("com.example.app");
+    expect(bundle.index.revision).toBe(0);
+    expect(bundle.anchors).toEqual([]);
+    expect(bundle.screens).toEqual([]);
+    expect(bundle.transitions).toEqual([]);
+    expect(bundle.indexSha256).toBe("0".repeat(64));
+    expect(bundle.knowledgeHash).toBe("0".repeat(64));
+  });
+
+  it("rethrows any other loader error", async () => {
+    await expect(loadKnowledgeResilient(
+      loaderFailure(new Error("boom")),
+      { projectRoot: "/real/app", packageName: "com.example.app" }
+    )).rejects.toThrow("boom");
+  });
+
+  it("forwards a successfully loaded bundle unchanged", async () => {
+    const expected = knowledgeFixture();
+    const bundle = await loadKnowledgeResilient(
+      (): Promise<LoadedKnowledgeBundle> => Promise.resolve(expected),
+      { projectRoot: "/real/app", packageName: "com.example.app" }
+    );
+
+    expect(bundle).toBe(expected);
   });
 });

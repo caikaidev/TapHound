@@ -29,6 +29,7 @@ export interface ImpactResolverDependencies {
   loadKnowledge: (input: {
     projectRoot: string;
     workspaceRoot?: string | undefined;
+    packageName: string;
   }) => Promise<LoadedKnowledgeBundle>;
   listJourneyPaths: (input: {
     projectRoot: string;
@@ -107,9 +108,10 @@ export class ImpactResolver {
   public readonly resolve = async (input: {
     projectRoot: string;
     workspaceRoot?: string | undefined;
+    packageName: string;
     changeSet: ChangeSet;
   }): Promise<ImpactSet> => {
-    const { projectRoot, changeSet } = input;
+    const { projectRoot, packageName, changeSet } = input;
     const workspaceRoot = input.workspaceRoot;
     const [context, knowledge, journeyPaths] = await Promise.all([
       this.dependencies.loadContext({
@@ -118,6 +120,7 @@ export class ImpactResolver {
       }),
       this.dependencies.loadKnowledge({
         projectRoot,
+        packageName,
         ...(workspaceRoot === undefined ? {} : { workspaceRoot })
       }),
       this.dependencies.listJourneyPaths({

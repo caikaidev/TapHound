@@ -362,6 +362,7 @@ export interface CliDependencies {
     resolve: (input: {
       projectRoot: string;
       workspaceRoot?: string | undefined;
+      packageName: string;
       changeSet: ChangeSet;
     }) => Promise<ImpactSet>;
   } | undefined;
@@ -421,6 +422,40 @@ export interface ProductionDependencyOptions {
 
 function runId(): string {
   return `${new Date().toISOString().replaceAll(":", "-")}-${randomUUID()}`;
+}
+
+export function loadKnowledgeResilient(
+  load: (input: {
+    projectRoot: string;
+    packageName: string;
+    workspaceRoot?: string | undefined;
+  }) => Promise<LoadedKnowledgeBundle>,
+  input: {
+    projectRoot: string;
+    packageName: string;
+    workspaceRoot?: string | undefined;
+  }
+): Promise<LoadedKnowledgeBundle> {
+  return load(input).catch((error: unknown) => {
+    if (isErrnoException(error) && error.code === "ENOENT") {
+      return {
+        index: {
+          version: 1,
+          packageName: input.packageName,
+          revision: 0,
+          anchors: [],
+          screens: [],
+          transitions: []
+        },
+        indexSha256: "0".repeat(64),
+        knowledgeHash: "0".repeat(64),
+        anchors: [],
+        screens: [],
+        transitions: []
+      } satisfies LoadedKnowledgeBundle;
+    }
+    throw error;
+  });
 }
 
 export function createProductionDependencies(
@@ -585,12 +620,11 @@ export function createProductionDependencies(
     loadKnowledge: (input: {
       projectRoot: string;
       workspaceRoot?: string | undefined;
-    }): Promise<LoadedKnowledgeBundle> => knowledgeLoader.load({
-      projectRoot: input.projectRoot,
-      ...(input.workspaceRoot === undefined
-        ? {}
-        : { workspaceRoot: input.workspaceRoot })
-    }),
+      packageName: string;
+    }): Promise<LoadedKnowledgeBundle> => loadKnowledgeResilient(
+      knowledgeLoader.load.bind(knowledgeLoader),
+      input
+    ),
     listJourneyPaths: (input: {
       projectRoot: string;
       workspaceRoot?: string | undefined;

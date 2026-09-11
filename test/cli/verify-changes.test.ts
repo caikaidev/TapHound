@@ -289,6 +289,7 @@ describe("verify-changes", () => {
     expect(resolveCall).not.toBeUndefined();
     expect(resolveCall?.projectRoot).toBe("/real/app");
     expect(resolveCall?.workspaceRoot).toBe(TARGET_WORKSPACE);
+    expect(resolveCall?.packageName).toBe("com.example.app");
     expect(dependencies.journeyCompositionStore.read).toHaveBeenCalledWith({
       projectRoot: "/real/app",
       relativePath: "journeys/search.json",

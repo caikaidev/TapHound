@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 
 import { Command } from "commander";
 
+import { TapHoundConfigSchema } from "../../domain/config.js";
 import { CONFIG_PATH } from "../../domain/workspace.js";
 import type { ImpactSet } from "../../domain/impact.js";
 import {
@@ -95,23 +96,44 @@ export function createImpactCommand(dependencies: CliDependencies): Command {
 
         let changeSet;
         let impact;
+        let resolvedTarget;
+        let config;
         if (options.target !== undefined) {
           const id = options.target;
           const home = targetsHome(dependencies, options.targets);
-          const resolved = await dependencies.localTargets
+          resolvedTarget = await dependencies.localTargets
             .targetResolver(home).resolve(id);
-          const gitRoot = resolved.project.gitRoot ?? resolved.resolvedPath;
+          const loaded = await dependencies.localTargets.configStore
+            .loadTargets(home);
+          const entry = loaded.targets[resolvedTarget.id];
+          if (entry === undefined) {
+            throw new Error(`Local target "${resolvedTarget.id}" is not registered`);
+          }
+          config = TapHoundConfigSchema.parse(
+            dependencies.localTargets.localTargetService(home)
+              .configForTarget({
+                entry,
+                resolvedPath: resolvedTarget.resolvedPath,
+                workspaceRoot: resolvedTarget.workspaceRoot
+              })
+          );
+          const gitRoot = resolvedTarget.project.gitRoot ?? resolvedTarget.resolvedPath;
           changeSet = await dependencies.gitDiff.diff({
             projectRoot: gitRoot,
             base: options.base,
             head
           });
           impact = await dependencies.impact.resolve({
-            projectRoot: resolved.resolvedPath,
-            workspaceRoot: resolved.workspaceRoot,
+            projectRoot: resolvedTarget.resolvedPath,
+            workspaceRoot: resolvedTarget.workspaceRoot,
+            packageName: config.run.packageName,
             changeSet
           });
         } else {
+          const rawConfig = await dependencies.readJson(
+            resolve(options.project, options.config)
+          );
+          config = TapHoundConfigSchema.parse(rawConfig);
           changeSet = await dependencies.gitDiff.diff({
             projectRoot: options.project,
             base: options.base,
@@ -119,6 +141,7 @@ export function createImpactCommand(dependencies: CliDependencies): Command {
           });
           impact = await dependencies.impact.resolve({
             projectRoot: options.project,
+            packageName: config.run.packageName,
             changeSet
           });
         }

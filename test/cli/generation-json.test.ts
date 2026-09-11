@@ -379,7 +379,7 @@ describe("generation JSON process protocol", () => {
     expect(runtime?.recovery.status).toBeTypeOf("function");
     expect(runtime?.readSession).toBeTypeOf("function");
     expect(generationStoreFactory).toHaveBeenCalledTimes(1);
-    expect(generationStoreFactory).toHaveBeenCalledWith("/project");
+    expect(generationStoreFactory).toHaveBeenCalledWith("/project", undefined);
     expect(internals(runtime?.confirmation).store).toBe(store);
     expect(internals(runtime?.executor).store).toBe(store);
     expect(internals(runtime?.observer).store).toBe(store);

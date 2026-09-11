@@ -57,6 +57,7 @@ export interface RuntimeObservation {
 
 export interface RuntimeObserveInput {
   generationId: string;
+  workspaceRoot?: string | undefined;
   idle?: IdleConfig | undefined;
   signal?: AbortSignal | undefined;
 }

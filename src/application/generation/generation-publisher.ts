@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { extname, resolve } from "node:path";
+import { extname, join, resolve } from "node:path";
 
 import {
   GenerationBundleManifestSchema,
@@ -188,18 +188,22 @@ export class GenerationPublisher {
   public readonly export = async (input: {
     generationId: string;
     projectRoot: string;
+    workspaceRoot?: string | undefined;
     journeyPath: string;
     journey: Journey;
     meta: GenerationMeta;
   }): Promise<{ journeyPath: string; metaPath: string }> => {
     const journey = JourneySchema.parse(input.journey);
     const meta = GenerationMetaSchema.parse(input.meta);
-    const journeyPath = resolve(input.projectRoot, input.journeyPath);
+    const exportRoot = input.workspaceRoot ?? input.projectRoot;
+    const journeyPath = resolve(exportRoot, input.journeyPath);
     const metaPath = generationMetaOutputPath(journeyPath);
-    const authorityRoot = resolve(input.projectRoot, BUILD_DIR);
+    const authorityRoot = input.workspaceRoot === undefined
+      ? resolve(exportRoot, BUILD_DIR)
+      : join(exportRoot, "runs");
     try {
       await this.dependencies.journeyWriter.writeProjectBound({
-        projectRoot: input.projectRoot,
+        projectRoot: exportRoot,
         authorityRoot,
         outputPath: journeyPath,
         journey
@@ -207,7 +211,7 @@ export class GenerationPublisher {
       const expectedJourney = Buffer.from(serializeJson(journey));
       const actualJourney = await this.dependencies.journeyWriter
         .readProjectBound({
-          projectRoot: input.projectRoot,
+          projectRoot: exportRoot,
           authorityRoot,
           outputPath: journeyPath
         });
@@ -221,14 +225,14 @@ export class GenerationPublisher {
     }
     try {
       await this.dependencies.metaWriter.writeProjectBound({
-        projectRoot: input.projectRoot,
+        projectRoot: exportRoot,
         authorityRoot,
         outputPath: metaPath,
         meta
       });
       const expectedMeta = Buffer.from(serializeJson(meta));
       const actualMeta = await this.dependencies.metaWriter.readProjectBound({
-        projectRoot: input.projectRoot,
+        projectRoot: exportRoot,
         authorityRoot,
         outputPath: metaPath
       });

@@ -13,6 +13,7 @@ import {
   unlink
 } from "node:fs/promises";
 import {
+  dirname,
   isAbsolute,
   join,
   posix,
@@ -51,6 +52,7 @@ export interface FileSystemGenerationSessionStoreOptions {
   lockRetryMs?: number;
   now?: (() => Date) | undefined;
   hooks?: FileSystemGenerationSessionStoreHooks;
+  generationRoot?: string | undefined;
 }
 
 export interface FileSystemGenerationSessionStoreHooks {
@@ -74,6 +76,7 @@ export interface FileSystemGenerationSessionStoreHooks {
 interface RequiredStoreOptions {
   lockTimeoutMs: number;
   lockRetryMs: number;
+  generationRoot?: string | undefined;
 }
 
 const DEFAULT_OPTIONS: RequiredStoreOptions = {
@@ -134,6 +137,14 @@ function parseStoreConfiguration(
       throw new TypeError("now must be a function");
     }
 
+    const generationRootInput = Reflect.get(options, "generationRoot") as unknown;
+    if (
+      generationRootInput !== undefined
+      && typeof generationRootInput !== "string"
+    ) {
+      throw new TypeError("generationRoot must be a string");
+    }
+
     const hooksInput = Reflect.get(options, "hooks") as unknown;
     const hooks: FileSystemGenerationSessionStoreHooks = {};
     if (hooksInput !== undefined) {
@@ -154,7 +165,10 @@ function parseStoreConfiguration(
       projectRoot: resolve(projectRoot),
       options: {
         lockTimeoutMs: lockTimeoutMs as number,
-        lockRetryMs: lockRetryMs as number
+        lockRetryMs: lockRetryMs as number,
+        ...(generationRootInput === undefined
+          ? {}
+          : { generationRoot: generationRootInput })
       },
       now: (nowInput ?? ((): Date => new Date())) as () => Date,
       hooks
@@ -1247,6 +1261,7 @@ implements GenerationSessionStore {
   private readonly options: RequiredStoreOptions;
   private readonly now: () => Date;
   private readonly hooks: FileSystemGenerationSessionStoreHooks;
+  private readonly customGenerationRoot: boolean;
 
   public constructor(
     projectRoot: string,
@@ -1254,7 +1269,10 @@ implements GenerationSessionStore {
   ) {
     const configuration = parseStoreConfiguration(projectRoot, options);
     this.projectRoot = configuration.projectRoot;
-    this.generationRoot = join(this.projectRoot, GENERATIONS_DIR);
+    this.generationRoot = typeof configuration.options.generationRoot === "string"
+      ? resolve(configuration.options.generationRoot)
+      : join(this.projectRoot, GENERATIONS_DIR);
+    this.customGenerationRoot = this.generationRoot !== join(this.projectRoot, GENERATIONS_DIR);
     this.locksRoot = join(this.generationRoot, ".locks");
     this.options = configuration.options;
     this.now = configuration.now;
@@ -2678,6 +2696,12 @@ implements GenerationSessionStore {
 
   private readonly ensureGenerationRoot = async (): Promise<void> => {
     try {
+      if (this.customGenerationRoot) {
+        await mkdir(dirname(this.generationRoot), { recursive: true });
+        await createOrRequireDirectory(this.generationRoot);
+        await createOrRequireDirectory(this.locksRoot);
+        return;
+      }
       await requireRealDirectory(this.projectRoot);
       const taphoundDirectory = join(this.projectRoot, TAPHOUND_DIR);
       if (await createOrRequireDirectory(taphoundDirectory)) {

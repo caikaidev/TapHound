@@ -2986,4 +2986,23 @@ describe("FileSystemGenerationSessionStore", () => {
     expect(sessions).toHaveLength(1);
     expect(sessions[0]?.publication.status).toBe("published");
   });
+
+  it("hosts the authoritative generation root at a custom workspace location", async () => {
+    const root = await temporaryRoot();
+    const workspace = join(root, "workspace");
+    const store = new FileSystemGenerationSessionStore(root, {
+      generationRoot: join(workspace, "generations")
+    });
+    const session = validSession();
+
+    await store.create(session);
+
+    expect(await readFile(join(
+      workspace,
+      "generations",
+      ".generation-1.work",
+      "state.json"
+    ), "utf8")).not.toHaveLength(0);
+    await expect(store.read("generation-1")).resolves.toEqual(session);
+  });
 });

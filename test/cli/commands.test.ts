@@ -662,6 +662,7 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
     expect(test.value.contextLoader.load).toHaveBeenCalledWith({
       projectRoot: "/project",
       contextPath: "/project/context.json",
+      allowIncomplete: true,
       moduleIds: [":feature:search"]
     });
     expect(test.exitCodes).toEqual([0]);

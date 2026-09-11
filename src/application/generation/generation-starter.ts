@@ -76,6 +76,7 @@ export interface GenerationExternalFlowInput {
 
 export interface GenerationStartInput {
   projectRoot: string;
+  workspaceRoot?: string | undefined;
   config: TapHoundConfig;
   context: ResolvedProjectContext;
   project: ProjectDescription;

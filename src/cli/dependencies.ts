@@ -336,6 +336,7 @@ export interface CliDependencies {
   generationRuntime?: (input: {
     projectRoot: string;
     config: TapHoundConfig;
+    workspaceRoot?: string | undefined;
   }) => GenerationCliRuntime;
   detachedProcess?: DetachedProcessLauncher | undefined;
   cliEntryPath?: string | undefined;
@@ -417,7 +418,8 @@ export interface CliDependencies {
 
 export interface ProductionDependencyOptions {
   generationStoreFactory?: (
-    projectRoot: string
+    projectRoot: string,
+    workspaceRoot?: string  
   ) => GenerationSessionStore;
   runtimeBackendChoice?: RuntimeBackendChoice | undefined;
   mobileMcpToolsFactory?: (() => MobileMcpTools) | undefined;
@@ -535,8 +537,16 @@ export function createProductionDependencies(
     signal
   );
   const generationStoreFactory = options.generationStoreFactory
-    ?? ((projectRoot: string): GenerationSessionStore => (
-      new FileSystemGenerationSessionStore(projectRoot)
+    ?? ((
+      projectRoot: string,
+      workspaceRoot?: string  
+    ): GenerationSessionStore => (
+      new FileSystemGenerationSessionStore(
+        projectRoot,
+        workspaceRoot === undefined
+          ? {}
+          : { generationRoot: join(workspaceRoot, "generations") }
+      )
     ));
   const projectFiles = new NodeProjectFileInspector();
   const projectInventory = new NodeProjectInventoryInspector();
@@ -844,16 +854,21 @@ export function createProductionDependencies(
         contextValidator,
         appPreparer: new GenerationAppPreparer(adb, clock),
         uiSnapshots,
-        store: generationStoreFactory(input.projectRoot),
+        store: generationStoreFactory(
+          input.projectRoot,
+          input.workspaceRoot
+        ),
         now: (): Date => new Date(),
         generateId: randomUUID,
         randomBytes
       }).start(input)
     },
     runtimeObserver: {
-      observe: async ({ projectRoot, ...input }): Promise<RuntimeObservation> => (
+      observe: async (
+        { projectRoot, workspaceRoot, ...input }
+      ): Promise<RuntimeObservation> => (
         new RuntimeObserver({
-          store: generationStoreFactory(projectRoot),
+          store: generationStoreFactory(projectRoot, workspaceRoot),
           sessions,
           sessionPorts: runtimeSessionPortViews,
           waitUntilIdle,
@@ -862,8 +877,15 @@ export function createProductionDependencies(
         }).observe(input)
       )
     },
-    generationRuntime: ({ projectRoot, config }): GenerationCliRuntime => {
-      const store = generationStoreFactory(projectRoot);
+    generationRuntime: ({
+      projectRoot,
+      config,
+      workspaceRoot
+    }): GenerationCliRuntime => {
+      const store = generationStoreFactory(
+        projectRoot,
+        workspaceRoot
+      );
       const planner = new GenerationPlanner({
         projectRoot,
         knowledge: knowledgeLoader,

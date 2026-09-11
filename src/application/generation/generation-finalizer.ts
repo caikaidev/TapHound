@@ -141,6 +141,7 @@ export class GenerationFinalizationError extends Error {
 export interface GenerationFinalizeInput {
   generationId: string;
   projectRoot: string;
+  workspaceRoot?: string | undefined;
   config: TapHoundConfig;
   context: ResolvedProjectContext;
   contextFromSnapshot?: boolean | undefined;
@@ -387,6 +388,9 @@ export class GenerationFinalizer {
           config: replayConfig,
           journey,
           projectRoot: canonicalProjectRoot,
+          ...(input.workspaceRoot === undefined
+            ? {}
+            : { workspaceRoot: input.workspaceRoot }),
           devices: [{
             role: journey.devices[0]?.role ?? DEFAULT_DEVICE_ROLE,
             deviceSerial: input.deviceSerial
@@ -606,6 +610,9 @@ export class GenerationFinalizer {
       const exported = await this.dependencies.publisher.export({
         generationId: session.id,
         projectRoot: input.projectRoot,
+        ...(input.workspaceRoot === undefined
+          ? {}
+          : { workspaceRoot: input.workspaceRoot }),
         journeyPath: outputPath,
         journey,
         meta

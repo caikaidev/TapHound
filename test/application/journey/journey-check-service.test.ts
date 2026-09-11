@@ -118,6 +118,7 @@ describe("JourneyCheckService", () => {
       journeyPath: ".taphound/journeys/search.json",
       metaPath: ".taphound/journeys/search.meta.json",
       status: "fresh",
+      lifecycle: "verified",
       reasons: [],
       driftedModules: [],
       message: undefined
@@ -302,5 +303,26 @@ describe("JourneyCheckService", () => {
       noMeta: 0,
       invalid: 0
     });
+  });
+
+  it("classifies an explicitly retired Journey as retired regardless of drift", async () => {
+    const retiredMeta = JSON.parse(metaJson({
+      projectHash: "0".repeat(64)
+    })) as Record<string, unknown>;
+    retiredMeta.retired = {
+      retiredAt: "2026-09-11T00:00:00.000Z",
+      reason: "superseded"
+    };
+    const result = await check({
+      journeys: {
+        ".taphound/journeys/search.json": `${JSON.stringify(runtimeJourney)}\n`
+      },
+      metas: {
+        ".taphound/journeys/search.json": `${JSON.stringify(retiredMeta)}\n`
+      }
+    });
+
+    expect(result.entries[0]?.lifecycle).toBe("retired");
+    expect(result.entries[0]?.status).toBe("stale");
   });
 });

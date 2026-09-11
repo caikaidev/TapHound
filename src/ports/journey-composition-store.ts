@@ -21,5 +21,6 @@ export interface JourneyCompositionStore {
     projectRoot: string;
     relativePath: string;
     content: string;
+    workspaceRoot?: string | undefined;
   }) => Promise<void>;
 }

@@ -486,6 +486,10 @@ export const GenerationMetaSchema = z.strictObject({
     promotedAt: z.iso.datetime(),
     reason: z.string().trim().min(1)
   }).optional(),
+  retired: z.strictObject({
+    retiredAt: z.iso.datetime(),
+    reason: z.string().trim().min(1)
+  }).optional(),
   generationId: GenerationSessionIdSchema,
   journeyPath: ProjectRelativePathSchema,
   bindings: z.strictObject({

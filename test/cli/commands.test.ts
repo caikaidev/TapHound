@@ -1210,11 +1210,19 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
       exitCode: 0,
       strict: false,
       summary: { total: 1, fresh: 1, stale: 0, noMeta: 0, invalid: 0 },
+      lifecycle: {
+        draft: 0,
+        verified: 1,
+        suspect: 0,
+        stale: 0,
+        retired: 0
+      },
       journeys: [{
         name: "search",
         journeyPath: ".taphound/journeys/search.json",
         metaPath: ".taphound/journeys/search.meta.json",
         status: "fresh",
+        lifecycle: "verified",
         reasons: [],
         driftedModules: []
       }]
@@ -1325,6 +1333,7 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
     expect(test.stdout.value).toBe(
       "recorded: no-meta\n"
       + "Checked 1 Journeys: 0 fresh, 0 stale, 1 no-meta, 0 invalid\n"
+      + "Lifecycle: draft 1\n"
     );
     expect(test.exitCodes).toEqual([0]);
   });

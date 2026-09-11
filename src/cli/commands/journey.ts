@@ -13,6 +13,10 @@ import {
   JourneyPromoter
 } from "../../application/journey/journey-promoter.js";
 import {
+  JourneyRetireError,
+  JourneyRetirer
+} from "../../application/journey/journey-retirer.js";
+import {
   JourneyCompositionError
 } from "../../application/journey/journey-resolver.js";
 import {
@@ -20,6 +24,11 @@ import {
 } from "../../application/context/context-loader.js";
 import { TapHoundConfigSchema } from "../../domain/config.js";
 import type { TapHoundConfig } from "../../domain/config.js";
+import type { JourneyLifecycleState } from "../../domain/journey-lifecycle.js";
+import {
+  TargetError,
+  type ResolvedTarget
+} from "../../domain/target.js";
 import {
   JourneyResolutionManifestSchema,
   ResolvedJourneyPathSchema
@@ -53,7 +62,9 @@ interface JourneyListOptions {
 interface JourneyCheckOptions {
   project: string;
   config: string;
-  context: string;
+  context?: string | undefined;
+  target?: string | undefined;
+  targets?: string | undefined;
   json?: boolean | undefined;
   strict?: boolean | undefined;
 }
@@ -62,6 +73,17 @@ interface JourneyPromoteOptions {
   project: string;
   journey: string;
   reason: string;
+  target?: string | undefined;
+  targets?: string | undefined;
+  json?: boolean | undefined;
+}
+
+interface JourneyRetireOptions {
+  project: string;
+  journey: string;
+  reason: string;
+  target?: string | undefined;
+  targets?: string | undefined;
   json?: boolean | undefined;
 }
 
@@ -102,6 +124,8 @@ function writeFailure(
   const known = error instanceof JourneyCompositionError
     || error instanceof JourneyCheckError
     || error instanceof JourneyPromotionError
+    || error instanceof JourneyRetireError
+    || error instanceof TargetError
     || error instanceof ContextLoadError
     || error instanceof z.ZodError;
   const output = {
@@ -114,11 +138,15 @@ function writeFailure(
           ? error.code
           : error instanceof JourneyPromotionError
             ? error.code
-            : error instanceof ContextLoadError
+            : error instanceof JourneyRetireError
               ? error.code
-              : error instanceof z.ZodError
-                ? "CONFIG_INVALID"
-                : "INTERNAL_ERROR",
+              : error instanceof TargetError
+                ? error.code
+                : error instanceof ContextLoadError
+                  ? error.code
+                  : error instanceof z.ZodError
+                    ? "CONFIG_INVALID"
+                    : "INTERNAL_ERROR",
       message: errorMessage(error)
     }
   };
@@ -128,6 +156,77 @@ function writeFailure(
     writeLine(dependencies.stderr, output.failure.message);
   }
   dependencies.setExitCode(output.exitCode);
+}
+
+function targetsHome(
+  dependencies: CliDependencies,
+  options: { targets?: string | undefined }
+): string {
+  const explicit = options.targets ?? process.env.TAPHOUND_TARGETS_HOME;
+  return explicit === undefined
+    ? dependencies.cwd()
+    : resolve(dependencies.cwd(), explicit);
+}
+
+async function resolveJourneyTarget(
+  dependencies: CliDependencies,
+  targetId: string,
+  options: { targets?: string | undefined }
+): Promise<{
+  resolver: ReturnType<CliDependencies["localTargets"]["targetResolver"]>;
+  target: ResolvedTarget;
+  config: TapHoundConfig;
+  workspaceRoot: string;
+  projectRoot: string;
+}> {
+  const home = targetsHome(dependencies, options);
+  const targetResolver = dependencies.localTargets.targetResolver(home);
+  const target = await targetResolver.resolve(targetId);
+  const loaded = await dependencies.localTargets.configStore.loadTargets(home);
+  const entry = loaded.targets[targetId];
+  if (entry === undefined) {
+    throw new TargetError(
+      "LOCAL_TARGET_NOT_FOUND",
+      `Local target "${targetId}" is not registered. Add it with: taphound local add ${targetId} --path <path>`
+    );
+  }
+  const config = dependencies.localTargets.localTargetService(home)
+    .configForTarget({
+      entry,
+      resolvedPath: target.resolvedPath,
+      workspaceRoot: target.workspaceRoot
+    });
+  const fingerprint = await targetResolver.fingerprint(
+    target.project,
+    entry.run.packageName
+  );
+  await dependencies.localTargets.localTargetService(home)
+    .assertProjectUnchanged(target, fingerprint.hash);
+  return {
+    resolver: targetResolver,
+    target,
+    config,
+    workspaceRoot: target.workspaceRoot,
+    projectRoot: target.resolvedPath
+  };
+}
+
+function lifecycleSummary(
+  entries: readonly JourneyCheckEntry[]
+): Record<JourneyLifecycleState, number> {
+  const counts: Record<JourneyLifecycleState, number> = {
+    draft: 0,
+    verified: 0,
+    suspect: 0,
+    stale: 0,
+    retired: 0
+  };
+  for (const entry of entries) {
+    if (entry.lifecycle !== undefined) {
+      counts[entry.lifecycle] += 1;
+    }
+  }
+  return counts;
 }
 
 function createResolveCommand(dependencies: CliDependencies): Command {
@@ -278,19 +377,28 @@ function createCheckCommand(dependencies: CliDependencies): Command {
     .description("Check committed Journeys against live project bindings")
     .option("--project <path>", "Android project root", dependencies.cwd())
     .option("--config <path>", "TapHound config path", CONFIG_PATH)
-    .requiredOption("--context <path>", "Project Context index path")
+    .option("--context <path>", "Project Context index path")
+    .option("--target <id>", "Registered local target id")
+    .option("--targets <path>", "Targets workspace base path")
     .option("--json", "Emit one machine-readable JSON value")
     .option("--strict", "Exit non-zero when any Journey is not fresh")
     .action(async (options: JourneyCheckOptions): Promise<void> => {
       try {
-        await assertNoLegacyWorkspace(dependencies, options.project);
+        const targetContext = options.target === undefined
+          ? undefined
+          : await resolveJourneyTarget(dependencies, options.target, options);
+        const projectRoot: string = targetContext?.projectRoot ?? options.project;
+        const workspaceRoot: string | undefined = targetContext?.workspaceRoot;
+        if (targetContext === undefined) {
+          await assertNoLegacyWorkspace(dependencies, options.project);
+        }
         const composition = requireComposition(dependencies);
         let config: TapHoundConfig;
         try {
-          config = TapHoundConfigSchema.parse(await dependencies.readJson(
-            resolve(options.project, options.config)
-          ));
-          assertArtifactDirectory(options.project, config.artifactsDir);
+          config = targetContext?.config ?? TapHoundConfigSchema.parse(
+            await dependencies.readJson(resolve(options.project, options.config))
+          );
+          assertArtifactDirectory(projectRoot, config.artifactsDir);
         } catch (error) {
           throw new JourneyCheckError(
             "CONFIG_INVALID",
@@ -299,11 +407,19 @@ function createCheckCommand(dependencies: CliDependencies): Command {
           );
         }
         const index = await dependencies.contextLoader.readIndex({
-          projectRoot: options.project,
-          contextPath: resolve(options.project, options.context)
+          projectRoot,
+          ...(workspaceRoot === undefined
+            ? {}
+            : { workspaceRoot }),
+          contextPath: resolve(
+            workspaceRoot ?? projectRoot,
+            options.context === undefined
+              ? "context/project-context.json"
+              : options.context
+          )
         });
         const project = await dependencies.projectDescriber.describe({
-          projectRoot: options.project,
+          projectRoot,
           config,
           ...(dependencies.signal === undefined
             ? {}
@@ -312,18 +428,23 @@ function createCheckCommand(dependencies: CliDependencies): Command {
         const result = await new JourneyCheckService({
           store: composition.store
         }).check({
-          projectRoot: options.project,
+          projectRoot,
+          ...(workspaceRoot === undefined
+            ? {}
+            : { workspaceRoot }),
           config,
           project,
           bundle: index.bundle
         });
         const notFresh = result.summary.total - result.summary.fresh;
         const exitCode = options.strict === true && notFresh > 0 ? 1 : 0;
+        const lifecycleCounts = lifecycleSummary(result.entries);
         const output = {
           status: "checked" as const,
           exitCode,
           strict: options.strict === true,
           summary: result.summary,
+          lifecycle: lifecycleCounts,
           journeys: result.entries
         };
         if (options.json === true) {
@@ -344,6 +465,13 @@ function createCheckCommand(dependencies: CliDependencies): Command {
             + `${String(result.summary.noMeta)} no-meta, `
             + `${String(result.summary.invalid)} invalid`
           );
+          lines.push(
+            `Lifecycle: `
+            + Object.entries(lifecycleCounts)
+              .filter(([, count]) => count > 0)
+              .map(([state, count]) => `${state} ${String(count)}`)
+              .join(", ")
+          );
           writeLine(dependencies.stdout, lines.join("\n"));
         }
         dependencies.setExitCode(exitCode);
@@ -359,15 +487,26 @@ function createPromoteCommand(dependencies: CliDependencies): Command {
     .option("--project <path>", "Android project root", dependencies.cwd())
     .requiredOption("--journey <path>", "Project-relative Journey path")
     .requiredOption("--reason <text>", "Why this Journey is worth keeping")
+    .option("--target <id>", "Registered local target id")
+    .option("--targets <path>", "Targets workspace base path")
     .option("--json", "Emit one machine-readable JSON value")
     .action(async (options: JourneyPromoteOptions): Promise<void> => {
       try {
-        await assertNoLegacyWorkspace(dependencies, options.project);
+        const targetContext = options.target === undefined
+          ? undefined
+          : await resolveJourneyTarget(dependencies, options.target, options);
+        const projectRoot = targetContext?.projectRoot ?? options.project;
+        if (targetContext === undefined) {
+          await assertNoLegacyWorkspace(dependencies, options.project);
+        }
         const composition = requireComposition(dependencies);
         const result = await new JourneyPromoter({
           store: composition.store
         }).promote({
-          projectRoot: options.project,
+          projectRoot,
+          ...(targetContext === undefined
+            ? {}
+            : { workspaceRoot: targetContext.workspaceRoot }),
           journeyPath: options.journey,
           reason: options.reason,
           now: new Date()
@@ -395,11 +534,64 @@ function createPromoteCommand(dependencies: CliDependencies): Command {
     });
 }
 
+function createRetireCommand(dependencies: CliDependencies): Command {
+  return new Command("retire")
+    .description("Retire a Journey; its replay can no longer be trusted")
+    .option("--project <path>", "Android project root", dependencies.cwd())
+    .requiredOption("--journey <path>", "Project-relative Journey path")
+    .requiredOption("--reason <text>", "Why this Journey is retired")
+    .option("--target <id>", "Registered local target id")
+    .option("--targets <path>", "Targets workspace base path")
+    .option("--json", "Emit one machine-readable JSON value")
+    .action(async (options: JourneyRetireOptions): Promise<void> => {
+      try {
+        const targetContext = options.target === undefined
+          ? undefined
+          : await resolveJourneyTarget(dependencies, options.target, options);
+        const projectRoot = targetContext?.projectRoot ?? options.project;
+        if (targetContext === undefined) {
+          await assertNoLegacyWorkspace(dependencies, options.project);
+        }
+        const composition = requireComposition(dependencies);
+        const result = await new JourneyRetirer({
+          store: composition.store
+        }).retire({
+          projectRoot,
+          ...(targetContext === undefined
+            ? {}
+            : { workspaceRoot: targetContext.workspaceRoot }),
+          journeyPath: options.journey,
+          reason: options.reason,
+          now: new Date()
+        });
+        const output = {
+          status: "retired" as const,
+          exitCode: 0 as const,
+          journeyPath: result.journeyPath,
+          metaPath: result.metaPath,
+          retiredAt: result.retiredAt
+        };
+        if (options.json === true) {
+          writeJson(dependencies.stdout, output);
+        } else {
+          writeLine(
+            dependencies.stdout,
+            `Retired ${result.journeyPath}`
+          );
+        }
+        dependencies.setExitCode(0);
+      } catch (error) {
+        writeFailure(dependencies, options, error);
+      }
+    });
+}
+
 export function createJourneyCommand(dependencies: CliDependencies): Command {
   return new Command("journey")
     .description("Compose reusable Flows into runnable Journeys")
     .addCommand(createResolveCommand(dependencies))
     .addCommand(createListFlowsCommand(dependencies))
     .addCommand(createCheckCommand(dependencies))
-    .addCommand(createPromoteCommand(dependencies));
+    .addCommand(createPromoteCommand(dependencies))
+    .addCommand(createRetireCommand(dependencies));
 }

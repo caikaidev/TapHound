@@ -3,6 +3,7 @@ import {
   GenerationMetaSchema,
   type GenerationMeta
 } from "../../domain/generation.js";
+import type { JourneyLifecycleState } from "../../domain/journey-lifecycle.js";
 import { JourneySchema } from "../../domain/journey.js";
 import type {
   ContextModuleReference,
@@ -41,6 +42,7 @@ export interface JourneyCheckEntry {
   journeyPath: string;
   metaPath: string;
   status: JourneyCheckStatus;
+  lifecycle: JourneyLifecycleState | undefined;
   reasons: readonly JourneyCheckReason[];
   driftedModules: readonly JourneyCheckDriftedModule[];
   message: string | undefined;
@@ -75,6 +77,7 @@ export class JourneyCheckError extends Error {
 
 export interface JourneyCheckInput {
   projectRoot: string;
+  workspaceRoot?: string | undefined;
   config: TapHoundConfig;
   project: ProjectDescription;
   bundle: ProjectContext;
@@ -134,7 +137,8 @@ export class JourneyCheckService {
     input: JourneyCheckInput
   ): Promise<JourneyCheckResult> => {
     const paths = await this.dependencies.store.listJourneyPaths(
-      input.projectRoot
+      input.projectRoot,
+      input.workspaceRoot
     );
     const projectHash = hashGenerationBinding(input.project);
     const configHash = hashGenerationBinding(input.config);
@@ -145,6 +149,7 @@ export class JourneyCheckService {
     for (const journeyPath of paths) {
       entries.push(await this.checkJourney({
         projectRoot: input.projectRoot,
+        workspaceRoot: input.workspaceRoot,
         journeyPath,
         projectHash,
         configHash,
@@ -156,6 +161,7 @@ export class JourneyCheckService {
 
   private readonly checkJourney = async (input: {
     projectRoot: string;
+    workspaceRoot?: string | undefined;
     journeyPath: string;
     projectHash: string;
     configHash: string;
@@ -170,6 +176,7 @@ export class JourneyCheckService {
       journeyPath: input.journeyPath,
       metaPath: metaPathFor(input.journeyPath),
       status,
+      lifecycle: lifecycleFor(status, reasons),
       reasons,
       driftedModules: [],
       message
@@ -179,7 +186,10 @@ export class JourneyCheckService {
     try {
       bytes = await this.dependencies.store.read({
         projectRoot: input.projectRoot,
-        relativePath: input.journeyPath
+        relativePath: input.journeyPath,
+        ...(input.workspaceRoot === undefined
+          ? {}
+          : { workspaceRoot: input.workspaceRoot })
       });
     } catch (error) {
       return entry(
@@ -202,7 +212,10 @@ export class JourneyCheckService {
     try {
       metaBytes = await this.dependencies.store.readJourneyMeta({
         projectRoot: input.projectRoot,
-        journeyPath: input.journeyPath
+        journeyPath: input.journeyPath,
+        ...(input.workspaceRoot === undefined
+          ? {}
+          : { workspaceRoot: input.workspaceRoot })
       });
     } catch (error) {
       return entry(
@@ -254,14 +267,53 @@ export class JourneyCheckService {
         reasons.push("module-missing");
       }
     }
+    const status = reasons.length === 0 ? "fresh" : "stale";
     return {
       name: journeyName(input.journeyPath),
       journeyPath: input.journeyPath,
       metaPath: metaPathFor(input.journeyPath),
-      status: reasons.length === 0 ? "fresh" : "stale",
+      status,
+      lifecycle: meta.retired !== undefined
+        ? "retired"
+        : status === "fresh"
+          ? "verified"
+          : classifyLifecycle(reasons),
       reasons,
       driftedModules,
       message: undefined
     };
   };
+}
+
+const STALE_REASONS: ReadonlySet<JourneyCheckReason> = new Set([
+  "journey-path-mismatch",
+  "project-hash",
+  "module-drift",
+  "module-missing"
+]);
+
+function lifecycleFor(
+  status: JourneyCheckStatus,
+  reasons: readonly JourneyCheckReason[]
+): JourneyLifecycleState | undefined {
+  if (status === "invalid") {
+    return undefined;
+  }
+  if (status === "no-meta") {
+    return "draft";
+  }
+  if (reasons.length === 0) {
+    return "verified";
+  }
+  return reasons.some((reason) => STALE_REASONS.has(reason))
+    ? "stale"
+    : "suspect";
+}
+
+function classifyLifecycle(
+  reasons: readonly JourneyCheckReason[]
+): JourneyLifecycleState {
+  return reasons.some((reason) => STALE_REASONS.has(reason))
+    ? "stale"
+    : "suspect";
 }

@@ -44,7 +44,7 @@ describe("createProgram", () => {
     expect(
       createProgram().commands.find((command) => command.name() === "journey")
         ?.commands.map((command) => command.name())
-    ).toEqual(["resolve", "list-flows", "check", "promote"]);
+    ).toEqual(["resolve", "list-flows", "check", "promote", "retire"]);
     expect(
       createProgram().commands.find((command) => command.name() === "generation")
         ?.commands.map((command) => command.name())

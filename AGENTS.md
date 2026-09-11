@@ -332,6 +332,17 @@ verified Journey evidence, and rewrites the meta sidecar to
 check passes. Missing evidence, hash drift, a modified Journey, or an already
 promoted sidecar fails closed at exit code 2.
 
+`journey check` reports the deterministic lifecycle state of every Journey:
+`verified` (bindings fresh), `draft` (no generation meta), `stale` (project
+or module evidence drifted), `suspect` (config-only drift), and `retired`
+(explicitly retired), with invalid Journeys reported without a lifecycle
+state. `journey retire --journey <path> --reason <text>` records
+`retired: {retiredAt, reason}` in the meta sidecar; retiring a Journey
+without meta fails with `META_MISSING` and a second retire fails with
+`JOURNEY_ALREADY_RETIRED` (both exit code 2). `journey check`, `retire`, and
+`promote` all accept `--target <id>` for registered local targets, reading
+Journeys from the target workspace.
+
 ## Protocol and Implementation Constraints
 
 - The project uses ESM with NodeNext resolution. TypeScript source imports use

@@ -228,12 +228,26 @@ implements JourneyCompositionStore {
     projectRoot: string;
     relativePath: string;
     content: string;
+    workspaceRoot?: string | undefined;
   }): Promise<void> => {
-    await ensureBuildLayout(input.projectRoot);
+    if (input.workspaceRoot === undefined) {
+      await ensureBuildLayout(input.projectRoot);
+    }
+    const boundRoot = input.workspaceRoot ?? input.projectRoot;
     await writeProjectBoundText({
-      projectRoot: input.projectRoot,
-      authorityRoot: resolve(input.projectRoot, BUILD_DIR),
-      outputPath: resolve(input.projectRoot, input.relativePath)
+      projectRoot: boundRoot,
+      authorityRoot: resolve(
+        boundRoot,
+        input.workspaceRoot === undefined ? BUILD_DIR : "runs"
+      ),
+      outputPath: resolve(
+        boundRoot,
+        input.workspaceRoot === undefined
+          ? input.relativePath
+          : input.relativePath.startsWith(`${TAPHOUND_DIR}/`)
+            ? input.relativePath.slice(TAPHOUND_DIR.length + 1)
+            : input.relativePath
+      )
     }, input.content);
   };
 

@@ -114,9 +114,9 @@ async function gitValue(
   executable: "git",
   root: string,
   args: readonly string[],
-  run: CliDependencies["localTargets"]["processRunner"]["run"]
+  runner: CliDependencies["localTargets"]["processRunner"]
 ): Promise<string | undefined> {
-  const result = await run({
+  const result = await runner.run({
     executable,
     args: ["-C", root, ...args]
   });
@@ -134,11 +134,11 @@ async function inspectTargetGit(
   if (root === undefined) {
     return null;
   }
-  const run = dependencies.localTargets.processRunner.run;
+  const runner = dependencies.localTargets.processRunner;
   const [head, branch, status] = await Promise.all([
-    gitValue("git", root, ["rev-parse", "HEAD"], run),
-    gitValue("git", root, ["rev-parse", "--abbrev-ref", "HEAD"], run),
-    run({
+    gitValue("git", root, ["rev-parse", "HEAD"], runner),
+    gitValue("git", root, ["rev-parse", "--abbrev-ref", "HEAD"], runner),
+    runner.run({
       executable: "git",
       args: ["-C", root, "status", "--porcelain"]
     })

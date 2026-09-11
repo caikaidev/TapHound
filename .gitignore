@@ -38,22 +38,11 @@ local.properties
 
 # OS
 .DS_Store
-Thumbs.db
-desktop.ini
 
-# Logs / temp
-*.log
-*.tmp
-*.bak
-
-# Working / test-result docs (not version-controlled)
-docs/feedback/
-docs/verification/
-docs/superpowers/
-docs/archive/
-
-# Local target registrations and workspaces
+# Local Target (registered local targets; generated per-target workspace guard)
 benchmarks/targets.local.json
+benchmarks/targets.local.example.json
 benchmarks/apps/local/
 benchmarks/cases/local/
 benchmarks/.taphound/
+.taphound/.gitignore

@@ -80,16 +80,21 @@ See the [local testing guide](docs/local-testing.md) for source, npm tarball, an
 - `observe`: capture a point-in-time device snapshot (foreground, activity, layout, optional logcat) without a session or side effects.
 - `project describe`: output stable Android project facts.
 - `context list` / `validate` / `status`: inspect or validate a Project Context index and module shards.
+- `context generate`: generate Project Context scaffolding from project source (`--force` to overwrite an existing index).
 - `context refresh`: recompute Context evidence hashes, including semantic hashes, without re-analyzing source.
+- `context rehash`: recompute Project Context shard and index hashes, optionally limited with `--module <id...>`.
 - `journey list-flows` / `journey resolve`: validate reusable Flows and resolve
   composed Journey Sources into flat Journey v2 files. `list-flows --include-external`
   also lists External Flows used by `generation bridge --flow`.
 - `journey check`: classify every committed Journey under `.taphound/journeys`
   as `fresh`, `stale`, `no-meta`, or `invalid` by comparing its meta sidecar
   bindings (project, config, Context module selection) against the live
-  project. `--strict` exits non-zero for CI when any Journey is not fresh.
-- `generation start` / `observe` / `step` / `confirm` / `manual` / `bridge` /
-  `status` / `recover` / `config idle` / `archive` / `list` / `finalize`:
+  project, and report each Journey's lifecycle state (`verified`, `draft`,
+  `stale`, `suspect`, `retired`; invalid Journeys have no lifecycle).
+  `--strict` exits non-zero for CI when any Journey is not fresh.
+- `generation start` / `observe` / `next` / `step` / `confirm` / `manual` /
+  `bridge` / `status` / `recover` / `config idle` / `archive` / `list` /
+  `finalize`:
   manage deterministic Journey generation sessions. `bridge` records cross-app
   flows (e.g. camera, picker, share) through a bound External Flow.
   `config idle` hot-adjusts the session's idle policy without restarting, and
@@ -134,6 +139,10 @@ See the [local testing guide](docs/local-testing.md) for source, npm tarball, an
   hash and the verified Journey evidence inside the generation bundle before
   flipping the meta sidecar to `promoted`; Journeys that drifted from their
   evidence fail closed.
+- `journey retire --journey <path> --reason <text>`: record a retired lifecycle
+  state in the meta sidecar; `journey check` then reports it as `retired`.
+  `check`, `retire`, and `promote` all accept `--target <id>` for registered
+  local targets.
 
 ## Configuration
 
@@ -182,9 +191,16 @@ pixel-level frame quiescence is required.
 `runtime.backend` selects the device runtime backend: `auto` (default) and
 `mobile-mcp` route device work through the [Mobile MCP](https://www.npmjs.com/package/@mobilenext/mobile-mcp)
 server, while `adb` selects the ADB + Android CLI backend as the explicit
-fallback. See the [Runtime Backend SPI](docs/architecture/runtime-backend.md)
-for the capability matrix and the Level 1 orchestrators that will bring full
-`verify`/`record`/`generation` support to Mobile MCP.
+fallback. Device work flows through the Runtime Backend SPI: `observe`,
+`verify`, `record`, and `generation` borrow a session per run through the
+`RuntimeSessionOpener` port, `align` still routes through the bridge, and
+`doctor` is fully backend-aware. Commands that need capabilities the selected
+backend lacks (under `mobile-mcp`: process discovery, foreground Activity,
+logcat dump) fail closed with `RUNTIME_CAPABILITY_MISSING` (exit code 3), so
+`verify`/`record`/`generation`/`observe` keep the ADB execute path until the
+upstream Mobile MCP server exposes them. See the
+[Runtime Backend SPI](docs/architecture/runtime-backend.md)
+for the capability matrix and adoption levels.
 
 Generation binds the normalized configuration when a session starts. Choose
 the idle strategy and timeout before `generation start`; after start, any config

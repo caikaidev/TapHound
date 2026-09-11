@@ -80,16 +80,20 @@ git diff --exit-code -- assets/brand/png
 - `observe`：捕获设备即时快照（前台组件、Activity、布局、可选 logcat），无 session、无副作用。
 - `project describe`：输出稳定的 Android 项目事实。
 - `context list` / `validate` / `status`：查看或校验 Project Context 索引及模块分片。
+- `context generate`：从项目源码生成 Project Context 脚手架（`--force` 覆盖已有索引）。
 - `context refresh`：在不重新分析源码的前提下，重算 Context 证据哈希（含语义哈希）。
+- `context rehash`：重算 Project Context 分片与索引哈希，可用 `--module <id...>` 限定模块。
 - `journey list-flows` / `journey resolve`：校验可复用 Flow，并将组合式 Journey
   Source 解析为扁平 Journey v2。`list-flows --include-external` 还会列出供
   `generation bridge --flow` 使用的 External Flow。
 - `journey check`：将 `.taphound/journeys` 下的每个已提交 Journey 按其 meta
   边界（项目、配置、Context 模块选择）与当前项目比对，分类为 `fresh`、`stale`、
-  `no-meta` 或 `invalid`。`--strict` 在存在非 fresh Journey 时以非零码退出，
-  可用于 CI 门禁。
-- `generation start` / `observe` / `step` / `confirm` / `manual` / `bridge` /
-  `status` / `recover` / `config idle` / `archive` / `list` / `finalize`：管理确定性 Journey 生成会话。
+  `no-meta` 或 `invalid`，并报告每个 Journey 的生命周期状态（`verified`、
+  `draft`、`stale`、`suspect`、`retired`；invalid Journey 没有生命周期状态）。
+  `--strict` 在存在非 fresh Journey 时以非零码退出，可用于 CI 门禁。
+- `generation start` / `observe` / `next` / `step` / `confirm` / `manual` /
+  `bridge` / `status` / `recover` / `config idle` / `archive` / `list` /
+  `finalize`：管理确定性 Journey 生成会话。
   `bridge` 通过已绑定的 External Flow 记录跨应用流程（如相机、选择器、分享）。
   `config idle` 无需重启会话即可热调整 idle 策略；`step --replace <index>`
   通过确定性重放已存储前缀并绑定全新 snapshot，回退活动会话。
@@ -99,9 +103,11 @@ git diff --exit-code -- assets/brand/png
   `--force`。
 - `ui-cache status` / `ui-cache clear --yes`：查看或删除仅用于加速的
   `.taphound/build/cache/ui/` 索引；不会删除 Journey、报告或 Generation 证据。
-- `knowledge status` / `bootstrap` / `plan` / `receipts` / `promote`：
-  管理已提交的 Anchor、Screen 与 Transition 知识。运行时只写不可变收据；
-  只有显式 bootstrap 或 promote 才会更新权威知识。
+- `knowledge status` / `bootstrap` / `goal` / `plan` / `receipts` / `promote` /
+  `evolve`：管理已提交的 Anchor、Screen 与 Transition 知识。运行时只写不可变收据；
+  只有显式 bootstrap、promote 或按收据折叠的 evolve 才会更新权威知识。`goal`
+  为已知目标 Screen 起草严格 Goal Spec，`evolve` 把绑定到当前 Registry hash 的
+  收据折叠进 Transition 观察计数，并把 `inferred` 文档升级为 `observed`。
 - `local add` / `list` / `inspect` / `remove`：将某个不相关的 Android 仓库注册为
   Local Target，并查看其解析路径、Git 元数据、Context 状态与 Journey 数量。
   Local Target 验证属于 dogfooding，绝不发布。`--target <id>` 使 `doctor`、
@@ -113,6 +119,13 @@ git diff --exit-code -- assets/brand/png
 - `benchmark validate` / `list` / `run` / `compare`：以 `legacy`、`baseFlow`
   或 `knowledge` 引擎对照 Ground Truth 回放 Benchmark Case，并比较成功率、
   路由准确率、耗时与 LLM 指标。
+- `journey promote --journey <path> --reason <text>`：把已验证回放通过的
+  Journey 提升为持久资产。提升前会重新校验 generation bundle 内的验证报告哈希与
+  已验证 Journey 证据，校验通过后才把 meta 附属文件改为 `promoted`；与证据发生
+  漂移的 Journey 会失败关闭。
+- `journey retire --journey <path> --reason <text>`：在 meta 附属文件中记录
+  retired 生命周期状态；`journey check` 随后将其报告为 `retired`。
+  `check`、`retire` 与 `promote` 均支持 `--target <id>` 针对已注册的本地目标运行。
 
 ## 配置
 
@@ -153,8 +166,13 @@ UIAutomator 结构确认稳定。如果页面持续绘制，`hybrid` 会回退�
 帧计数；只有确实需要像素帧静止时才使用 `frameStats`。
 `runtime.backend` 选择设备运行时后端：默认 `auto` 与 `mobile-mcp` 通过
 [Mobile MCP](https://www.npmjs.com/package/@mobilenext/mobile-mcp) server 执行设备操作，
-`adb` 则显式选择 ADB + Android CLI 后端作为回退。能力矩阵及让
-`verify`/`record`/`generation` 完整支持 Mobile MCP 的 Level 1 编排器规划见
+`adb` 则显式选择 ADB + Android CLI 后端作为回退。设备操作统一走 Runtime Backend
+SPI：`observe`、`verify`、`record` 与 `generation` 每次运行通过
+`RuntimeSessionOpener` 借用 session，`align` 仍经 bridge 路由，`doctor` 已完全
+后端感知。当所选项后端缺少能力时（`mobile-mcp` 下：进程发现、前台 Activity、
+logcat 导出），命令会以 `RUNTIME_CAPABILITY_MISSING`（exit code 3）失败关闭，
+因此在 Mobile MCP server 提供这些能力之前，`verify`/`record`/`generation`/`observe`
+仍走 ADB 执行路径。能力矩阵与采用等级见
 Runtime Backend SPI（`docs/architecture/runtime-backend.md`）。
 
 Generation 会在 session 启动时绑定规范化后的完整配置。请在

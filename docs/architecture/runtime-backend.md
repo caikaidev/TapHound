@@ -87,7 +87,7 @@ AdbRuntimeBackend ──openSession(serial)──▶ RuntimeSession
 RuntimeBackendAdbBridge (implements AdbPort)
         │  re-inserts the bound serial into each call
         ▼
-RecorderService / generation / align
+align (and any AdbPort-shaped long-tail consumer)
 ```
 
 `ObserveService`, `VerifyRuntime`, `RecorderService`, `RuntimeObserver`, and
@@ -140,13 +140,15 @@ from two sources with fixed precedence:
 | `mobile-mcp` | `MobileMcpRuntimeBackend` |
 
 **Mobile MCP is the preferred runtime path for read-only work (2026-09-10).**
-`observe` and `doctor` run on it by default; ADB is the execute path for
-`verify`, `record`, and `generation`, because the 1.0.3 server audit
-confirmed it still lacks process discovery, foreground Activity, and a
-historical logcat dump (the robot has `listRunningProcesses`, but it is not
-exposed as a tool). ADB stays reachable through `runtime.backend: "adb"` or
-`TAPHOUND_RUNTIME_BACKEND=adb`; the demo project pins `adb`. The capability
-table is re-checked on each server upgrade (see Level 4 below).
+`observe` and `doctor` run on it by default; `verify`, `record`, and
+`generation` also borrow sessions through their session-first paths but fail
+closed on the capabilities the 1.0.3 server audit confirmed it still lacks
+(process discovery, foreground Activity, and a historical logcat dump — the
+robot has `listRunningProcesses`, but it is not exposed as a tool), so ADB
+stays the execute path for them. ADB remains reachable through
+`runtime.backend: "adb"` or `TAPHOUND_RUNTIME_BACKEND=adb`; the demo project
+pins `adb`. The capability table is re-checked on each server upgrade (see
+Level 4 below).
 
 An invalid value in either source fails with `CONFIG_INVALID` (exit code 2)
 before any command runs; a missing config or a config without `runtime.backend`
@@ -200,12 +202,11 @@ Known limitations:
   1.0.3+ server would otherwise treat `/tmp` as the only allowed temp
   directory and reject TapHound's `os.tmpdir()`-based screenshot paths with
   `"is not in the list of allowed directories"`.
-- `verify`, `record`, `generation`, and `observe` still call capability-gated
+- `verify`, `record`, `generation`, and `observe` call capability-gated
   members (`currentActivity`, `appProcesses`, Logcat) and therefore fail
-  closed under mobile-mcp with `RUNTIME_CAPABILITY_MISSING` (exit code 3);
-  `observe` and `verify` fail closed through their own session-first paths,
-  while `record` and `generation` still route through the bridge until their
-  Level 1 orchestrators land.
+  closed under mobile-mcp with `RUNTIME_CAPABILITY_MISSING` (exit code 3)
+  through their own session-first paths; `align` still routes through the
+  bridge for the same fail-closed outcome.
 - Launching uses `mobile_launch_app`, which resolves the launcher activity
   (the same semantics as `monkey -p`).
 - Evidence is not portable across backends: descriptors are content-hashed
@@ -217,7 +218,7 @@ Known limitations:
 
 | Level | State | Description |
 |---|---|---|
-| 0 — bridge (current) | done | Production flows through the SPI via `RuntimeBackendAdbBridge`; services keep the `AdbPort` type. `doctor` is backend-aware and fully works under mobile-mcp. |
+| 0 — bridge adoption | done | Production flows through the SPI via `RuntimeBackendAdbBridge`; services keep the `AdbPort` type. `doctor` is backend-aware and fully works under mobile-mcp. |
 | 1 — session-first orchestrators | done | `ObserveService`, `VerifyRuntime`, `RecorderService`, `RuntimeObserver`, and `GenerationStepExecutor` borrow a session per run through `RuntimeSessionOpener` and fail closed on missing capability members; `VerifyRuntime` feeds its `AdbPort`-shaped helpers through `RuntimeSessionPortViews` (`src/ports/runtime-session-ports.ts`). The bridge remains for device discovery, `align`, and long-tail consumers. |
 | 2 — full session typing | later | Helpers (`ProcessWaiter`, `ActionExecutor`, `LogcatCollector`, …) accept `Pick<RuntimeSession, …>`; `AdbPort` shrinks to the bridge or is deleted. |
 | 3 — Mobile MCP default | done | `MobileMcpRuntimeBackend` passes the shared contract suite and `auto` resolves to it; ADB remains available through `runtime.backend: "adb"` and the environment override. |

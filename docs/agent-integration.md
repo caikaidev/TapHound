@@ -154,6 +154,15 @@ without a device. It pairs each Journey with its `<name>.meta.json` sidecar
 - `invalid` — the Journey or sidecar is unreadable or fails its schema
   (`journey-unreadable`, `journey-schema`, `meta-unreadable`, `meta-schema`).
 
+Each entry also carries a lifecycle state (`lifecycle`): `verified` (fresh
+bindings), `draft` (no sidecar), `stale` (structural drift on project,
+module, or journey path), `suspect` (config-only drift such as `config-hash`
+or `meta-legacy`), or `retired` (the sidecar records `retired`). Invalid
+Journeys have no lifecycle state. `journey retire --journey <path> --reason
+<text>` records `retired` in the sidecar; `journey promote` flips it to
+`promoted` (reported as `verified` here) after re-checking the generation
+bundle's verification evidence.
+
 `meta-legacy` marks sidecars published before `contextSelection` was
 recorded. They classify as `stale` (fail-closed) because module drift can no
 longer be evaluated; re-run `generation finalize` to republish the Journey
@@ -169,11 +178,13 @@ taphound journey check \
 `--context` is required and names the live Project Context index; the command
 reads `.taphound/config.json` by default (override with `--config`). With
 `--json` it emits exactly one JSON value containing a `summary`
-(`total`/`fresh`/`stale`/`noMeta`/`invalid`) and per-Journey `journeys`
-entries, and the JSON `exitCode` matches the process exit code. Exit `0` means
-the check completed — findings or not; `2` reports config or Context errors;
-`4` is internal. `--strict` turns any non-fresh entry (stale, invalid, or
-no-meta) into exit `1` for CI gates.
+(`total`/`fresh`/`stale`/`noMeta`/`invalid`), a `lifecycle` object counting
+each lifecycle state, and per-Journey `journeys` entries, and the JSON
+`exitCode` matches the process exit code. Exit `0` means the check completed —
+findings or not; `2` reports config or Context errors; `4` is internal.
+`--strict` turns any non-fresh entry (stale, invalid, or no-meta) into exit
+`1` for CI gates. `--target <id>` runs `check`, `retire`, and `promote`
+against a registered Local Target workspace instead of `--project`.
 
 ## Machine Contract
 

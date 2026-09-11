@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { IdlePolicySchema } from "./config.js";
+
 import type { FailureCode } from "./failure.js";
 
 export const TARGETS_SCHEMA_VERSION = 1 as const;
@@ -43,6 +45,7 @@ export const TargetEntrySchema = z.strictObject({
   validation: z.strictObject({
     mode: TargetValidationModeSchema
   }).optional(),
+  idle: IdlePolicySchema.optional(),
   artifacts: z.strictObject({
     namespace: z.string().min(1).optional()
   }).optional(),

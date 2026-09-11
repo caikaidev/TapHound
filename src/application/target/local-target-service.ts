@@ -27,7 +27,7 @@ export class LocalTargetService {
         packageName: run.packageName,
         activity: run.activity ?? DEFAULT_TARGET_ACTIVITY
       },
-      idle: DEFAULT_TARGET_IDLE,
+      idle: input.entry.idle ?? DEFAULT_TARGET_IDLE,
       artifactsDir: `${input.workspaceRoot}/runs`
     });
   };

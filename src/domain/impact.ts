@@ -65,7 +65,7 @@ export const ImpactSetSchema = z.strictObject({
   version: z.literal(1),
   base: z.string().trim().min(1),
   head: z.string().trim().min(1),
-  affectedModules: z.array(KnowledgeIdSchema),
+  affectedModules: z.array(z.string().trim().min(1)),
   affectedFeatures: z.array(z.string().trim().min(1)),
   affectedScreens: z.array(KnowledgeIdSchema),
   affectedAnchors: z.array(KnowledgeIdSchema),

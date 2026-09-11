@@ -622,7 +622,8 @@ export function createProductionDependencies(
           input.projectRoot,
           input.workspaceRoot,
           CONTEXT_INDEX_PATH
-        )
+        ),
+        allowIncomplete: true
       });
       return { context: loaded.context, modules: loaded.modules };
     },

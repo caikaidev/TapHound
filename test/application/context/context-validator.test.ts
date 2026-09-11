@@ -574,7 +574,7 @@ describe("ContextValidator", () => {
     });
   });
 
-  it("configured policy accepts a package/activity suffix match with divergence", async () => {
+  it("configured policy accepts an activity suffix match with divergence", async () => {
     const root = await temporaryRoot();
     const content = "content";
     await writeEvidence(root, "source.kt", content);
@@ -605,6 +605,30 @@ describe("ContextValidator", () => {
     });
   });
 
+  it("configured policy accepts a fully-qualified activity equal to the evidence", async () => {
+    const root = await temporaryRoot();
+    const content = "content";
+    await writeEvidence(root, "source.kt", content);
+    const context = contextWithIdentity(
+      contextFor([{ path: "source.kt", sha256: sha256(content) }]),
+      "com.example.app",
+      "com.example.app.MainActivity"
+    );
+
+    await expect(validator().validate({
+      context,
+      projectRoot: root,
+      config: {
+        ...config,
+        run: {
+          packageName: "com.example.app",
+          activity: "com.example.app.MainActivity"
+        }
+      },
+      identityPolicy: "configured"
+    })).resolves.toEqual({ status: "valid" });
+  });
+
   it("configured policy rejects a mismatched activity suffix", async () => {
     const root = await temporaryRoot();
     const content = "content";
@@ -612,7 +636,7 @@ describe("ContextValidator", () => {
     const context = contextWithIdentity(
       contextFor([{ path: "source.kt", sha256: sha256(content) }]),
       "com.example.im",
-      "com.example.im.other.Main"
+      "com.example.im.ui.SplashActivity"
     );
 
     await expect(validator().validate({
@@ -622,7 +646,7 @@ describe("ContextValidator", () => {
         ...config,
         run: {
           packageName: "com.example.tchat",
-          activity: ".ui.Splash"
+          activity: ".MainActivity"
         }
       },
       identityPolicy: "configured"
@@ -630,7 +654,7 @@ describe("ContextValidator", () => {
       status: "invalid",
       reason: {
         code: "CONTEXT_IDENTITY_MISMATCH",
-        message: "Project Context identity does not match the configured project (evidence package com.example.im, configured package com.example.tchat)"
+        message: "Project Context identity does not match the configured project (evidence launchActivity com.example.im.ui.SplashActivity, configured com.example.tchat.MainActivity; declare the activity with: taphound local add <id> --path <path> --package <pkg> --activity <relative-or-fq>)"
       }
     });
   });

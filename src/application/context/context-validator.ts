@@ -116,19 +116,6 @@ function isSecretEvidencePath(path: string): boolean {
   );
 }
 
-function relativeActivity(
-  packageName: string,
-  activity: string
-): string | undefined {
-  if (activity === packageName) {
-    return "";
-  }
-  if (activity.startsWith(`${packageName}.`)) {
-    return activity.slice(packageName.length + 1);
-  }
-  return undefined;
-}
-
 function invalid(
   code: ContextValidationReasonCode,
   message: string
@@ -217,34 +204,34 @@ export class ContextValidator {
 
     let divergence: ContextIdentityDivergence | undefined;
     if (input.identityPolicy === "configured") {
+      const evidenceActivity = parsed.data.launchActivity;
+      const activityIsRelative = input.config.run.activity.startsWith(".");
+      const suffixMatch = (
+        activityIsRelative
+        && evidenceActivity.endsWith(input.config.run.activity)
+      );
       if (
-        parsed.data.packageName !== input.config.run.packageName
-        || parsed.data.launchActivity !== configuredActivity
+        evidenceActivity === configuredActivity
+        || suffixMatch
       ) {
-        const evidenceRelative = relativeActivity(
-          parsed.data.packageName,
-          parsed.data.launchActivity
-        );
-        const configuredRelative = relativeActivity(
-          input.config.run.packageName,
-          configuredActivity
-        );
-        if (
-          evidenceRelative !== undefined
-          && configuredRelative !== undefined
-          && evidenceRelative === configuredRelative
-        ) {
+        if (parsed.data.packageName !== input.config.run.packageName) {
+          const evidencePackageName = suffixMatch
+            ? evidenceActivity.slice(
+              0,
+              evidenceActivity.length - input.config.run.activity.length
+            )
+            : parsed.data.packageName;
           divergence = {
-            evidencePackageName: parsed.data.packageName,
+            evidencePackageName,
             configuredPackageName: input.config.run.packageName,
-            launchActivity: parsed.data.launchActivity
+            launchActivity: evidenceActivity
           };
-        } else {
-          return invalid(
-            "CONTEXT_IDENTITY_MISMATCH",
-            `Project Context identity does not match the configured project (evidence package ${parsed.data.packageName}, configured package ${input.config.run.packageName})`
-          );
         }
+      } else {
+        return invalid(
+          "CONTEXT_IDENTITY_MISMATCH",
+          `Project Context identity does not match the configured project (evidence launchActivity ${evidenceActivity}, configured ${configuredActivity}; declare the activity with: taphound local add <id> --path <path> --package <pkg> --activity <relative-or-fq>)`
+        );
       }
     } else if (
       parsed.data.packageName !== input.config.run.packageName

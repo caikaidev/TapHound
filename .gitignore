@@ -40,9 +40,17 @@ local.properties
 .DS_Store
 
 # Local Target (registered local targets; generated per-target workspace guard)
+# Root local-target workspace (real app context/journeys/runs/generations/cache)
+.taphound/local/
 benchmarks/targets.local.json
 benchmarks/targets.local.example.json
 benchmarks/apps/local/
 benchmarks/cases/local/
 benchmarks/.taphound/
 .taphound/.gitignore
+
+# Local verification results and process records (not version-controlled)
+/docs/archive/
+/docs/feedback/
+/docs/superpowers/
+/docs/verification/*-audit.md

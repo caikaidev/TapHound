@@ -10,6 +10,11 @@ import { resolve } from "node:path";
  * Centralising the build here eliminates the race.
  */
 export default function setup(): void {
+  // Corporate environments may export NODE_USE_ENV_PROXY, which makes every
+  // Node child print EnvHttpProxyAgent (UNDICI-EHPA) diagnostics and pollute
+  // deterministic stdout/stderr assertions. The code performs no proxy-aware
+  // fetch, so the variable is removed before workers fork and inherit env.
+  delete process.env.NODE_USE_ENV_PROXY;
   const repositoryRoot = resolve(import.meta.dirname, "..");
   const build = spawnSync("npm", ["run", "build", "--silent"], {
     cwd: repositoryRoot,

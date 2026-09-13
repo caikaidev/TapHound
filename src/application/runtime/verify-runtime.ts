@@ -28,7 +28,12 @@ import type {
   RuntimeSessionPortViewsFactory
 } from "../../ports/runtime-session-ports.js";
 import type { AnchorResolverPort } from "../../ports/anchor-resolver.js";
-import type { UiSnapshotProvider } from "../../ports/ui-snapshot.js";
+import type { AdbPort } from "../../ports/adb.js";
+import type {
+  UiSnapshot,
+  UiSnapshotProvider
+} from "../../ports/ui-snapshot.js";
+import type { UiStabilityProbe } from "../../ports/ui-stability.js";
 import type { DeviceAssignment } from "../devices/resolve-device-assignments.js";
 import { LogcatCollector } from "../collector/logcat-collector.js";
 import { logcatStopFailed } from "../collector/logcat-stop.js";
@@ -47,6 +52,35 @@ export type VerifyProgressEvent =
   | { stage: "replaying"; stepIndex: number; stepCount: number }
   | { stage: "collecting" };
 
+export type VerifyHookStatus = "passed" | "failed" | "unresolved";
+
+export interface VerifyHookResult {
+  status: VerifyHookStatus;
+  message?: string | undefined;
+}
+
+export interface VerifyHookContext {
+  deviceRole: string;
+  deviceSerial: string;
+  adb: AdbPort;
+  uiSnapshotProvider: UiSnapshotProvider;
+  logcat: {
+    lines: () => readonly { raw: string }[];
+  };
+  clock: Clock;
+  snapshot: UiSnapshot;
+}
+
+export interface VerifyHooks {
+  beforeSteps?: ((context: VerifyHookContext) => Promise<VerifyHookResult>) | undefined;
+  afterSteps?: ((context: VerifyHookContext) => Promise<VerifyHookResult>) | undefined;
+}
+
+export interface VerifyHookOutcome extends VerifyHookResult {
+  phase: "beforeSteps" | "afterSteps";
+  deviceRole: string;
+}
+
 export interface VerifyInput {
   config: TapHoundConfig;
   journey: Journey;
@@ -57,6 +91,7 @@ export interface VerifyInput {
   requireFocusedInput?: boolean | undefined;
   generatedReplayPolicy?: boolean | undefined;
   manualReplay?: boolean | undefined;
+  hooks?: VerifyHooks | undefined;
   signal?: AbortSignal | undefined;
   progress?: ((event: VerifyProgressEvent) => void) | undefined;
 }
@@ -87,6 +122,7 @@ export interface VerifyResult {
   report: TapHoundReport;
   reportPath: string;
   summaryPath: string;
+  hookOutcomes?: readonly VerifyHookOutcome[] | undefined;
 }
 
 interface DeviceRuntime {
@@ -95,6 +131,7 @@ interface DeviceRuntime {
   session: RuntimeSession;
   views: RuntimeSessionPortViews;
   provider: UiSnapshotProvider | undefined;
+  readySnapshot: UiSnapshot | undefined;
   logcat: LogcatCollector;
   logcatStarted: boolean;
   runner: StepRunnerLike | undefined;
@@ -154,6 +191,65 @@ function layerForFailure(code: FailureCode): keyof TapHoundReport["layers"] {
 
 function soleRoleForJourney(journey: Journey): string {
   return journey.devices[0]?.role ?? DEFAULT_DEVICE_ROLE;
+}
+
+function stabilityProbe(
+  provider: UiSnapshotProvider,
+  fallback: UiStabilityProbe
+): UiStabilityProbe {
+  const withCapability = provider as UiSnapshotProvider & {
+    supportsStability?: boolean;
+    sample?: unknown;
+    reset?: unknown;
+  };
+  return withCapability.supportsStability === true
+    && typeof withCapability.sample === "function"
+    && typeof withCapability.reset === "function"
+    ? (withCapability as unknown as UiStabilityProbe)
+    : fallback;
+}
+
+function taskHookOutcome(
+  phase: "beforeSteps" | "afterSteps",
+  runtime: DeviceRuntime,
+  result: VerifyHookResult
+): VerifyHookOutcome {
+  return { ...result, phase, deviceRole: runtime.role };
+}
+
+async function runVerifyHook(
+  phase: "beforeSteps" | "afterSteps",
+  runtime: DeviceRuntime,
+  snapshot: UiSnapshot,
+  hooks: VerifyHooks,
+  clock: Clock
+): Promise<VerifyHookOutcome> {
+  const hook = phase === "beforeSteps"
+    ? hooks.beforeSteps
+    : hooks.afterSteps;
+  if (hook === undefined) {
+    return taskHookOutcome(phase, runtime, {
+      status: "unresolved",
+      message: "Verify hook is not configured"
+    });
+  }
+  try {
+    const result = await hook({
+      deviceRole: runtime.role,
+      deviceSerial: runtime.deviceSerial,
+      adb: runtime.views.adb,
+      uiSnapshotProvider: runtime.provider as UiSnapshotProvider,
+      logcat: runtime.logcat,
+      clock,
+      snapshot
+    });
+    return taskHookOutcome(phase, runtime, result);
+  } catch (error) {
+    return taskHookOutcome(phase, runtime, {
+      status: "unresolved",
+      message: error instanceof Error ? error.message : String(error)
+    });
+  }
 }
 
 function stepDeviceRole(step: JourneyStep, soleRole: string): string {
@@ -255,6 +351,7 @@ export class VerifyRuntime {
         };
     const secondaryErrors: ReportFailure[] = [];
     const collectionErrors: ReportFailure[] = [];
+    const hookOutcomes: VerifyHookOutcome[] = [];
     const steps: TapHoundReport["steps"] = [];
     const layers: TapHoundReport["layers"] = {
       run: "notRun",
@@ -314,6 +411,7 @@ export class VerifyRuntime {
             session: deviceSession,
             views,
             provider: undefined,
+            readySnapshot: undefined,
             logcat: new LogcatCollector(views.adb, this.dependencies.clock),
             logcatStarted: false,
             runner: undefined
@@ -483,16 +581,17 @@ export class VerifyRuntime {
             );
             break;
           }
-          await provider.capture({
+          const readySnapshot = await provider.capture({
             reason: "locate",
             ...(input.signal === undefined ? {} : { signal: input.signal }),
             timeoutMs: input.config.idle.timeoutMs
           });
+          runtime.readySnapshot = readySnapshot;
           runtime.runner = createStepRunner({
             adb: runtime.views.adb,
             screenshots: runtime.views.screenshots,
             annotatedScreens: runtime.views.annotatedScreens,
-            uiStability: runtime.views.uiStability,
+            uiStability: stabilityProbe(provider, runtime.views.uiStability),
             uiSnapshotProvider: provider,
             clock: this.dependencies.clock,
             logcat: runtime.logcat,
@@ -529,6 +628,27 @@ export class VerifyRuntime {
         layers.structural = "passed";
         layers.activityCheckpoint = "passed";
         layers.explicitExpect = "passed";
+      }
+
+      if (
+        primaryFailure === undefined
+        && input.hooks?.beforeSteps !== undefined
+      ) {
+        for (const runtime of runtimes) {
+          if (
+            runtime.provider === undefined
+            || runtime.readySnapshot === undefined
+          ) {
+            continue;
+          }
+          hookOutcomes.push(await runVerifyHook(
+            "beforeSteps",
+            runtime,
+            runtime.readySnapshot,
+            input.hooks,
+            this.dependencies.clock
+          ));
+        }
       }
 
       if (primaryFailure === undefined) {
@@ -581,6 +701,41 @@ export class VerifyRuntime {
               result.failure.stepIndex
             );
             break;
+          }
+        }
+
+        if (input.hooks?.afterSteps !== undefined) {
+          for (const runtime of runtimes) {
+            if (runtime.provider === undefined) {
+              continue;
+            }
+            let snapshot: UiSnapshot;
+            try {
+              snapshot = await runtime.provider.capture({
+                reason: "evidence",
+                ...(input.signal === undefined
+                  ? {}
+                  : { signal: input.signal }),
+                timeoutMs: input.config.idle.timeoutMs
+              });
+            } catch (error) {
+              hookOutcomes.push({
+                phase: "afterSteps",
+                deviceRole: runtime.role,
+                status: "unresolved",
+                message: `Post-journey snapshot failed: ${
+                  error instanceof Error ? error.message : String(error)
+                }`
+              });
+              continue;
+            }
+            hookOutcomes.push(await runVerifyHook(
+              "afterSteps",
+              runtime,
+              snapshot,
+              input.hooks,
+              this.dependencies.clock
+            ));
           }
         }
       }
@@ -737,7 +892,8 @@ export class VerifyRuntime {
       exitCode: failure === undefined ? 0 : exitCodeForFailure(failure.code),
       report,
       reportPath: published.reportPath,
-      summaryPath: published.summaryPath
+      summaryPath: published.summaryPath,
+      ...(hookOutcomes.length === 0 ? {} : { hookOutcomes })
     };
   }
 }

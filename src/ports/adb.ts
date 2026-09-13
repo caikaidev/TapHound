@@ -60,8 +60,17 @@ export interface DumpLogcatOptions {
   timeoutMs?: number | undefined;
 }
 
+export interface DeviceIdentity {
+  manufacturer: string;
+  model: string;
+  sdkLevel: number;
+}
+
 export interface AdbPort {
   devices: (signal?: AbortSignal) => Promise<readonly DeviceInfo[]>;
+  deviceIdentity?: (
+    identity: AppIdentity
+  ) => Promise<DeviceIdentity>;
   foregroundComponent: (
     identity: AppIdentity
   ) => Promise<ForegroundComponent>;

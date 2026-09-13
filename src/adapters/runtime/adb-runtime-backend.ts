@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 
 import type {
   AdbPort,
-  AppIdentity
+  AppIdentity,
+  DeviceIdentity
 } from "../../ports/adb.js";
 import type {
   AnnotatedScreenResolverPort
@@ -93,6 +94,25 @@ export class AdbRuntimeSession implements RuntimeSession {
 
   public get deviceSerial(): string {
     return this.dependencies.deviceSerial;
+  }
+
+  public get deviceIdentity():
+    | ((app: RuntimeAppQuery) => Promise<DeviceIdentity>)
+    | undefined {
+    if (this.dependencies.adb.deviceIdentity === undefined) {
+      return undefined;
+    }
+    return (app: RuntimeAppQuery): Promise<DeviceIdentity> => {
+      const current = this.dependencies.adb.deviceIdentity;
+      if (current === undefined) {
+        return Promise.reject(
+          new Error("deviceIdentity is unavailable")
+        );
+      }
+      return current(
+        appIdentity(app, this.dependencies.deviceSerial)
+      );
+    };
   }
 
   public openUiSnapshots(

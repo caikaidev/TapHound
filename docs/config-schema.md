@@ -61,6 +61,9 @@ have no defaults; `strategy` defaults to `"hybrid"`.
 | `idle.pollIntervalMs` | integer | Required, positive. Sleep between polls (not the poll duration). |
 | `idle.stablePolls` | integer | Required, positive. Consecutive stable polls required to declare idle. |
 | `idle.timeoutMs` | integer | Required, positive. Total wait budget per idle phase before `IDLE_TIMEOUT`. Each poll consumes its own duration from this budget, so slow UI dumps require a larger value. |
+| `idle.ignoreCursorBlink` | boolean | Optional. Treat layout changes that touch only editable widgets (`EditText` / `EDITABLE`) as cursor-blink noise instead of layout instability. For OEM keyboards and IME animations that keep polling busy. |
+| `idle.ignoreLayoutDrift` | boolean | Optional. Treat a *constant* structured change set across consecutive polls as transient layout/geometry drift (keyboard push, ripple/focus animations) instead of content change: as long as every changed element keeps its identity (`class` + `resource-id` + `text`) across polls, those changes are ignored; the first poll with a different set counts as a real change (and the new set is adopted). Only meaningful for structured diffs (Android CLI `layout --diff`), never for signature-based sampling; combine with `ignoreCursorBlink` when a field is both moved and edited. |
+| `idle.deviceProfiles` | array | Optional. Per-device overrides keyed on `match` (`manufacturer`, `model`, `sdkLevel`; at least one required, case-insensitive). Each profile can override `strategy`, `timeoutMs`, `pollIntervalMs`, `stablePolls`, `ignoreCursorBlink`, and `ignoreLayoutDrift`. Later matching profiles win. |
 
 Strategy behavior and tuning details (early-bail thresholds, confirmation
 floors, per-strategy poll accounting) are documented in
@@ -77,7 +80,7 @@ floors, per-strategy poll accounting) are documented in
 
 | Field | Type | Constraint |
 |---|---|---|
-| `ui.backend` | enum | `auto` (runtime default), `system-uiautomator`, `android-cli`, `appium-uiautomator2`. Appium is explicit-only and fails closed when its provider is unavailable. |
+| `ui.backend` | enum | `auto` (runtime default), `system-uiautomator`, `android-cli`, `appium-uiautomator2`. `auto` probes Appium first: when a local Appium server answers `/status` on 127.0.0.1:4723, the Appium UiAutomator2 provider is used ahead of `system-uiautomator`, then `android-cli`; an unreachable server or a provider that cannot bind skips forward without error. An explicit `appium-uiautomator2` remains strict and fails closed when its provider is unavailable. |
 | `ui.snapshotTimeoutMs` | integer | Optional, positive. Per-capture timeout for one UI snapshot (a single `uiautomator` dump can exceed 5 s on large trees; raise this before raising `idle.timeoutMs` when dumps are slow). |
 | `ui.cacheEnabled` | boolean | Optional. `false` disables only the run-scoped observation cache; it never changes locator rules or action behavior. |
 

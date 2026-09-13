@@ -19,6 +19,16 @@ export const ReportFailureSchema = z.strictObject({
 
 const AnchorLocatorReportSchema = z.strictObject({
   status: z.enum(["resolved", "locatorFallback", "failed"]),
+  resolvedBy: z.strictObject({
+    kind: z.enum([
+      "composeSemantics",
+      "resourceId",
+      "contentDescription",
+      "visibleText",
+      "visualMatch"
+    ]),
+    confidence: z.enum(["primary", "fallback"])
+  }).optional(),
   message: z.string().trim().min(1).optional()
 });
 

@@ -60,18 +60,17 @@ function argvOptionValue(
     if (argument === undefined) {
       continue;
     }
-    if (argument.startsWith(prefix)) {
+    if (argument === `--${name}` && argv[index + 1] !== undefined) {
+      value = argv[index + 1] ?? undefined;
+    } else if (argument.startsWith(prefix)) {
       value = argument.slice(prefix.length);
-      continue;
-    }
-    if (argument === `--${name}`) {
-      const next = argv[index + 1];
-      if (next !== undefined && !next.startsWith("-")) {
-        value = next;
-      }
     }
   }
   return value;
+}
+
+function argvHasTarget(argv: readonly string[]): boolean {
+  return argv.some((argument) => argument.startsWith("--target"));
 }
 
 export interface RuntimeBackendInvocation {
@@ -94,7 +93,11 @@ async function configBackendChoice(
   try {
     text = await invocation.readConfigFile(configPath);
   } catch {
-    return "auto";
+    // Local-target mode: the project config lives in the target workspace and
+    // is not readable here; local targets are local ADB projects, so default
+    // to the adb backend instead of falling through to mobile-mcp (remote
+    // cloud), which fails with DEVICE_UNAVAILABLE without a remote session.
+    return argvHasTarget(invocation.argv) ? "adb" : "auto";
   }
   let parsed: unknown;
   try {

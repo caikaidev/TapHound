@@ -32,6 +32,7 @@ import { resolveLocator } from "../locator/locator-resolver.js";
 import { launchFailure } from "../runtime/launch-failure.js";
 import { ProcessWaiter } from "../runtime/process-waiter.js";
 import { IdleWaiter } from "../wait/idle-waiter.js";
+import { deviceIdentityResolver } from "../wait/idle-profiles.js";
 import {
   listLocatableTargets,
   listRecorderTargets,
@@ -222,7 +223,12 @@ export class RecorderService {
       views.uiStability,
       this.dependencies.clock,
       input.deviceSerial,
-      input.config.run.packageName
+      input.config.run.packageName,
+      deviceIdentityResolver(views.adb, {
+        packageName: input.config.run.packageName,
+        deviceSerial: input.deviceSerial,
+        timeoutMs: input.config.idle.timeoutMs
+      })
     );
     await uiSnapshotProvider.capture({
       reason: "locate",
@@ -491,7 +497,12 @@ export class RecorderService {
       views.uiStability,
       this.dependencies.clock,
       input.deviceSerial,
-      packageName
+      packageName,
+      deviceIdentityResolver(views.adb, {
+        packageName,
+        deviceSerial: input.deviceSerial,
+        timeoutMs: input.config.idle.timeoutMs
+      })
     );
     let currentLayout = layout;
     let swipesUsed = 0;
@@ -656,7 +667,12 @@ export class RecorderService {
         views.uiStability,
         this.dependencies.clock,
         input.deviceSerial,
-        input.config.run.packageName
+        input.config.run.packageName,
+        deviceIdentityResolver(views.adb, {
+          packageName: input.config.run.packageName,
+          deviceSerial: input.deviceSerial,
+          timeoutMs: input.config.idle.timeoutMs
+        })
       );
       const idle = await idleWaiter.waitUntilIdle(input.config.idle, input.signal);
       if (idle.status === "cancelled") {
@@ -719,7 +735,12 @@ export class RecorderService {
       views.uiStability,
       this.dependencies.clock,
       input.deviceSerial,
-      escapedPackageName
+      escapedPackageName,
+      deviceIdentityResolver(views.adb, {
+        packageName: escapedPackageName,
+        deviceSerial: input.deviceSerial,
+        timeoutMs: input.config.idle.timeoutMs
+      })
     );
     const executor = new ActionExecutor(
       views.adb,

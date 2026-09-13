@@ -11,6 +11,19 @@
     "strategy": "structural",
     "pollIntervalMs": 200,
     "stablePolls": 2,
-    "timeoutMs": 10000
+    "timeoutMs": 10000,
+    "deviceProfiles": [
+      {
+        "match": {
+          "manufacturer": "samsung"
+        },
+        "ignoreCursorBlink": true,
+        "timeoutMs": 20000,
+        "ignoreLayoutDrift": true
+      }
+    ]
+  },
+  "ui": {
+    "backend": "auto"
   }
 }

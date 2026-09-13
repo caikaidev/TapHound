@@ -29,19 +29,30 @@ export class AutoUiSnapshotProviderFactory implements UiSnapshotProviderFactory 
         "Appium UiAutomator2 provider is not installed"
       );
     }
+    const appium = this.appium;
+    const probe = appium as (UiSnapshotProviderFactory & {
+      probe?: (timeoutMs?: number) => Promise<boolean>;
+    }) | undefined;
+    if (probe?.probe !== undefined && await probe.probe(options.timeoutMs)) {
+      try {
+        return await (appium as UiSnapshotProviderFactory).open(options);
+      } catch (error) {
+        if (!isAutoFallbackable(error)) throw error;
+      }
+    }
     try {
       return await this.system.open(options);
     } catch (error) {
-      if (
-        !(error instanceof UiSnapshotError)
-        || (
-          error.code !== "UI_BACKEND_UNAVAILABLE"
-          && error.code !== "UI_SNAPSHOT_INVALID"
-        )
-      ) {
-        throw error;
-      }
+      if (!isAutoFallbackable(error)) throw error;
     }
     return this.androidCli.open(options);
   }
+}
+
+function isAutoFallbackable(error: unknown): boolean {
+  return error instanceof UiSnapshotError
+    && (
+      error.code === "UI_BACKEND_UNAVAILABLE"
+      || error.code === "UI_SNAPSHOT_INVALID"
+    );
 }

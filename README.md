@@ -76,7 +76,13 @@ See the [local testing guide](docs/local-testing.md) for source, npm tarball, an
 
 - `doctor`: checks Node.js, ADB, Android CLI, app installation, permissions, and device. With `ui.backend=appium-uiautomator2`, it also checks the local Appium server and UiAutomator2 driver. The default runtime backend is Mobile MCP (`runtime.backend=auto`), so it checks the Mobile MCP server instead of the Android CLI and diagnoses the device through Mobile MCP tools; set `runtime.backend=adb` in config (or `TAPHOUND_RUNTIME_BACKEND=adb`) to check the ADB toolchain instead.
 - `record`: interactively execute actions and record a Journey.
-- `verify`: deterministically replay a Journey and publish a report.
+- `verify`: deterministically replay a Journey and publish a report. With `--contract`, verify an Acceptance Contract: hash-bound Journey, preconditions, post-journey assertions, evidence requirements, and a `pass`/`fail`/`inconclusive`/`needsReview`/`invalid` Verdict.
+- `contract validate`: validate an Acceptance Contract JSON and its Journey hash binding without touching a device.
+- `contract review`: merge externally produced reviewer findings into a stored `verdict.json`; `pass`/`inconclusive` may escalate to `needsReview`, but a deterministic `fail`/`invalid` is never rewritten (see `docs/source-of-truth.md`).
+- `playbook validate`: validate a Verification Playbook (schema, hash-bound Contract, Escalation Policy rules) without touching a device (see `docs/playbook.md`).
+- `baseline capture` / `baseline compare`: capture a behavior Baseline from a passing report and compare a new report against it deterministically; `compare` exits 1 on any drifted activity/element fact (see `docs/checkpoint-regression.md`).
+- `failure classify`: classify a failed Verification report into a concise structured failure contract (type, likely stage, expected/actual, evidence refs) for a Coding Agent or Diagnosis Agent — no log dump, no model call (see `docs/failure-classification.md`).
+- `local sync <id>`: copy the committed asset directories (context/journeys/knowledge/contracts/playbooks) from a project into a registered local target's workspace so `--target` commands can load them there (see `docs/local-target.md`).
 - `observe`: capture a point-in-time device snapshot (foreground, activity, layout, optional logcat) without a session or side effects.
 - `project describe`: output stable Android project facts.
 - `context list` / `validate` / `status`: inspect or validate a Project Context index and module shards.
@@ -111,6 +117,10 @@ See the [local testing guide](docs/local-testing.md) for source, npm tarball, an
   Knowledge screens/anchors/transitions, and Journey selection (P0 directly
   affected, P1 shared screen, P2 adjacent) through read-only analysis of
   `.taphound/context`, `.taphound/knowledge`, and `.taphound/journeys`.
+- `verify --diff <ref>`: the single Coding-Agent entry point — replay the
+  Journeys a Git change affects and return one `overall` verdict
+  (`--base`/`--head`/`--scope` optional; `verify-changes` remains as the
+  verbose alias). See [`docs/agent-integration.md`](docs/agent-integration.md).
 - `verify-changes --base <ref> --head <ref> [--scope p0,p1]`: replay the
   selected Journeys on a real device and report a per-Journey verdict plus an
   overall pass/fail; skips locator-only Journeys (no semantic binding) and
@@ -122,12 +132,14 @@ See the [local testing guide](docs/local-testing.md) for source, npm tarball, an
   generate/status/validate`, `verify`, `impact`, and `verify-changes` against a
   registered target; see [Local Target](docs/local-target.md).
 - `knowledge status` / `bootstrap` / `goal` / `plan` / `receipts` / `promote` /
-  `evolve`: manage committed Anchor, Screen, and Transition knowledge. Runtime
+  `evolve` / `feature-map`: manage committed Anchor, Screen, and Transition knowledge. Runtime
   commands write immutable receipts; only explicit bootstrap, promotion, or
   receipt-folded evolution updates authority. `goal` drafts a strict Goal Spec
-  for a known target Screen, and `evolve` folds receipts bound to the current
+  for a known target Screen, `evolve` folds receipts bound to the current
   Registry hash into Transition observation counts and upgrades `inferred`
-  documents to `observed`.
+  documents to `observed`, and `feature-map` derives a deterministic,
+  low-token agent-facing projection of the Registry (see
+  [Feature Map](docs/feature-map.md)).
 - `generation start --goal <goal.json>` / `generation next`: bind Knowledge
   and a strict Goal, then recognize and execute one known Transition through
   the existing proposal, risk, evidence, and replay controls.
@@ -255,7 +267,7 @@ taphound record \
 
 The Recorder does not auto-generate business `expect` assertions. Activity, Element, or Logcat assertions should be added explicitly by developers or external agents. See [Journey Schema](docs/journey-schema.md) for protocol details.
 
-Supported actions include `click`, `longClick`, `inputText`, `swipe`, `scrollTo`, `back`, and `wait`. `click`, `longClick`, `swipe`, `scrollTo`, and `inputText` may target a Knowledge `anchor` in addition to (or instead of) a runtime `locator`. `scrollTo` swipes within a deterministic `container` up to `maxSwipes` times, stopping once the target `anchor` or `locator` resolves uniquely without clicking it.
+Supported actions include `click`, `longClick`, `inputText`, `swipe`, `scrollTo`, `back`, and `wait`. `click`, `longClick`, `swipe`, `scrollTo`, and `inputText` may target a Knowledge `anchor` in addition to (or instead of) a runtime `locator`; Anchors are Semantic UI References with an optional ordered candidate chain, and the report records how each resolution matched (`resolvedBy { kind, confidence }` — see `docs/semantic-anchor.md`). `scrollTo` swipes within a deterministic `container` up to `maxSwipes` times, stopping once the target `anchor` or `locator` resolves uniquely without clicking it.
 
 ## AI-Agent-Driven Android Test Path Generation
 
@@ -407,7 +419,44 @@ For agent invocations:
 taphound verify --project . --journey .taphound/journeys/search.json --json
 ```
 
-`--json` mode guarantees exactly one final JSON value on stdout; progress and diagnostics go to stderr. See [Agent Integration](docs/agent-integration.md) and [Report Schema](docs/report-schema.md).
+`--json` mode guarantees exactly one final JSON value on stdout; progress and diagnostics go to stderr. See [Agent Integration](docs/agent-integration.md), [Report Schema](docs/report-schema.md), [Independent Verification Agent](docs/verification-agent.md) (V0.7 orchestration contract + measurement protocol), and [Terminology](docs/terminology.md) (status vocabulary maps).
+
+### Beyond a single replay: the deterministic verification chain
+
+A single replay answers "does this Journey still pass?"; the Trust model
+answers "is the task actually done?" with a chain of deterministic artifacts:
+
+```text
+Knowledge Registry → Feature Map (agent orientation, docs/feature-map.md)
+        ↓
+Acceptance Contract (hash-bound Journey + assertions, docs/contract-schema.md)
+        ↓
+Verification Playbook (phases + Escalation Policy, docs/playbook.md)
+        ↓
+Journey replay → Evidence (report.json, screenshots, Logcat)
+        ↓
+Verdict (pass / fail / inconclusive / needsReview / invalid)
+        ↓
+Failure Classification (structured contract for repair agents,
+                        docs/failure-classification.md)
+        ↓
+Baseline + Regression Comparator (behavior drifts vs a known-good run,
+                                   docs/checkpoint-regression.md)
+```
+
+- **Semantic Anchors** (`docs/semantic-anchor.md`): an Anchor is a semantic
+  reference with an ordered candidate chain; the report records how a
+  resolution matched (`resolvedBy {kind, confidence}`), so a Journey survives
+  XML→Compose migrations and resource-id renames. `visualMatch` is never
+  performed by Core.
+- **Source of Truth** (`docs/source-of-truth.md`): a lower-trust layer
+  (semantic/multimodal reviewer) may escalate a deterministic `pass` or
+  `inconclusive` to `needsReview`, but never rewrites a deterministic `fail`
+  or `invalid`. Escalation is driven by explicit, ordered policy rules in the
+  Playbook — *when AI is invoked is itself deterministic*.
+- **Agent diff mode**: `verify --diff <ref>` selects the minimal Journey set a
+  Git change affects via the ImpactSet (P0/P1/P2) and returns one `overall`
+  verdict.
 
 ## Local Target (real-app validation)
 

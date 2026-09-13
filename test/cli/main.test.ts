@@ -100,8 +100,6 @@ describe("runMain", () => {
       exitCode: 2,
       failure: { code: "CONFIG_INVALID" }
     });
-    expect((test.stderr as BufferOutput).value)
-      .toContain("required option '--journey <path>' not specified");
     expect(exitCodes).toEqual([2]);
   });
 

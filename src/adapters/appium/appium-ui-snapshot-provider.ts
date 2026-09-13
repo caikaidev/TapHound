@@ -11,6 +11,11 @@ import type {
   UiSnapshotProvider,
   UiSnapshotProviderFactory
 } from "../../ports/ui-snapshot.js";
+import type {
+  UiStabilityProbe,
+  UiStabilitySampleOptions,
+  UiStabilitySampleResult
+} from "../../ports/ui-stability.js";
 import {
   readDeviceUiEnvironment,
   type DeviceUiEnvironment
@@ -48,11 +53,11 @@ function loopbackEndpoint(value: string): URL {
   return endpoint;
 }
 
-class FetchAppiumHttpClient implements AppiumHttpClient {
+export class FetchAppiumHttpClient implements AppiumHttpClient {
   public constructor(private readonly endpoint: URL) {}
 
   public async request(input: AppiumHttpRequest): Promise<{ value: unknown }> {
-    const timeout = AbortSignal.timeout(input.timeoutMs);
+    const timeout = AbortSignal.timeout(Math.trunc(input.timeoutMs));
     const signal = input.signal === undefined
       ? timeout
       : AbortSignal.any([input.signal, timeout]);
@@ -81,8 +86,9 @@ function objectValue(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-class AppiumUiSnapshotProvider implements UiSnapshotProvider {
+class AppiumUiSnapshotProvider implements UiSnapshotProvider, UiStabilityProbe {
   private closePromise: Promise<void> | undefined;
+  private lastSourceSignature: string | undefined;
 
   public constructor(
     private readonly http: AppiumHttpClient,
@@ -90,6 +96,33 @@ class AppiumUiSnapshotProvider implements UiSnapshotProvider {
     private readonly environment: DeviceUiEnvironment,
     public readonly descriptor: UiBackendDescriptor
   ) {}
+
+  public reset(): void {
+    this.lastSourceSignature = undefined;
+  }
+
+  public async sample(
+    options: UiStabilitySampleOptions
+  ): Promise<UiStabilitySampleResult> {
+    void options.deviceSerial;
+    const startedAt = performance.now();
+    const snapshot = await this.capture({
+      reason: "idle",
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+      timeoutMs: options.timeoutMs ?? 5000
+    });
+    const signature = createHash("sha256")
+      .update(JSON.stringify(snapshot.roots))
+      .digest("hex");
+    const previous = this.lastSourceSignature;
+    this.lastSourceSignature = signature;
+    return {
+      changes: previous === signature ? [] : [{ layoutSha256: signature }],
+      layout: snapshot.roots,
+      backend: "uiautomator",
+      durationMs: performance.now() - startedAt
+    };
+  }
 
   public async capture(options: CaptureUiSnapshotOptions): Promise<UiSnapshot> {
     if (this.closePromise !== undefined) {
@@ -112,7 +145,9 @@ class AppiumUiSnapshotProvider implements UiSnapshotProvider {
       throw new UiSnapshotError(
         "UI_SNAPSHOT_FAILED",
         this.descriptor.id,
-        "Appium page source capture failed",
+        `Appium page source capture failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
         { cause: error, terminal: true }
       );
     }
@@ -178,6 +213,19 @@ export class AppiumUiSnapshotProviderFactory implements
     this.settings = {
       mapTestTagToResourceId: options.mapTestTagToResourceId ?? false
     };
+  }
+
+  public async probe(timeoutMs = 2000): Promise<boolean> {
+    try {
+      const response = await this.http.request({
+        method: "GET",
+        path: "/status",
+        timeoutMs
+      });
+      return response.value !== undefined;
+    } catch {
+      return false;
+    }
   }
 
   public async open(

@@ -5,6 +5,11 @@ import type {
   UiSnapshotProviderFactory,
   OpenUiSnapshotProviderOptions
 } from "../../ports/ui-snapshot.js";
+import type {
+  UiStabilityProbe,
+  UiStabilitySampleOptions,
+  UiStabilitySampleResult
+} from "../../ports/ui-stability.js";
 
 type InvalidationReason = Parameters<
   NonNullable<UiSnapshotProvider["invalidate"]>
@@ -34,8 +39,9 @@ export class CachedUiSnapshotProviderFactory implements
   }
 }
 
-export class CachedUiSnapshotProvider implements UiSnapshotProvider {
+export class CachedUiSnapshotProvider implements UiSnapshotProvider, Partial<UiStabilityProbe> {
   public readonly descriptor;
+  public readonly supportsStability: boolean;
   private mutationEpoch = 0;
   private cached: CachedObservation | undefined;
   private inFlight: { epoch: number; promise: Promise<UiSnapshot> } | undefined;
@@ -51,6 +57,27 @@ export class CachedUiSnapshotProvider implements UiSnapshotProvider {
     private readonly ttlMs = 300
   ) {
     this.descriptor = source.descriptor;
+    const sourceProbe = source as UiSnapshotProvider & Partial<UiStabilityProbe>;
+    this.supportsStability = typeof sourceProbe.sample === "function"
+      && typeof sourceProbe.reset === "function";
+  }
+
+  public reset(): void {
+    const sourceProbe = this.source as UiSnapshotProvider & Partial<UiStabilityProbe>;
+    sourceProbe.reset?.();
+  }
+
+  public sample(
+    options: UiStabilitySampleOptions
+  ): Promise<UiStabilitySampleResult> {
+    const sourceProbe = this.source as UiSnapshotProvider & Partial<UiStabilityProbe>;
+    const sample = sourceProbe.sample;
+    if (sample === undefined) {
+      return Promise.reject(new Error(
+        "Underlying UI snapshot provider does not support stability sampling"
+      ));
+    }
+    return sample.call(sourceProbe as UiStabilityProbe, options);
   }
 
   public capture(options: CaptureUiSnapshotOptions): Promise<UiSnapshot> {

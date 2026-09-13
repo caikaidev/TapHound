@@ -28,6 +28,25 @@ time. External Workflow Skills may invoke it once per independent Case, but
 they own requirement analysis, planning, coding, build/install, multi-Case
 scheduling, completion gates, and diagnosis.
 
+For those external stages, Core offers deterministic support this Skill does
+not own and never bypasses:
+
+- `taphound verify --diff <ref>` — select and replay the minimal Journey set a
+  Git change affects (ImpactSet P0/P1/P2), one `overall` verdict.
+- `taphound failure classify --report <path>` — concise structured failure
+  contract for a repair loop (no log dump).
+- `taphound baseline capture` / `baseline compare` — behavior drift against a
+  known-good run.
+- `taphound knowledge feature-map --markdown` — low-token registry projection
+  for orientation.
+- `taphound contract validate` / `contract review` / `playbook validate` —
+  Acceptance Contract and Escalation Policy tooling.
+- `taphound local sync <id>` — copy project assets into a local target's
+  workspace before `--target` runs.
+
+This Skill's own contract remains unchanged: one Case Goal, one deterministic
+generation session, final Replay in `generation finalize`.
+
 This Skill requires a valid Project Context as a prerequisite. The
 `taphound-journey-brief-author` Skill is the recommended producer — it analyzes
 Android source and maintains the Context Bundle. When this Skill encounters

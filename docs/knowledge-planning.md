@@ -98,6 +98,22 @@ newly bound receipts are eligible. When nothing changes, `evolve` reports
 counts feed the Route Planner's edge cost, so repeatedly verified Transitions
 become cheaper than unproven ones.
 
+## Feature Map projection
+
+`knowledge feature-map` derives a read-only, deterministic, low-token
+projection of the committed Registry for agents:
+
+```bash
+taphound knowledge feature-map --project /path/to/android-project --json
+taphound knowledge feature-map --project /path/to/android-project --markdown
+```
+
+A Feature is the set of Screens reachable from one entry Screen (a Screen with
+no incoming Transition); entries, features, Transitions, and Anchors are mapped
+and sorted deterministically, and the bundle hash is carried for drift
+detection. The projection is never a second Source of Truth and never modifies
+device state. See [`docs/feature-map.md`](./feature-map.md).
+
 ## Goal scaffolding
 
 `knowledge goal` drafts the strict Goal Spec for a known Screen without
@@ -177,8 +193,18 @@ step is not tied to a single UI resource id. `click`, `longClick`, `swipe`,
 resolves the anchor against the fresh layout first and falls back to the
 `locator` only when the step carries one, recording
 `anchor: { status: "locatorFallback" }` in the report. See
-[`docs/journey-schema.md`](./journey-schema.md) and
-[`docs/report-schema.md`](./report-schema.md) for the full protocol.
+[`docs/journey-schema.md`](./journey-schema.md),
+[`docs/report-schema.md`](./report-schema.md), and
+[`docs/semantic-anchor.md`](./semantic-anchor.md) for the full protocol.
+
+Anchors are **Semantic UI References**: an optional ordered `candidates`
+chain (`composeSemantics` → `resourceId` → `contentDescription` →
+`visibleText` → `visualMatch`) is resolved deterministically, the first unique
+match wins, and the report records `resolvedBy { kind, confidence }`
+(`primary`/`fallback`). `visualMatch` is never performed by Core: when only it
+remains, resolution fails closed as `visualOnly` →
+`RUNTIME_CAPABILITY_MISSING`, leaving visual matching to an external
+multimodal layer under the Escalation Policy.
 
 ## Journey promotion
 

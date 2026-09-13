@@ -224,6 +224,16 @@ function fakeLocalTargets(
       run: processRun,
       start: vi.fn()
     },
+    localSync: {
+      sync: vi.fn((input: { targetId: string; projectRoot: string; targetsHome: string }): Promise<{ targetId: string; projectRoot: string; workspaceRoot: string; syncedDirs: string[]; filesCopied: number; skippedBuild: boolean }> => Promise.resolve({
+        targetId: input.targetId,
+        projectRoot: input.projectRoot,
+        workspaceRoot: `/targets/.taphound/local/${input.targetId}`,
+        syncedDirs: [],
+        filesCopied: 0,
+        skippedBuild: true
+      })),
+    },
     clock: { now: () => new Date() },
     ...overrides
   };

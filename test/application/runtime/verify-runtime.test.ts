@@ -525,6 +525,7 @@ describe("VerifyRuntime", () => {
       launchApp: () => Promise.resolve(commandResult()),
       forceStop: () => Promise.resolve(commandResult()),
       currentActivity: undefined,
+      deviceIdentity: undefined,
       foregroundComponent: undefined,
       appProcesses: undefined,
       windowTopology: undefined,

@@ -109,6 +109,37 @@ describe("TapHoundConfigSchema", () => {
     })).toThrow();
   });
 
+  it("accepts ignoreCursorBlink and device idle profiles", () => {
+    const parsed = TapHoundConfigSchema.parse({
+      ...validConfig,
+      idle: {
+        ...validConfig.idle,
+        ignoreCursorBlink: true,
+        deviceProfiles: [{
+          match: { manufacturer: "samsung", model: "SM-A5560", sdkLevel: 34 },
+          ignoreCursorBlink: true,
+          ignoreLayoutDrift: true,
+          strategy: "frameStats",
+          timeoutMs: 15000
+        }]
+      }
+    });
+    expect(parsed.idle.ignoreCursorBlink).toBe(true);
+    expect(parsed.idle.deviceProfiles?.[0]?.match.model).toBe("SM-A5560");
+    expect(parsed.idle.deviceProfiles?.[0]?.strategy).toBe("frameStats");
+    expect(parsed.idle.deviceProfiles?.[0]?.ignoreLayoutDrift).toBe(true);
+  });
+
+  it("rejects a device idle profile without any match attribute", () => {
+    expect(() => TapHoundConfigSchema.parse({
+      ...validConfig,
+      idle: {
+        ...validConfig.idle,
+        deviceProfiles: [{ match: {}, ignoreCursorBlink: true }]
+      }
+    })).toThrow();
+  });
+
   it("requires a package name", () => {
     const config = structuredClone(validConfig);
     Reflect.deleteProperty(config.run, "packageName");

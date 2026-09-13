@@ -65,6 +65,7 @@ import {
   type IdleConfig,
   type IdleResult
 } from "../wait/idle-waiter.js";
+import { deviceIdentityResolver } from "../wait/idle-profiles.js";
 import { withIdleAdvice } from "../wait/idle-advice.js";
 import {
   summarizeProposedStep
@@ -900,7 +901,12 @@ export class GenerationStepExecutor {
         this.boundViews().uiStability,
         this.dependencies.clock,
         session.target.deviceSerial,
-        session.target.packageName
+        session.target.packageName,
+        deviceIdentityResolver(this.boundViews().adb, {
+          packageName: session.target.packageName,
+          deviceSerial: session.target.deviceSerial,
+          timeoutMs: this.dependencies.idle.timeoutMs
+        })
       );
 
       if (provisional.action === "scrollTo") {
@@ -1831,7 +1837,12 @@ export class GenerationStepExecutor {
         this.boundViews().uiStability,
         this.dependencies.clock,
         session.target.deviceSerial,
-        escapedPackageName
+        escapedPackageName,
+        deviceIdentityResolver(this.boundViews().adb, {
+          packageName: escapedPackageName,
+          deviceSerial: session.target.deviceSerial,
+          timeoutMs: this.dependencies.idle.timeoutMs
+        })
       );
       const scroll = await new ScrollToExecutor({
         uiSnapshotProvider: this.boundUiSnapshotProvider(),
@@ -1897,7 +1908,12 @@ export class GenerationStepExecutor {
       this.boundViews().uiStability,
       this.dependencies.clock,
       session.target.deviceSerial,
-      escapedPackageName
+      escapedPackageName,
+      deviceIdentityResolver(this.boundViews().adb, {
+        packageName: escapedPackageName,
+        deviceSerial: session.target.deviceSerial,
+        timeoutMs: this.dependencies.idle.timeoutMs
+      })
     );
     const idle = await externalIdleWaiter.waitUntilIdle(
       this.dependencies.idle,

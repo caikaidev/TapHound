@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "id": "behavior-result-missing",
+  "category": "behavior",
+  "description": "Submit shows a NO RESULTS error text instead of the queried result",
+  "variant": {
+    "label": "behavior-result-missing",
+    "apkPath": ".taphound/variants/behavior-result-missing.apk"
+  },
+  "contractPath": ".taphound/contracts/fd-search-results.json",
+  "expectedVerdict": "fail",
+  "tags": [
+    "search",
+    "result"
+  ]
+}

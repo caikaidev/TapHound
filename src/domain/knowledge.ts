@@ -16,7 +16,7 @@ export const KnowledgeStatusSchema = z.enum([
 ]);
 export const KnowledgeSha256Schema = z.string().regex(/^[a-f\d]{64}$/);
 
-const QualifiedNameSchema = z.string().regex(
+export const QualifiedNameSchema = z.string().regex(
   /^(?:[A-Za-z_$][\w$]*\.)+[A-Za-z_$][\w$]*$/,
   "Value must be fully qualified"
 );
@@ -64,6 +64,27 @@ export const KnowledgeSourceFilesSchema = z.array(
   }
 });
 
+export const AnchorCandidateKindSchema = z.enum([
+  "composeSemantics",
+  "resourceId",
+  "contentDescription",
+  "visibleText",
+  "visualMatch"
+]);
+
+export const AnchorCandidateSchema = z.strictObject({
+  kind: AnchorCandidateKindSchema,
+  locator: LocatorSchema
+}).superRefine((candidate, context) => {
+  if (candidate.kind === "visualMatch") {
+    context.addIssue({
+      code: "custom",
+      path: ["locator"],
+      message: "visualMatch candidates are resolved by an external multimodal layer, never by Core"
+    });
+  }
+});
+
 export const AnchorDefinitionSchema = z.strictObject({
   version: z.literal(1),
   id: KnowledgeIdSchema,
@@ -77,6 +98,18 @@ export const AnchorDefinitionSchema = z.strictObject({
     }
   }),
   identity: AnchorIdentitySchema,
+  candidates: z.array(AnchorCandidateSchema).optional().superRefine((candidates, context) => {
+    if (candidates === undefined) {
+      return;
+    }
+    const kinds = candidates.map((candidate) => candidate.kind);
+    if (new Set(kinds).size !== kinds.length) {
+      context.addIssue({
+        code: "custom",
+        message: "Anchor candidate kinds must be unique"
+      });
+    }
+  }),
   description: z.string().trim().min(1).optional(),
   sourceFiles: KnowledgeSourceFilesSchema.optional()
 });
@@ -239,6 +272,8 @@ export const KnowledgeBundleIndexSchema = z.strictObject({
 });
 
 export type KnowledgeStatus = z.infer<typeof KnowledgeStatusSchema>;
+export type AnchorCandidateKind = z.infer<typeof AnchorCandidateKindSchema>;
+export type AnchorCandidate = z.infer<typeof AnchorCandidateSchema>;
 export type AnchorDefinition = z.infer<typeof AnchorDefinitionSchema>;
 export type StatePredicate = z.infer<typeof StatePredicateSchema>;
 export type ScreenDefinition = z.infer<typeof ScreenDefinitionSchema>;

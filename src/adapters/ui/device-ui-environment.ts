@@ -35,6 +35,10 @@ export function parseDisplayRotation(
   if (orientation !== undefined) {
     return ([0, 90, 180, 270] as const)[Number(orientation)];
   }
+  const rotationIndex = /\bRotation([0-3])\b/i.exec(dumpsysInput)?.[1];
+  if (rotationIndex !== undefined) {
+    return ([0, 90, 180, 270] as const)[Number(rotationIndex)];
+  }
   const degrees = /\bROT_(0|90|180|270)\b/i.exec(dumpsysInput)?.[1];
   if (degrees === undefined) return undefined;
   const parsed = Number(degrees);

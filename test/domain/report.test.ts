@@ -160,6 +160,38 @@ describe("TapHoundReportSchema", () => {
     expect(TapHoundReportSchema.parse(report).steps[0]?.locator)
       .toMatchObject({ fallbackUsed: true, fallbackLabel: "#7" });
   });
+
+  it("records semantic anchor resolution confidence", () => {
+    const firstStep = validReport().steps[0];
+    if (firstStep === undefined) {
+      throw new Error("Fixture must contain a step");
+    }
+    const report = validReport({
+      steps: [{
+        ...firstStep,
+        locator: {
+          status: "found",
+          matchedBy: "anchor",
+          anchorId: "search.open",
+          fallbackUsed: false,
+          anchor: {
+            status: "resolved",
+            resolvedBy: { kind: "visibleText", confidence: "fallback" }
+          }
+        }
+      }]
+    });
+
+    const parsed = TapHoundReportSchema.parse(report);
+    expect(parsed.steps[0]?.locator).toMatchObject({
+      matchedBy: "anchor",
+      anchorId: "search.open",
+      anchor: {
+        status: "resolved",
+        resolvedBy: { kind: "visibleText", confidence: "fallback" }
+      }
+    });
+  });
 });
 
 describe("hashJourney", () => {

@@ -423,7 +423,8 @@ All edges retain their Phase 1 confidence.
 
 - Use ONLY read-only commands: `observe`, `context generate`, `context
   refresh`, `context rehash`, `context validate`, `context status`,
-  `context list`, `journey check`, `doctor`, `project describe`. NEVER use
+  `context list`, `knowledge feature-map`, `journey check`, `doctor`,
+  `project describe`. NEVER use
   `generation`, `verify`, `record`, `align`.
 - Do NOT modify device state (no clicks, no input, no swipes).
 - The agent NEVER computes SHA-256 hashes manually. Core does all Context

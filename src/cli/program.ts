@@ -1,9 +1,6 @@
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-
 import { Command } from "commander";
 
+import { readCliVersion } from "./version.js";
 import { createContextCommand } from "./commands/context.js";
 import { createDoctorCommand } from "./commands/doctor.js";
 import { createGenerationCommand } from "./commands/generation.js";
@@ -13,6 +10,7 @@ import { createObserveCommand } from "./commands/observe.js";
 import { createProjectCommand } from "./commands/project.js";
 import { createRecordCommand } from "./commands/record.js";
 import { createVerifyCommand } from "./commands/verify.js";
+import { createContractCommand } from "./commands/contract.js";
 import { createAlignCommand } from "./commands/align.js";
 import { createImpactCommand } from "./commands/impact.js";
 import { createVerifyChangesCommand } from "./commands/verify-changes.js";
@@ -20,23 +18,13 @@ import { createUiCacheCommand } from "./commands/ui-cache.js";
 import { createKnowledgeCommand } from "./commands/knowledge.js";
 import { createBenchmarkCommand } from "./commands/benchmark.js";
 import { createLocalCommand } from "./commands/local.js";
+import { createPlaybookCommand } from "./commands/playbook.js";
+import { createBaselineCommand } from "./commands/baseline.js";
+import { createFailureCommand } from "./commands/failure.js";
 import {
   createProductionDependencies,
   type CliDependencies
 } from "./dependencies.js";
-
-function readCliVersion(): string {
-  try {
-    const here = dirname(fileURLToPath(import.meta.url));
-    const pkgPath = resolve(here, "../../package.json");
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as {
-      version?: string;
-    };
-    return pkg.version ?? "unknown";
-  } catch {
-    return "unknown";
-  }
-}
 
 export function createProgram(
   dependencies: CliDependencies = createProductionDependencies()
@@ -70,6 +58,7 @@ export function createProgram(
     .addCommand(configureOutput(createDoctorCommand(dependencies)))
     .addCommand(configureOutput(createRecordCommand(dependencies)))
     .addCommand(configureOutput(createVerifyCommand(dependencies)))
+    .addCommand(configureOutput(createContractCommand(dependencies)))
     .addCommand(configureOutput(createObserveCommand(dependencies)))
     .addCommand(configureOutput(createProjectCommand(dependencies)))
     .addCommand(configureOutput(createContextCommand(dependencies)))
@@ -77,6 +66,9 @@ export function createProgram(
     .addCommand(configureOutput(createGenerationCommand(dependencies)))
     .addCommand(configureOutput(createKnowledgeCommand(dependencies)))
     .addCommand(configureOutput(createBenchmarkCommand(dependencies)))
+    .addCommand(configureOutput(createPlaybookCommand(dependencies)))
+    .addCommand(configureOutput(createBaselineCommand(dependencies)))
+    .addCommand(configureOutput(createFailureCommand(dependencies)))
     .addCommand(configureOutput(createLocalCommand(dependencies)))
     .addCommand(configureOutput(createInitCommand(dependencies)))
     .addCommand(configureOutput(createAlignCommand(dependencies)))

@@ -160,6 +160,29 @@ describe("resolveRuntimeBackendChoiceFromInvocation", () => {
     expect(withoutRuntime).toBe("auto");
   });
 
+  it("defaults local-target invocations to the adb backend when no project config is readable", async () => {
+    const choice = await resolveRuntimeBackendChoiceFromInvocation(
+      invocation({
+        argv: ["node", "taphound", "verify", "--diff", "main", "--target", "demo"],
+        files: {}
+      })
+    );
+
+    expect(choice).toBe("adb");
+  });
+
+  it("still prefers an explicit env override over the target default", async () => {
+    const choice = await resolveRuntimeBackendChoiceFromInvocation(
+      invocation({
+        env: { TAPHOUND_RUNTIME_BACKEND: "auto" },
+        argv: ["node", "taphound", "verify", "--diff", "main", "--target", "demo"],
+        files: {}
+      })
+    );
+
+    expect(choice).toBe("adb");
+  });
+
   it("rejects an invalid config runtime backend with the config path", async () => {
     await expect(resolveRuntimeBackendChoiceFromInvocation(invocation({
       files: {

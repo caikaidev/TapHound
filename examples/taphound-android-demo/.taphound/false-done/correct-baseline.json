@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "id": "correct-baseline",
+  "category": "correct",
+  "description": "Agent keeps the original implementation; search works as expected",
+  "variant": { "label": "correct-baseline", "apkPath": ".taphound/variants/correct-baseline.apk" },
+  "contractPath": ".taphound/contracts/fd-search-results.json",
+  "expectedVerdict": "pass",
+  "tags": ["search", "baseline"]
+}

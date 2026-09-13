@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "id": "fd-search-results",
+  "goal": "Submitting a search shows a result and never shows the NO RESULTS failure text",
+  "journey": {
+    "path": ".taphound/journeys/search.json",
+    "sha256": "2ec3897c50137c69eeb895060567808602c899bfcd1715c9c7b3ad935d5d6ce1"
+  },
+  "preconditions": [{ "kind": "installed" }],
+  "assertions": [
+    {
+      "type": "element",
+      "locator": { "resourceId": "search_result" },
+      "visibility": "visible",
+      "timeoutMs": 3000
+    },
+    {
+      "type": "element",
+      "locator": { "text": "NO RESULTS" },
+      "visibility": "absent",
+      "timeoutMs": 3000
+    }
+  ],
+  "evidenceRequirements": [
+    { "kind": "screenshot", "required": true },
+    { "kind": "logcat", "scope": "anyStep", "required": true }
+  ]
+}

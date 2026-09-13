@@ -1660,12 +1660,17 @@ describe("StepRunner wait until", () => {
         status: "found";
         point: { x: number; y: number };
         bounds?: { left: number; top: number; right: number; bottom: number };
+        resolvedBy?: {
+          kind: "composeSemantics" | "resourceId" | "contentDescription" | "visibleText" | "visualMatch";
+          confidence: "primary" | "fallback";
+        };
       }> => {
         void input;
         return Promise.resolve({
           status: "found" as const,
           point: { x: 50, y: 25 },
-          bounds: { left: 0, top: 0, right: 100, bottom: 50 }
+          bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+          resolvedBy: { kind: "composeSemantics" as const, confidence: "fallback" as const }
         });
       })
     };
@@ -1692,7 +1697,10 @@ describe("StepRunner wait until", () => {
       status: "found",
       matchedBy: "anchor",
       anchorId: "demo.search.open",
-      anchor: { status: "resolved" }
+      anchor: {
+        status: "resolved",
+        resolvedBy: { kind: "composeSemantics", confidence: "fallback" }
+      }
     });
   });
 

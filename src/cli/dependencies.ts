@@ -1,8 +1,10 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import {
+  mkdir,
   mkdtemp,
   readFile,
-  rm
+  rm,
+  writeFile
 } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve as resolvePath } from "node:path";
@@ -52,7 +54,9 @@ import { FileSystemJourneyWriter } from "../adapters/filesystem/journey-writer.j
 import { FileSystemUiCacheStore } from "../adapters/filesystem/ui-cache-store.js";
 import { FileSystemKnowledgeRegistry } from "../adapters/filesystem/knowledge-registry.js";
 import { FileSystemBenchmarkStore } from "../adapters/filesystem/benchmark-store.js";
+import { FileSystemFalseDoneStore } from "../adapters/filesystem/false-done-store.js";
 import type { BenchmarkStore } from "../ports/benchmark-store.js";
+import type { FalseDoneRunResult } from "../domain/false-done.js";
 import {
   FileSystemKnowledgeReceiptStore
 } from "../adapters/filesystem/knowledge-receipt-store.js";
@@ -187,8 +191,28 @@ import type {
 import { ProjectDescriber } from "../application/project/project-describer.js";
 import { RecorderService, type RecordInput, type RecordResult } from "../application/recorder/recorder-service.js";
 import { ReportWriter } from "../application/report/report-writer.js";
+import {
+  ContractVerifier,
+  type ContractVerifyInput,
+  type ContractVerifyResult
+} from "../application/contract/contract-verifier.js";
+import { ContractLoader } from "../application/contract/contract-loader.js";
+import { ContractReviewMerger } from "../application/contract/contract-review.js";
+import { PlaybookValidator } from "../application/playbook/playbook-validator.js";
+import { BaselineService } from "../application/checkpoint/baseline-service.js";
+import { FailureClassifier } from "../application/diagnosis/failure-classifier.js";
+import { LocalSyncService, type LocalSyncResult } from "../application/target/local-sync-service.js";
+import type { ContractVerdictView } from "../domain/contract.js";
+import { TapHoundReportV4Schema } from "../domain/report.js";
+import type { FailureClassification } from "../domain/failure-classification.js";
+import {
+  FalseDoneRunner,
+  type FalseDoneRunInput,
+  type FalseDoneValidateOutput
+} from "../application/benchmark/false-done-runner.js";
 import { VerifyRuntime, type VerifyInput, type VerifyResult } from "../application/runtime/verify-runtime.js";
 import { IdleWaiter } from "../application/wait/idle-waiter.js";
+import { deviceIdentityResolver } from "../application/wait/idle-profiles.js";
 import type { TapHoundConfig } from "../domain/config.js";
 import type {
   LocalTargetIdentity,
@@ -240,7 +264,11 @@ import type {
 } from "../ports/knowledge-registry.js";
 import { isErrnoException } from "../shared/errors.js";
 import { readRuntimeBackendChoice } from "./runtime-selection.js";
-import { CONTEXT_INDEX_PATH, tapHoundPath } from "../domain/workspace.js";
+import {
+  CONTEXT_INDEX_PATH,
+  LOCAL_WORKSPACE_DIR,
+  tapHoundPath
+} from "../domain/workspace.js";
 import { JourneySchema } from "../domain/journey.js";
 
 export interface TextOutput {
@@ -282,11 +310,20 @@ export interface GenerationCliRuntime {
   }) => Promise<ActionResolutionResult>) | undefined;
 }
 
+export interface LocalSyncPort {
+  sync: (input: {
+    targetId: string;
+    projectRoot: string;
+    targetsHome: string;
+  }) => Promise<LocalSyncResult>;
+}
+
 export interface LocalTargets {
   targetsHome: () => string;
   configStore: TargetConfigStorePort;
   pathResolver: TargetPathResolverPort;
   workspace: LocalTargetWorkspacePort;
+  localSync: LocalSyncPort;
   targetResolver: (targetsHome: string) => TargetResolver;
   localTargetService: (targetsHome: string) => LocalTargetService;
   processRunner: ProcessRunner;
@@ -296,6 +333,7 @@ export interface LocalTargets {
 export interface CliDependencies {
   signal?: AbortSignal | undefined;
   localTargets: LocalTargets;
+  localSync?: LocalSyncPort | undefined;
   doctor: {
     run: (input?: DoctorRunInput) => Promise<DoctorReport>;
   };
@@ -305,6 +343,22 @@ export interface CliDependencies {
   verifier: {
     verify: (input: VerifyInput) => Promise<VerifyResult>;
   };
+  contractVerifier?: {
+    verify: (input: ContractVerifyInput) => Promise<ContractVerifyResult>;
+  } | undefined;
+  contractLoader?: Pick<ContractLoader, "load"> | undefined;
+  playbookValidator?: Pick<PlaybookValidator, "validate"> | undefined;
+  baselineService?: Pick<BaselineService, "captureFromReport" | "write" | "compare"> | undefined;
+  failureClassifier?: {
+    classify: (reportPath: string) => Promise<FailureClassification>;
+  } | undefined;
+  contractReview?: {
+    merge: ContractReviewMerger["merge"];
+    writeVerdict: (input: {
+      verdictPath: string;
+      view: ContractVerdictView;
+    }) => Promise<void>;
+  } | undefined;
   projectDescriber: Pick<ProjectDescriber, "describe">;
   contextValidator: Pick<ContextValidator, "validate">;
   contextLoader: Pick<ContextLoader, "load" | "readIndex">;
@@ -407,6 +461,20 @@ export interface CliDependencies {
   } | undefined;
   benchmark?: {
     store: BenchmarkStore;
+  } | undefined;
+  falseDone?: {
+    validate: (input: {
+      projectRoot: string;
+      caseIds?: readonly string[] | undefined;
+    }) => Promise<FalseDoneValidateOutput>;
+    run: (input: FalseDoneRunInput) => Promise<{
+      result: FalseDoneRunResult;
+      path: string;
+    }>;
+    readResult: (
+      projectRoot: string,
+      runId: string
+    ) => Promise<FalseDoneRunResult>;
   } | undefined;
   readJson: (path: string) => Promise<unknown>;
   cwd: () => string;
@@ -531,7 +599,12 @@ export function createProductionDependencies(
     uiStability,
     clock,
     deviceSerial,
-    packageName
+    packageName,
+    deviceIdentityResolver(adb, {
+      packageName: packageName ?? "unknown",
+      deviceSerial,
+      timeoutMs: config.timeoutMs
+    })
   ).waitUntilIdle(
     config,
     signal
@@ -614,6 +687,92 @@ export function createProductionDependencies(
     receipts: knowledgeReceiptStore
   });
   const benchmarkStore = new FileSystemBenchmarkStore();
+  const falseDoneStore = new FileSystemFalseDoneStore();
+  const falseDoneRunner = new FalseDoneRunner({
+    store: falseDoneStore,
+    installApk: async ({ deviceSerial, apkPath }): Promise<void> => {
+      const result = await runner.run({
+        executable: "adb",
+        args: ["-s", deviceSerial, "install", "-r", apkPath]
+      });
+      if (
+        result.exitCode !== 0
+        || result.spawnError !== undefined
+        || result.cancelled
+        || result.timedOut
+      ) {
+        throw new Error(
+          result.stderr.trim()
+            || result.spawnError
+            || result.stdout.trim()
+            || "adb install failed"
+        );
+      }
+    },
+    verifyContract: (input): Promise<ContractVerifyResult> => (
+      productionContractVerifier.verify(input)
+    ),
+    readText: (path: string): Promise<string> => readFile(path, "utf8"),
+    readBytes: async (path: string): Promise<Uint8Array> => (
+      new Uint8Array(await readFile(path))
+    ),
+    now: (): Date => new Date(),
+    createRunId: randomUUID
+  });
+  const productionContractLoader = new ContractLoader({
+    readText: (path: string): Promise<string> => readFile(path, "utf8")
+  });
+  const productionContractReview = new ContractReviewMerger({
+    now: (): Date => new Date()
+  });
+  const productionPlaybookValidator = new PlaybookValidator({
+    readText: (path: string): Promise<string> => readFile(path, "utf8")
+  });
+  const productionBaselineService = new BaselineService({
+    readText: (path: string): Promise<string> => readFile(path, "utf8"),
+    writeText: (path: string, content: string): Promise<void> => {
+      const directory = dirname(path);
+      return mkdir(directory, { recursive: true }).then(() => (
+        writeFile(path, content, "utf8")
+      ));
+    },
+    now: (): Date => new Date()
+  });
+  const productionFailureClassifier = new FailureClassifier({
+    now: (): Date => new Date()
+  });
+  const productionContractVerifier = new ContractVerifier({
+    verify: (input): Promise<VerifyResult> => productionVerifyRuntime.verify(input),
+    loadKnowledge: (input): Promise<LoadedKnowledgeBundle> => (
+      knowledgeRegistry.load(input.projectRoot, input.workspaceRoot)
+    ),
+    readText: (path: string): Promise<string> => readFile(path, "utf8"),
+    writeVerdict: async ({ reportPath, verdict }): Promise<void> => {
+      const directory = dirname(reportPath);
+      await mkdir(directory, { recursive: true });
+      await writeFile(
+        join(directory, "verdict.json"),
+        `${JSON.stringify(verdict, null, 2)}\n`,
+        "utf8"
+      );
+    },
+    now: (): Date => new Date()
+  });
+  const productionVerifyRuntime = new VerifyRuntime({
+    sessions,
+    sessionPorts: runtimeSessionPortViews,
+    clock,
+    artifactStore: new FileSystemArtifactStore(),
+    reportWriter: new ReportWriter(),
+    now: (): Date => new Date(),
+    createRunId: runId,
+    anchorResolverFor: (
+      projectRoot: string,
+      workspaceRoot?: string
+    ): AnchorResolverPort => (
+      new KnowledgeAnchorResolver(knowledgeRegistry, projectRoot, workspaceRoot)
+    )
+  });
   const gitDiff = new NodeGitDiff(runner);
   const impactResolver = new ImpactResolver({
     loadContext: async (input: {
@@ -757,25 +916,30 @@ export function createProductionDependencies(
       prompt: new InquirerRecorderPrompt(),
       journeyWriter: new FileSystemJourneyWriter()
     }),
-    verifier: new VerifyRuntime({
-      sessions,
-      sessionPorts: runtimeSessionPortViews,
-      clock,
-      artifactStore: new FileSystemArtifactStore(),
-      reportWriter: new ReportWriter(),
-      now: () => new Date(),
-      createRunId: runId,
-      anchorResolverFor: (
-        projectRoot: string,
-        workspaceRoot?: string  
-      ): AnchorResolverPort => (
-        new KnowledgeAnchorResolver(knowledgeRegistry, projectRoot, workspaceRoot)
-      )
-    }),
-    projectDescriber: new ProjectDescriber({
-      discoverer: moduleDiscoverer,
-      identity: identityInspector
-    }),
+      verifier: productionVerifyRuntime,
+      contractLoader: productionContractLoader,
+      contractVerifier: productionContractVerifier,
+      playbookValidator: productionPlaybookValidator,
+      baselineService: productionBaselineService,
+      failureClassifier: {
+        classify: async (reportPath: string): Promise<FailureClassification> => {
+          const text = await readFile(reportPath, "utf8");
+          const report = TapHoundReportV4Schema.parse(JSON.parse(text));
+          return productionFailureClassifier.classify({ report });
+        }
+      },
+      contractReview: {
+        merge: productionContractReview.merge,
+        writeVerdict: async ({ verdictPath, view }): Promise<void> => {
+          const directory = dirname(verdictPath);
+          await mkdir(directory, { recursive: true });
+          await writeFile(verdictPath, `${JSON.stringify(view, null, 2)}\n`, "utf8");
+        }
+      },
+      projectDescriber: new ProjectDescriber({
+        discoverer: moduleDiscoverer,
+        identity: identityInspector
+      }),
     contextValidator,
     contextLoader,
     contextRefresher,
@@ -846,6 +1010,20 @@ export function createProductionDependencies(
     },
     benchmark: {
       store: benchmarkStore
+    },
+    falseDone: {
+      validate: (input): Promise<FalseDoneValidateOutput> => (
+        falseDoneRunner.validate(input)
+      ),
+      run: (input): Promise<Awaited<ReturnType<FalseDoneRunner["run"]>>> => (
+        falseDoneRunner.run(input)
+      ),
+      readResult: (
+        projectRoot: string,
+        runId: string
+      ): Promise<FalseDoneRunResult> => (
+        falseDoneStore.readResult(projectRoot, runId)
+      )
     },
     generationStarter: {
       start: async (input): Promise<
@@ -1081,6 +1259,12 @@ export function createProductionDependencies(
       ? {}
       : { cliEntryPath: process.argv[1] }),
     localTargets: buildLocalTargets(runner, { now: (): Date => new Date() }),
+    localSync: new LocalSyncService({
+      workspaceRoot: (
+        targetsHome: string,
+        targetId: string
+      ): string => join(targetsHome, LOCAL_WORKSPACE_DIR, targetId)
+    }),
     readJson: async (path): Promise<unknown> => JSON.parse(
       await readFile(path, "utf8")
     ) as unknown,
@@ -1126,6 +1310,10 @@ function buildLocalTargets(
     pathResolver,
     workspace,
     targetResolver: makeResolver,
+    localSync: new LocalSyncService({
+      workspaceRoot: (targetsHome: string, targetId: string): string =>
+        workspace.root(targetsHome, targetId)
+    }),
     localTargetService: (
       targetsHome: string
     ): LocalTargetService => new LocalTargetService({

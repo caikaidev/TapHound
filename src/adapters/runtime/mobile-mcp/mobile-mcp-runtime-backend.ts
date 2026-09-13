@@ -228,6 +228,7 @@ export class MobileMcpRuntimeSession implements RuntimeSession {
   public readonly descriptor: RuntimeBackendDescriptor;
   public readonly deviceSerial: string;
   public readonly currentActivity: undefined;
+  public readonly deviceIdentity: undefined;
   public readonly foregroundComponent: undefined;
   public readonly appProcesses: undefined;
   public readonly windowTopology: undefined;

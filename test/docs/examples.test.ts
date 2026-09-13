@@ -275,6 +275,7 @@ describe("TapHound documentation examples", () => {
       "doctor",
       "record",
       "verify",
+      "contract",
       "observe",
       "project",
       "context",
@@ -282,6 +283,9 @@ describe("TapHound documentation examples", () => {
       "generation",
       "knowledge",
       "benchmark",
+      "playbook",
+      "baseline",
+      "failure",
       "local",
       "init",
       "align",
@@ -305,6 +309,10 @@ describe("TapHound documentation examples", () => {
         "generation start",
         "knowledge status",
         "benchmark validate",
+        "playbook validate",
+        "baseline capture",
+        "failure classify",
+        "verify --diff",
         "taphound init",
         "ui-cache status"
       ]) {

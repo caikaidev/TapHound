@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 
 import type {
+  DeviceIdentity
+} from "../../ports/adb.js";
+import type {
   AnnotatedScreenResolverPort
 } from "../../ports/annotated-screen-resolver.js";
 import type {
@@ -111,6 +114,9 @@ export class FakeRuntimeSession implements RuntimeSession {
   public readonly currentActivity:
     | ((app: RuntimeAppQuery) => Promise<string>)
     | undefined;
+  public readonly deviceIdentity:
+    | ((app: RuntimeAppQuery) => Promise<DeviceIdentity>)
+    | undefined;
   public readonly foregroundComponent:
     | ((app: RuntimeAppQuery) => Promise<ForegroundComponent>)
     | undefined;
@@ -143,6 +149,7 @@ export class FakeRuntimeSession implements RuntimeSession {
     state?: FakeRuntimeSessionState | undefined;
     uiSnapshots?: UiSnapshotProvider | undefined;
     uiStability?: UiStabilityProbe | undefined;
+    deviceIdentity?: DeviceIdentity | undefined;
   }) {
     this.descriptor = input.descriptor;
     this.deviceSerial = input.deviceSerial;
@@ -162,6 +169,12 @@ export class FakeRuntimeSession implements RuntimeSession {
         );
       }
       : undefined;
+    this.deviceIdentity = input.deviceIdentity === undefined
+      ? undefined
+      : (app: RuntimeAppQuery): Promise<DeviceIdentity> => {
+        this.calls.push(`deviceIdentity:${app.packageName}`);
+        return Promise.resolve(input.deviceIdentity as DeviceIdentity);
+      };
     this.foregroundComponent = this.capabilities.foregroundActivity
       ? (app: RuntimeAppQuery): Promise<ForegroundComponent> => {
         this.calls.push(`foregroundComponent:${app.packageName}`);

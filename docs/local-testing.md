@@ -63,7 +63,7 @@ After building, you can inspect the CLI directly:
 node dist/cli/main.js --help
 ```
 
-The first line should be `Usage: taphound`, and it should list `doctor`, `record`, `verify`, `observe`, `project`, `context`, `journey`, `generation`, `knowledge`, `benchmark`, `init`, `align`, `impact`, `verify-changes`, and `ui-cache`.
+The first line should be `Usage: taphound`, and it should list `doctor`, `record`, `verify`, `contract`, `observe`, `project`, `context`, `journey`, `generation`, `knowledge`, `benchmark`, `init`, `align`, `impact`, `verify-changes`, and `ui-cache`.
 
 ## 3. Test the npm Tarball
 
@@ -214,3 +214,40 @@ Cross-machine validation should retain at minimum:
 - Whether the failure can be reliably reproduced on the same commit
 
 Do not commit tokens, OTPs, device privacy data, or other credentials.
+
+## 7. Vendor-Specific Device Notes
+
+Customized ROMs differ in UI idle behavior. Two seams exist for device-specific
+tuning (see `docs/config-schema.md`):
+
+- `idle.ignoreCursorBlink` — treats structural layout changes that touch only
+  editable widgets (`EditText` / `EDITABLE`) as cursor-blink noise.
+- `idle.deviceProfiles` — per-device overrides matched on `manufacturer`,
+  `model`, and/or `sdkLevel` (case-insensitive), each able to override
+  `strategy`, `timeoutMs`, `pollIntervalMs`, `stablePolls`, and
+  `ignoreCursorBlink`. Later matching profiles win.
+
+Known observations on Samsung devices (`SM-A5560`, Android 14, One UI):
+
+- Opening an editable field opens the Software Keyboard and keeps the layout
+  busy for a long stretch; the keyboard also pushes sibling controls
+  (e.g. a submit button) around, so `ignoreCursorBlink` alone does not cover
+  the whole IME animation. Two complementary seams handle this:
+  `ignoreCursorBlink` (editable-only changes) and `ignoreLayoutDrift`
+  (a constant change set across polls = geometry drift; see
+  `docs/config-schema.md`). The demo config ships a `samsung` profile enabling
+  both and raising `timeoutMs`.
+- The Android CLI `layout` service can transiently fail with
+  "Unrecognized response from instrumentation server" on these devices;
+  TapHound surfaces that as `UI_SNAPSHOT_INVALID` at capture time. Restarting
+  `adb` or the Instrumentation Server may recover it; the failure is
+  environment-only and reproduces independently of TapHound changes.
+- Devices where both the Android CLI `layout` service and the shell
+  `uiautomator` service fail (e.g. some Android 16 devices) can still run
+  through `ui.backend=appium-uiautomator2` with a local Appium server
+  (`appium --address 127.0.0.1 --port 4723`, UiAutomator2 driver installed).
+  The Appium provider does its own stability sampling (page-source hash
+  diff), because an active Appium session owns the UiAutomation connection
+  and shell `uiautomator dump` then fails with a session conflict; the demo
+  config keeps this backend pinned for that reason. A device reboot clears a
+  stuck "UiAutomationService already registered" framework state.

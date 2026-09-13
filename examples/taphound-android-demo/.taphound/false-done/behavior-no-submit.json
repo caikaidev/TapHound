@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "id": "behavior-no-submit",
+  "category": "behavior",
+  "description": "Tapping submit has no effect at all",
+  "variant": { "label": "behavior-no-submit", "apkPath": ".taphound/variants/behavior-no-submit.apk" },
+  "contractPath": ".taphound/contracts/fd-search-results.json",
+  "expectedVerdict": "fail",
+  "tags": ["search", "submit"]
+}

@@ -132,8 +132,11 @@ generated `<base>/.taphound/.gitignore` that contains `local/`:
     local/
       <id>/
         identity.json     # registered identity + project fingerprint + package
-        context/          # Project Context generated for this target
-        journeys/         # Journeys verified against this target
+        context/          # Project Context synced from the project
+        journeys/         # Journeys synced from the project
+        knowledge/        # Knowledge registry synced from the project
+        contracts/        # Acceptance Contracts synced from the project
+        playbooks/        # Verification Playbooks synced from the project
         runs/             # verify/verify-changes reports (screenshots, Logcat)
         generations/      # reserved (generation --target is deferred)
         cache/
@@ -142,6 +145,11 @@ generated `<base>/.taphound/.gitignore` that contains `local/`:
 The **target project repository never gains TapHound files.** All TapHound
 artifacts live under the targets home, and the target repo's Git status stays
 limited to the developer's own changes.
+
+`local sync <id>` copies the committed asset directories (context, journeys,
+knowledge, contracts, playbooks) from the project into the target workspace,
+so `--target` commands can load them there. The workspace `build/` subtree is
+never copied: it stays the runtime-isolated area. Sync is idempotent.
 
 ## CLI reference
 
@@ -176,6 +184,21 @@ or `cwd`). Verify each is present with `node dist/cli/main.js <cmd> --help`:
 - `context status --target <id>` / `context validate --target <id>`
 - `verify --target <id> --journey <name>`
 - `verify-changes --target <id> --base <ref>` (and `impact --target <id>`)
+- `verify --diff <ref> --target <id>` — the Agent-facing diff entry
+
+### Sync project assets
+
+`--target` commands load Context, Journeys, Knowledge, Contracts, and
+Playbooks from the target workspace. After registering (or after committing
+new assets in the project), sync them once:
+
+```bash
+node dist/cli/main.js local sync my-app --json
+```
+
+Without a sync the workspace is empty and `--target` analysis fails with
+`CONTEXT_INVALID` ("Context shard does not exist"). Sync never copies the
+`build/` subtree (runtime-isolated) and is idempotent.
 
 ## Verification against a Local Target
 

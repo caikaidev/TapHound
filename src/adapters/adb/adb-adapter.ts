@@ -9,6 +9,7 @@ import {
 import type {
   AdbPort,
   AppIdentity,
+  DeviceIdentity,
   DeviceInfo,
   DumpLogcatOptions,
   LaunchActivityOptions,
@@ -97,6 +98,41 @@ export class AdbAdapter implements AdbPort {
         }
         return { serial, status };
       });
+  }
+
+  public async deviceIdentity(
+    identity: AppIdentity
+  ): Promise<DeviceIdentity> {
+    const property = async (name: string): Promise<string> => {
+      const result = await this.run(
+        ["-s", identity.deviceSerial, "shell", "getprop", name],
+        identity.signal,
+        identity.timeoutMs
+      );
+      if (
+        result.exitCode !== 0
+        || result.spawnError !== undefined
+        || result.cancelled
+        || result.timedOut
+      ) {
+        throw new Error(`getprop ${name} failed on ${identity.deviceSerial}`);
+      }
+      return result.stdout.trim();
+    };
+    const manufacturer = await property("ro.product.manufacturer");
+    const model = await property("ro.product.model");
+    const sdk = await property("ro.build.version.sdk");
+    const sdkLevel = Number(sdk);
+    if (
+      manufacturer.length === 0
+      || model.length === 0
+      || !Number.isSafeInteger(sdkLevel)
+    ) {
+      throw new Error(
+        `Device ${identity.deviceSerial} returned an incomplete identity`
+      );
+    }
+    return { manufacturer, model, sdkLevel };
   }
 
   public async foregroundComponent(

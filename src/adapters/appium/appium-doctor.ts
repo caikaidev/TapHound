@@ -30,6 +30,32 @@ export async function checkAppiumUiAutomator2(
     timeoutMs: 5000,
     ...(signal === undefined ? {} : { signal })
   });
+  const serverStatus = async (): Promise<{
+    ok: boolean;
+    version?: string | undefined;
+    error?: string | undefined;
+  }> => {
+    try {
+      const response = await fetch("http://127.0.0.1:4723/status", {
+        signal: AbortSignal.timeout(5000)
+      });
+      const payload = await response.json() as {
+        value?: { build?: { version?: unknown } };
+      };
+      if (!response.ok) throw new Error(`HTTP ${String(response.status)}`);
+      return {
+        ok: true,
+        version: typeof payload.value?.build?.version === "string"
+          ? payload.value.build.version
+          : undefined
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error)
+      };
+    }
+  };
   try {
     const version = await command(["--version"]);
     if (
@@ -38,6 +64,13 @@ export async function checkAppiumUiAutomator2(
       || version.timedOut
       || version.cancelled
     ) {
+      const server = await serverStatus();
+      if (server.ok) {
+        return {
+          status: "passed",
+          message: `UiAutomator2 (verified via running server); server ${server.version ?? "unknown"}; start: appium --address 127.0.0.1 --port 4723`
+        };
+      }
       return {
         status: "failed",
         message: version.stderr.trim() || version.spawnError || "Appium server is unavailable"
@@ -50,6 +83,14 @@ export async function checkAppiumUiAutomator2(
       || drivers.timedOut
       || drivers.cancelled
     ) {
+      const server = await serverStatus();
+      if (server.ok) {
+        return {
+          status: "passed",
+          version: firstLine(version.stdout),
+          message: `UiAutomator2 (verified via running server); server ${server.version ?? "unknown"}; start: appium --address 127.0.0.1 --port 4723`
+        };
+      }
       return {
         status: "failed",
         version: firstLine(version.stdout),

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "id": "behavior-query-lost",
+  "category": "behavior",
+  "description": "The submitted query is dropped from the log evidence",
+  "variant": { "label": "behavior-query-lost", "apkPath": ".taphound/variants/behavior-query-lost.apk" },
+  "contractPath": ".taphound/contracts/fd-search-results.json",
+  "expectedVerdict": "fail",
+  "tags": ["search", "logcat"]
+}

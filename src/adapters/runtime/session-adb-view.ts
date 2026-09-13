@@ -1,6 +1,7 @@
 import type {
   AdbPort,
   AppIdentity,
+  DeviceIdentity,
   DeviceInfo,
   DumpLogcatOptions,
   LaunchActivityOptions,
@@ -83,6 +84,17 @@ export class RuntimeSessionAdbView implements AdbPort {
       );
     }
     return this.session.currentActivity(appQuery(identity));
+  }
+
+  public async deviceIdentity(identity: AppIdentity): Promise<DeviceIdentity> {
+    this.assertBoundSerial(identity.deviceSerial);
+    if (this.session.deviceIdentity === undefined) {
+      throw runtimeCapabilityMissing(
+        this.session.descriptor.id,
+        "deviceIdentity"
+      );
+    }
+    return this.session.deviceIdentity(appQuery(identity));
   }
 
   public async isInstalled(identity: AppIdentity): Promise<boolean> {

@@ -8,6 +8,7 @@ import type {
 } from "../domain/runtime.js";
 import type { WindowTopology } from "../domain/window-hierarchy.js";
 import type { UiBackendSelection } from "../domain/ui-backend.js";
+import type { DeviceIdentity } from "./adb.js";
 import type { AnnotatedScreenResolverPort } from "./annotated-screen-resolver.js";
 import type {
   CommandResult,
@@ -76,6 +77,9 @@ export interface RuntimeSession {
   forceStop(app: RuntimeAppQuery): Promise<CommandResult>;
   readonly currentActivity:
     | ((app: RuntimeAppQuery) => Promise<string>)
+    | undefined;
+  readonly deviceIdentity:
+    | ((app: RuntimeAppQuery) => Promise<DeviceIdentity>)
     | undefined;
   readonly foregroundComponent:
     | ((app: RuntimeAppQuery) => Promise<ForegroundComponent>)

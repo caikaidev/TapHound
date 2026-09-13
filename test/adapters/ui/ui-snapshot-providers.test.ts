@@ -21,6 +21,11 @@ import type {
 } from "../../../src/ports/ui-snapshot.js";
 import type { CommandResult } from "../../../src/ports/process-runner.js";
 import { commandResult, processRunner } from "../../fakes/process-runner.js";
+
+type AppiumLikeFactory = UiSnapshotProviderFactory & {
+  probe: (timeoutMs?: number) => Promise<boolean>;
+};
+
 import { uiSnapshotProvider } from "../../fakes/ui-snapshot.js";
 
 function environmentResults(): [CommandResult, CommandResult, CommandResult] {
@@ -42,6 +47,14 @@ describe("bound UI snapshot providers", () => {
     expect(parseDisplayRotation(
       "Viewport INTERNAL: displayId=0, orientation=1, logicalFrame=[0, 0, 2670, 1200]"
     )).toBe(90);
+  });
+  it("reads a rotation from the standard dumpsys input Rotation line", () => {
+    expect(parseDisplayRotation(
+      "        OrientationAware: false\n      Orientation: Rotation0"
+    )).toBe(0);
+    expect(parseDisplayRotation(
+      "        Orientation: Rotation2"
+    )).toBe(180);
   });
   it("binds System UIAutomator once and attributes physical-display snapshots", async () => {
     const runner = processRunner();
@@ -162,6 +175,76 @@ describe("bound UI snapshot providers", () => {
     })).rejects.toMatchObject({ code: "UI_SNAPSHOT_FAILED" });
 
     expect(systemOpen).toHaveBeenCalledOnce();
+    expect(androidOpen).toHaveBeenCalledOnce();
+  });
+
+  it("prefers Appium in the auto chain when its server is reachable", async () => {
+    const system = uiSnapshotProvider();
+    const android = uiSnapshotProvider();
+    const appiumProvider = uiSnapshotProvider();
+    const appiumOpen = vi.fn(() => Promise.resolve(appiumProvider));
+    const appiumFactory: AppiumLikeFactory = {
+      open: appiumOpen,
+      probe: (): Promise<boolean> => Promise.resolve(true)
+    };
+    const auto = new AutoUiSnapshotProviderFactory(
+      { open: vi.fn(() => Promise.resolve(system)) },
+      { open: vi.fn(() => Promise.resolve(android)) },
+      appiumFactory
+    );
+    const provider = await auto.open({
+      deviceSerial: "emulator-5554",
+      timeoutMs: 1000
+    });
+    expect(provider).toBe(appiumProvider);
+    expect(appiumOpen).toHaveBeenCalledOnce();
+  });
+
+  it("falls through from Appium to system-uiautomator when the Appium server is unreachable", async () => {
+    const system = uiSnapshotProvider();
+    const systemOpen = vi.fn(() => Promise.resolve(system));
+    const appiumFactory: AppiumLikeFactory = {
+      open: vi.fn(),
+      probe: (): Promise<boolean> => Promise.resolve(false)
+    };
+    const auto = new AutoUiSnapshotProviderFactory(
+      { open: systemOpen },
+      { open: vi.fn(() => Promise.resolve(uiSnapshotProvider())) },
+      appiumFactory
+    );
+    const provider = await auto.open({
+      deviceSerial: "emulator-5554",
+      timeoutMs: 1000
+    });
+    expect(provider).toBe(system);
+    expect(systemOpen).toHaveBeenCalledOnce();
+  });
+
+  it("falls back from Appium to android-cli when the Appium session cannot open", async () => {
+    const android = uiSnapshotProvider();
+    const androidOpen = vi.fn(() => Promise.resolve(android));
+    const appiumFactory: AppiumLikeFactory = {
+      open: vi.fn(() => Promise.reject(new UiSnapshotError(
+        "UI_BACKEND_UNAVAILABLE",
+        "appium-uiautomator2",
+        "session failed"
+      ))),
+      probe: (): Promise<boolean> => Promise.resolve(true)
+    };
+    const auto = new AutoUiSnapshotProviderFactory(
+      { open: vi.fn(() => Promise.reject(new UiSnapshotError(
+        "UI_BACKEND_UNAVAILABLE",
+        "system-uiautomator",
+        "not available"
+      ))) },
+      { open: androidOpen },
+      appiumFactory
+    );
+    const provider = await auto.open({
+      deviceSerial: "emulator-5554",
+      timeoutMs: 1000
+    });
+    expect(provider).toBe(android);
     expect(androidOpen).toHaveBeenCalledOnce();
   });
 

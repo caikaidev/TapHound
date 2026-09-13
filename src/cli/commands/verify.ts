@@ -2,6 +2,8 @@ import { join, resolve } from "node:path";
 
 import { Command } from "commander";
 
+import { readCliVersion } from "../version.js";
+import { runDiffVerification } from "../diff-verification.js";
 import { TapHoundConfigSchema } from "../../domain/config.js";
 import {
   DEFAULT_DEVICE_ROLE,
@@ -28,7 +30,12 @@ import { assertNoLegacyWorkspace } from "../workspace-guard.js";
 interface VerifyOptions {
   project: string;
   config: string;
-  journey: string;
+  journey?: string | undefined;
+  contract?: string | undefined;
+  diff?: string | undefined;
+  base?: string | undefined;
+  head?: string | undefined;
+  scope?: string | undefined;
   device?: string | undefined;
   package?: string | undefined;
   activity?: string | undefined;
@@ -164,11 +171,104 @@ async function runDoctorAndVerify(
   }
 }
 
+async function runContractVerify(
+  dependencies: CliDependencies,
+  options: VerifyOptions,
+  config: ReturnType<typeof TapHoundConfigSchema.parse>,
+  projectRoot: string,
+  workspaceRoot: string | undefined
+): Promise<void> {
+  const json = options.json === true;
+  if (dependencies.contractVerifier === undefined) {
+    writeFailure(
+      dependencies,
+      json,
+      "CONFIG_INVALID",
+      "TapHound contract verification is not configured"
+    );
+    return;
+  }
+  try {
+    const doctor = await dependencies.doctor.run({
+      packageName: config.run.packageName,
+      ...(config.ui?.backend === undefined
+        ? {}
+        : { requestedUiBackend: config.ui.backend }),
+      ...(options.device === undefined
+        ? {}
+        : { requestedDevice: options.device }),
+      ...(dependencies.signal === undefined
+        ? {}
+        : { signal: dependencies.signal })
+    });
+    if (doctor.status === "failed") {
+      writeFailure(
+        dependencies,
+        json,
+        doctor.failureCode ?? "ENVIRONMENT_MISSING_TOOL",
+        doctor.checks.find((check) => check.status === "failed")?.message
+          ?? "TapHound environment preflight failed"
+      );
+      return;
+    }
+    const deviceSerial = options.device ?? doctor.deviceSerial;
+    if (deviceSerial === undefined) {
+      throw new Error("Doctor did not select a device");
+    }
+    writeLine(
+      dependencies.stderr,
+      `TapHound: verifying contract ${resolve(projectRoot, options.contract as string)}`
+    );
+    const result = await dependencies.contractVerifier.verify({
+      projectRoot,
+      ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
+      config,
+      devices: [{
+        role: DEFAULT_DEVICE_ROLE,
+        deviceSerial
+      }],
+      toolVersions: toolVersions(doctor.checks),
+      taphoundVersion: readCliVersion(),
+      contractPath: resolve(projectRoot, options.contract as string),
+      manualReplay: process.stdin.isTTY,
+      ...(dependencies.signal === undefined
+        ? {}
+        : { signal: dependencies.signal })
+    });
+    if (json) {
+      writeJson(dependencies.stdout, result.view);
+    } else {
+      writeLine(
+        dependencies.stdout,
+        `TapHound verify --contract: ${result.view.verdict.toUpperCase()}\nReport: ${result.view.reportPath ?? "n/a"}`
+      );
+    }
+    dependencies.setExitCode(result.exitCode);
+  } catch (error) {
+    const output = failureOutput(4, "INTERNAL_ERROR", errorMessage(error));
+    if (json) {
+      writeJson(dependencies.stdout, output);
+    } else {
+      writeLine(dependencies.stderr, output.failure.message);
+    }
+    dependencies.setExitCode(4);
+  }
+}
+
 async function runTargetVerify(
   dependencies: CliDependencies,
   options: VerifyOptions
 ): Promise<void> {
   const json = options.json === true;
+  if (options.journey === undefined) {
+    writeFailure(
+      dependencies,
+      json,
+      "CONFIG_INVALID",
+      "verify --target requires --journey"
+    );
+    return;
+  }
   const id = options.target as string;
   const home = targetsHome(dependencies, options.targets);
   const resolver = dependencies.localTargets.targetResolver(home);
@@ -271,10 +371,15 @@ async function runTargetVerify(
 
 export function createVerifyCommand(dependencies: CliDependencies): Command {
   return new Command("verify")
-    .description("Deterministically verify a TapHound Journey")
+    .description("Deterministically verify a TapHound Journey or Acceptance Contract")
     .option("--project <path>", "Android project root", dependencies.cwd())
     .option("--config <path>", "TapHound config path", CONFIG_PATH)
-    .requiredOption("--journey <path>", "TapHound Journey path or bare name with --target")
+    .option("--journey <path>", "TapHound Journey path or bare name with --target")
+    .option("--contract <path>", "Acceptance Contract path (mutually exclusive with --journey)")
+    .option("--diff <ref>", "Verify the Journeys a Git change affects (diff mode)")
+    .option("--base <ref>", "Base Git ref for --diff (default origin/main)")
+    .option("--head <ref>", "Head Git ref for --diff (defaults to HEAD, or WORKTREE with --target)")
+    .option("--scope <p0,p1,p2>", "Selection tiers for --diff", "p0,p1")
     .option("--device <serial>", "Select an online Android device")
     .option("--package <name>", "Override run.packageName")
     .option("--activity <name>", "Override run.activity")
@@ -283,19 +388,102 @@ export function createVerifyCommand(dependencies: CliDependencies): Command {
     .option("--targets <path>", "Targets workspace base path")
     .option("--json", "Emit one machine-readable JSON value")
     .action(async (options: VerifyOptions): Promise<void> => {
+      if (options.diff !== undefined) {
+        await runDiffVerification(dependencies, {
+          project: options.project,
+          config: options.config,
+          base: options.base ?? options.diff,
+          ...(options.head === undefined ? {} : { head: options.head }),
+          ...(options.device === undefined ? {} : { device: options.device }),
+          ...(options.scope === undefined ? {} : { scope: options.scope }),
+          ...(options.target === undefined ? {} : { target: options.target }),
+          ...(options.targets === undefined ? {} : { targets: options.targets }),
+          json: options.json === true
+        });
+        return;
+      }
+      if (options.journey === undefined && options.contract === undefined) {
+        writeFailure(
+          dependencies,
+          options.json === true,
+          "CONFIG_INVALID",
+          "verify requires exactly one of --journey or --contract"
+        );
+        return;
+      }
+      if (options.journey !== undefined && options.contract !== undefined) {
+        writeFailure(
+          dependencies,
+          options.json === true,
+          "CONFIG_INVALID",
+          "--journey and --contract are mutually exclusive"
+        );
+        return;
+      }
+      if (options.contract !== undefined && options.target !== undefined) {
+        writeFailure(
+          dependencies,
+          options.json === true,
+          "CONFIG_INVALID",
+          "verify --contract does not support --target in this version; run it against a project workspace"
+        );
+        return;
+      }
       if (options.target !== undefined) {
         await runTargetVerify(dependencies, options);
         return;
       }
 
       let config;
-      let journey;
+      if (options.contract === undefined) {
+        let journey;
+        try {
+          const rawConfig = await dependencies.readJson(
+            resolve(options.project, options.config)
+          );
+          const parsed = TapHoundConfigSchema.parse(rawConfig);
+          config = TapHoundConfigSchema.parse({
+            ...parsed,
+            run: {
+              packageName: options.package ?? parsed.run.packageName,
+              activity: options.activity ?? parsed.run.activity
+            },
+            artifactsDir: options.reports ?? parsed.artifactsDir
+          });
+          assertArtifactDirectory(options.project, config.artifactsDir);
+          await assertNoLegacyWorkspace(dependencies, options.project);
+          journey = JourneySchema.parse(await dependencies.readJson(
+            resolve(options.project, options.journey as string)
+          ));
+        } catch (error) {
+          const output = failureOutput(2, "CONFIG_INVALID", errorMessage(error));
+          if (options.json === true) {
+            writeJson(dependencies.stdout, output);
+          } else {
+            writeLine(dependencies.stderr, output.failure.message);
+          }
+          dependencies.setExitCode(2);
+          return;
+        }
+
+        await runDoctorAndVerify(
+          dependencies,
+          options,
+          config,
+          journey,
+          options.project,
+          undefined
+        );
+        return;
+      }
+
+      let contractConfig;
       try {
         const rawConfig = await dependencies.readJson(
           resolve(options.project, options.config)
         );
         const parsed = TapHoundConfigSchema.parse(rawConfig);
-        config = TapHoundConfigSchema.parse({
+        contractConfig = TapHoundConfigSchema.parse({
           ...parsed,
           run: {
             packageName: options.package ?? parsed.run.packageName,
@@ -303,11 +491,8 @@ export function createVerifyCommand(dependencies: CliDependencies): Command {
           },
           artifactsDir: options.reports ?? parsed.artifactsDir
         });
-        assertArtifactDirectory(options.project, config.artifactsDir);
+        assertArtifactDirectory(options.project, contractConfig.artifactsDir);
         await assertNoLegacyWorkspace(dependencies, options.project);
-        journey = JourneySchema.parse(await dependencies.readJson(
-          resolve(options.project, options.journey)
-        ));
       } catch (error) {
         const output = failureOutput(2, "CONFIG_INVALID", errorMessage(error));
         if (options.json === true) {
@@ -318,12 +503,10 @@ export function createVerifyCommand(dependencies: CliDependencies): Command {
         dependencies.setExitCode(2);
         return;
       }
-
-      await runDoctorAndVerify(
+      await runContractVerify(
         dependencies,
         options,
-        config,
-        journey,
+        contractConfig,
         options.project,
         undefined
       );

@@ -82,6 +82,7 @@ function mockSession(deviceSerial: string): RuntimeSession & {
     launchApp: mocks.launchApp,
     forceStop: mocks.forceStop,
     currentActivity: mocks.currentActivity,
+    deviceIdentity: undefined,
     foregroundComponent: mocks.foregroundComponent,
     appProcesses: mocks.appProcesses,
     windowTopology: mocks.windowTopology,

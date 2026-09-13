@@ -32,6 +32,10 @@ interface AddOptions extends LocalOptions {
   activity?: string | undefined;
 }
 
+interface SyncOptions extends LocalOptions {
+  target?: string | undefined;
+}
+
 interface GitInfo {
   head?: string | undefined;
   branch?: string | undefined;
@@ -356,6 +360,51 @@ export function createLocalCommand(dependencies: CliDependencies): Command {
               removed
                 ? `Removed local target ${id}`
                 : `Local target ${id} is not registered`
+            );
+          }
+          dependencies.setExitCode(0);
+        } catch (error) {
+          writeFailure(
+            dependencies,
+            json,
+            error instanceof TargetError ? error.code : "INTERNAL_ERROR",
+            errorMessage(error),
+            error instanceof TargetError
+              ? exitCodeForFailure(error.code)
+              : 4
+          );
+        }
+      })))
+    .addCommand(withTargetsAndJson(new Command("sync")
+      .description("Sync project TapHound assets (context/journeys/knowledge/contracts/playbooks/baselines) into a target workspace")
+      .argument("<id>", "Target id")
+      .action(async (id: string, options: SyncOptions): Promise<void> => {
+        const json = options.json === true;
+        const home = targetsHome(dependencies, options.targets);
+        if (dependencies.localSync === undefined) {
+          writeFailure(
+            dependencies,
+            json,
+            "INTERNAL_ERROR",
+            "TapHound local sync is not configured",
+            4
+          );
+          return;
+        }
+        try {
+          const resolver = dependencies.localTargets.targetResolver(home);
+          const resolved = await resolver.resolve(id);
+          const result = await dependencies.localSync.sync({
+            targetId: id,
+            projectRoot: resolved.resolvedPath,
+            targetsHome: home
+          });
+          if (json) {
+            writeJson(dependencies.stdout, result);
+          } else {
+            writeLine(
+              dependencies.stdout,
+              `Synced ${String(result.syncedDirs.length)} asset dir(s) into ${result.workspaceRoot} (${String(result.filesCopied)} files)`
             );
           }
           dependencies.setExitCode(0);

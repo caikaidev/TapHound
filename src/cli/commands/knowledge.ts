@@ -4,6 +4,7 @@ import { Command } from "commander";
 
 import { InteractionGraph } from "../../application/planning/interaction-graph.js";
 import { RoutePlanner } from "../../application/planning/route-planner.js";
+import { FeatureMapProjector, renderFeatureMapMarkdown } from "../../application/knowledge/feature-map-projector.js";
 import { ScreenDetector } from "../../application/recognition/screen-detector.js";
 import { TapHoundConfigSchema } from "../../domain/config.js";
 import {
@@ -46,6 +47,10 @@ interface GoalOptions extends CommonOptions {
   maxReplans: string;
 }
 
+interface FeatureMapOptions extends CommonOptions {
+  markdown?: boolean | undefined;
+}
+
 interface PlanOptions extends CommonOptions {
   goal: string;
   snapshot: string;
@@ -59,6 +64,8 @@ function requireKnowledge(
   }
   return dependencies.knowledge;
 }
+
+const featureMapProjector = new FeatureMapProjector({});
 
 function failure(
   dependencies: CliDependencies,
@@ -388,6 +395,35 @@ function receiptsCommand(dependencies: CliDependencies): Command {
     });
 }
 
+function featureMapCommand(dependencies: CliDependencies): Command {
+  return new Command("feature-map")
+    .description("Project committed Knowledge into a deterministic agent-friendly Feature Map")
+    .option("--project <path>", "Android project root", dependencies.cwd())
+    .option("--json", "Emit the structured projection as one JSON value")
+    .option("--markdown", "Emit the low-token Markdown projection")
+    .action(async (options: FeatureMapOptions): Promise<void> => {
+      try {
+        const bundle = await requireKnowledge(dependencies).load({
+          projectRoot: options.project
+        });
+        const projection = featureMapProjector.project(bundle);
+        if (options.json === true) {
+          writeJson(dependencies.stdout, projection);
+        } else if (options.markdown === true) {
+          writeLine(dependencies.stdout, renderFeatureMapMarkdown(projection));
+        } else {
+          writeLine(
+            dependencies.stdout,
+            `Feature Map: ${String(projection.features.length)} feature(s), ${String(projection.entryScreens.length)} entry screen(s), hash ${projection.knowledgeHash.slice(0, 12)}`
+          );
+        }
+        dependencies.setExitCode(0);
+      } catch (error) {
+        failure(dependencies, options, error);
+      }
+    });
+}
+
 export function createKnowledgeCommand(
   dependencies: CliDependencies
 ): Command {
@@ -399,5 +435,6 @@ export function createKnowledgeCommand(
     .addCommand(planCommand(dependencies))
     .addCommand(receiptsCommand(dependencies))
     .addCommand(promoteCommand(dependencies))
-    .addCommand(evolveCommand(dependencies));
+    .addCommand(evolveCommand(dependencies))
+    .addCommand(featureMapCommand(dependencies));
 }

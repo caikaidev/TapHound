@@ -367,4 +367,164 @@ describe("IdleWaiter", () => {
       options.stabilityBackend === "uiautomator"
     ))).toBe(true);
   });
+
+  it("treats editable-widget-only changes as cursor blink when ignoreCursorBlink is on", async () => {
+    const cli = stabilityProbe();
+    const cursor = [{
+      class: "android.widget.EditText",
+      "resource-id": "com.example.app:id/search_input",
+      interactions: ["CLICKABLE", "EDITABLE"]
+    }];
+    vi.mocked(cli.sample)
+      .mockResolvedValueOnce(cursor)
+      .mockResolvedValueOnce(cursor)
+      .mockResolvedValueOnce([]);
+    const clock = new FakeClock();
+
+    const result = await new IdleWaiter(
+      cli,
+      clock,
+      "emulator-5554"
+    ).waitUntilIdle({
+      strategy: "structural",
+      pollIntervalMs: 100,
+      stablePolls: 2,
+      timeoutMs: 500,
+      ignoreCursorBlink: true
+    });
+
+    expect(result.status).toBe("stable");
+  });
+
+  it("keeps failing on layout changes that are not editable widgets", async () => {
+    const cli = stabilityProbe();
+    const keyboard = [{
+      class: "android.widget.Button",
+      interactions: ["CLICKABLE"]
+    }];
+    vi.mocked(cli.sample)
+      .mockImplementation(() => Promise.resolve(keyboard));
+    const clock = new FakeClock();
+
+    const result = await new IdleWaiter(
+      cli,
+      clock,
+      "emulator-5554"
+    ).waitUntilIdle({
+      strategy: "structural",
+      pollIntervalMs: 100,
+      stablePolls: 2,
+      timeoutMs: 300,
+      ignoreCursorBlink: true
+    });
+
+    expect(result.status).toBe("timeout");
+    expect(vi.mocked(cli.sample)).toHaveBeenCalled();
+  });
+
+  it("keeps the default behavior when ignoreCursorBlink is off", async () => {
+    const cli = stabilityProbe();
+    const cursor = [{
+      class: "android.widget.EditText",
+      interactions: ["EDITABLE"]
+    }];
+    vi.mocked(cli.sample)
+      .mockImplementation(() => Promise.resolve(cursor));
+    const clock = new FakeClock();
+
+    const result = await new IdleWaiter(
+      cli,
+      clock,
+      "emulator-5554"
+    ).waitUntilIdle({
+      strategy: "structural",
+      pollIntervalMs: 100,
+      stablePolls: 2,
+      timeoutMs: 300
+    });
+
+    expect(result.status).toBe("timeout");
+  });
+
+  it("ignores layout drift when the change set stays constant across polls", async () => {
+    const cli = stabilityProbe();
+    const drifted = [
+      { class: "android.widget.Button", "resource-id": "submit_search", interactions: ["CLICKABLE"] },
+      { class: "android.widget.EditText", "resource-id": "search_input", interactions: ["EDITABLE"] }
+    ];
+    vi.mocked(cli.sample)
+      .mockResolvedValueOnce(drifted)
+      .mockResolvedValueOnce(drifted)
+      .mockResolvedValueOnce(drifted)
+      .mockResolvedValueOnce([]);
+    const clock = new FakeClock();
+
+    const result = await new IdleWaiter(
+      cli,
+      clock,
+      "emulator-5554"
+    ).waitUntilIdle({
+      strategy: "structural",
+      pollIntervalMs: 100,
+      stablePolls: 2,
+      timeoutMs: 500,
+      ignoreLayoutDrift: true
+    });
+
+    expect(result.status).toBe("stable");
+  });
+
+  it("keeps a constant change set visible when ignoreLayoutDrift is off", async () => {
+    const cli = stabilityProbe();
+    const drifted = [
+      { class: "android.widget.Button", "resource-id": "submit_search", interactions: ["CLICKABLE"] }
+    ];
+    vi.mocked(cli.sample)
+      .mockImplementation(() => Promise.resolve(drifted));
+    const clock = new FakeClock();
+
+    const result = await new IdleWaiter(
+      cli,
+      clock,
+      "emulator-5554"
+    ).waitUntilIdle({
+      strategy: "structural",
+      pollIntervalMs: 100,
+      stablePolls: 2,
+      timeoutMs: 300
+    });
+
+    expect(result.status).toBe("timeout");
+  });
+
+  it("adopts a new constant change set after a real transition", async () => {
+    const cli = stabilityProbe();
+    const keyboardDrift = [
+      { class: "android.widget.Button", "resource-id": "submit_search", interactions: ["CLICKABLE"] }
+    ];
+    const settled = [
+      { class: "android.widget.TextView", "resource-id": "search_result", interactions: [] }
+    ];
+    vi.mocked(cli.sample)
+      .mockResolvedValueOnce(keyboardDrift)
+      .mockResolvedValueOnce(keyboardDrift)
+      .mockResolvedValueOnce(settled)
+      .mockResolvedValueOnce(settled)
+      .mockResolvedValueOnce([]);
+    const clock = new FakeClock();
+
+    const result = await new IdleWaiter(
+      cli,
+      clock,
+      "emulator-5554"
+    ).waitUntilIdle({
+      strategy: "structural",
+      pollIntervalMs: 100,
+      stablePolls: 2,
+      timeoutMs: 500,
+      ignoreLayoutDrift: true
+    });
+
+    expect(result.status).toBe("stable");
+  });
 });

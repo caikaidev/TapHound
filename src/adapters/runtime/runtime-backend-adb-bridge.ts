@@ -1,6 +1,7 @@
 import type {
   AdbPort,
   AppIdentity,
+  DeviceIdentity,
   DeviceInfo,
   DumpLogcatOptions,
   LaunchActivityOptions,
@@ -34,6 +35,18 @@ export class RuntimeBackendAdbBridge implements AdbPort {
 
   public devices(signal?: AbortSignal): Promise<readonly DeviceInfo[]> {
     return this.dependencies.backend.listDevices(signal);
+  }
+
+  public deviceIdentity(identity: AppIdentity): Promise<DeviceIdentity> {
+    return this.session(identity.deviceSerial).then((session) => {
+      if (session.deviceIdentity === undefined) {
+        return Promise.reject(runtimeCapabilityMissing(
+          session.descriptor.id,
+          "deviceIdentity"
+        ));
+      }
+      return session.deviceIdentity(appQuery(identity));
+    });
   }
 
   public foregroundComponent(

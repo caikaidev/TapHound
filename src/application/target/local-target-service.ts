@@ -28,6 +28,11 @@ export class LocalTargetService {
         activity: run.activity ?? DEFAULT_TARGET_ACTIVITY
       },
       idle: input.entry.idle ?? DEFAULT_TARGET_IDLE,
+      // Local targets are local ADB projects by definition: default the
+      // runtime backend to adb so doctor/diff-mode do not fall through to
+      // the mobile-mcp (remote cloud) backend, which would fail with
+      // DEVICE_UNAVAILABLE when no remote session is open.
+      runtime: { backend: "adb" },
       artifactsDir: `${input.workspaceRoot}/runs`
     });
   };

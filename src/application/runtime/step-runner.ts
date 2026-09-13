@@ -36,6 +36,7 @@ import {
   type ExpectationObservationInput
 } from "../assertion/expectation-evaluator.js";
 import { IdleWaiter, type IdleConfig } from "../wait/idle-waiter.js";
+import { deviceIdentityResolver } from "../wait/idle-profiles.js";
 import { withIdleAdvice } from "../wait/idle-advice.js";
 import {
   hasExactlyOneEnabledFocusedElement
@@ -111,7 +112,12 @@ export class StepRunner {
       options.uiStability,
       options.clock,
       options.deviceSerial,
-      options.packageName
+      options.packageName,
+      deviceIdentityResolver(options.adb, {
+        packageName: options.packageName,
+        deviceSerial: options.deviceSerial,
+        timeoutMs: options.idle.timeoutMs
+      })
     );
     this.expectationEvaluator = new ExpectationEvaluator(
       options.adb,
@@ -766,7 +772,12 @@ export class StepRunner {
               matchedBy: "anchor",
               anchorId: step.anchor,
               fallbackUsed: false,
-              anchor: { status: "resolved" }
+              anchor: {
+                status: "resolved",
+                ...(anchorResolution.resolvedBy === undefined
+                  ? {}
+                  : { resolvedBy: anchorResolution.resolvedBy })
+              }
             };
           } else if (step.locator === undefined) {
             report.locator = {
@@ -915,7 +926,9 @@ export class StepRunner {
           return fail(
             anchorResolution.status === "ambiguous"
               ? "ANCHOR_AMBIGUOUS"
-              : "ANCHOR_NOT_FOUND",
+              : anchorResolution.status === "visualOnly"
+                ? "RUNTIME_CAPABILITY_MISSING"
+                : "ANCHOR_NOT_FOUND",
             anchorResolution.message
               ?? `Knowledge anchor ${step.anchor} did not resolve`
           );
@@ -955,7 +968,12 @@ export class StepRunner {
           matchedBy: "anchor",
           anchorId: step.anchor,
           fallbackUsed: false,
-          anchor: { status: "resolved" }
+          anchor: {
+            status: "resolved",
+            ...(anchorResolution.resolvedBy === undefined
+              ? {}
+              : { resolvedBy: anchorResolution.resolvedBy })
+          }
         };
         if (this.options.requireFocusedInput === true) {
           layout = await this.captureLayout("locate", this.options.idle.timeoutMs, signal);

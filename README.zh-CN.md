@@ -76,7 +76,13 @@ git diff --exit-code -- assets/brand/png
 
 - `doctor`：检查 Node.js、ADB、Android CLI、应用安装、权限和设备；显式使用 `ui.backend=appium-uiautomator2` 时还检查本地 Appium 与 UiAutomator2 driver。默认运行时后端为 Mobile MCP（`runtime.backend=auto`），此时检查 Mobile MCP server 并通过 Mobile MCP 工具诊断设备；在配置中设置 `runtime.backend=adb`（或环境变量 `TAPHOUND_RUNTIME_BACKEND=adb`）可改回检查 ADB 工具链。
 - `record`：交互式执行操作并录制 Journey。
-- `verify`：确定性重放 Journey 并发布报告。
+- `verify`：确定性重放 Journey 并发布报告。使用 `--contract` 时验证 Acceptance Contract：哈希绑定 Journey、前置条件、旅程后断言、证据要求，并输出 `pass`/`fail`/`inconclusive`/`needsReview`/`invalid` Verdict。使用 `--diff <ref>` 时进入 diff 模式：重放 Git 变更影响的 Journeys 并返回单一 `overall` verdict（`taphound verify --diff main`，`verify-changes` 为其冗长别名，见 `docs/agent-integration.md`）。
+- `contract validate`：在不触碰设备的情况下校验 Acceptance Contract JSON 及其 Journey 哈希绑定。
+- `contract review`：将外部产生的评审发现合并进已存储的 `verdict.json`；`pass`/`inconclusive` 可升级为 `needsReview`，但确定性的 `fail`/`invalid` 永远不会被改写（见 `docs/source-of-truth.md`）。
+- `playbook validate`：校验 Verification Playbook（schema、哈希绑定 Contract、Escalation Policy 规则），不触碰设备（见 `docs/playbook.md`）。
+- `baseline capture` / `baseline compare`：从通过的报告捕获行为 Baseline，并确定性地将新报告与之对比；`compare` 发现任何 activity/element 漂移时退出码为 1（见 `docs/checkpoint-regression.md`）。
+- `failure classify`：将失败的 Verification 报告分类为简洁的结构化失败契约（类型、可能阶段、expected/actual、证据引用），供 Coding Agent 或 Diagnosis Agent 使用——不倾倒日志、不调用模型（见 `docs/failure-classification.md`）。
+- `local sync <id>`：把项目的受控资产目录（context/journeys/knowledge/contracts/playbooks）复制进已注册 local target 的 workspace，使 `--target` 命令能在那里加载它们（见 `docs/local-target.md`）。
 - `observe`：捕获设备即时快照（前台组件、Activity、布局、可选 logcat），无 session、无副作用。
 - `project describe`：输出稳定的 Android 项目事实。
 - `context list` / `validate` / `status`：查看或校验 Project Context 索引及模块分片。
@@ -104,10 +110,12 @@ git diff --exit-code -- assets/brand/png
 - `ui-cache status` / `ui-cache clear --yes`：查看或删除仅用于加速的
   `.taphound/build/cache/ui/` 索引；不会删除 Journey、报告或 Generation 证据。
 - `knowledge status` / `bootstrap` / `goal` / `plan` / `receipts` / `promote` /
-  `evolve`：管理已提交的 Anchor、Screen 与 Transition 知识。运行时只写不可变收据；
+  `evolve` / `feature-map`：管理已提交的 Anchor、Screen 与 Transition 知识。运行时只写不可变收据；
   只有显式 bootstrap、promote 或按收据折叠的 evolve 才会更新权威知识。`goal`
   为已知目标 Screen 起草严格 Goal Spec，`evolve` 把绑定到当前 Registry hash 的
-  收据折叠进 Transition 观察计数，并把 `inferred` 文档升级为 `observed`。
+  收据折叠进 Transition 观察计数，并把 `inferred` 文档升级为 `observed`；
+  `feature-map` 派生确定性的、低 token 的 Agent 友好投影（见
+  [Feature Map](docs/feature-map.md)）。
 - `local add` / `list` / `inspect` / `remove`：将某个不相关的 Android 仓库注册为
   Local Target，并查看其解析路径、Git 元数据、Context 状态与 Journey 数量。
   Local Target 验证属于 dogfooding，绝不发布。`--target <id>` 使 `doctor`、
@@ -357,6 +365,40 @@ taphound verify --project . --journey .taphound/journeys/search.json --json
 ```
 
 `--json` 模式保证 stdout 只有一个最终 JSON 值，进度和诊断写入 stderr。详见 [Agent 集成](docs/agent-integration.md) 与 [报告协议](docs/report-schema.md)。
+
+### 单次重放之外：确定性验证链
+
+单次重放回答"这条 Journey 还能过吗？"，信任模型回答"任务真的完成了吗？"，由一串
+确定性工件组成：
+
+```text
+Knowledge Registry → Feature Map（Agent 定位，docs/feature-map.md）
+        ↓
+Acceptance Contract（哈希绑定 Journey + 断言，docs/contract-schema.md）
+        ↓
+Verification Playbook（阶段 + Escalation Policy，docs/playbook.md）
+        ↓
+Journey 重放 → Evidence（report.json、截图、Logcat）
+        ↓
+Verdict（pass / fail / inconclusive / needsReview / invalid）
+        ↓
+Failure Classification（修复 Agent 的结构化失败契约，
+                        docs/failure-classification.md）
+        ↓
+Baseline + Regression Comparator（与已知良好运行的行为漂移，
+                                   docs/checkpoint-regression.md）
+```
+
+- **Semantic Anchors**（`docs/semantic-anchor.md`）：Anchor 是带有序候选链的
+  语义引用；报告记录解析方式（`resolvedBy {kind, confidence}`），使 Journey
+  在 XML→Compose 迁移与 resource-id 改名后仍然可用。`visualMatch` 永不由
+  Core 执行。
+- **Source of Truth**（`docs/source-of-truth.md`）：低信任层（语义/多模态
+  Reviewer）可把确定性的 `pass` 或 `inconclusive` 升级为 `needsReview`，但
+  永远不能把确定性的 `fail` 或 `invalid` 改写为成功。升级由 Playbook 中显式、
+  有序的规则驱动——**AI 何时被调用本身是确定性的**。
+- **Agent diff 模式**：`verify --diff <ref>` 通过 ImpactSet（P0/P1/P2）选出
+  Git 变更影响的极小 Journey 集合，返回单一 `overall` verdict。
 
 ## Local Target（真实应用验证）
 

@@ -5,7 +5,11 @@
   "description": "Editor-validation schema for .taphound/config.json. The Zod schema in src/domain/config.ts is the runtime contract; unknown fields are rejected.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "run", "idle"],
+  "required": [
+    "version",
+    "run",
+    "idle"
+  ],
   "properties": {
     "version": {
       "const": 1,
@@ -14,7 +18,10 @@
     "run": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["packageName", "activity"],
+      "required": [
+        "packageName",
+        "activity"
+      ],
       "properties": {
         "packageName": {
           "type": "string",
@@ -31,10 +38,19 @@
     "idle": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["pollIntervalMs", "stablePolls", "timeoutMs"],
+      "required": [
+        "pollIntervalMs",
+        "stablePolls",
+        "timeoutMs"
+      ],
       "properties": {
         "strategy": {
-          "enum": ["hybrid", "layoutDiff", "frameStats", "structural"],
+          "enum": [
+            "hybrid",
+            "layoutDiff",
+            "frameStats",
+            "structural"
+          ],
           "default": "hybrid",
           "description": "Idle stability strategy. hybrid: frame counters with structural fallback; layoutDiff: layout-tree comparison only; frameStats: frame counters only (no fallback); structural: layout tree only."
         },
@@ -52,6 +68,71 @@
           "type": "integer",
           "minimum": 1,
           "description": "Total wait budget per idle phase. Each poll's own duration is charged against this budget; slow UI dumps require a larger value."
+        },
+        "ignoreCursorBlink": {
+          "type": "boolean",
+          "description": "Treat structure diffs whose only changes are editable controls (short cursor blink) as noise; ignored when strategy uses signature sampling."
+        },
+        "ignoreLayoutDrift": {
+          "type": "boolean",
+          "description": "Treat structure diffs with a constant semantic change-set as geometric drift (IME push, ripple), and hand over to the new set when the change-set actually changes."
+        },
+        "deviceProfiles": {
+          "type": "array",
+          "description": "Device-specific idle overrides, matched last-wins against manufacturer/model/sdkLevel (case-insensitive).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "match"
+            ],
+            "properties": {
+              "match": {
+                "type": "object",
+                "additionalProperties": false,
+                "minProperties": 1,
+                "properties": {
+                  "manufacturer": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "sdkLevel": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              },
+              "strategy": {
+                "type": "string",
+                "enum": [
+                  "hybrid",
+                  "layoutDiff",
+                  "frameStats",
+                  "structural"
+                ]
+              },
+              "pollIntervalMs": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "stablePolls": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "ignoreCursorBlink": {
+                "type": "boolean"
+              },
+              "ignoreLayoutDrift": {
+                "type": "boolean"
+              }
+            }
+          }
         }
       }
     },
@@ -60,7 +141,12 @@
       "additionalProperties": false,
       "properties": {
         "backend": {
-          "enum": ["auto", "system-uiautomator", "android-cli", "appium-uiautomator2"],
+          "enum": [
+            "auto",
+            "system-uiautomator",
+            "android-cli",
+            "appium-uiautomator2"
+          ],
           "default": "auto",
           "description": "UI capture backend. auto is the runtime default; appium is explicit-only and fails closed when unavailable."
         },
@@ -78,10 +164,16 @@
     "runtime": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["backend"],
+      "required": [
+        "backend"
+      ],
       "properties": {
         "backend": {
-          "enum": ["auto", "adb", "mobile-mcp"],
+          "enum": [
+            "auto",
+            "adb",
+            "mobile-mcp"
+          ],
           "default": "auto",
           "description": "Device runtime backend selection. auto and mobile-mcp route device work through the Mobile MCP server; adb selects the ADB + Android CLI backend. The TAPHOUND_RUNTIME_BACKEND environment variable overrides this field per invocation."
         }
@@ -94,8 +186,12 @@
       "description": "Verify report output directory. May point outside .taphound, but any path inside .taphound must stay under .taphound/build (enforced at runtime).",
       "not": {
         "anyOf": [
-          { "pattern": "^\\.taphound$" },
-          { "pattern": "^\\.taphound/(?!build(/|$)).+" }
+          {
+            "pattern": "^\\.taphound$"
+          },
+          {
+            "pattern": "^\\.taphound/(?!build(/|$)).+"
+          }
         ]
       }
     }

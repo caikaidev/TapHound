@@ -93,8 +93,10 @@ The code follows ports and adapters:
   `src/cli/dependencies.ts` wires production adapters into application services.
   `src/cli/main.ts` is the executable entry point.
 
-The CLI exposes `doctor`, `record`, `verify`, `observe`, `project`, `context`,
-`journey`, `generation`, `init`, and `align`. Keep external tools and filesystem effects
+The CLI exposes `doctor`, `record`, `verify`, `contract`, `observe`,
+`project`, `context`, `journey`, `generation`, `knowledge`, `benchmark`,
+`playbook`, `baseline`, `failure`, `impact`, `verify-changes`, `local`,
+`init`, `align`, and `ui-cache`. Keep external tools and filesystem effects
 behind ports so application tests can inject fakes.
 
 ### Runtime Backend SPI
@@ -145,6 +147,9 @@ layout; derive every path from it instead of writing `.taphound` literals:
       external/           # committed project External Flows (bridge auto replay)
     sources/              # committed composed leaf Journey sources
     journeys/             # committed Journeys and <name>.meta.json sidecars
+    contracts/            # committed Acceptance Contracts
+    playbooks/            # committed Verification Playbooks
+    baselines/            # committed behavior Baselines
     build/                # ephemeral and Git-ignored
       generations/<id>/   # authoritative generation bundles (+ .locks)
       jobs/<id>/          # detached finalize stdout and progress
@@ -166,6 +171,48 @@ no automatic migration.
 `VerifyRuntime` checks installation, starts Logcat, force-stops and cold-launches
 the app, waits for process and Activity readiness, and runs Journey steps through
 `StepRunner`.
+
+`VerifyInput` accepts optional `hooks` (`beforeSteps`/`afterSteps`, see
+`src/application/runtime/verify-runtime.ts`). Each hook receives the device
+ports plus a `UiSnapshot` and returns
+`{ status: "passed"|"failed"|"unresolved", message? }`. Hooks never mutate the
+replay report or exit code; a throwing hook becomes an `unresolved` outcome
+collected in `VerifyResult.hookOutcomes`. `beforeSteps` reuses the readiness
+snapshot; `afterSteps` captures one fresh snapshot only when configured.
+
+`verify --contract` (and `contract validate`) validate an Acceptance Contract
+(`src/domain/contract.ts`, `src/application/contract/`): a hash-bound Journey
+reference plus preconditions, post-journey assertions, and evidence
+requirements. The Verdict (`pass`/`fail`/`inconclusive`/`needsReview`/`invalid`)
+is one JSON value on stdout and is written as `verdict.json` beside
+`report.json`; see `docs/contract-schema.md`. Knowledge-backed terms (`screen`,
+`anchor`) require a loadable Knowledge registry and fail closed with
+`CONTRACT_KNOWLEDGE_UNAVAILABLE`. `verify --diff <ref>` is the Agent-facing
+diff mode (see `docs/agent-integration.md`): it routes through the shared
+`runDiffVerification` (`src/cli/diff-verification.ts`) that `verify-changes`
+also uses — git diff → ImpactSet → P0/P1/P2 Journey selection → per-Journey
+verify → one `overall` verdict; `--base` defaults to the `--diff` ref when
+`--base` is omitted, `--head` defaults to HEAD (or WORKTREE with `--target`). `contract review` merges externally produced
+reviewer findings into a stored Verdict: `pass`/`inconclusive` may escalate to
+`needsReview`, but a deterministic `fail`/`invalid` is never rewritten; the
+Source-of-Truth hierarchy is documented in `docs/source-of-truth.md`.
+`playbook validate` checks a Verification Playbook (`src/domain/playbook.ts`):
+schema, hash-bound Contract, and Escalation Policy rules — ordered
+first-match rules that map deterministic verdict/reason facts to a
+`verdict` action or an `escalate` target (`semantic`/`multimodal`); the
+evaluator is pure and never calls a model (see `docs/playbook.md`).
+`baseline capture`/`baseline compare` implement the deterministic behavior
+Baseline and Regression Comparator (`src/application/checkpoint/`): a
+Baseline freezes activity sequence + element presence/screen facts from a
+passed report, and the pure `compareRegression` reports every drifted fact as
+a `RegressionDiff`; `equivalent: true` only when every fact reproduces (see
+`docs/checkpoint-regression.md`). `failure classify` maps a failed report's
+primary failure into a structured `FailureClassification`
+(`src/domain/failure-classification.ts`): the type and likely stage are pure
+maps from the failure code (`FAILURE_CODE_TYPES`/`FAILURE_TYPE_STAGES`, all
+codes covered by a taxonomy test), expected/actual and evidence refs are
+derived from report facts — offline, deterministic, no model call (see
+`docs/failure-classification.md`).
 
 Each step checks the before Activity, resolves a deterministic locator, applies
 an explicitly configured annotated-label fallback only when eligible, executes
@@ -322,7 +369,11 @@ Anchors, Screens, and Transitions to `observed`. Statuses never downgrade and
 can never be double-counted, and a no-op fold reports `unchanged` without a
 write. `knowledge goal` drafts a strict Goal Spec for a known target Screen
 (`--target`, `--parameter key=value`, `--max-steps`, `--max-replans`); natural
-language stays with external Skills.
+language stays with external Skills. `knowledge feature-map` derives a
+read-only, deterministic, agent-friendly projection of the Registry
+(`--json` structured, `--markdown` low-token; see `docs/feature-map.md`);
+Features are reachability clusters rooted at entry Screens, ordered by id, and
+the projection is never a second Source of Truth.
 
 `journey promote --journey <path> --reason <text>` completes the Journey
 lifecycle `verified → promoted`. It re-hashes the generation bundle's
@@ -341,7 +392,15 @@ state. `journey retire --journey <path> --reason <text>` records
 without meta fails with `META_MISSING` and a second retire fails with
 `JOURNEY_ALREADY_RETIRED` (both exit code 2). `journey check`, `retire`, and
 `promote` all accept `--target <id>` for registered local targets, reading
-Journeys from the target workspace.
+Journeys from the target workspace. `local sync <id>` copies the committed
+asset directories (context/journeys/knowledge/contracts/playbooks) from the
+project into a target's workspace so `--target` commands can load them;
+without it `--target` analysis fails closed with `CONTEXT_INVALID`. Local
+targets are local ADB projects: the synthesized target config defaults
+`runtime.backend` to `adb` (`src/application/target/local-target-service.ts`),
+and a local-target invocation with no readable project config also resolves to
+the `adb` backend instead of `auto`/mobile-mcp
+(`src/cli/runtime-selection.ts`).
 
 ## Protocol and Implementation Constraints
 
@@ -372,7 +431,12 @@ Journeys from the target workspace.
   `inputText` share this behavior: `scrollTo` resolves the anchor target to
   element bounds before swiping, and `inputText` taps the resolved anchor point
   to focus it before typing (an anchor element without bounds fails with
-  `ANCHOR_NOT_FOUND`).
+  `ANCHOR_NOT_FOUND`). Anchors are Semantic UI References: an optional ordered
+  `candidates` chain resolves deterministically (first unique match wins) and
+  the report records `resolvedBy { kind, confidence }` with `primary` or
+  `fallback`; `visualMatch` is never performed by Core — when only it remains,
+  resolution is `visualOnly` and fails closed with
+  `RUNTIME_CAPABILITY_MISSING` (see `docs/semantic-anchor.md`).
 - Annotated fallback is explicit and limited to `click` and `longClick`. Swipe
   without element bounds fails rather than guessing a region.
 - `scrollTo` swipes a `container` up to `maxSwipes` until the anchor or

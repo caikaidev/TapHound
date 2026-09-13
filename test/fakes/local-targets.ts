@@ -37,6 +37,16 @@ export function defaultLocalTargets(): LocalTargets {
     },
     targetResolver: () => resolver,
     localTargetService: () => service,
+    localSync: {
+      sync: vi.fn((input: { targetId: string; projectRoot: string; targetsHome: string }) => Promise.resolve({
+        targetId: input.targetId,
+        projectRoot: input.projectRoot,
+        workspaceRoot: "/targets/.taphound/local/" + input.targetId,
+        syncedDirs: [],
+        filesCopied: 0,
+        skippedBuild: true
+      }))
+    },
     processRunner: {
       run: vi.fn(() => Promise.resolve({
         exitCode: 0,

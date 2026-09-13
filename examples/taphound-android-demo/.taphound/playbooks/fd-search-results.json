@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "id": "fd-search-results",
+  "kind": "behavior-regression",
+  "goal": "Search results survive a detail round trip and are shown to the user",
+  "phases": [
+    "contract-verify",
+    "baseline-capture",
+    "change-apply",
+    "replay-journey",
+    "baseline-compare",
+    "evidence-collect",
+    "verdict-apply"
+  ],
+  "contract": {
+    "path": ".taphound/contracts/fd-search-results.json",
+    "sha256": "b3df1649f4e64f363abfa6d3958d3d939c2f6949b1c7ad93ad04d3df3a2cd046"
+  },
+  "evidenceRequirements": [
+    { "kind": "screenshot", "scope": "final", "required": true },
+    { "kind": "uiHierarchy", "scope": "final", "required": true }
+  ],
+  "passCondition": "baseline-compare reports no regression and search_result is visible",
+  "failCondition": "baseline-compare reports a regression or a deterministic assertion fails",
+  "inconclusiveCondition": "baseline evidence is unavailable or the run cannot complete",
+  "escalation": {
+    "version": 1,
+    "rules": [
+      {
+        "id": "deterministic-fail",
+        "when": { "verdicts": ["fail"] },
+        "then": { "action": "verdict", "result": "fail" }
+      },
+      {
+        "id": "ambiguous-evidence",
+        "when": { "reasons": ["ASSERTION_UNRESOLVED", "EVIDENCE_INSUFFICIENT"] },
+        "then": { "action": "escalate", "target": "semantic" }
+      },
+      {
+        "id": "visual-only-requirement",
+        "when": { "verdicts": ["pass"], "reasons": ["CONTRACT_OK"] },
+        "then": { "action": "escalate", "target": "multimodal" }
+      },
+      {
+        "id": "fallback",
+        "when": { "verdicts": ["inconclusive"] },
+        "then": { "action": "verdict", "result": "inconclusive" }
+      }
+    ]
+  }
+}

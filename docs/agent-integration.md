@@ -1,684 +1,153 @@
-# Calling TapHound from an Agent CLI
+# Agent Integration (V1.0)
 
-TapHound provides two integration surfaces for Agents:
+The final Coding-Agent interface is deliberately tiny. An agent does not need
+to understand TapHound's internals — it only needs a finish condition:
 
-- Use `taphound verify --json` to deterministically verify an existing Journey.
-- Use a Project Context and `taphound generation ... --json` to generate a new Journey, which TapHound then fully Replays from the initial state and publishes after verification.
+> **TapHound Verdict == PASS**
 
-An external Agent may analyze source code, judge whether a goal is complete, and propose the next step, but TapHound Core never invokes a model. Project Context validation, device-state binding, proposal validation, risk confirmation, ADB execution, final Replay, and assertions are all handled by deterministic code.
+It is designed for Coding Agents (Claude Code, other terminal agents, and CI
+pipelines alike): every response is one machine-readable JSON value, commands
+are single-entry, and no TapHound internals leak into the agent's context.
 
-TapHound intentionally stops at the Journey boundary. External Workflow Skills
-own requirement analysis, planning, coding, build/install, multi-Case
-orchestration, completion gates, and diagnosis. An orchestrator can invoke
-TapHound once per independent Case and adapt the public JSON, Report, and
-evidence paths into its own Task/Result protocol. Workflow correlation and
-Requirement/Plan identities remain outside TapHound.
+## Stable CLI invocation contract
 
-For one Case, an external orchestrator may supply the optional Skill-level
-`journeyBrief` binding:
-
-```json
-{
-  "path": ".android-agent-workflow/req-search-001/cases/CASE-002/taphound-journey-brief.md",
-  "sha256": "<SHA-256 of the exact file bytes>"
-}
-```
-
-The Markdown format is defined by
-[`taphound-journey-brief.example.md`](../assets/skills/taphound-journey-generator/templates/taphound-journey-brief.example.md).
-This is not a Core CLI argument. It provides static Case hints to the Journey
-Skill; Project Context, live Snapshot binding, risk policy, and final Replay
-remain authoritative.
-
-## Journey Brief Authoring
-
-The [`taphound-journey-brief-author` Skill](../assets/skills/taphound-journey-brief-author/SKILL.md)
-is the recommended producer of the Brief. It combines Android source analysis
-with read-only `taphound observe` to author one Brief per Case, then
-returns `{path, sha256}` for the Journey Skill to consume. It uses only
-read-only commands and never modifies device state.
-
-### Subagent dispatch pattern
-
-A multi-Case orchestrator dispatches one brief-author subagent per Case.
-Configure the subagent with a **name** and a **PROMPT** field whose content
-is copied verbatim from
-[`brief-author-role.md`](../assets/skills/taphound-journey-brief-author/prompts/brief-author-role.md).
-That file is a lean bootstrap: it establishes the role, capability boundary,
-inputs, output format, and key rules, then directs the subagent to read
-`SKILL.md` from the installed skill directory for the full execution
-procedure. This keeps the PROMPT short enough for agent runtimes that
-impose a length limit on the PROMPT configuration field. The orchestrator then
-dispatches a dynamic task message per Case with these explicit inputs:
-
-| Field | Required | Description |
-|---|---|---|
-| `project` | yes | Android project root path |
-| `caseGoal` | yes | One Case's test scenario (natural language) |
-| `caseId` | no | Case identifier for frontmatter |
-| `contextPaths` | no | Explicit path array; the subagent reads ONLY these files for surrounding context |
-| `observeSnapshot` | no | Pre-captured `taphound observe --json` result |
-| `output` | no | Brief output path (defaults to `.taphound/journeys/taphound-journey-brief.md`) |
-
-The subagent returns a single JSON summary:
-
-```json
-{
-  "status": "authored",
-  "caseId": "CASE-002",
-  "path": ".taphound/journeys/taphound-journey-brief.md",
-  "sha256": "<64-char hex hash>",
-  "edgesVerified": 2,
-  "edgesNeedsObservation": 1
-}
-```
-
-The orchestrator never re-parses raw exploration content from the subagent;
-it consumes only this structured summary.
-
-### Hard rule on file names
-
-The brief-author subagent MUST NEVER search for or assume files named
-`plan.md`, `requirement.md`, or any convention. It reads ONLY files the
-orchestrator explicitly passes via `contextPaths`. If no `contextPaths` are
-supplied, it works from `caseGoal` alone plus source code and Project Context.
-This rule is encoded in both `SKILL.md` and `brief-author-role.md`.
-
-### Parallel strategy and device contention
-
-To enable parallel brief authoring across multiple Cases without device
-contention, the orchestrator pre-captures one `taphound observe --json`
-snapshot and passes it to all parallel brief-author subagents via the
-`observeSnapshot` input. When `observeSnapshot` is provided, the subagent
-uses it directly and MUST NOT call `taphound observe` itself.
-
-```bash
-# Orchestrator captures once, before dispatching parallel subagents:
-taphound observe --project <project> --device <serial> --logcat-lines 200 --json
-# Then passes the result as observeSnapshot to each parallel subagent.
-```
-
-### Human Review gate
-
-The Brief is an inspectable artifact between the planning phase and Journey
-generation. After a brief-author subagent returns `status: "authored"`, the
-orchestrator should present the Brief path and summary to the user for
-Review before dispatching the downstream Journey generation subagent with
-the `journeyBrief: {path, sha256}` binding. Review is a Skill convention,
-not a Core CLI gate; the Journey Skill's own Brief validation (SHA-256
-check, frontmatter, required sections, Goal match) remains enforced.
-
-```
-Orchestrator
-  |-- dispatch brief-author subagent  (per Case, parallel)
-  |     output: {path, sha256, caseId, edgesVerified, edgesNeedsObservation}
-  |
-  |-- human Review (brief is an inspectable artifact)
-  |
-  |-- dispatch journey subagent
-        input:  {project, goal, journeyBrief: {path, sha256}}
-        output: {journeyPath, reportPath, verified}
-```
-
-## Verifying an Existing Journey
-
-A typical flow: a developer uses Claude Code or another Agent CLI to implement a requirement, then has the Agent call TapHound Journey to verify whether the code meets expectations.
-
-```bash
-taphound verify \
-  --project /workspace/android-app \
-  --config /workspace/android-app/.taphound/config.json \
-  --journey /workspace/android-app/.taphound/journeys/search.json \
-  --device emulator-5554 \
-  --json
-```
-
-## Checking Committed Journeys
-
-`journey check` audits every committed Journey under `.taphound/journeys/`
-without a device. It pairs each Journey with its `<name>.meta.json` sidecar
-(written by `generation finalize`) and classifies each entry as `fresh`,
-`stale`, `no-meta`, or `invalid`:
-
-- `fresh` — the Journey parses and every sidecar binding still matches the
-  live project: `projectHash`/`configHash` against `project describe` and the
-  normalized config, the recorded `journeyPath`, and every
-  `contextSelection` module's `sha256` against the live Context index.
-- `stale` — the Journey is structurally valid but a binding drifted:
-  `project-hash`, `config-hash`, `journey-path-mismatch`, `module-drift`
-  (a selected module shard's `sha256` changed), `module-missing` (a selected
-  module no longer exists in the live bundle; both list module ids in
-  `driftedModules`), or `meta-legacy`.
-- `no-meta` — the Journey has no sidecar, so freshness cannot be proven (for
-  example a hand-resolved or recorded Journey).
-- `invalid` — the Journey or sidecar is unreadable or fails its schema
-  (`journey-unreadable`, `journey-schema`, `meta-unreadable`, `meta-schema`).
-
-Each entry also carries a lifecycle state (`lifecycle`): `verified` (fresh
-bindings), `draft` (no sidecar), `stale` (structural drift on project,
-module, or journey path), `suspect` (config-only drift such as `config-hash`
-or `meta-legacy`), or `retired` (the sidecar records `retired`). Invalid
-Journeys have no lifecycle state. `journey retire --journey <path> --reason
-<text>` records `retired` in the sidecar; `journey promote` flips it to
-`promoted` (reported as `verified` here) after re-checking the generation
-bundle's verification evidence.
-
-`meta-legacy` marks sidecars published before `contextSelection` was
-recorded. They classify as `stale` (fail-closed) because module drift can no
-longer be evaluated; re-run `generation finalize` to republish the Journey
-with the field.
-
-```bash
-taphound journey check \
-  --project /workspace/android-app \
-  --context .taphound/context/project-context.json \
-  --json
-```
-
-`--context` is required and names the live Project Context index; the command
-reads `.taphound/config.json` by default (override with `--config`). With
-`--json` it emits exactly one JSON value containing a `summary`
-(`total`/`fresh`/`stale`/`noMeta`/`invalid`), a `lifecycle` object counting
-each lifecycle state, and per-Journey `journeys` entries, and the JSON
-`exitCode` matches the process exit code. Exit `0` means the check completed —
-findings or not; `2` reports config or Context errors; `4` is internal.
-`--strict` turns any non-fresh entry (stale, invalid, or no-meta) into exit
-`1` for CI gates. `--target <id>` runs `check`, `retire`, and `promote`
-against a registered Local Target workspace instead of `--project`.
-
-## Machine Contract
-
-- The stdout of `verify --json` contains exactly one JSON value and a trailing newline, with no progress text.
-- stderr receives pre-checks, progress, and diagnostics, which the Agent may save separately.
-- The process exit code matches the JSON `exitCode`.
-- `0` means passed; `1` is a product verification failure; `2` is invalid input; `3` is an unavailable environment; `4` is a TapHound internal error.
-- When a report exists, read `reportPath`, `report.primaryFailure`, `report.secondaryErrors`, and the layered results.
-- When no report exists, read the top-level `failure.code` and `failure.message`.
-
-Do not merely search stdout text for "passed"; first check the process status and `exitCode`, then read the structured fields.
-
-### Environment Noise on stderr
-
-When the calling environment sets `NODE_USE_ENV_PROXY=1` (common on machines
-with corporate proxies), Node.js 22+ prints an experimental
-`[UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental` notice to the
-**stderr of every spawned Node process**, including TapHound and TapHound's
-own child processes. This warning:
-
-- never appears on stdout, so it does not break the one-JSON stdout contract;
-- is emitted by the Node runtime, not by TapHound code;
-- does, however, pollute stderr assertions and any pipeline that merges
-  stderr into the captured output.
-
-Agents that assert on exact stderr content should either unset the variable
-when spawning TapHound (`spawn(..., { env: { ...process.env,
-NODE_USE_ENV_PROXY: undefined } })`) or filter stderr by lines before
-asserting. Tests that spawn the built CLI follow the same rule.
-
-## Node.js Invocation Example
-
-```js
-import { spawn } from "node:child_process";
-
-const child = spawn("taphound", [
-  "verify",
-  "--project", projectRoot,
-  "--journey", journeyPath,
-  "--json"
-], { shell: false });
-
-let stdout = "";
-let stderr = "";
-child.stdout.setEncoding("utf8").on("data", chunk => { stdout += chunk; });
-child.stderr.setEncoding("utf8").on("data", chunk => { stderr += chunk; });
-
-child.on("close", code => {
-  const result = JSON.parse(stdout);
-  if (code !== result.exitCode) throw new Error("TapHound exit contract mismatch");
-  // Feed result.report.primaryFailure back to the development Agent.
-});
-```
-
-The caller must also use an argument array and keep `shell: false`, to avoid turning project paths or user input into a Shell command.
-
-## Generating a New Journey
-
-Generation sessions bind one exact UI backend descriptor (`id`, adapter and
-engine version, and configuration hash). Runtime Snapshot v2 carries that
-descriptor, the physical-display viewport, observation ID, and capture timing.
-An Agent must submit the exact referenced snapshot and must not substitute a
-snapshot captured by another backend. A legacy session without evidence may
-bind once on its first snapshot; a legacy session with evidence must be
-restarted rather than migrated implicitly.
-
-`ui.backend=auto` chooses only at provider open and does not silently fail over
-during an authoritative operation. `appium-uiautomator2` is opt-in and supplies
-only the page-source tree; application lifecycle, actions, waiting, Logcat, and
-verification remain TapHound/ADB responsibilities.
-
-The generation flow uses the in-repo [`taphound-journey-generator` Skill](../assets/skills/taphound-journey-generator/SKILL.md):
-
-1. `project describe --json` outputs stable Package and Activity information.
-2. The [`taphound-journey-brief-author` Skill](../assets/skills/taphound-journey-brief-author/SKILL.md) analyzes each Gradle module independently and produces the Project Context root index plus module shards. It owns the full Context lifecycle: initial generation, `context refresh` re-hashing, and full regeneration.
-3. `context list` exposes the compact module catalog. `context validate` / `context status` check the index, shard hashes, source evidence, and per-module file inventory. `context refresh` recomputes evidence hashes for an existing Context without re-analyzing source.
-4. `journey list-flows --json` validates reusable local prefixes. The Agent
-   selects the deepest applicable valid Flow, never by filename alone. The
-   first resolved step must begin at a stable Activity deterministically
-   reached after cold launch. A transient Splash must not be required to
-   remain foreground; `core/launch-home` should be a `wait: Home -> Home`
-   readiness anchor with an expectation for a unique Home element.
-5. `generation start --module ... [--base-flow ...]` binds the project,
-   config, selected module dependency closure, device, and optional cleanly
-   replayed Flow prefix. Without a Base Flow, Core force-stops, launches the
-   configured Activity, and waits for the App process before creating the
-   session. `run.activity` is only the cold-launch entry; the subsequent
-   observation's idle/layout checks establish the stable post-redirect state.
-6. The Agent uses `generation observe --compact --json`, reads the project-
-   relative authoritative `snapshotRef`, and submits a proposal strictly bound
-   to that full snapshot. Compact successful steps return `nextBinding` and
-   `nextSnapshotRef`; the Agent reads the reference before the next proposal.
-   Active references point into the Store-owned
-   `.<generationId>.work` bundle; publication atomically moves the same
-   evidence into the final `<generationId>` bundle.
-   It uses `generation confirm` when human approval is required, and
-   `generation manual` for local TTY overrides. Confirmation defaults to a
-   local prompt. In a non-TTY sandbox, the Agent may pass
-   `--decision approve|decline` only after the user explicitly reviews that
-   exact challenge; the decision remains bound to Core-owned evidence.
-7. `generation status` exposes durable state. While verification is running,
-   `verification.phase` reports live replay progress (`preparing`,
-   `replaying` with 0-based `stepIndex` and `stepCount`, or `collecting`);
-   phase updates are progress annotations and do not consume session
-   revisions. `generation status --wait` prints each observed phase
-   transition to stderr while stdout keeps emitting exactly one final JSON
-   value. Interrupted work is retried only
-   after explicit `generation recover --decision retry` acknowledgement.
- 8. `generation finalize --detach` survives caller interruption and fully
-    Replays from the initial state. The Journey and immutable evidence are
-    published only after exact verification passes. Finalize resolves the
-    Context from the session's stored snapshot (written at `generation start`
-    as `context/resolved.json` and bound to the session's `contextHash`), so
-    unrelated source edits after start cannot scrap the session. Live Context
-    drift is reported to stderr as a warning; the snapshot remains
-    authoritative. `--context` is only required for legacy sessions created
-    without a snapshot. Precondition failures (`CONTEXT_INVALID` from binding
-    or snapshot integrity) never terminally poison the attempt: finalize
-    validates before the attempt is recorded, and a legacy session's drift
-    detected after replay rolls the running attempt back to `notRun`, so the
-    session stays retryable once the underlying drift is repaired or reverted.
-    Only genuine replay failures durably mark verification `failed`.
- 9. `generation list --json` enumerates all sessions in the workspace (active,
-     archived, and published). `generation archive --session <id>` marks an idle
-     active session as archived so it no longer clutters active listings. Archive
-    is only permitted on sessions with no in-flight step or pending
-    confirmation; recoveryRequired sessions must be recovered first.
- 10. `generation config idle --session <id> [--strategy <s>]
-     [--poll-interval-ms <n>] [--stable-polls <n>] [--timeout-ms <n>]`
-     hot-adjusts the session's idle policy without restarting the session or
-     invalidating the config binding. At least one setting is required; the patch
-     merges onto the session's current policy (initially the bound config's
-     `idle`) and advances the session revision, so the next proposal must bind
-     the new revision. Updates are rejected with `CONFIG_INVALID` unless the
-     session is `active` with no in-flight step, no pending confirmation, and
-     verification and publication both `notRun`. Subsequent observe, step, and
-     finalize replay all honor the stored session policy; `generation status`
-     reports it as `idlePolicy`.
- 11. `generation step --replace <index> --session <id>` rewinds an active
-     session instead of accepting a proposal: TapHound replays the stored
-     candidate prefix `[0, index)` through the same cold-launch replay engine
-     as finalize (honoring the session's stored idle policy), truncates the
-     candidate steps to that prefix by advancing the session revision, and
-     binds a fresh post-replay snapshot, so the agent can re-propose from the
-     stored prefix without restarting the session. The index must be an
-     integer in `[0, candidateStepCount]`; an index inside the bound Base
-     Flow prefix fails with `FLOW_INVALID`. Index `0` cold-resets the app
-     without replay. Replace is rejected with `CONFIG_INVALID` unless the
-     session is `active` with no in-flight step, no pending confirmation, and
-     verification and publication both `notRun`. A prefix replay failure fails
-     with `VERIFICATION_FAILED` and leaves the session untouched. Superseded
-     step evidence stays in the generation bundle as an audit trail; the
-     published manifest is rebuilt from the surviving evidence at finalize.
-     The output matches `generation observe` (binding plus `snapshotRef`,
-     full snapshot unless `--compact`) plus `status: "replaced"`,
-     `stepIndex`, `remainingStepCount`, and `truncatedStepCount`; the next
-     proposal must bind the returned revision and snapshot. `--input` and
-     `--replace` are mutually exclusive, and the replace preflight pins the
-     session's bound device, so no `--device` flag exists.
-
-
-```bash
-taphound project describe --project /workspace/android-app --json
-taphound context validate \
-  --project /workspace/android-app \
-  --context .taphound/context/project-context.json \
-  --json
-taphound journey list-flows \
-  --project /workspace/android-app \
-  --json
-taphound generation start \
-  --project /workspace/android-app \
-  --context .taphound/context/project-context.json \
-  --module :feature:search \
-  --base-flow search/open \
-  --device emulator-5554 \
-  --json
-```
-
-The application module is always selected; dependencies declared by selected modules are expanded automatically. Omitting `--module` selects all modules. Selected modules must be `complete` or explicitly `unsupported`; `unsupported` is an analyzed verdict (no journey-relevant surfaces) and a legitimate terminal state. Modules that are `partial` or `notAnalyzed` fail loading with `CONTEXT_MODULE_INCOMPLETE` — finish or re-analyze those shards first. The exact root-index hash and selected shard IDs/hashes are returned as `contextSelection` and bound to the session. Pass `--compact` to summarize `contextSelection` as `bundleVersion`, `indexHash`, and a `moduleIds` list instead of per-module binding hashes; the session still binds the full selection. Modules cannot be added later. The device is bound at `generation start`. `generation observe`, `step`, `confirm`, `manual`, `status`, `recover`, and `config idle` use that binding via `--session` and do not accept `--device`; `generation finalize` resolves the bound Context from the session's immutable snapshot (`context/resolved.json`, integrity-checked against the session's `contextHash`) and may explicitly provide `--device`, but must not change the session identity binding. Legacy sessions without a snapshot fall back to reloading the bound module set from `--context`.
-
-### Refreshing Context Evidence Hashes
-
-`context refresh` recomputes evidence hashes for an existing Context without re-analyzing source. It backfills the optional `semanticSha256` for every evidence file, rehashes files whose change was formatting or comments only, repairs index entries whose shard hash drifted, and rewrites only the shards and index that actually changed.
-
-```bash
-taphound context refresh \
-  --project /workspace/android-app \
-  --context .taphound/context/project-context.json \
-  --json
-```
-
-Refresh never invents semantic knowledge. It stops with `exitCode: 1` and `status: "blocked"` when evidence changed semantically, when a module's file inventory changed, or when an evidence file is missing or unreadable, because those cases need module re-analysis. `--module <id...>` limits refresh to selected modules. `--accept-source-changes` additionally rehashes semantically changed evidence and inventory drift; use it only when the recorded module summary is still accurate, since the summary itself is not updated. Missing or unreadable evidence always blocks.
-
-The per-module file inventory never includes build-output directories (`bin/`, `build/`, `out/`) or VCS/tool caches (`.git/`, `.gradle/`, `.idea/`, `.taphound/`). Context bundles produced by older TapHound versions may still carry evidence entries under those directories; such entries recompile into hash drift and surface as `CONTEXT_STALE` even though no journey-relevant source changed. Re-running `context refresh --accept-source-changes` once removes those now-ineligible evidence entries (each scope reports the count in `droppedIneligible`) and realigns the stored inventory hash, after which normal validation resumes.
-
-By default, changed source evidence stops generation with `CONTEXT_STALE`. For frequent implementation-only edits, an agent may explicitly pass `--allow-evidence-drift` to both `generation start` and `generation finalize`. This does not bypass Context shard integrity, project/config/session bindings, locator safety, or final replay verification. It only allows the validator's evidence-file drift result to proceed; the final replay remains authoritative. JSON output reports `evidenceDriftAllowed: true` when this opt-in is active. `generation finalize` itself resolves the Context from the session snapshot, so post-start source edits never fail finalize; when the live Context diverges, finalize prints the drift reason to stderr as a non-fatal warning and the session snapshot stays authoritative.
-
-Generation's `--json` commands likewise write only one machine-readable JSON
-value to stdout and indicate the result with `exitCode`. `observe` always
-returns `snapshotRef`; `--compact` omits the duplicate inline snapshot.
-`step`, `confirm`, and `manual` similarly replace `nextSnapshot` with
-`nextSnapshotRef` in compact mode, and `step --replace` returns the same
-binding plus `snapshotRef` shape as `observe`. The referenced file is still the full
-RuntimeSnapshot behind the proposal binding. The Agent must retain
-`generationId`, `baseRevision`, `snapshotHash`, and that exact snapshot, and
-must not fabricate or reuse expired bindings; the step envelope may submit
-either the full snapshot or its `snapshotRef`. Step results include phase timing
-for freshness, evidence setup, observation, action, idle wait, expectations,
-Logcat, and optional next observation. During finalize replay the running
-verification attempt persists a `phase` (`preparing`, `replaying` with
-`stepIndex`/`stepCount`, or `collecting`) and the finalizer writes each
-phase to stderr; detached jobs capture those lines in the job progress log.
-Detached finalize progress and stdout
-live under `.taphound/build/jobs/<generationId>/`, outside the authoritative
-bundle. For the full protocol, retry rules, and Context update strategy, see
-the Skill's [`GUIDE.md`](../assets/skills/taphound-journey-generator/GUIDE.md).
-
-The `generation step --input` envelope is a strict object with exactly three
-top-level fields. Unknown, missing, or flat (unwrapped) fields are rejected as
-`CONTEXT_INVALID`; the JSON failure includes a `hint` describing the required
-shape:
-
-```jsonc
-{
-  "version": 1,
-  "proposal": {
-    "action": "click",
-    "locator": { "resourceId": "btn_more" },
-    "binding": {
-      "generationId": "<session-id>",
-      "baseRevision": 2,
-      "snapshotHash": "<sha256-of-snapshot>"
-    },
-    "activity": { "before": "com.example.app.AIChatActivity" }
-  },
-  "snapshot": { /* full RuntimeSnapshot returned by generation observe */ }
-}
-```
-
-`proposal.binding` must match the `nextBinding`/`binding` returned by the most
-recent `observe` (or prior step), and `snapshot` must be that exact
-RuntimeSnapshot. `activity.after` and `expect` are optional on a proposal;
-Core records the observed post-action Activity and evaluates any supplied
-expectation.
-
-Instead of copying the full RuntimeSnapshot, the envelope may carry the
-`snapshotRef` (or `nextSnapshotRef`) string emitted by the preceding
-`observe`/`step` output:
-
-```jsonc
-{
-  "version": 1,
-  "proposal": { /* as above */ },
-  "snapshotRef": ".taphound/build/generations/<bundle>/evidence/snapshots/revision-000002/<attempt>/snapshot.json"
-}
-```
-
-Core loads the referenced evidence from the session's authoritative bundle and
-applies the same binding validation as for an inline snapshot; the reference
-must point at the same generation session. Envelopes carrying both `snapshot`
-and `snapshotRef`, or neither, are rejected. An unreadable, foreign, or
-mismatched reference fails as `SNAPSHOT_STALE`: observe again and rebind.
-
-
-When Base Flow verification fails, `generation start --json` returns
-`FLOW_REPLAY_FAILED` details containing the Flow name, Verify report path,
-primary failure, the failed step's Activity/locator/expectation summary, and
-recovery guidance. The Agent must not silently skip reuse or treat a device
-already showing Home as an exact replay. It should repair or re-record the
-Flow, and restart without `--base-flow` only after the user explicitly chooses
-that bypass.
-When an indexed Locator is resolvable from the bound snapshot, Core persists
-versioned, non-geometric semantic evidence for the selected element. Replay
-recomputes that evidence before mutation and fails instead of using annotated
-fallback when the indexed element's represented content changed. Existing
-Journeys without this optional evidence retain their previous ordinal
-behavior.
-
-`generation status` includes `pendingConfirmation` and its computed `expired`
-flag. While a challenge is pending, `observe` returns
-`RISK_CONFIRMATION_REQUIRED` with challenge details rather than an internal
-error. An expired challenge cannot be approved; resolve it with the exact
-challenge ID (for example `confirm --decision decline`) before observing and
-submitting a fresh proposal.
-For approved actions, the challenge ID and `approvalMode` (`localTty` or
-`delegated`) are stored in the in-flight attempt before device mutation and in
-the immutable step result, so interrupted-action recovery retains the approval
-audit.
-
-## Installing the Skill for AI Agents
-
-`taphound init` copies the TapHound Journey Generator Skill from the npm package into
-each Agent's Skill directory. The interactive multi-select requires choosing
-at least one Agent; you can also specify non-interactively with `--agent`:
-
-```bash
-taphound init --agent claude,codex,cursor,droid --json
-```
-
-Global install (user-level directory):
-
-```bash
-taphound init --agent claude --global
-```
-
-Supported Agents and paths:
-
-| Agent | Project-level path | User-level path |
-|---|---|---|
-| Claude Code | `.claude/skills/` | `~/.claude/skills/` |
-| Codex | `.agents/skills/` | `~/.agents/skills/` |
-| Cursor | `.cursor/skills/` | `~/.cursor/skills/` |
-| Droid | `.factory/skills/` | `~/.factory/skills/` |
-| Other | `.agents/skills/` | `~/.agents/skills/` |
-
-The Skill ships with the npm package (`assets/skills/`), and `taphound init`
-copies it into the target Skill root. Re-running `init` overwrites existing
-files in the installed Skill directory.
-
-## Minimal Instructions for Claude Code
+Every machine-readable command follows one rule:
 
 ```text
-After implementation is complete, run:
-taphound verify --project . --journey .taphound/journeys/search.json --json
-Parse the JSON; acceptance passes only when exitCode=0.
-If it fails, report report.primaryFailure first, and include reportPath.
-Do not modify the Journey to mask implementation defects.
+exactly one JSON value on stdout
+progress + diagnostics on stderr
+JSON exitCode == process exit code
 ```
 
-## Safety and Determinism
+- `taphound verify --contract <path> --json` emits the Verdict (with
+  `exitCode`) as the only **stdout** value.
+- `taphound verify --diff <ref> --json` emits `{overall, results, impact}`.
+- `taphound failure classify --report <path> --json` emits the classification.
+- `taphound knowledge feature-map --json` emits the projection.
+- Non-JSON (human) mode writes summaries to **stdout** and errors to
+  **stderr**, and sets the same exit code.
 
-TapHound Replay never invokes AI. The Agent may select an existing Journey or propose new steps in a generation session, but the final judgment of Locator, Activity, Layout Diff, risk policy, and Expect is performed by deterministic code. The Agent must not automatically loosen assertions, swap the Package, delete steps, or bypass confirmation after a failure.
+`taphound init` installs the two bundled Skills
+(`taphound-journey-brief-author`, `taphound-journey-generator`) into
+`assets/skills/`; `generation observe`/`next`/`step` drive one deterministic
+generation session. bridge steps use External Flows; an escaped package that
+never returns fails with `PACKAGE_ESCAPE` equivalent codes
+(`BRIDGE_NOT_RETURNED`). The whole surface is exercised by
+`verify-changes`/`verify --diff` against registered targets or worktrees, and
+`taphound init` is the recommended first install step for agents.
 
-Generation binds the normalized config for the lifetime of the session. Agents
-must choose `idle.strategy` before `generation start`; after start, any config
-change other than the idle policy requires a new session. The idle policy alone
-can be hot-adjusted mid-session through `generation config idle`, which stores a
-session-scoped override that observe, step, and finalize replay honor while the
-original `configHash` binding stays authoritative. When a step needs correction,
-`generation step --replace <index>` rewinds the session to its stored prefix
-through the same deterministic replay engine as finalize; if the prefix no
-longer replays exactly, the replace fails and the session is left untouched.
-`hybrid` falls back from
-active frame counters to Core-owned UIAutomator layout hashes; `layoutDiff`
-selects structural stability directly. An action attempt that returns
-`status: "recoveryRequired"` may already have executed. Inspect
-`generation status`, obtain explicit user approval before `recover`, and never
-assume that recovery committed the interrupted action or returned a snapshot.
-
-## Verification Cost Model
-
-Generation finalizes a Journey with exactly one uninterrupted cold-start
-replay of the complete step list. This is a deliberate design decision, not an
-implementation shortcut: the published report is self-contained proof that the
-exact Journey, launched from a reset process, replays step by step without
-relying on any session-time execution history.
-
-The cost consequence is equally deliberate: finalize replay time grows
-linearly with the step count, and a Journey that fails verification late must
-be corrected and re-verified in full. Two alternatives were evaluated and
-rejected:
-
-- **Trusting session-time execution as partial verification.** Steps executed
-  during generation run in a warm process: the activity stack, caches, and
-  process state carry over between steps. Accepting that history as evidence
-  would publish Journeys whose cold-start determinism was never proven by
-  Core; the first full replay would effectively be the user's, not TapHound's.
-- **Verified-prefix caching.** Reusing a previously replayed prefix would
-  require binding cached replay results to an exact prefix hash, environment,
-  and device state, and silently invalidating them on any `step --replace`,
-  app reinstall, or tool change. The bookkeeping would duplicate the session
-  revision protocol without adding any guarantee that the cached prefix still
-  reproduces from a cold start.
-
-The shipped mitigations keep full replay authoritative while bounding its
-cost:
-
-1. `generation step --replace <index>` localizes corrections. A locator or
-   step fix replays only the stored prefix through the same cold-launch
-   engine, truncates the session, and re-binds a fresh snapshot; subsequent
-   steps are not re-executed because they no longer exist. Without replace,
-   every late correction would otherwise force re-recording the entire
-   suffix.
-2. `generation finalize --detach` plus the persisted verification `phase`
-   (with per-step `stepIndex`/`stepCount` progress) make long replays
-   observable without holding a terminal open; `generation status --wait`
-   polls to completion.
-3. Finalize refuses redundant work: it validates all bindings before
-   starting, and only a genuine replay failure durably marks verification
-   `failed`, so precondition mistakes do not consume a replay cycle.
-
-Agents should therefore budget one full-replay duration per finalize attempt,
-prefer `step --replace` over restarting a session after a mid-journey
-correction, and treat finalize replay time as an expected, one-time cost of
-publishing proof rather than a retry penalty.
-
-## Cross-Application Flows
-
-TapHound Core enforces single-package determinism. When a step causes the
-foreground to leave the configured target package — for example tapping a
-button that opens the system camera, a file picker, or a third-party share
-sheet — `generation step` and `generation manual` reject the post-action
-snapshot with `PACKAGE_ESCAPE`. This is by design: TapHound cannot
-deterministically bind or replay actions that execute in a process it does not
-own.
-
-### Bridge Action
-
-The `bridge` action lets Core own the trigger click and the return detection
-for cross-app flows within a single generation step. Core clicks the trigger,
-detects the package escape, optionally executes a bound External Flow's steps
-inside the escaped package, waits for the foreground to return, and captures
-the post-return snapshot.
-
-Bridge steps run in two replay modes:
-
-- **Auto** (`replayMode: "auto"`): `--flow <name>` resolves a bound External
-  Flow. Core stamps the flow's steps as `externalSteps` and replays them
-  deterministically during `finalize` with no human operator.
-- **Manual** (`replayMode: "manual"`): no `--flow`. A human operator completes
-  the external action during replay.
-
-Bind External Flows at session start:
+## The single entry point
 
 ```bash
-taphound generation start \
-  --project . \
-  --external-flow camera/photo-capture \
-  ...
+# verify everything a Git change affects (minimal verification set)
+taphound verify --diff main --project /path/to/android-project --json
+
+# or an explicit base/head
+taphound verify --diff origin/main --base main --head HEAD --scope p0,p1
+
+# or a bare Journey / Acceptance Contract
+taphound verify --journey .taphound/journeys/search.json --json
+taphound verify --contract .taphound/contracts/search.json --json
 ```
 
-List available flows (built-in and project):
+`verify --diff <ref>` is the diff-aware entry (V1.0): it computes
+`git diff <ref>...HEAD`, maps the change through Project Context + Knowledge
+(`impact`), selects the affected Journeys (P0/P1/P2), replays each, and
+returns one `overall` verdict:
+
+```json
+{
+  "base": "origin/main",
+  "head": "HEAD",
+  "impact": { "...": "see docs/impact.md" },
+  "results": [
+    { "path": ".taphound/journeys/search.json", "name": "TapHound demo search", "selection": "p0", "status": "passed", "reportPath": "..." }
+  ],
+  "overall": "passed"
+}
+```
+
+The Coding Agent's loop:
+
+```text
+agent: "implemented the change"
+taphound verify --diff main     → overall: passed  → Task Done
+                                  overall: failed  → agent reads failure classify →
+                                                      fixes → re-run
+```
+
+## Failure handling
+
+When a Journey fails, the agent consumes `failure classify` (structured
+contract) — never raw logcat:
 
 ```bash
-taphound journey list-flows --project . --include-external --json
+taphound failure classify --report <run>/report.json --json
 ```
 
-Use `generation bridge` with one of the built-in scenarios:
+## Local targets (`--target`)
 
-- `photoCapture` — system camera (validates escaped package)
-- `pickImage` — system image picker (validates escaped package)
-- `pickFile` — system file picker (validates escaped package)
-- `custom` — any other cross-app flow (skips package validation, requires
-  `--description`)
+Register a repo once, then let the agent target it by id:
 
 ```bash
-# Auto bridge (deterministic, no operator)
-taphound generation bridge \
-  --project . \
-  --session <id> \
-  --scenario photoCapture \
-  --trigger-locator '{"resourceId":"com.example.app:id/camera_button"}' \
-  --flow camera/photo-capture \
-  --return-timeout-ms 60000 \
-  --escape-timeout-ms 3000 \
-  --json
-
-# Manual bridge (human operator completes external action)
-taphound generation bridge \
-  --project . \
-  --session <id> \
-  --scenario photoCapture \
-  --trigger-locator '{"resourceId":"com.example.app:id/camera_button"}' \
-  --return-timeout-ms 60000 \
-  --json
+taphound local add my-app --path /path/to/repo
+taphound verify --diff main --target my-app --json
 ```
 
-Like `generation manual`, `bridge` goes through risk confirmation. If the
-action is not auto-approved, the response carries `status:
-"confirmationRequired"` and the Agent calls `generation confirm` with the human
-decision.
+This works in a **worktree** (head = `WORKTREE`): the change set is computed
+against the target's Git root while the app builds in the worktree.
 
-### Failure Codes
+## Verdicts and Source of Truth
 
-- `BRIDGE_NO_ESCAPE` — the foreground did not leave the target package within
-  `escapeTimeoutMs` (default 3 seconds) of the trigger click.
-- `SCENARIO_PACKAGE_MISMATCH` — the escaped package is not in the known system
-  package list for the selected scenario. Use `custom` to bypass.
-- `BRIDGE_NOT_RETURNED` — the foreground did not return to the target package
-  within `returnTimeoutMs`.
-- `EXTERNAL_FLOW_NOT_FOUND` — `--flow` names a flow not bound to this session.
-- `EXTERNAL_FLOW_STALE` — the bound flow file changed since `generation start`.
-- `EXTERNAL_PACKAGE_MISMATCH` — an external step ran in a different package
-  than `escapedPackageName`.
-- `EXTERNAL_ACTIVITY_MISMATCH` — an external step's `expectedActivity` did not
-  match.
-- `EXTERNAL_STEP_FAILED` — an external step's action failed (e.g., locator not
-  found).
-- `EXTERNAL_LOCATOR_STRICTNESS` — an external step locator lacks a `resourceId`
-  (v1 requires XML-only resource IDs for external steps).
-- `MANUAL_STEP_REQUIRED` — a non-interactive `finalize` encountered a
-  `replayMode: "manual"` step. Bind an External Flow or run finalize in a TTY.
+`overall` is deterministic: every selected Journey must `pass`. A `failed`
+Journey is never rewritten to `pass` by a reviewer, semantic comparator, or
+multimodal layer (see `docs/source-of-truth.md`). Only `contract review`
+can escalate `pass`/`inconclusive` to `needsReview`, and the Escalation
+Policy decides deterministic escalation triggers (`docs/playbook.md`).
 
-See [`docs/journey-schema.md`](./journey-schema.md) for the full bridge schema
-and [`examples/bridge-camera.journey.json`](../examples/bridge-camera.journey.json)
-for a complete Journey.
+## Suggested Skill surface
+
+A TapHound Agent Skill ships the following public commands (external to Core):
+
+| Command | Purpose |
+|---|---|
+| `taphound verify --diff <ref>` | verify the minimal set a change affects |
+| `taphound verify --contract <path>` | verify one task against its Acceptance Contract |
+| `taphound failure classify --report <path>` | structured failure contract |
+| `taphound knowledge feature-map --markdown` | low-token app map for orientation |
+| `taphound baseline compare --baseline <path> --report <path>` | behavior regression check |
+
+The Skill never mutates device state or Knowledge; it reads CLI JSON output
+and orchestrates re-runs.
+
+## Journey Brief Authoring (subagent dispatch)
+
+`taphound-journey-brief-author` is the recommended producer of a Journey Brief:
+it builds the Project Context Bundle (root index + one shard per Gradle
+module) from read-only `taphound project`/`context` evidence, then authors one
+Brief per Case by combining source analysis with read-only `taphound
+observe`. A dispatcher (e.g. a Claude Code subagent dispatch) may parallelize
+the authoring across Cases. The dispatch contract is the input envelope
+`{project, caseGoal, caseId, contextPaths, observeSnapshot, output}` — the
+`observeSnapshot` field carries the read-only observation evidence from
+`taphound observe` that the author folds into the Brief. The author's working
+artifacts are `plan.md` (the per-Case authoring plan) and
+`requirement.md`-style case input; both stay project-relative. The author role
+prompt ships as
+`assets/skills/taphound-journey-brief-author/prompts/brief-author-role.md`
+(plus a zh-CN variant). The Brief author uses only read-only commands and
+never modifies device state.
+
+## Journey Brief contract (Skills)
+
+The `taphound-journey-generator` Skill consumes an optional project-relative
+**Journey Brief** through a `journeyBrief: {path, sha256}` binding in its
+invocation. The Brief is a hook to the `taphound-journey-brief.md` contract
+(`assets/skills/taphound-journey-generator/templates/`): the generator's
+`consume-journey-brief` prompt reads Goal, Preconditions, Expected Journey,
+Assertions, Implementation Hints, Constraints, Evidence References, State
+Transition Map, and Capability Notes into the deterministic generation flow.
+It is **untrusted static Case context** — Core never executes it; Project
+Context, live Runtime Snapshots, risk policy, execution, and final Replay stay
+authoritative. The hash binding (`journeyBrief.sha256`) lets a caller detect a
+stale brief before generation.

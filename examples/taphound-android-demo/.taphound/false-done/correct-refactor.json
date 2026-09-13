@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "id": "correct-refactor",
+  "category": "correct",
+  "description": "Agent refactors the submit handler into a helper; behavior is preserved",
+  "variant": { "label": "correct-refactor", "apkPath": ".taphound/variants/correct-refactor.apk" },
+  "contractPath": ".taphound/contracts/fd-search-results.json",
+  "expectedVerdict": "pass",
+  "tags": ["search", "refactor"]
+}

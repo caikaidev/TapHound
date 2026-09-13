@@ -1,8 +1,9 @@
 import type { DisplayViewport } from "../domain/geometry.js";
 import type { LayoutElement } from "../domain/layout.js";
+import type { AnchorCandidateKind } from "../domain/knowledge.js";
 
 export interface AnchorResolution {
-  status: "found" | "notFound" | "ambiguous";
+  status: "found" | "notFound" | "ambiguous" | "visualOnly";
   point?: { x: number; y: number };
   bounds?: {
     left: number;
@@ -12,6 +13,10 @@ export interface AnchorResolution {
   };
   element?: LayoutElement;
   message?: string;
+  resolvedBy?: {
+    kind: AnchorCandidateKind;
+    confidence: "primary" | "fallback";
+  };
 }
 
 export interface AnchorResolverPort {

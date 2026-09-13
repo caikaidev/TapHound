@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { Command } from "commander";
 
 import { BenchmarkRunner } from "../../application/benchmark/benchmark-runner.js";
+import { compareFalseDoneRuns } from "../../application/benchmark/false-done-compare.js";
 import {
   GenerationBenchmarkExecutor,
   type GenerationBenchmarkRuntime
@@ -520,6 +521,152 @@ export function createBenchmarkCommand(dependencies: CliDependencies): Command {
         );
       } catch (error) {
         fail(dependencies, options, "BENCHMARK_COMPARE_FAILED", error);
+      }
+    });
+
+  const falseDone = command
+    .command("false-done")
+    .description("False-Done Benchmark: does verification catch agent false completions");
+
+  falseDone
+    .command("validate")
+    .description("Validate False-Done Cases (variant APK + bound Contract)")
+    .option("--project <path>", "Android project root", dependencies.cwd())
+    .option("--case <id...>", "Restrict to specific Case ids")
+    .option("--json", "Emit one machine-readable JSON value")
+    .action(async (options: CommonOptions & { case?: string[] | undefined }): Promise<void> => {
+      try {
+        if (dependencies.falseDone === undefined) {
+          throw new Error("False-Done services are unavailable");
+        }
+        const output = await dependencies.falseDone.validate({
+          projectRoot: options.project,
+          ...(options.case === undefined ? {} : { caseIds: options.case })
+        });
+        emit(
+          dependencies,
+          options,
+          {
+            status: output.status,
+            exitCode: output.status === "valid" ? 0 : 2,
+            cases: output.cases
+          },
+          `False-Done cases: ${String(output.cases.length)}`
+        );
+      } catch (error) {
+        fail(dependencies, options, "FALSE_DONE_INVALID", error);
+      }
+    });
+
+  falseDone
+    .command("run")
+    .description("Run False-Done Cases: install each variant, verify its Contract, score detection")
+    .option("--project <path>", "Android project root", dependencies.cwd())
+    .option("--config <path>", "TapHound config path", CONFIG_PATH)
+    .option("--device <serial>", "Select an online Android device")
+    .option("--case <id...>", "Restrict to specific Case ids")
+    .option("--repeats <n>", "Verify each Case N times to measure replay stability", "1")
+    .option("--json", "Emit one machine-readable JSON value")
+    .action(async (options: CommonOptions & {
+      config: string;
+      device?: string | undefined;
+      case?: string[] | undefined;
+      repeats: string;
+    }): Promise<void> => {
+      try {
+        if (dependencies.falseDone === undefined) {
+          throw new Error("False-Done services are unavailable");
+        }
+        const repeats = Number(options.repeats);
+        if (!Number.isSafeInteger(repeats) || repeats < 1 || repeats > 5) {
+          throw new Error("--repeats must be an integer between 1 and 5");
+        }
+        const config = TapHoundConfigSchema.parse(
+          await dependencies.readJson(resolve(options.project, options.config))
+        );
+        const doctor = await dependencies.doctor.run({
+          packageName: config.run.packageName,
+          ...(options.device === undefined
+            ? {}
+            : { requestedDevice: options.device }),
+          ...(dependencies.signal === undefined
+            ? {}
+            : { signal: dependencies.signal })
+        });
+        if (doctor.status === "failed") {
+          emit(dependencies, options, {
+            status: "failed",
+            exitCode: 3,
+            code: doctor.failureCode ?? "ENVIRONMENT_MISSING_TOOL"
+          }, "False-Done environment preflight failed");
+          return;
+        }
+        const deviceSerial = options.device ?? doctor.deviceSerial;
+        if (deviceSerial === undefined) {
+          throw new Error("Doctor did not select a device");
+        }
+        const toolVersions = Object.fromEntries(doctor.checks.flatMap(
+          (check) => check.status === "passed" && check.version !== undefined
+            ? [[check.name, check.version] as const]
+            : []
+        ));
+        const { result, path } = await dependencies.falseDone.run({
+          projectRoot: options.project,
+          deviceSerial,
+          repeats,
+          config,
+          toolVersions,
+          manualReplay: process.stdin.isTTY,
+          ...(options.case === undefined ? {} : { caseIds: options.case }),
+          ...(dependencies.signal === undefined
+            ? {}
+            : { signal: dependencies.signal })
+        });
+        emit(dependencies, options, {
+          status: "ran",
+          exitCode: 0,
+          runId: result.runId,
+          resultPath: path,
+          metrics: result.metrics
+        }, `False-Done run ${result.runId} at ${path}`);
+      } catch (error) {
+        fail(dependencies, options, "FALSE_DONE_RUN_FAILED", error);
+      }
+    });
+
+  falseDone
+    .command("compare")
+    .description("Compare two False-Done runs and report metric deltas")
+    .option("--project <path>", "Android project root", dependencies.cwd())
+    .requiredOption("--baseline <runId>", "Baseline False-Done run id")
+    .requiredOption("--candidate <runId>", "Candidate False-Done run id")
+    .option("--json", "Emit one machine-readable JSON value")
+    .action(async (options: CommonOptions & {
+      baseline: string;
+      candidate: string;
+    }): Promise<void> => {
+      try {
+        if (dependencies.falseDone === undefined) {
+          throw new Error("False-Done services are unavailable");
+        }
+        const store = dependencies.falseDone;
+        const baseline = await store.readResult(
+          options.project,
+          options.baseline
+        );
+        const candidate = await store.readResult(
+          options.project,
+          options.candidate
+        );
+        const output = compareFalseDoneRuns(baseline, candidate);
+        emit(
+          dependencies,
+          options,
+          { status: "compared", exitCode: 0, ...output },
+          `Compared ${baseline.runId} -> ${candidate.runId}`
+        );
+      } catch (error) {
+        fail(dependencies, options, "FALSE_DONE_COMPARE_FAILED", error);
       }
     });
 

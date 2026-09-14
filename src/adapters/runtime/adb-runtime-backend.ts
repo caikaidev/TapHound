@@ -109,7 +109,7 @@ export class AdbRuntimeSession implements RuntimeSession {
           new Error("deviceIdentity is unavailable")
         );
       }
-      return current(
+      return current.call(this.dependencies.adb,
         appIdentity(app, this.dependencies.deviceSerial)
       );
     };

@@ -96,6 +96,7 @@ describe("VerifyRuntime", () => {
       "idle",
       "pid",
       "activity-search",
+      "step-layout",
       "screenshot",
       "logcat-stop",
       "report"
@@ -684,8 +685,10 @@ describe("VerifyRuntime multi-device", () => {
       "idle@emulator-5556",
       "pid@emulator-5556",
       "activity-search@emulator-5556",
+      "step-layout@emulator-5554",
       "screenshot@emulator-5554",
       "logcat-stop@emulator-5554",
+      "step-layout@emulator-5556",
       "screenshot@emulator-5556",
       "logcat-stop@emulator-5556",
       "report"
@@ -772,6 +775,7 @@ describe("VerifyRuntime multi-device", () => {
       "activity-main@emulator-5554",
       "baseline@emulator-5554",
       "install@emulator-5556",
+      "step-layout@emulator-5554",
       "screenshot@emulator-5554",
       "logcat-stop@emulator-5554",
       "screenshot@emulator-5556",

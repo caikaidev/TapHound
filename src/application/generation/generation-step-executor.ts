@@ -81,6 +81,7 @@ import {
   hasExactlyOneEnabledFocusedElement
 } from "./focused-input.js";
 import { closeUiSnapshotProvider } from "../ui/ui-snapshot-lifecycle.js";
+import { uiStabilityProbe } from "../ui/ui-stability-probe.js";
 
 export type GenerationCandidateSource = "planner" | "manualOverride";
 
@@ -607,11 +608,14 @@ export class GenerationStepExecutor {
       });
       try {
       const views = this.dependencies.sessionPorts(deviceSession);
+      const boundBackendSelection = session.bindings.uiBackend === undefined
+        ? undefined
+        : uiBackendIdAsSelection(session.bindings.uiBackend.id);
       const uiSnapshotProvider = await deviceSession.openUiSnapshots({
         timeoutMs: idle.timeoutMs,
-        ...(session.bindings.uiBackend === undefined
+        ...(boundBackendSelection === undefined
           ? {}
-          : { backend: uiBackendIdAsSelection(session.bindings.uiBackend.id) }),
+          : { backend: boundBackendSelection }),
         ...(this.dependencies.uiCacheEnabled === undefined
           ? {}
           : { cacheEnabled: this.dependencies.uiCacheEnabled }),
@@ -898,7 +902,10 @@ export class GenerationStepExecutor {
         (): void => this.boundUiSnapshotProvider().invalidate?.("beforeAction")
       );
       const idleWaiter = new IdleWaiter(
-        this.boundViews().uiStability,
+        uiStabilityProbe(
+          this.boundUiSnapshotProvider(),
+          this.boundViews().uiStability
+        ),
         this.dependencies.clock,
         session.target.deviceSerial,
         session.target.packageName,
@@ -1834,7 +1841,10 @@ export class GenerationStepExecutor {
         { action: "scrollTo" }
       >;
       const externalIdleWaiter = new IdleWaiter(
-        this.boundViews().uiStability,
+        uiStabilityProbe(
+          this.boundUiSnapshotProvider(),
+          this.boundViews().uiStability
+        ),
         this.dependencies.clock,
         session.target.deviceSerial,
         escapedPackageName,
@@ -1905,7 +1915,10 @@ export class GenerationStepExecutor {
     }
 
     const externalIdleWaiter = new IdleWaiter(
-      this.boundViews().uiStability,
+      uiStabilityProbe(
+        this.boundUiSnapshotProvider(),
+        this.boundViews().uiStability
+      ),
       this.dependencies.clock,
       session.target.deviceSerial,
       escapedPackageName,

@@ -74,7 +74,7 @@ See the [local testing guide](docs/local-testing.md) for source, npm tarball, an
 
 ## CLI Commands
 
-- `doctor`: checks Node.js, ADB, Android CLI, app installation, permissions, and device. With `ui.backend=appium-uiautomator2`, it also checks the local Appium server and UiAutomator2 driver. The default runtime backend is Mobile MCP (`runtime.backend=auto`), so it checks the Mobile MCP server instead of the Android CLI and diagnoses the device through Mobile MCP tools; set `runtime.backend=adb` in config (or `TAPHOUND_RUNTIME_BACKEND=adb`) to check the ADB toolchain instead.
+- `doctor`: checks Node.js, ADB, Android CLI, app installation, permissions, and device. `runtime.backend=auto` uses the ADB runtime. `ui.backend=auto` prefers a healthy local Appium UiAutomator2 provider, then falls back to system UIAutomator and Android CLI snapshots. Pin either backend when deterministic environment parity matters.
 - `record`: interactively execute actions and record a Journey.
 - `verify`: deterministically replay a Journey and publish a report. With `--contract`, verify an Acceptance Contract: hash-bound Journey, preconditions, post-journey assertions, evidence requirements, and a `pass`/`fail`/`inconclusive`/`needsReview`/`invalid` Verdict.
 - `contract validate`: validate an Acceptance Contract JSON and its Journey hash binding without touching a device.
@@ -186,7 +186,8 @@ Create `.taphound/config.json` in the Android project. `run.packageName` is requ
 `ui` is optional, so parsing an existing config does not add fields or change
 its Generation binding hash. Runtime defaults to `auto`; explicit backend
 choices are `system-uiautomator`, `android-cli`, and `appium-uiautomator2`.
-Appium remains explicit-only and fails closed when its provider is unavailable.
+`auto` probes Appium UiAutomator2 first, then falls back to system UIAutomator
+and Android CLI. Explicit selections fail closed instead of falling back.
 `cacheEnabled: false` is the cache-equivalence switch: it disables only the
 run-scoped observation cache, never changes locator rules or action behavior.
 Persistent UI cache files store resource-ID-based screen/flow contracts and
@@ -201,16 +202,15 @@ entirely for apps with known continuous rendering, or `frameStats` only when
 pixel-level frame quiescence is required.
 
 `runtime.backend` selects the device runtime backend: `auto` (default) and
-`mobile-mcp` route device work through the [Mobile MCP](https://www.npmjs.com/package/@mobilenext/mobile-mcp)
-server, while `adb` selects the ADB + Android CLI backend as the explicit
-fallback. Device work flows through the Runtime Backend SPI: `observe`,
+`adb` use the complete ADB + Android CLI runtime, while `mobile-mcp` explicitly
+selects the [Mobile MCP](https://www.npmjs.com/package/@mobilenext/mobile-mcp)
+server. Device work flows through the Runtime Backend SPI: `observe`,
 `verify`, `record`, and `generation` borrow a session per run through the
 `RuntimeSessionOpener` port, `align` still routes through the bridge, and
 `doctor` is fully backend-aware. Commands that need capabilities the selected
 backend lacks (under `mobile-mcp`: process discovery, foreground Activity,
-logcat dump) fail closed with `RUNTIME_CAPABILITY_MISSING` (exit code 3), so
-`verify`/`record`/`generation`/`observe` keep the ADB execute path until the
-upstream Mobile MCP server exposes them. See the
+logcat dump) fail closed with `RUNTIME_CAPABILITY_MISSING` (exit code 3).
+See the
 [Runtime Backend SPI](docs/architecture/runtime-backend.md)
 for the capability matrix and adoption levels.
 

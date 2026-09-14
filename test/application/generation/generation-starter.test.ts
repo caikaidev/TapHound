@@ -14,6 +14,7 @@ import { GENERATION_CONTEXT_SNAPSHOT_PATH } from "../../../src/domain/workspace.
 import {
   GenerationSessionStoreError
 } from "../../../src/ports/generation-session-store.js";
+import { runtimeCapabilityMissing } from "../../../src/ports/runtime-capability.js";
 import { hashJourney } from "../../../src/domain/report.js";
 import { contextSelection } from "../../fixtures/project-context.js";
 import { validReport } from "../../fixtures/report.js";
@@ -388,6 +389,24 @@ describe("GenerationStarter", () => {
     })).rejects.toMatchObject({
       code: "APP_LAUNCH_FAILED",
       message: "launch failed"
+    });
+    expect(test.created).toEqual([]);
+  });
+
+  it("preserves runtime capability failures from app preparation", async () => {
+    const test = starter();
+    test.prepare.mockRejectedValueOnce(
+      runtimeCapabilityMissing("mobile-mcp", "currentActivity")
+    );
+
+    await expect(test.service.start({
+      projectRoot: "/project",
+      config,
+      context,
+      project,
+      deviceSerial: "emulator-5554"
+    })).rejects.toMatchObject({
+      code: "RUNTIME_CAPABILITY_MISSING"
     });
     expect(test.created).toEqual([]);
   });

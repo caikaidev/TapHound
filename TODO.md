@@ -1,13 +1,13 @@
 # TapHound Post-Machine-Switch TODO
 
-This checklist is for cross-machine validation and the subsequent pre-release after the current development phase ends. Once GitHub push evidence is complete, use remote `main` and [`docs/verification/taphound-v0.2-dev.1-audit.md`](docs/verification/taphound-v0.2-dev.1-audit.md) as the baseline.
+This checklist is for cross-machine validation and the `0.2.0-dev.6` pre-release. Historical `dev.1` evidence remains archived in [`docs/verification/taphound-v0.2-dev.1-audit.md`](docs/verification/taphound-v0.2-dev.1-audit.md), but it is not current release evidence.
 
-## Current Handoff Baseline
+## Historical dev.1 Handoff
 
 - [x] TapHound rename, HoundMark, release metadata, and local tarball smoke have been committed.
 - [x] The first source code push has been pushed normally to `origin/main`, with SHA `473f27cf6993ce0cd2ed80d3180715e734dba4c7`, no force-push.
 - [x] The remote default branch is `main`; the repository page is currently publicly visible, and visibility was not changed this time.
-- [x] The exact local tarball SHA-256 is `0545c4f2324080b2c3cee99d27351887c868fe9f8bdf4ff37cc0275413d8e47f`.
+- [x] The historical `dev.1` tarball SHA-256 was `0545c4f2324080b2c3cee99d27351887c868fe9f8bdf4ff37cc0275413d8e47f`; it must not be reused for `dev.6`.
 - [ ] The npm package has not been published yet; the independent publish gate remains closed.
 
 ## Recovery After Machine Switch
@@ -19,7 +19,7 @@ This checklist is for cross-machine validation and the subsequent pre-release af
 
 ## Cross-Machine Validation
 
-- [ ] Regenerate `taphound-0.2.0-dev.5.tgz` and verify the size, SHA-256, npm shasum, integrity, and file listing.
+- [ ] Regenerate `taphound-0.2.0-dev.6.tgz` and verify the size, SHA-256, npm shasum, integrity, and file listing.
 - [ ] Install from the exact tarball and verify `taphound --help`, confirming there is no legacy binary entry.
 - [ ] Run doctor and the Demo Journey on an Emulator or USB Device.
 - [ ] Inspect the reports, screenshots, and logs in `.taphound/build/runs/`; record the device, tool versions, and failure reproduction steps.
@@ -31,7 +31,7 @@ This checklist is for cross-machine validation and the subsequent pre-release af
 - [ ] Check the npm login identity, 2FA requirements, and `taphound` package name status; do not record tokens or OTPs.
 - [ ] Re-run the full quality gate and the exact-tarball install smoke.
 - [ ] Show the user the account, version, public access, `dev` tag, tarball digest, and file listing, and obtain an independent explicit confirmation.
-- [ ] Publish only `taphound@0.2.0-dev.5` to `dev`; do not create or move `latest`, and do not publish a different tarball.
+- [ ] Publish only `taphound@0.2.0-dev.6` to `dev`; do not create or move `latest`, and do not publish a different tarball.
 - [ ] Freshly install `taphound@dev` from the registry and run the CLI smoke.
 - [ ] Write the registry evidence back into the release audit, commit, and push normally; never force-push.
 

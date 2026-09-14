@@ -5,6 +5,7 @@ import type { CliDependencies, TextOutput } from "../../src/cli/dependencies.js"
 import type { AlignCameraResult } from "../../src/application/align/align-service.js";
 import { fakeWorkspaceLayout } from "../fakes/workspace-layout.js";
 import { defaultLocalTargets } from "../fakes/local-targets.js";
+import { runtimeCapabilityMissing } from "../../src/ports/runtime-capability.js";
 
 class BufferOutput implements TextOutput {
   public value = "";
@@ -126,6 +127,23 @@ describe("taphound align camera command", () => {
     expect(output.exitCode).toBe(2);
     expect(output.failure.code).toBe("ALIGN_SHUTTER_NOT_FOUND");
     expect(test.exitCodes).toEqual([2]);
+  });
+
+  it("preserves runtime capability failures with exit code 3", async () => {
+    const test = harness(writtenResult);
+    test.alignCameraMock.mockRejectedValueOnce(
+      runtimeCapabilityMissing("mobile-mcp", "startActivityByIntent")
+    );
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "align", "camera", "--json"
+    ]);
+    const output = JSON.parse(test.stdout.value) as {
+      exitCode: number;
+      failure: { code: string };
+    };
+    expect(output.exitCode).toBe(3);
+    expect(output.failure.code).toBe("RUNTIME_CAPABILITY_MISSING");
+    expect(test.exitCodes).toEqual([3]);
   });
 
   it("passes --device and --force to the service", async () => {

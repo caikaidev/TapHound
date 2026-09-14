@@ -116,12 +116,14 @@ members (`annotatedScreens`, `startActivityByIntent`) are `undefined` when
 unsupported and fail closed with `RUNTIME_CAPABILITY_MISSING` (exit code 3),
 which names the `runtime.backend` / `TAPHOUND_RUNTIME_BACKEND` escape hatches.
 `config.json` selects the backend through
-`runtime.backend` (`auto` | `adb` | `mobile-mcp`); `auto` and `mobile-mcp`
-resolve to the Mobile MCP backend, `adb` selects the ADB backend, and the
+`runtime.backend` (`auto` | `adb` | `mobile-mcp`); `auto` and `adb`
+resolve to the ADB backend, `mobile-mcp` explicitly selects Mobile MCP, and the
 `TAPHOUND_RUNTIME_BACKEND` environment variable overrides
 the config per invocation. A missing `mcp-server-mobile` binary fails with the
 coded `ENVIRONMENT_MISSING_TOOL` and a remediation message naming the install
-command and the adb escape hatch. Commands that need capabilities the selected
+command and the ADB escape hatch. Independently, `ui.backend=auto` prefers
+Appium UiAutomator2, then system UIAutomator, then Android CLI. Commands that
+need capabilities the selected
 backend lacks (`verify`, `record`, `generation`, `observe`, `align`) fail
 closed; `observe`, `verify`, `record`, and `generation` borrow a session per
 run through the `RuntimeSessionOpener` port (the Level 1 session-first
@@ -412,7 +414,7 @@ the `adb` backend instead of `auto`/mobile-mcp
   rejected. Coordinate schema, inferred types, runtime behavior, docs/examples,
   fixtures, and tests whenever a protocol changes.
 - Config has no build or artifact input because TapHound does not compile.
-  Report `schemaVersion` is `2`; installation failure is `APP_NOT_INSTALLED`
+  Report `schemaVersion` is `4`; installation failure is `APP_NOT_INSTALLED`
   with exit code 3.
 - Locator priority is fixed: `resourceId`, then `text`, then
   `contentDescription`. Missing or ambiguous matches fail rather than selecting

@@ -35,6 +35,32 @@ export class PlaybookValidator {
 
   private readonly validateRule = (rule: EscalationRule): string[] => {
     const issues: string[] = [];
+    const verdictResult = rule.then.action === "verdict"
+      ? rule.then.result
+      : undefined;
+    if (
+      verdictResult !== undefined
+      && rule.when.verdicts?.some(
+        (verdict) => (
+          (verdict === "fail" || verdict === "invalid")
+          && verdict !== verdictResult
+        )
+      )
+    ) {
+      issues.push(
+        `Rule "${rule.id}" cannot rewrite a deterministic fail or invalid verdict`
+      );
+    }
+    if (
+      rule.then.action === "escalate"
+      && rule.when.verdicts?.some(
+        (verdict) => verdict === "fail" || verdict === "invalid"
+      ) === true
+    ) {
+      issues.push(
+        `Rule "${rule.id}" cannot escalate a deterministic fail or invalid verdict`
+      );
+    }
     if (
       rule.then.action === "escalate"
       && rule.then.target === "semantic"

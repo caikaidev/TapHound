@@ -173,4 +173,28 @@ describe("PlaybookValidator", () => {
       issue.includes("pass-to-semantic")
     ))).toBe(true);
   });
+
+  it.each(["fail", "invalid"] as const)(
+    "rejects rewriting deterministic %s to pass",
+    async (verdict) => {
+      const playbook = parsePlaybook(playbookText(hashContractText(contractText)));
+      playbook.escalation.rules = [{
+        id: `${verdict}-to-pass`,
+        when: { verdicts: [verdict] },
+        then: { action: "verdict", result: "pass" }
+      }];
+      const validator = validatorWith(files({
+        "/project/.taphound/playbooks/search-fd.json": JSON.stringify(playbook)
+      }));
+
+      const output = await validator.validate({
+        projectRoot: "/project",
+        playbookPaths: ["/project/.taphound/playbooks/search-fd.json"]
+      });
+      expect(output.status).toBe("invalid");
+      expect(output.playbooks[0]?.issues).toContain(
+        `Rule "${verdict}-to-pass" cannot rewrite a deterministic fail or invalid verdict`
+      );
+    }
+  );
 });

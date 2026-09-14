@@ -91,7 +91,8 @@ export const EscalationResultSchema = z.enum([
   "pass",
   "fail",
   "inconclusive",
-  "needsReview"
+  "needsReview",
+  "invalid"
 ]);
 
 export const EscalationTargetSchema = z.enum([

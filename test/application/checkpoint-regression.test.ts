@@ -35,6 +35,7 @@ function passedResult(reportSteps: unknown[]): VerifyResult {
         collection: "passed"
       },
       steps: reportSteps as VerifyResult["report"]["steps"],
+      screens: [{ screen: "search", status: "matched" }],
       artifacts: {
         directory: "/runs/run-1",
         report: "report.json",
@@ -60,7 +61,7 @@ function passedResult(reportSteps: unknown[]): VerifyResult {
       phase: "afterSteps",
       status: "passed",
       deviceRole: "default",
-      message: "Expected screen search"
+      screen: "search"
     }]
   };
 }
@@ -74,6 +75,7 @@ const steps: VerifyResult["report"]["steps"] = [{
   durationMs: 100,
   locator: {
     status: "found",
+    requested: { resourceId: "com.example.app:id/search" },
     matchedBy: "resourceId",
     fallbackUsed: false,
     message: "search"
@@ -105,6 +107,9 @@ describe("BaselineCapturer", () => {
     }]);
     expect(baseline.elements[0]?.kind).toBe("present");
     expect(baseline.elements[0]?.matchedBy).toBe("resourceId");
+    expect(baseline.elements[0]?.locator).toEqual({
+      resourceId: "com.example.app:id/search"
+    });
   });
 
   it("extracts a screen fact from after-hook outcome", () => {
@@ -233,5 +238,54 @@ describe("compareRegression", () => {
     });
     expect(result.equivalent).toBe(false);
     expect(result.regressions.some((diff) => diff.kind === "element")).toBe(true);
+  });
+
+  it("flags changed requested locator identity as a regression", () => {
+    const baseline = new BaselineCapturer({ now: (): Date => new Date() }).capture({
+      id: "search-baseline",
+      journeySha256: "a".repeat(64),
+      capturedAt: "2026-07-19T10:00:06.000Z",
+      runId: "run-1",
+      packageName: "com.example.app",
+      result: passedResult(steps)
+    });
+    const current = passedResult([{
+      ...steps[0],
+      locator: {
+        ...steps[0]?.locator,
+        status: "found",
+        requested: { resourceId: "com.example.app:id/search-v2" },
+        fallbackUsed: false
+      }
+    }]);
+
+    const result = compareRegression({
+      baseline,
+      current: current.report,
+      journeySha256: "a".repeat(64),
+      comparedAt: "2026-07-19T10:00:10.000Z"
+    });
+    expect(result.regressions.some((diff) => diff.kind === "element")).toBe(true);
+  });
+
+  it("flags a missing structured Screen match as a regression", () => {
+    const baseline = new BaselineCapturer({ now: (): Date => new Date() }).capture({
+      id: "search-baseline",
+      journeySha256: "a".repeat(64),
+      capturedAt: "2026-07-19T10:00:06.000Z",
+      runId: "run-1",
+      packageName: "com.example.app",
+      result: passedResult(steps)
+    });
+    const current = passedResult(steps);
+    current.report.screens = [];
+
+    const result = compareRegression({
+      baseline,
+      current: current.report,
+      journeySha256: "a".repeat(64),
+      comparedAt: "2026-07-19T10:00:10.000Z"
+    });
+    expect(result.regressions.some((diff) => diff.kind === "screen")).toBe(true);
   });
 });

@@ -43,7 +43,7 @@ describe("runtime backend domain schema", () => {
   });
 
   it("resolves every choice deterministically", () => {
-    expect(resolveRuntimeBackendId("auto")).toBe("mobile-mcp");
+    expect(resolveRuntimeBackendId("auto")).toBe("adb");
     expect(resolveRuntimeBackendId("adb")).toBe("adb");
     expect(resolveRuntimeBackendId("mobile-mcp")).toBe("mobile-mcp");
   });

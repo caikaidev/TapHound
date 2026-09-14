@@ -30,6 +30,7 @@ import type {
   UiSnapshot,
   UiSnapshotProvider
 } from "../../ports/ui-snapshot.js";
+import type { UiStabilityProbe } from "../../ports/ui-stability.js";
 import type { IdleConfig, IdleResult } from "../wait/idle-waiter.js";
 import { withIdleAdvice } from "../wait/idle-advice.js";
 import type {
@@ -38,6 +39,7 @@ import type {
 import { GenerationOperationError } from "./generation-starter.js";
 import type { GenerationPlanningTiming } from "./generation-planner.js";
 import { closeUiSnapshotProvider } from "../ui/ui-snapshot-lifecycle.js";
+import { uiStabilityProbe } from "../ui/ui-stability-probe.js";
 
 export type RuntimeObservationBinding = ProposalBinding;
 
@@ -95,7 +97,8 @@ export interface RuntimeObserverDependencies {
     deviceSerial: string,
     config: IdleConfig,
     signal?: AbortSignal,
-    packageName?: string
+    packageName?: string,
+    stability?: UiStabilityProbe
   ) => Promise<IdleResult>;
   now: () => Date;
   createAttemptId: () => string;
@@ -236,93 +239,20 @@ export class RuntimeObserver {
     const idle = current.idlePolicy === undefined
       ? input.idle
       : current.idlePolicy;
-    if (
-      idle !== undefined
-      && this.dependencies.waitUntilIdle !== undefined
-    ) {
-      const idleResult = await this.dependencies.waitUntilIdle(
-        current.target.deviceSerial,
-        idle,
-        input.signal,
-        current.target.packageName
-      );
-      if (idleResult.status !== "stable") {
-        throw new GenerationOperationError(
-          idleResult.status === "cancelled" ? "RECOVERY_REQUIRED" : "IDLE_TIMEOUT",
-          idleResult.status === "cancelled"
-            ? "Runtime observation was cancelled while waiting for layout stability"
-            : withIdleAdvice(
-              "Layout did not become stable before observation",
-              idleResult
-            ),
-          idleResult.status === "cancelled"
-            ? undefined
-            : {
-                idle: {
-                  strategy: idleResult.strategy,
-                  ...(idleResult.backend === undefined
-                    ? {}
-                    : { backend: idleResult.backend }),
-                  polls: idleResult.polls,
-                  durationMs: idleResult.durationMs,
-                  samplingDurationMs: idleResult.samplingDurationMs,
-                  fallbackUsed: idleResult.fallbackUsed,
-                  frameActivityDetected: idleResult.frameActivityDetected,
-                  lastDiff: idleResult.lastDiff
-                }
-              }
-        );
-      }
-    }
     const session = await this.dependencies.sessions.openSession({
       deviceSerial: current.target.deviceSerial,
       ...(input.signal === undefined ? {} : { signal: input.signal })
     });
     try {
     const views = this.dependencies.sessionPorts(session);
-    if (
-      idle !== undefined
-      && this.dependencies.waitUntilIdle !== undefined
-    ) {
-      const idleResult = await this.dependencies.waitUntilIdle(
-        current.target.deviceSerial,
-        idle,
-        input.signal,
-        current.target.packageName
-      );
-      if (idleResult.status !== "stable") {
-        throw new GenerationOperationError(
-          idleResult.status === "cancelled" ? "RECOVERY_REQUIRED" : "IDLE_TIMEOUT",
-          idleResult.status === "cancelled"
-            ? "Runtime observation was cancelled while waiting for layout stability"
-            : withIdleAdvice(
-              "Layout did not become stable before observation",
-              idleResult
-            ),
-          idleResult.status === "cancelled"
-            ? undefined
-            : {
-                idle: {
-                  strategy: idleResult.strategy,
-                  ...(idleResult.backend === undefined
-                    ? {}
-                    : { backend: idleResult.backend }),
-                  polls: idleResult.polls,
-                  durationMs: idleResult.durationMs,
-                  samplingDurationMs: idleResult.samplingDurationMs,
-                  fallbackUsed: idleResult.fallbackUsed,
-                  frameActivityDetected: idleResult.frameActivityDetected,
-                  lastDiff: idleResult.lastDiff
-                }
-              }
-        );
-      }
-    }
+    const boundBackendSelection = current.bindings.uiBackend === undefined
+      ? undefined
+      : uiBackendIdAsSelection(current.bindings.uiBackend.id);
     const uiSnapshotProvider = await session.openUiSnapshots({
       timeoutMs: idle?.timeoutMs ?? 5000,
-      ...(current.bindings.uiBackend === undefined
+      ...(boundBackendSelection === undefined
         ? {}
-        : { backend: uiBackendIdAsSelection(current.bindings.uiBackend.id) }),
+        : { backend: boundBackendSelection }),
       ...(this.dependencies.uiCacheEnabled === undefined
         ? {}
         : { cacheEnabled: this.dependencies.uiCacheEnabled }),
@@ -351,6 +281,45 @@ export class RuntimeObserver {
           "CONFIG_INVALID",
           "Legacy generation with authoritative evidence has no UI backend binding"
         );
+      }
+      if (
+        idle !== undefined
+        && this.dependencies.waitUntilIdle !== undefined
+      ) {
+        const idleResult = await this.dependencies.waitUntilIdle(
+          current.target.deviceSerial,
+          idle,
+          input.signal,
+          current.target.packageName,
+          uiStabilityProbe(uiSnapshotProvider, views.uiStability)
+        );
+        if (idleResult.status !== "stable") {
+          throw new GenerationOperationError(
+            idleResult.status === "cancelled" ? "RECOVERY_REQUIRED" : "IDLE_TIMEOUT",
+            idleResult.status === "cancelled"
+              ? "Runtime observation was cancelled while waiting for layout stability"
+              : withIdleAdvice(
+                "Layout did not become stable before observation",
+                idleResult
+              ),
+            idleResult.status === "cancelled"
+              ? undefined
+              : {
+                  idle: {
+                    strategy: idleResult.strategy,
+                    ...(idleResult.backend === undefined
+                      ? {}
+                      : { backend: idleResult.backend }),
+                    polls: idleResult.polls,
+                    durationMs: idleResult.durationMs,
+                    samplingDurationMs: idleResult.samplingDurationMs,
+                    fallbackUsed: idleResult.fallbackUsed,
+                    frameActivityDetected: idleResult.frameActivityDetected,
+                    lastDiff: idleResult.lastDiff
+                  }
+                }
+          );
+        }
       }
       runtime = await collectRuntime(
         {

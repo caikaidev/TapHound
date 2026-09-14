@@ -1,6 +1,10 @@
 import { z } from "zod";
 
-import { KnowledgeIdSchema, KnowledgeSha256Schema } from "./knowledge.js";
+import {
+  KnowledgeIdSchema,
+  KnowledgeSha256Schema,
+  QualifiedNameSchema
+} from "./knowledge.js";
 import { LocatorSchema } from "./layout.js";
 import { ProjectRelativePathSchema } from "./project-context.js";
 
@@ -42,7 +46,7 @@ export const ContractAssertionSchema = z.discriminatedUnion("type", [
     type: z.literal("element"),
     locator: LocatorSchema,
     visibility: z.enum(["visible", "absent"]).default("visible"),
-    packageName: QualifiedActivitySchema.optional(),
+    packageName: QualifiedNameSchema.optional(),
     timeoutMs: TimeoutMsSchema
   }),
   z.strictObject({

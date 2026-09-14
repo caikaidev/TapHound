@@ -194,7 +194,9 @@ interface ObserverHarness {
         stablePolls: number;
         timeoutMs: number;
       },
-      signal?: AbortSignal
+      signal?: AbortSignal,
+      packageName?: string,
+      stability?: UiStabilityProbe
     ) => Promise<IdleResult>
   >;
   uiSnapshotProvider: UiSnapshotProvider;
@@ -399,7 +401,28 @@ describe("RuntimeObserver", () => {
       "emulator-5554",
       idle,
       undefined,
-      "com.example.app"
+      "com.example.app",
+      expect.anything()
+    );
+  });
+
+  it("uses a provider-owned stability probe before capturing observation evidence", async () => {
+    const test = harness();
+    const provider = Object.assign(test.uiSnapshotProvider, {
+      supportsStability: true,
+      reset: vi.fn(),
+      sample: vi.fn(() => Promise.resolve([]))
+    });
+    const idle = {
+      pollIntervalMs: 150,
+      stablePolls: 2,
+      timeoutMs: 3000
+    };
+
+    await test.observer.observe({ generationId: "generation-1", idle });
+
+    expect(test.waitUntilIdle).toHaveBeenCalledWith(
+      "emulator-5554", idle, undefined, "com.example.app", provider
     );
   });
 
@@ -434,7 +457,8 @@ describe("RuntimeObserver", () => {
         timeoutMs: 30000
       },
       undefined,
-      "com.example.app"
+      "com.example.app",
+      expect.anything()
     );
   });
 

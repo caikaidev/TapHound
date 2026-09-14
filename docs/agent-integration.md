@@ -21,7 +21,7 @@ JSON exitCode == process exit code
 
 - `taphound verify --contract <path> --json` emits the Verdict (with
   `exitCode`) as the only **stdout** value.
-- `taphound verify --diff <ref> --json` emits `{overall, results, impact}`.
+- `taphound verify --diff <ref> --json` emits `{overall, exitCode, results, impact}`.
 - `taphound failure classify --report <path> --json` emits the classification.
 - `taphound knowledge feature-map --json` emits the projection.
 - Non-JSON (human) mode writes summaries to **stdout** and errors to
@@ -63,7 +63,8 @@ returns one `overall` verdict:
   "results": [
     { "path": ".taphound/journeys/search.json", "name": "TapHound demo search", "selection": "p0", "status": "passed", "reportPath": "..." }
   ],
-  "overall": "passed"
+  "overall": "passed",
+  "exitCode": 0
 }
 ```
 

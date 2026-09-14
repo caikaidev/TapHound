@@ -46,7 +46,7 @@ const RUNTIME_BACKEND_RESOLUTION: Record<
   RuntimeBackendChoice,
   RuntimeBackendId
 > = {
-  auto: "mobile-mcp",
+  auto: "adb",
   adb: "adb",
   "mobile-mcp": "mobile-mcp"
 };

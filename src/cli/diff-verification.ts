@@ -53,6 +53,7 @@ export interface DiffVerificationResult {
   impact: ImpactSet;
   results: JourneyVerdict[];
   overall: "passed" | "failed" | "error";
+  exitCode: 0 | 1 | 2 | 3 | 4;
   note?: string | undefined;
   target?: {
     id: string;
@@ -340,12 +341,18 @@ export async function runDiffVerification(
           ? "passed"
           : "failed";
     }
+    const exitCode = results.length === 0
+      ? (changeSet.files.length === 0 ? 0 : 4)
+      : failed === undefined
+        ? 0
+        : failed.exitCode;
     const payload: DiffVerificationResult = {
       base: options.base,
       head,
       impact,
       results,
       overall,
+      exitCode,
       ...(note === undefined ? {} : { note }),
       ...(resolvedTarget === undefined
         ? {}
@@ -368,11 +375,7 @@ export async function runDiffVerification(
       ];
       writeLine(dependencies.stdout, lines.join("\n"));
     }
-    if (results.length === 0) {
-      dependencies.setExitCode(0);
-      return;
-    }
-    dependencies.setExitCode(failed === undefined ? 0 : failed.exitCode);
+    dependencies.setExitCode(exitCode);
   } catch (error) {
     const code = failureCodeFromUnknown(error);
     if (code !== undefined) {

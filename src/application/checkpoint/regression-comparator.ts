@@ -8,7 +8,7 @@ import type { TapHoundReport } from "../../domain/report.js";
 
 export interface RegressionCompareInput {
   baseline: Baseline;
-  current: Pick<TapHoundReport, "steps">;
+  current: Pick<TapHoundReport, "steps" | "screens">;
   journeySha256: string;
   comparedAt: string;
 }
@@ -49,10 +49,18 @@ function currentElements(steps: TapHoundReport["steps"]): Set<string> {
 function reportLocatorKey(locator: {
   anchorId?: string | undefined;
   matchedBy?: string | undefined;
+  requested?: {
+    resourceId?: string | undefined;
+    text?: string | undefined;
+    contentDescription?: string | undefined;
+  } | undefined;
   message?: string | undefined;
 }): string {
   if (locator.anchorId !== undefined) {
     return `resourceId:anchor:${locator.anchorId}`;
+  }
+  if (locator.requested !== undefined) {
+    return baselineLocatorKey(locator.requested);
   }
   const via = locator.matchedBy ?? "unknown";
   return `${via}:${via}`;
@@ -125,6 +133,20 @@ export const compareRegression = (
         kind: "element",
         locator: fact.locator,
         expected: `${fact.kind} element`,
+        actual: "missing"
+      });
+    }
+  }
+  const currentScreens = new Set(
+    (input.current.screens ?? [])
+      .map((screen) => screen.screen)
+  );
+  for (const fact of input.baseline.screens) {
+    if (!currentScreens.has(fact.screen)) {
+      regressions.push({
+        kind: "screen",
+        screen: fact.screen,
+        expected: fact.status,
         actual: "missing"
       });
     }

@@ -4,6 +4,42 @@ import type {
   RuntimeBackend,
   RuntimeSession
 } from "../../ports/runtime-backend.js";
+import type { UiSnapshotProvider } from "../../ports/ui-snapshot.js";
+
+function borrowedProvider(provider: UiSnapshotProvider): UiSnapshotProvider {
+  return new Proxy(provider, {
+    get(target, property, receiver): unknown {
+      if (property === "close") {
+        return (): Promise<void> => Promise.resolve();
+      }
+      const value = Reflect.get(target, property, receiver) as unknown;
+      return typeof value === "function"
+        ? value.bind(target) as unknown
+        : value;
+    }
+  });
+}
+
+function borrowedSession(session: RuntimeSession): RuntimeSession {
+  return new Proxy(session, {
+    get(target, property, receiver): unknown {
+      if (property === "close") {
+        return (): Promise<void> => Promise.resolve();
+      }
+      if (property === "openUiSnapshots") {
+        return async (
+          options?: Parameters<RuntimeSession["openUiSnapshots"]>[0]
+        ): Promise<UiSnapshotProvider> => borrowedProvider(
+          await target.openUiSnapshots(options)
+        );
+      }
+      const value = Reflect.get(target, property, receiver) as unknown;
+      return typeof value === "function"
+        ? value.bind(target) as unknown
+        : value;
+    }
+  });
+}
 
 export class SharedSessionRuntimeBackend implements RuntimeBackend {
   private readonly sessions = new Map<string, Promise<RuntimeSession>>();
@@ -27,7 +63,7 @@ export class SharedSessionRuntimeBackend implements RuntimeBackend {
   ): Promise<RuntimeSession> {
     const existing = this.sessions.get(options.deviceSerial);
     if (existing !== undefined) {
-      return existing;
+      return existing.then(borrowedSession);
     }
     const opened = this.backend.openSession(options);
     opened.catch(() => {
@@ -36,7 +72,7 @@ export class SharedSessionRuntimeBackend implements RuntimeBackend {
       }
     });
     this.sessions.set(options.deviceSerial, opened);
-    return opened;
+    return opened.then(borrowedSession);
   }
 
   public async close(): Promise<void> {

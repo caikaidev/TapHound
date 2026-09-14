@@ -31,14 +31,15 @@ export type UiBackendId = z.infer<typeof UiBackendIdSchema>;
 export type UiBackendSelection = z.infer<typeof UiBackendSelectionSchema>;
 
 // Descriptor ids can name runtime-bound backends ("mobile-mcp") that never
-// participate in direct ui.backend selection; opening those through the
-// legacy snapshot factories must fail closed instead of silently re-routing.
-export function uiBackendIdAsSelection(id: UiBackendId): UiBackendSelection {
+// participate in direct ui.backend selection. Return undefined for those ids
+// so callers keep the runtime-owned snapshot provider; their descriptor
+// equality checks still reject a genuine backend mismatch.
+export function uiBackendIdAsSelection(
+  id: UiBackendId
+): UiBackendSelection | undefined {
   if (id === "system-uiautomator" || id === "android-cli"
     || id === "appium-uiautomator2") {
     return id;
   }
-  throw new Error(
-    `UI backend "${id}" cannot be opened through the direct snapshot factory`
-  );
+  return undefined;
 }

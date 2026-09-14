@@ -1213,6 +1213,7 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
       lifecycle: {
         draft: 0,
         verified: 1,
+        promoted: 0,
         suspect: 0,
         stale: 0,
         retired: 0

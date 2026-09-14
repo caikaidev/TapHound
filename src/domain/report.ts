@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { FAILURE_CODES } from "./failure.js";
 import { DeviceRoleSchema } from "./journey.js";
+import { LocatorSchema } from "./layout.js";
 import { UiBackendDescriptorSchema } from "./ui-backend.js";
 import { UiCacheTelemetrySchema } from "./ui-cache.js";
 
@@ -40,6 +41,7 @@ const LocatorReportSchema = z.strictObject({
     "contentDescription",
     "anchor"
   ]).optional(),
+  requested: LocatorSchema.optional(),
   anchorId: z.string().trim().min(1).optional(),
   anchor: AnchorLocatorReportSchema.optional(),
   fallbackUsed: z.boolean(),
@@ -142,6 +144,7 @@ const ArtifactsSchema = z.strictObject({
   report: z.string().min(1),
   summary: z.string().min(1),
   screenshots: z.array(ArtifactRolePathSchema),
+  uiHierarchies: z.array(ArtifactRolePathSchema).optional(),
   logcats: z.array(ArtifactRolePathSchema),
   stepLogs: z.array(z.string().min(1))
 });
@@ -163,6 +166,10 @@ const ReportFields = {
   }),
   layers: LayersSchema,
   steps: z.array(StepReportSchema),
+  screens: z.array(z.strictObject({
+    screen: z.string().trim().min(1),
+    status: z.literal("matched")
+  })).optional(),
   artifacts: ArtifactsSchema,
   primaryFailure: ReportFailureSchema.optional(),
   secondaryErrors: z.array(ReportFailureSchema),
@@ -196,6 +203,7 @@ export const TapHoundReportV4Schema = z.strictObject({
   }
   const unknownArtifactRole = [
     ...report.artifacts.screenshots,
+    ...(report.artifacts.uiHierarchies ?? []),
     ...report.artifacts.logcats
   ].some((entry) => !roles.has(entry.role));
   if (unknownArtifactRole) {

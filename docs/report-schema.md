@@ -9,6 +9,7 @@ the configured `<artifactsDir>/<runId>/`. A custom path may be outside
 report.json
 summary.txt
 screenshot-<role>.png
+ui-hierarchy-<role>.json
 logcat-<role>.txt
 steps/001-logcat.txt
 steps/001-layout-diff.json
@@ -32,9 +33,12 @@ Only the optional evidence actually produced appears in `artifacts`. The report 
   device.
 - `layers`: `run`, `structural`, `activityCheckpoint`, `explicitExpect`, `collection`.
 - `steps`: per-step Action, Locator, Idle, Activity, Expect, and log-slice
-  results. Each step records the `device` role that executed it.
+  results. Locator results retain the requested Locator identity, not only the
+  field that matched. Each step records the `device` role that executed it.
+- `screens`: structured Knowledge Screen matches captured during verification.
 - `artifacts`: paths to the report, summary, per-device screenshots and logs
-  (`screenshots`/`logcats` arrays of `{role, path}`), and step logs.
+  (`screenshots`/`uiHierarchies`/`logcats` arrays of `{role, path}`), and step
+  logs. UI hierarchy entries refer to actual serialized final snapshots.
 - `fallbackUsed`: whether any step used an explicit annotated fallback.
 - `primaryFailure`: the first primary failure.
 - `secondaryErrors`: collection or internal secondary errors that occurred after the primary failure.

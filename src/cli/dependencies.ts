@@ -79,17 +79,6 @@ import {
   FileSystemWorkspaceLayout
 } from "../adapters/filesystem/workspace-layout.js";
 import { NodeProcessRunner } from "../adapters/process/node-process-runner.js";
-import { FileSystemTargetConfigStore } from "../adapters/filesystem/target-config-store.js";
-import { TargetPathResolver } from "../adapters/filesystem/target-path-resolver.js";
-import {
-  FileSystemLocalTargetWorkspace,
-  type LocalTargetWorkspacePort
-} from "../adapters/filesystem/local-target-workspace.js";
-import { TargetResolver } from "../application/target/target-resolver.js";
-import { LocalTargetService } from "../application/target/local-target-service.js";
-import type { ProcessRunner } from "../ports/process-runner.js";
-import type { TargetConfigStorePort } from "../ports/target-config-store.js";
-import type { TargetPathResolverPort } from "../ports/path-resolver.js";
 import {
   NodeDetachedProcessLauncher
 } from "../adapters/process/node-detached-process-launcher.js";
@@ -201,7 +190,6 @@ import { ContractReviewMerger } from "../application/contract/contract-review.js
 import { PlaybookValidator } from "../application/playbook/playbook-validator.js";
 import { BaselineService } from "../application/checkpoint/baseline-service.js";
 import { FailureClassifier } from "../application/diagnosis/failure-classifier.js";
-import { LocalSyncService, type LocalSyncResult } from "../application/target/local-sync-service.js";
 import type { ContractVerdictView } from "../domain/contract.js";
 import { TapHoundReportV4Schema } from "../domain/report.js";
 import type { FailureClassification } from "../domain/failure-classification.js";
@@ -214,10 +202,11 @@ import { VerifyRuntime, type VerifyInput, type VerifyResult } from "../applicati
 import { IdleWaiter } from "../application/wait/idle-waiter.js";
 import { deviceIdentityResolver } from "../application/wait/idle-profiles.js";
 import type { TapHoundConfig } from "../domain/config.js";
-import type {
-  LocalTargetIdentity,
-  ProjectFingerprint
-} from "../domain/target.js";
+import {
+  createLocalTargets,
+  type LocalSyncPort,
+  type LocalTargets
+} from "./local-target-dependencies.js";
 import {
   resolveRuntimeBackendId,
   type RuntimeBackendChoice
@@ -266,7 +255,6 @@ import { isErrnoException } from "../shared/errors.js";
 import { readRuntimeBackendChoice } from "./runtime-selection.js";
 import {
   CONTEXT_INDEX_PATH,
-  LOCAL_WORKSPACE_DIR,
   tapHoundPath
 } from "../domain/workspace.js";
 import { JourneySchema } from "../domain/journey.js";
@@ -310,25 +298,7 @@ export interface GenerationCliRuntime {
   }) => Promise<ActionResolutionResult>) | undefined;
 }
 
-export interface LocalSyncPort {
-  sync: (input: {
-    targetId: string;
-    projectRoot: string;
-    targetsHome: string;
-  }) => Promise<LocalSyncResult>;
-}
-
-export interface LocalTargets {
-  targetsHome: () => string;
-  configStore: TargetConfigStorePort;
-  pathResolver: TargetPathResolverPort;
-  workspace: LocalTargetWorkspacePort;
-  localSync: LocalSyncPort;
-  targetResolver: (targetsHome: string) => TargetResolver;
-  localTargetService: (targetsHome: string) => LocalTargetService;
-  processRunner: ProcessRunner;
-  clock: { now: () => Date };
-}
+export type { LocalSyncPort, LocalTargets } from "./local-target-dependencies.js";
 
 export interface CliDependencies {
   signal?: AbortSignal | undefined;
@@ -594,9 +564,10 @@ export function createProductionDependencies(
     deviceSerial: string,
     config: Parameters<IdleWaiter["waitUntilIdle"]>[0],
     signal?: AbortSignal,
-    packageName?: string
+    packageName?: string,
+    stability?: UiStabilityProbe
   ): ReturnType<IdleWaiter["waitUntilIdle"]> => new IdleWaiter(
-    uiStability,
+    stability ?? uiStability,
     clock,
     deviceSerial,
     packageName,
@@ -832,6 +803,10 @@ export function createProductionDependencies(
       }
     }
   });
+  const localTargets = createLocalTargets(
+    runner,
+    { now: (): Date => new Date() }
+  );
   return {
     ...(signal === undefined ? {} : { signal }),
     ...(sharedBackend === undefined
@@ -1258,13 +1233,8 @@ export function createProductionDependencies(
     ...(process.argv[1] === undefined
       ? {}
       : { cliEntryPath: process.argv[1] }),
-    localTargets: buildLocalTargets(runner, { now: (): Date => new Date() }),
-    localSync: new LocalSyncService({
-      workspaceRoot: (
-        targetsHome: string,
-        targetId: string
-      ): string => join(targetsHome, LOCAL_WORKSPACE_DIR, targetId)
-    }),
+    localTargets,
+    localSync: localTargets.localSync,
     readJson: async (path): Promise<unknown> => JSON.parse(
       await readFile(path, "utf8")
     ) as unknown,
@@ -1282,64 +1252,5 @@ export function createProductionDependencies(
     setExitCode: (code): void => {
       process.exitCode = code;
     }
-  };
-}
-
-function buildLocalTargets(
-  runner: ProcessRunner,
-  clock: { now: () => Date }
-): LocalTargets {
-  const configStore = new FileSystemTargetConfigStore();
-  const pathResolver = new TargetPathResolver({ env: process.env });
-  const workspace = new FileSystemLocalTargetWorkspace();
-  const makeResolver = (targetsHome: string): TargetResolver => new TargetResolver({
-    targetsHome,
-    configStore,
-    pathResolver,
-    processRunner: runner,
-    clock
-  });
-  return {
-    targetsHome: (): string => {
-      const explicit = process.env.TAPHOUND_TARGETS_HOME;
-      return explicit === undefined
-        ? process.cwd()
-        : resolvePath(process.cwd(), explicit);
-    },
-    configStore,
-    pathResolver,
-    workspace,
-    targetResolver: makeResolver,
-    localSync: new LocalSyncService({
-      workspaceRoot: (targetsHome: string, targetId: string): string =>
-        workspace.root(targetsHome, targetId)
-    }),
-    localTargetService: (
-      targetsHome: string
-    ): LocalTargetService => new LocalTargetService({
-      identityStore: {
-        readIdentity: async (
-          targetId: string
-        ): Promise<LocalTargetIdentity | null> => (
-          workspace.readIdentity(targetsHome, targetId)
-        ),
-        writeIdentity: async (
-          identity: LocalTargetIdentity
-        ): Promise<void> => (
-          workspace.writeIdentity(targetsHome, identity.targetId, identity)
-        ),
-        ensureWorkspace: async (targetId: string): Promise<void> => (
-          workspace.ensureWorkspace(targetsHome, targetId)
-        )
-      },
-      fingerprint: (
-        project,
-        packageName?: string
-      ): Promise<Pick<ProjectFingerprint, "hash">> => (
-        makeResolver(targetsHome).fingerprint(project, packageName)
-      )
-    }),
-    processRunner: runner,
-    clock
   };
 }

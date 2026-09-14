@@ -12,9 +12,6 @@ import type {
   ResolvedProjectContext
 } from "../../domain/project-context.js";
 import type {
-  ScreenDefinition
-} from "../../domain/knowledge.js";
-import type {
   LoadedKnowledgeBundle
 } from "../../ports/knowledge-registry.js";
 
@@ -47,24 +44,22 @@ function unique(values: readonly string[]): string[] {
 }
 
 function contextEvidenceHash(
+  context: ResolvedProjectContext,
   modules: readonly ProjectContextModule[]
 ): string {
-  const canonical = modules
-    .map((module) => `${module.moduleId}|${module.projectDir}`)
-    .sort()
-    .join("\n");
+  const canonicalModules = modules
+    .map((module) => ({
+      moduleId: module.moduleId,
+      projectDir: module.projectDir,
+      inventory: module.inventory,
+      manifest: module.manifest
+    }))
+    .sort((left, right) => left.moduleId.localeCompare(right.moduleId));
+  const canonical = JSON.stringify({
+    selection: context.selection,
+    modules: canonicalModules
+  });
   return createHash("sha256").update(canonical).digest("hex");
-}
-
-function screenReferencesAnchor(
-  screens: readonly ScreenDefinition[],
-  anchorId: string
-): boolean {
-  return screens.some((screen) => (
-    screen.requiredAnchors.includes(anchorId)
-    || screen.optionalAnchors.includes(anchorId)
-    || screen.forbiddenAnchors.includes(anchorId)
-  ));
 }
 
 function journeyAnchorIds(journey: Journey): string[] {
@@ -208,11 +203,14 @@ export class ImpactResolver {
         continue;
       }
       const affectedAnchorByScreen = anchorsInJourney.find((id) => (
-        screenReferencesAnchor(knowledge.screens, id)
-        && (
-          affectedScreensSet.size > 0
-          || affectedTransitions.length > 0
-        )
+        knowledge.screens.some((screen) => (
+          affectedScreensSet.has(screen.id)
+          && (
+            screen.requiredAnchors.includes(id)
+            || screen.optionalAnchors.includes(id)
+            || screen.forbiddenAnchors.includes(id)
+          )
+        ))
       ));
       if (affectedAnchorByScreen !== undefined) {
         p1.push({
@@ -222,9 +220,23 @@ export class ImpactResolver {
         continue;
       }
       if (anchorsInJourney.length === 0) {
-        skipped.push({
+        if (affectedModules.length > 0) {
+          p1.push({
+            id: path,
+            reason: "affected module requires conservative coverage for a locator-only journey"
+          });
+        } else {
+          skipped.push({
+            id: path,
+            reason: "journey uses only runtime locators; no semantic anchor binding"
+          });
+        }
+        continue;
+      }
+      if (affectedModules.length > 0) {
+        p1.push({
           id: path,
-          reason: "journey uses only runtime locators; no semantic anchor binding"
+          reason: "affected module requires conservative semantic journey coverage"
         });
         continue;
       }
@@ -246,7 +258,7 @@ export class ImpactResolver {
       selectedJourneys: { p0, p1, p2 },
       skippedJourneys: skipped,
       provenance: {
-        contextHash: contextEvidenceHash(contextModules),
+        contextHash: contextEvidenceHash(context.context, contextModules),
         knowledgeHash: knowledge.knowledgeHash
       }
     });

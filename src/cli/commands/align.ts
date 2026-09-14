@@ -8,6 +8,10 @@ import {
   CONFIG_PATH
 } from "../../domain/workspace.js";
 import {
+  exitCodeForFailure,
+  failureCodeFromUnknown
+} from "../../domain/failure.js";
+import {
   AlignError,
   type AlignCameraResult
 } from "../../application/align/align-service.js";
@@ -117,6 +121,22 @@ export function createAlignCommand(dependencies: CliDependencies): Command {
             writeLine(dependencies.stderr, output.failure.message);
           }
           dependencies.setExitCode(2);
+          return;
+        }
+        const failureCode = failureCodeFromUnknown(error);
+        if (failureCode !== undefined) {
+          const exitCode = exitCodeForFailure(failureCode);
+          const output = failureOutput(
+            exitCode,
+            failureCode,
+            errorMessage(error)
+          );
+          if (options.json === true) {
+            writeJson(dependencies.stdout, output);
+          } else {
+            writeLine(dependencies.stderr, output.failure.message);
+          }
+          dependencies.setExitCode(exitCode);
           return;
         }
         const output = failureOutput(4, "INTERNAL_ERROR", errorMessage(error));

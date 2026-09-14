@@ -25,12 +25,14 @@ describe("SharedSessionRuntimeBackend", () => {
     const second = await backend.openSession({ deviceSerial: "emulator-5554" });
     const other = await backend.openSession({ deviceSerial: "emulator-5556" });
 
-    expect(first).toBe(second);
+    expect(first).not.toBe(second);
     expect(first).not.toBe(other);
     expect(inner.openCalls).toEqual([
       { deviceSerial: "emulator-5554" },
       { deviceSerial: "emulator-5556" }
     ]);
+    await first.close();
+    expect(inner.sessions[0]?.calls).not.toContain("close");
   });
 
   it("evicts a failed session open so a retry can recover", async () => {

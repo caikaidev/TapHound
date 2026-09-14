@@ -123,8 +123,8 @@ Evaluated once against the final post-journey snapshot through the optional
 
 | kind | `final` satisfied when | `anyStep` satisfied when |
 |---|---|---|
-| `screenshot` | report has at least one screenshot | n/a |
-| `uiHierarchy` | at least one step resolved a Locator | n/a |
+| `screenshot` | report has at least one final screenshot | final screenshot or an annotated step screenshot |
+| `uiHierarchy` | report has at least one serialized final UI hierarchy | same serialized hierarchy artifact (step-specific hierarchy artifacts are not emitted) |
 | `logcat` | report has at least one Logcat artifact | at least one step wrote a scoped Logcat |
 
 Missing **required** evidence yields `inconclusive` with

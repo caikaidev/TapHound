@@ -462,6 +462,31 @@ describe("GenerationStepExecutor", () => {
     expect(test.androidCli.layoutDiff).toHaveBeenCalledTimes(5);
   });
 
+  it("uses provider-owned stability sampling instead of the shell probe", async () => {
+    const runtime = snapshot();
+    const test = harness(session(runtime));
+    const sample = vi.fn(() => Promise.resolve([]));
+    Object.assign(test.uiSnapshotProvider, {
+      supportsStability: true,
+      sample,
+      reset: vi.fn()
+    });
+    test.androidCli.layoutDiff.mockRejectedValue(
+      new Error("shell stability probe is unavailable")
+    );
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(sample).toHaveBeenCalled();
+    expect(test.androidCli.layoutDiff).not.toHaveBeenCalled();
+  });
+
   it("durably begins a fresh safe step before ADB action and appends literals with provenance", async () => {
     const runtime = snapshot();
     const test = harness(session(runtime));

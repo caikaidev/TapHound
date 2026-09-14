@@ -78,6 +78,9 @@ function locatorToKey(locator: ReportLocator): Baseline["elements"][number]["loc
   if (locator.anchorId !== undefined) {
     return { resourceId: `anchor:${locator.anchorId}` };
   }
+  if (locator.requested !== undefined) {
+    return locator.requested;
+  }
   const via = locator.matchedBy;
   if (via === "resourceId") {
     return { resourceId: "resourceId" };
@@ -96,25 +99,25 @@ function screenFacts(
   hookOutcomes: VerifyResult["hookOutcomes"]
 ): BaselineScreenFact[] {
   const facts: BaselineScreenFact[] = [];
+  for (const screen of report.screens ?? []) {
+    facts.push(screen);
+  }
   const afterOutcome = hookOutcomes?.find(
-    (outcome) => outcome.phase === "afterSteps"
+    (outcome) => (
+      outcome.phase === "afterSteps"
+      && outcome.status === "passed"
+      && outcome.screen !== undefined
+    )
   );
-  if (afterOutcome === undefined) {
+  if (afterOutcome?.screen === undefined) {
     return facts;
   }
-  const message = afterOutcome.message;
-  if (message === undefined) {
-    return facts;
+  if (!facts.some((fact) => fact.screen === afterOutcome.screen)) {
+    facts.push({
+      screen: afterOutcome.screen,
+      status: "matched"
+    });
   }
-  const screenMatch = /Expected screen ([A-Za-z0-9._-]+)/.exec(message);
-  const matchedScreen = screenMatch?.[1];
-  if (matchedScreen === undefined) {
-    return facts;
-  }
-  facts.push({
-    screen: matchedScreen,
-    status: "matched"
-  });
   return facts;
 }
 

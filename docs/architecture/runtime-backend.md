@@ -35,8 +35,8 @@ Implementations:
 
 | Backend | Location | Role |
 |---|---|---|
-| `AdbRuntimeBackend` | `src/adapters/runtime/adb-runtime-backend.ts` | ADB + Android CLI backend. Composes the existing `AdbAdapter`, `AndroidCliAdapter`, stability probe, and snapshot factory; no reimplementation. Selected with `runtime.backend: "adb"`. |
-| `MobileMcpRuntimeBackend` | `src/adapters/runtime/mobile-mcp/mobile-mcp-runtime-backend.ts` | Default backend over the [Mobile MCP](https://www.npmjs.com/package/@mobilenext/mobile-mcp) server (`mcp-server-mobile`) using MCP stdio tools. `auto` resolves here. |
+| `AdbRuntimeBackend` | `src/adapters/runtime/adb-runtime-backend.ts` | ADB + Android CLI backend. Composes the existing `AdbAdapter`, `AndroidCliAdapter`, stability probe, and snapshot factory; no reimplementation. Selected by `runtime.backend: "auto"` or `"adb"`. |
+| `MobileMcpRuntimeBackend` | `src/adapters/runtime/mobile-mcp/mobile-mcp-runtime-backend.ts` | Explicit alternative over the [Mobile MCP](https://www.npmjs.com/package/@mobilenext/mobile-mcp) server (`mcp-server-mobile`) using MCP stdio tools. |
 | `FakeRuntimeBackend` | `src/adapters/runtime/fake-runtime-backend.ts` | Benchmarks and unit tests. |
 
 ## Design rules
@@ -135,20 +135,17 @@ from two sources with fixed precedence:
 
 | Effective choice | Resolves to |
 |---|---|
-| `auto` (default) | `MobileMcpRuntimeBackend` |
+| `auto` (default) | `AdbRuntimeBackend` |
 | `adb` | `AdbRuntimeBackend` |
 | `mobile-mcp` | `MobileMcpRuntimeBackend` |
 
-**Mobile MCP is the preferred runtime path for read-only work (2026-09-10).**
-`observe` and `doctor` run on it by default; `verify`, `record`, and
-`generation` also borrow sessions through their session-first paths but fail
-closed on the capabilities the 1.0.3 server audit confirmed it still lacks
-(process discovery, foreground Activity, and a historical logcat dump — the
-robot has `listRunningProcesses`, but it is not exposed as a tool), so ADB
-stays the execute path for them. ADB remains reachable through
-`runtime.backend: "adb"` or `TAPHOUND_RUNTIME_BACKEND=adb`; the demo project
-pins `adb`. The capability table is re-checked on each server upgrade (see
-Level 4 below).
+**ADB is the complete default runtime path.** `auto` resolves to ADB so
+`observe`, `verify`, `record`, `generation`, `align`, and `doctor` have the
+required process, Activity, Logcat, and intent capabilities. UI snapshot
+selection is independent: `ui.backend=auto` probes Appium UiAutomator2 first,
+then system UIAutomator, then Android CLI. Mobile MCP remains available through
+an explicit `runtime.backend: "mobile-mcp"` or environment override and fails
+closed when a command needs a capability it does not expose.
 
 An invalid value in either source fails with `CONFIG_INVALID` (exit code 2)
 before any command runs; a missing config or a config without `runtime.backend`
@@ -221,7 +218,7 @@ Known limitations:
 | 0 — bridge adoption | done | Production flows through the SPI via `RuntimeBackendAdbBridge`; services keep the `AdbPort` type. `doctor` is backend-aware and fully works under mobile-mcp. |
 | 1 — session-first orchestrators | done | `ObserveService`, `VerifyRuntime`, `RecorderService`, `RuntimeObserver`, and `GenerationStepExecutor` borrow a session per run through `RuntimeSessionOpener` and fail closed on missing capability members; `VerifyRuntime` feeds its `AdbPort`-shaped helpers through `RuntimeSessionPortViews` (`src/ports/runtime-session-ports.ts`). The bridge remains for device discovery, `align`, and long-tail consumers. |
 | 2 — full session typing | later | Helpers (`ProcessWaiter`, `ActionExecutor`, `LogcatCollector`, …) accept `Pick<RuntimeSession, …>`; `AdbPort` shrinks to the bridge or is deleted. |
-| 3 — Mobile MCP default | done | `MobileMcpRuntimeBackend` passes the shared contract suite and `auto` resolves to it; ADB remains available through `runtime.backend: "adb"` and the environment override. |
+| 3 — complete default runtime | done | `MobileMcpRuntimeBackend` passes the shared contract suite, while `auto` resolves to the capability-complete ADB runtime. Mobile MCP remains explicitly selectable. |
 | 4 — Mobile MCP capability completion | blocked | 1.0.3 audit confirmed no new capability can be enabled: `mobile_get_foreground_app` returns package name only (no Activity), `mobile_get_device_logs` is non-historical, and no process-list tool is exposed even though `AndroidRobot.listRunningProcesses` exists. `verify`/`record`/`generation` keep the ADB execute path; re-check on each upstream server release and flip once process discovery, foreground Activity, and logcat dump are available. |
 
 ## Phase 2 flip checklist
@@ -242,10 +239,9 @@ change, not a rewrite:
    `--project`/`--config` before dependency construction and combines the
    config choice with the `TAPHOUND_RUNTIME_BACKEND` override
    (`src/cli/runtime-selection.ts`).
-5. ~~Flip the `auto` resolution default and update
-    `docs/config-schema.md`.~~ done: `auto` now resolves to `mobile-mcp`;
-    ADB stays available through `runtime.backend: "adb"`, the environment
-    override, and the pinned demo project config.
+5. Keep `auto` on the capability-complete ADB runtime until an alternative can
+   support the full deterministic verification contract. UI `auto` independently
+   prefers Appium UiAutomator2.
 
 ## Dependency governance
 

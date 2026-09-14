@@ -117,7 +117,7 @@ function jsonOutput(result: CliProcessResult): Record<string, unknown> {
 }
 
 describe("built taphound doctor --json process contract", () => {
-  it("reports the mobile-mcp runtime backend by default", async () => {
+  it("reports the adb runtime backend by default", async () => {
     const test = await fixture();
     const result = runDoctor(test);
 
@@ -125,14 +125,12 @@ describe("built taphound doctor --json process contract", () => {
     const report = jsonOutput(result);
     expect(report).toMatchObject({
       status: "passed",
-      runtimeBackend: "mobile-mcp",
+      runtimeBackend: "adb",
       deviceSerial: "emulator-5554"
     });
     expect(report.checks).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: "android", status: "notRun" }),
-      expect.objectContaining({
-        name: "mobile-mcp", status: "passed", version: "9.9.9-fake"
-      })
+      expect.objectContaining({ name: "android", status: "passed" }),
+      expect.objectContaining({ name: "mobile-mcp", status: "notRun" })
     ]));
   }, 20000);
 
@@ -253,7 +251,9 @@ describe("built taphound doctor --json process contract", () => {
 
   it("explains how to install the Mobile MCP server when it is missing", async () => {
     const test = await fixture({ withoutMobileMcp: true });
-    const result = runDoctor(test, {}, { isolatedPath: true });
+    const result = runDoctor(test, {
+      TAPHOUND_RUNTIME_BACKEND: "mobile-mcp"
+    }, { isolatedPath: true });
 
     expect(result.status).toBe(3);
     const report = jsonOutput(result);

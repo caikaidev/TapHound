@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TargetResolver } from "../../../src/application/target/target-resolver.js";
+import { NodeTargetProjectInspector } from "../../../src/adapters/filesystem/target-project-inspector.js";
 import { commandResult } from "../../fakes/process-runner.js";
 import type { ResolvedPath } from "../../../src/ports/path-resolver.js";
 import type { LoadedTargets } from "../../../src/ports/target-config-store.js";
@@ -84,6 +85,7 @@ describe("TargetResolver", () => {
       processRunner: fakeRunner({
         [`git -C ${root} rev-parse --show-toplevel`]: `${root}\n`
       }),
+      projectInspector: new NodeTargetProjectInspector(),
       clock: { now: (): Date => new Date("2026-09-10T00:00:00.000Z") }
     });
     const target = await resolver.resolve("app");
@@ -104,6 +106,7 @@ describe("TargetResolver", () => {
         resolve: vi.fn((): Promise<ResolvedPath> => Promise.resolve({ configuredPath: "", resolvedPath: "" }))
       },
       processRunner: fakeRunner({}),
+      projectInspector: new NodeTargetProjectInspector(),
       clock: { now: (): Date => new Date() }
     });
     await expect(resolver.resolve("nope")).rejects.toMatchObject({
@@ -136,6 +139,7 @@ describe("TargetResolver", () => {
         [`git -C ${root} rev-parse --show-toplevel`]: `${root}\n`,
         [`git -C ${root} config --get remote.origin.url`]: "git@github.com:acme/mail.git\n"
       }),
+      projectInspector: new NodeTargetProjectInspector(),
       clock: { now: (): Date => new Date() }
     });
     const target = await resolver.resolve("app");
@@ -171,6 +175,7 @@ describe("TargetResolver", () => {
           [`git -C ${root} rev-parse --show-toplevel`]: `${root}\n`,
           [`git -C ${root} config --get remote.origin.url`]: "git@github.com:acme/mail.git\n"
         }),
+        projectInspector: new NodeTargetProjectInspector(),
         clock: { now: (): Date => new Date() }
       });
     const originalCwd = process.cwd();

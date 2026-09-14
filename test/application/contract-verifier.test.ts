@@ -76,10 +76,16 @@ const SNAPSHOT: UiSnapshot = {
 
 const EMPTY_SNAPSHOT: UiSnapshot = { ...SNAPSHOT, roots: [] };
 
-function adbStub(current: string): AdbPort {
+function adbStub(
+  current: string,
+  foregroundPackage = "com.example.app"
+): AdbPort {
   return {
     devices: vi.fn(),
-    foregroundComponent: vi.fn(),
+    foregroundComponent: vi.fn(() => Promise.resolve({
+      packageName: foregroundPackage,
+      activity: current
+    })),
     currentActivity: vi.fn(() => Promise.resolve(current)),
     isInstalled: vi.fn(),
     launchActivity: vi.fn(),
@@ -155,6 +161,7 @@ type StubOptions = {
   runHooks?: boolean;
   snapshot?: UiSnapshot;
   activity?: string;
+  foregroundPackage?: string;
 };
 
 function verifyStub(options: StubOptions = {}): {
@@ -213,11 +220,15 @@ function finishHookResults(
 function hookContext(options: {
   snapshot?: UiSnapshot;
   activity?: string;
+  foregroundPackage?: string;
 }): VerifyHookContext {
   return {
     deviceRole: "default",
     deviceSerial: "emulator-5554",
-    adb: adbStub(options.activity ?? "com.example.app.MainActivity"),
+    adb: adbStub(
+      options.activity ?? "com.example.app.MainActivity",
+      options.foregroundPackage
+    ),
     uiSnapshotProvider: {
       descriptor: SNAPSHOT.backend,
       capture: vi.fn(),
@@ -382,6 +393,28 @@ describe("ContractVerifier", () => {
     });
   });
 
+  it("does not satisfy anyStep Logcat evidence with only a final Logcat", async () => {
+    const contract = parseContract(CONTRACT_TEXT);
+    contract.evidenceRequirements = [{
+      kind: "logcat",
+      scope: "anyStep",
+      required: true
+    }];
+    const verifier = makeVerifier({
+      readText: readTextStub({
+        [JOURNEY_PATH]: JOURNEY_TEXT,
+        "/project/contracts/search.json": JSON.stringify(contract)
+      })
+    });
+
+    const result = await verifier.verify(verifyInput);
+    expect(result.view.reason).toBe("EVIDENCE_INSUFFICIENT");
+    expect(result.view.evidence).toEqual([expect.objectContaining({
+      kind: "logcat",
+      satisfied: false
+    })]);
+  });
+
   it("is inconclusive when the run errored", async () => {
     const verifier = makeVerifier({
       verify: verifyStub({
@@ -473,6 +506,61 @@ describe("ContractVerifier", () => {
     const result = await verifier.verify(verifyInput);
     expect(result.view.verdict).toBe("invalid");
     expect(result.view.reason).toBe("KNOWLEDGE_UNAVAILABLE");
+  });
+
+  it("is invalid when targetScreen is absent from loaded Knowledge", async () => {
+    const contract = parseContract(CONTRACT_TEXT);
+    contract.targetScreen = "missing-screen";
+    const verifier = makeVerifier({
+      knowledge: {
+        index: {
+          version: 1,
+          packageName: "com.example.app",
+          revision: 1,
+          anchors: [],
+          screens: [],
+          transitions: []
+        },
+        indexSha256: "a".repeat(64),
+        knowledgeHash: "b".repeat(64),
+        anchors: [],
+        screens: [],
+        transitions: []
+      },
+      readText: readTextStub({
+        [JOURNEY_PATH]: JOURNEY_TEXT,
+        "/project/contracts/search.json": JSON.stringify(contract)
+      })
+    });
+
+    const result = await verifier.verify(verifyInput);
+    expect(result.view.verdict).toBe("invalid");
+    expect(result.view.reason).toBe("KNOWLEDGE_UNAVAILABLE");
+    expect(result.view.message).toContain("missing-screen");
+  });
+
+  it("fails an element assertion when its package is not foreground", async () => {
+    const contract = parseContract(CONTRACT_TEXT);
+    contract.assertions = [{
+      type: "element",
+      locator: { resourceId: "search" },
+      visibility: "visible",
+      packageName: "com.example.external",
+      timeoutMs: 2000
+    }];
+    const verifier = makeVerifier({
+      verify: verifyStub({ foregroundPackage: "com.example.app" }).verify,
+      readText: readTextStub({
+        [JOURNEY_PATH]: JOURNEY_TEXT,
+        "/project/contracts/search.json": JSON.stringify(contract)
+      })
+    });
+
+    const result = await verifier.verify(verifyInput);
+    expect(result.view.verdict).toBe("fail");
+    expect(result.view.assertions[0]?.message).toContain(
+      "Expected foreground package com.example.external"
+    );
   });
 
   it("evaluates activity preconditions against the live Activity", async () => {

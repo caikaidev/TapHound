@@ -143,6 +143,7 @@ export const RegressionDiffSchema = z.strictObject({
   kind: z.enum(["activity", "element", "screen"]),
   stepIndex: z.number().int().nonnegative().optional(),
   locator: LocatorSchema.optional(),
+  screen: KnowledgeIdSchema.optional(),
   expected: z.string().trim().min(1),
   actual: z.string().trim().min(1)
 });

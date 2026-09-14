@@ -107,7 +107,7 @@ describe("VerifyRuntime contract hooks", () => {
       { phase: "afterSteps", deviceRole: "default", status: "passed" }
     ]);
     const stepLayouts = test.order.filter((entry) => entry === "step-layout");
-    expect(stepLayouts.length).toBe(2);
+    expect(stepLayouts.length).toBe(3);
     expect(test.order.filter((entry) => entry === "baseline").length).toBe(1);
     expect(result.report.steps).toHaveLength(1);
   });

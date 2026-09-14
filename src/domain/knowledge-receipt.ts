@@ -85,6 +85,14 @@ export const KnowledgePromotionSchema = z.strictObject({
   anchors: z.array(AnchorDefinitionSchema),
   screens: z.array(ScreenDefinitionSchema),
   transitions: z.array(TransitionDefinitionSchema)
+}).superRefine((promotion, context) => {
+  if (new Set(promotion.receiptIds).size !== promotion.receiptIds.length) {
+    context.addIssue({
+      code: "custom",
+      path: ["receiptIds"],
+      message: "Promotion receipt ids must be unique"
+    });
+  }
 });
 
 export type ScreenDetectionReceipt = z.infer<

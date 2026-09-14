@@ -361,6 +361,16 @@ export class StepRunner {
       status: StepRunResult["status"],
       failure?: ReportFailure
     ): Promise<StepRunResult> => {
+      if (report.locator !== undefined && report.locator.requested === undefined) {
+        const requested = step.action === "bridge"
+          ? step.triggerLocator
+          : "locator" in step
+            ? step.locator
+            : undefined;
+        if (requested !== undefined) {
+          report.locator.requested = requested;
+        }
+      }
       const finishedAt = this.options.clock.now();
       report.finishedAtMs = finishedAt;
       report.durationMs = finishedAt - startedAt;

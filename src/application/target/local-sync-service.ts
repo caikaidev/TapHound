@@ -1,19 +1,16 @@
-import { cp, mkdir, readdir, stat } from "node:fs/promises";
-import { join, relative } from "node:path";
-
 import {
-  BUILD_DIR,
   BASELINES_DIR,
   CONTRACTS_DIR,
   CONTEXT_DIR,
   JOURNEYS_DIR,
   KNOWLEDGE_DIR,
-  PLAYBOOKS_DIR,
-  TAPHOUND_DIR
+  PLAYBOOKS_DIR
 } from "../../domain/workspace.js";
+import type { LocalAssetSyncPort } from "../../ports/local-asset-sync.js";
 
 export interface LocalSyncDependencies {
   workspaceRoot: (targetsHome: string, targetId: string) => string;
+  assetSync: LocalAssetSyncPort;
 }
 
 export interface LocalSyncResult {
@@ -56,66 +53,20 @@ export class LocalSyncService {
       input.targetsHome,
       input.targetId
     );
-    const syncedDirs: string[] = [];
-    let filesCopied = 0;
-    for (const dir of SYNC_DIRS) {
-      const source = join(input.projectRoot, dir);
-      const relativeDir = dir.startsWith(`${TAPHOUND_DIR}/`)
-        ? dir.slice(TAPHOUND_DIR.length + 1)
-        : dir;
-      const destination = join(workspaceRoot, relativeDir);
-      try {
-        const sourceStat = await stat(source);
-        if (!sourceStat.isDirectory()) {
-          continue;
-        }
-      } catch {
-        // Source asset does not exist in the project; skip.
-        continue;
-      }
-      await mkdir(join(workspaceRoot, TAPHOUND_DIR), { recursive: true });
-      const copied = await copyTree(source, destination).catch((error: unknown) => {
-        throw new Error(
-          `local sync failed copying ${relative(input.projectRoot, source)}: ${
-            error instanceof Error ? error.message : String(error)
-          }`
-        );
-      });
-      filesCopied += copied;
-      syncedDirs.push(dir);
-    }
+    const synced = await this.dependencies.assetSync.sync({
+      projectRoot: input.projectRoot,
+      workspaceRoot,
+      assetDirectories: SYNC_DIRS
+    });
     return {
       targetId: input.targetId,
       projectRoot: input.projectRoot,
       workspaceRoot,
-      syncedDirs,
-      filesCopied,
+      syncedDirs: synced.syncedDirs,
+      filesCopied: synced.filesCopied,
       skippedBuild: true
     };
   };
-}
-
-async function copyTree(
-  source: string,
-  destination: string
-): Promise<number> {
-  let count = 0;
-  const entries = await readdir(source, { withFileTypes: true });
-  for (const entry of entries) {
-    const sourcePath = join(source, entry.name);
-    const destinationPath = join(destination, entry.name);
-    if (entry.isDirectory()) {
-      if (entry.name === BUILD_DIR) {
-        continue;
-      }
-      count += await copyTree(sourcePath, destinationPath);
-    } else if (entry.isFile()) {
-      await mkdir(destination, { recursive: true });
-      await cp(sourcePath, destinationPath);
-      count += 1;
-    }
-  }
-  return count;
 }
 
 export { SYNC_DIRS };

@@ -88,6 +88,24 @@ describe("resolveIdlePolicy", () => {
     await expect(resolve()).resolves.toEqual(identity);
   });
 
+  it("preserves the receiver for a stateful adb port", async () => {
+    const adb = {
+      marker: "bound",
+      deviceIdentity(): Promise<DeviceIdentity> {
+        if (this.marker !== "bound") {
+          throw new Error("deviceIdentity lost its receiver");
+        }
+        return Promise.resolve(identity);
+      }
+    };
+    const resolve = deviceIdentityResolver(adb, {
+      packageName: "com.example.app",
+      deviceSerial: "emulator-5554"
+    });
+
+    await expect(resolve()).resolves.toEqual(identity);
+  });
+
   it("resolves undefined when the adb port lacks deviceIdentity", async () => {
     const resolve = deviceIdentityResolver({}, {
       packageName: "com.example.app",

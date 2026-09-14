@@ -114,6 +114,7 @@ function baseDependencies(exitCodes: number[]): DiffDependencies {
 
 interface DiffVerdictPayload {
   overall: string;
+  exitCode: number;
   note?: string;
   results: { name: string; selection: string; status: string }[];
 }
@@ -140,6 +141,7 @@ describe("verify --diff", () => {
     expect(exitCodes).toEqual([0]);
     const output = parseVerdict(dependencies.stdout as BufferOutput);
     expect(output.overall).toBe("passed");
+    expect(output.exitCode).toBe(0);
     expect(output.note).toBe("No changes; nothing to verify");
     expect(output.results).toEqual([]);
     const impact = dependencies.impact;
@@ -165,7 +167,10 @@ describe("verify --diff", () => {
       "--project", "/project",
       "--json"
     ]);
-    expect(exitCodes).toEqual([0]);
+    expect(exitCodes).toEqual([4]);
+    const output = parseVerdict(dependencies.stdout as BufferOutput);
+    expect(output.overall).toBe("error");
+    expect(output.exitCode).toBe(4);
     expect(vi.mocked(dependencies.gitDiff.diff)).toHaveBeenCalledWith({
       projectRoot: "/project",
       base: "v0.9",
@@ -198,6 +203,6 @@ describe("verify --diff", () => {
       "--json"
     ]);
     // --diff wins (documented first-match); diff path runs with no journeys selected
-    expect(exitCodes[0]).toBe(0);
+    expect(exitCodes[0]).toBe(4);
   });
 });

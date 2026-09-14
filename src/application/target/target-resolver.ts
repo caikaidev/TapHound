@@ -1,6 +1,4 @@
 import { createHash } from "node:crypto";
-import { access, readFile } from "node:fs/promises";
-import { join } from "node:path";
 
 import {
   AndroidProjectIdentitySchema,
@@ -12,19 +10,22 @@ import {
   type ResolvedTarget
 } from "../../domain/target.js";
 import { localTargetWorkspaceRoot } from "../../domain/workspace.js";
-import { hasModuleBuildFile } from "../../adapters/filesystem/android-project-detection.js";
 import type {
   LoadedTargets,
   TargetConfigStorePort
 } from "../../ports/target-config-store.js";
 import type { ResolvedPath, TargetPathResolverPort } from "../../ports/path-resolver.js";
 import type { ProcessRunner } from "../../ports/process-runner.js";
+import type {
+  TargetProjectInspectorPort
+} from "../../ports/target-project-inspector.js";
 
 export interface TargetResolverDependencies {
   targetsHome: string;
   configStore: TargetConfigStorePort;
   pathResolver: TargetPathResolverPort;
   processRunner: ProcessRunner;
+  projectInspector: TargetProjectInspectorPort;
   clock: { now: () => Date };
 }
 
@@ -92,58 +93,28 @@ export class TargetResolver {
   ): Promise<AndroidProjectIdentity> => {
     const runner = this.dependencies.processRunner;
     const gitRoot = await gitValue(runner, root, ["rev-parse", "--show-toplevel"]);
-    const settingsFile = await this.firstExisting(root, [
-      "settings.gradle.kts",
-      "settings.gradle"
-    ]);
-    if (settingsFile === undefined) {
+    const inspection = await this.dependencies.projectInspector.inspect(root);
+    if (inspection.settingsFile === undefined) {
       throw new TargetError(
         "LOCAL_TARGET_NOT_ANDROID_PROJECT",
         `No settings.gradle(.kts) found at ${root}`
       );
     }
-    const hasWrapperEntry = await this.hasPath(root, [
-      "gradlew",
-      "gradle/wrapper/gradle-wrapper.properties"
-    ]);
-    if (!hasWrapperEntry && !(await hasModuleBuildFile(root))) {
+    if (!inspection.hasWrapperEntry && !inspection.hasModuleBuildFile) {
       throw new TargetError(
         "LOCAL_TARGET_NOT_ANDROID_PROJECT",
         `No Gradle wrapper or module build file found at ${root}`
       );
     }
-    const hasWrapperProperties = await this.hasPath(root, [
-      "gradle/wrapper/gradle-wrapper.properties"
-    ]);
     return AndroidProjectIdentitySchema.parse({
       rootDir: root,
-      settingsFile,
-      ...(hasWrapperProperties
+      settingsFile: inspection.settingsFile,
+      ...(inspection.hasWrapperProperties
         ? { gradleWrapper: "gradle/wrapper/gradle-wrapper.properties" }
         : {}),
       ...(gitRoot === undefined ? {} : { gitRoot })
     });
   };
-
-  private readonly firstExisting = async (
-    root: string,
-    candidates: readonly string[]
-  ): Promise<string | undefined> => {
-    for (const candidate of candidates) {
-      try {
-        await access(join(root, candidate));
-        return candidate;
-      } catch {
-        continue;
-      }
-    }
-    return undefined;
-  };
-
-  private readonly hasPath = async (
-    root: string,
-    candidates: readonly string[]
-  ): Promise<boolean> => (await this.firstExisting(root, candidates)) !== undefined;
 
   public readonly fingerprint = async (
     project: AndroidProjectIdentity,
@@ -152,8 +123,9 @@ export class TargetResolver {
     const runner = this.dependencies.processRunner;
     const root = project.rootDir;
     const remote = await gitValue(runner, root, ["config", "--get", "remote.origin.url"]);
-    const rootProjectName = await this.rootProjectName(root);
-    const settingsHash = await this.fileHash(root, project.settingsFile);
+    const inspection = await this.dependencies.projectInspector.inspect(root);
+    const rootProjectName = inspection.rootProjectName;
+    const settingsHash = inspection.settingsSha256;
     const parts = [
       remote === undefined ? "no-remote" : remote,
       rootProjectName === undefined ? "no-name" : rootProjectName,
@@ -170,31 +142,4 @@ export class TargetResolver {
     });
   };
 
-  private readonly rootProjectName = async (
-    root: string
-  ): Promise<string | undefined> => {
-    for (const file of ["settings.gradle.kts", "settings.gradle"]) {
-      try {
-        const content = await readFile(join(root, file), "utf8");
-        const match = /rootProject\.name\s*=\s*["']([^"']+)["']/.exec(content);
-        if (match !== null) {
-          return match[1];
-        }
-      } catch {
-        continue;
-      }
-    }
-    return undefined;
-  };
-
-  private readonly fileHash = async (
-    root: string,
-    file: string
-  ): Promise<string | undefined> => {
-    try {
-      return createHash("sha256").update(await readFile(join(root, file), "utf8")).digest("hex");
-    } catch {
-      return undefined;
-    }
-  };
 }

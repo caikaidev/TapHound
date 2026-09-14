@@ -45,6 +45,7 @@ import type {
   GenerationAppPreparer
 } from "./generation-app-preparer.js";
 import type { UiSnapshotProviderFactory } from "../../ports/ui-snapshot.js";
+import { isRuntimeCapabilityError } from "../../ports/runtime-capability.js";
 import { closeUiSnapshotProvider } from "../ui/ui-snapshot-lifecycle.js";
 
 export interface GenerationRecoveryDetails {
@@ -339,6 +340,9 @@ export class GenerationStarter {
           ...(input.signal === undefined ? {} : { signal: input.signal })
         });
       } catch (error) {
+        if (isRuntimeCapabilityError(error)) {
+          throw error;
+        }
         throw new GenerationOperationError(
           "APP_LAUNCH_FAILED",
           error instanceof Error ? error.message : String(error)

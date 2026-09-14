@@ -55,6 +55,19 @@ export class EscalationPolicyEvaluator {
       if (!matches(rule, signal)) {
         continue;
       }
+      if (
+        (signal.verdict === "fail" || signal.verdict === "invalid")
+        && (
+          rule.then.action !== "verdict"
+          || rule.then.result !== signal.verdict
+        )
+      ) {
+        return {
+          matched: true,
+          ruleId: "deterministic-verdict-is-final",
+          action: { action: "verdict", result: signal.verdict }
+        };
+      }
       return { matched: true, ruleId: rule.id, action: rule.then };
     }
     return { matched: false };

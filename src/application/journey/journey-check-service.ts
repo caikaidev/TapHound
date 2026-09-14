@@ -276,7 +276,7 @@ export class JourneyCheckService {
       lifecycle: meta.retired !== undefined
         ? "retired"
         : status === "fresh"
-          ? "verified"
+          ? meta.status
           : classifyLifecycle(reasons),
       reasons,
       driftedModules,

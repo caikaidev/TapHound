@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { LocalSyncService } from "../../src/application/target/local-sync-service.js";
+import { NodeLocalAssetSync } from "../../src/adapters/filesystem/local-asset-sync.js";
 
 let root: string;
 let projectRoot: string;
@@ -57,7 +58,8 @@ afterAll(async () => {
 describe("LocalSyncService", () => {
   const service = new LocalSyncService({
     workspaceRoot: (home: string, targetId: string): string =>
-      join(home, ".taphound", "local", targetId)
+      join(home, ".taphound", "local", targetId),
+    assetSync: new NodeLocalAssetSync()
   });
 
   it("syncs committed asset dirs into the target workspace", async () => {

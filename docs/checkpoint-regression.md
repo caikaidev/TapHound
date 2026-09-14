@@ -81,6 +81,12 @@ and still fail its Contract (a bug present in both), or pass its Contract and
 diverge from baseline (intentional UX change). The two pipelines must stay
 independent.
 
+Screen facts require comparable instrumentation: capture the Baseline and the
+compared report from runs that both produce Knowledge Screen matches (the
+`verify --contract` path). A plain `verify` report carries no Screen matches,
+so comparing it against a Baseline that has screen facts reports those facts
+as `missing` — that is missing evidence, not necessarily a real regression.
+
 ## CLI
 
 ```bash

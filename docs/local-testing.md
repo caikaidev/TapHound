@@ -55,7 +55,7 @@ npm run brand:render
 git diff --exit-code -- assets/brand/png
 ```
 
-All commands should exit 0, and re-rendering the brand PNGs should produce no Git diff. The latest exact test count is recorded in [`verification/taphound-v0.2-dev.1-audit.md`](verification/taphound-v0.2-dev.1-audit.md).
+All commands should exit 0, and re-rendering the brand PNGs should produce no Git diff. Historical test counts in release audits are not a substitute for the current command result.
 
 After building, you can inspect the CLI directly:
 
@@ -77,7 +77,10 @@ npm pack --json \
 shasum -a 256 /private/tmp/taphound-pack-smoke/taphound-0.2.0-dev.6.tgz
 ```
 
-Compare the digest and the size, shasum, integrity, and entryCount from `npm pack --json` against the [release-ready audit](verification/taphound-v0.2-dev.1-audit.md). Any difference means you must redo the install smoke in this section; you cannot reuse the validation conclusion from a previous machine.
+Record the digest, size, shasum, integrity, and entryCount from `npm pack --json`
+in the audit for the exact release candidate. Do not compare a `dev.6` tarball
+against the historical `dev.1` audit. Any difference between machines means
+you must redo the install smoke in this section.
 
 Install the exact tarball into a temporary directory:
 
@@ -136,8 +139,9 @@ TAPHOUND_ACCEPTANCE_DEVICE=1 npm run acceptance:generation
 
 Both entries are explicit opt-in; passing the normal test suite is not evidence that real-device Replay or Generation acceptance passed. You must run `npm run build` first.
 
-The Mobile MCP runtime backend is the `auto` default for the CLI, and it has
-its own opt-in acceptance entry. It requires `mcp-server-mobile` on `PATH`, an
+The Mobile MCP runtime backend is an explicit alternative to the default ADB
+runtime and has its own opt-in acceptance entry. It requires
+`mcp-server-mobile` on `PATH`, an
 online device with the demo app installed, and runs `doctor` end to end through
 the real MCP server (device discovery, app installation, and the screenshot
 permission probe). The demo project config pins `runtime.backend: "adb"` so
@@ -159,8 +163,10 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 ```
 
 Select a backend in `.taphound/config.json` with `ui.backend`. `auto` probes
-System UIAutomator and then Android CLI only while opening the provider; it
-never switches after binding. Appium remains explicit:
+the local Appium UiAutomator2 provider first, then System UIAutomator, and
+finally Android CLI; it probes only while opening the provider and never
+switches after binding. An explicit Appium configuration is strict and fails
+closed if the provider is unavailable:
 
 ```json
 {"ui":{"backend":"appium-uiautomator2","snapshotTimeoutMs":10000,"cacheEnabled":true}}

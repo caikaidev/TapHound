@@ -94,9 +94,8 @@ async function configBackendChoice(
     text = await invocation.readConfigFile(configPath);
   } catch {
     // Local-target mode: the project config lives in the target workspace and
-    // is not readable here; local targets are local ADB projects, so default
-    // to the adb backend instead of falling through to mobile-mcp (remote
-    // cloud), which fails with DEVICE_UNAVAILABLE without a remote session.
+    // is not readable here. Keep the explicit local ADB choice for that path;
+    // all other unreadable configs use the normal auto resolution.
     return argvHasTarget(invocation.argv) ? "adb" : "auto";
   }
   let parsed: unknown;

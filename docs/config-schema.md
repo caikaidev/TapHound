@@ -95,7 +95,7 @@ Runtime Backend SPI, capability model, and backend adoption roadmap.
 
 | Field | Type | Constraint |
 |---|---|---|
-| `runtime.backend` | enum | `auto` (default), `adb`, `mobile-mcp`. `auto` and `mobile-mcp` route device work through the Mobile MCP server; `adb` selects the ADB + Android CLI backend. |
+| `runtime.backend` | enum | `auto` (default), `adb`, `mobile-mcp`. `auto` and `adb` select the ADB + Android CLI runtime; `mobile-mcp` explicitly selects Mobile MCP. |
 
 The `TAPHOUND_RUNTIME_BACKEND` environment variable (`auto` / `adb` /
 `mobile-mcp`) overrides this field per invocation, so CI and experiments can

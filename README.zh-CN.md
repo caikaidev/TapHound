@@ -74,7 +74,7 @@ git diff --exit-code -- assets/brand/png
 
 ## CLI 命令
 
-- `doctor`：检查 Node.js、ADB、Android CLI、应用安装、权限和设备；显式使用 `ui.backend=appium-uiautomator2` 时还检查本地 Appium 与 UiAutomator2 driver。默认运行时后端为 Mobile MCP（`runtime.backend=auto`），此时检查 Mobile MCP server 并通过 Mobile MCP 工具诊断设备；在配置中设置 `runtime.backend=adb`（或环境变量 `TAPHOUND_RUNTIME_BACKEND=adb`）可改回检查 ADB 工具链。
+- `doctor`：检查 Node.js、ADB、Android CLI、应用安装、权限和设备。`runtime.backend=auto` 使用 ADB Runtime；`ui.backend=auto` 优先使用健康的本地 Appium UiAutomator2 provider，再回退到系统 UIAutomator 和 Android CLI snapshot provider。
 - `record`：交互式执行操作并录制 Journey。
 - `verify`：确定性重放 Journey 并发布报告。使用 `--contract` 时验证 Acceptance Contract：哈希绑定 Journey、前置条件、旅程后断言、证据要求，并输出 `pass`/`fail`/`inconclusive`/`needsReview`/`invalid` Verdict。使用 `--diff <ref>` 时进入 diff 模式：重放 Git 变更影响的 Journeys 并返回单一 `overall` verdict（`taphound verify --diff main`，`verify-changes` 为其冗长别名，见 `docs/agent-integration.md`）。
 - `contract validate`：在不触碰设备的情况下校验 Acceptance Contract JSON 及其 Journey 哈希绑定。
@@ -164,7 +164,8 @@ git diff --exit-code -- assets/brand/png
 `artifactsDir` 可省略，默认为 `.taphound/build/runs`。
 `ui` 可省略；运行时默认使用 `auto`。可显式选择
 `system-uiautomator`、`android-cli` 或 `appium-uiautomator2`，其中 Appium
-始终是显式选择，后端不可用会失败而不会切换。`cacheEnabled:false` 只关闭本次
+是 `auto` 的第一选择，然后依次回退到系统 UIAutomator 和 Android CLI；显式选择
+不可用时会失败而不会切换。`cacheEnabled:false` 只关闭本次
 运行的观察缓存，不会改变 Locator 或动作结果。持久缓存只保存 resourceId、页面
 合约与哈希，绝不保存旧坐标、页面源码、截图或文本；命中后仍必须重新采集 live UI
 并从当前元素计算坐标。
@@ -172,15 +173,13 @@ git diff --exit-code -- assets/brand/png
 UIAutomator 结构确认稳定。如果页面持续绘制，`hybrid` 会回退到结构稳定性判定，
 不会仅因帧计数持续变化而超时。已知存在持续重绘的应用可使用 `layoutDiff` 完全跳过
 帧计数；只有确实需要像素帧静止时才使用 `frameStats`。
-`runtime.backend` 选择设备运行时后端：默认 `auto` 与 `mobile-mcp` 通过
-[Mobile MCP](https://www.npmjs.com/package/@mobilenext/mobile-mcp) server 执行设备操作，
-`adb` 则显式选择 ADB + Android CLI 后端作为回退。设备操作统一走 Runtime Backend
+`runtime.backend` 选择设备运行时后端：默认 `auto` 与 `adb` 使用完整的
+ADB + Android CLI Runtime；`mobile-mcp` 显式选择
+[Mobile MCP](https://www.npmjs.com/package/@mobilenext/mobile-mcp) server。设备操作统一走 Runtime Backend
 SPI：`observe`、`verify`、`record` 与 `generation` 每次运行通过
 `RuntimeSessionOpener` 借用 session，`align` 仍经 bridge 路由，`doctor` 已完全
 后端感知。当所选项后端缺少能力时（`mobile-mcp` 下：进程发现、前台 Activity、
-logcat 导出），命令会以 `RUNTIME_CAPABILITY_MISSING`（exit code 3）失败关闭，
-因此在 Mobile MCP server 提供这些能力之前，`verify`/`record`/`generation`/`observe`
-仍走 ADB 执行路径。能力矩阵与采用等级见
+logcat 导出），命令会以 `RUNTIME_CAPABILITY_MISSING`（exit code 3）失败关闭。能力矩阵与采用等级见
 Runtime Backend SPI（`docs/architecture/runtime-backend.md`）。
 
 Generation 会在 session 启动时绑定规范化后的完整配置。请在

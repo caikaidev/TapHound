@@ -217,6 +217,7 @@ function lifecycleSummary(
   const counts: Record<JourneyLifecycleState, number> = {
     draft: 0,
     verified: 0,
+    promoted: 0,
     suspect: 0,
     stale: 0,
     retired: 0

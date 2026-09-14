@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run coverage
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build
+      - run: npm run brand:render
+      - run: git diff --exit-code -- assets/brand/png
+      - run: node dist/cli/main.js --help

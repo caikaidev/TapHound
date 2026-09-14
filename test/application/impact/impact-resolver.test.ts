@@ -256,10 +256,12 @@ describe("ImpactResolver", () => {
     expect(impact.selectedJourneys.p0).toMatchObject([{
       id: ".taphound/journeys/anchored-search.json"
     }]);
-    expect(impact.selectedJourneys.p1).toEqual([]);
+    expect(impact.selectedJourneys.p1).toMatchObject([{
+      id: ".taphound/journeys/generated-search.json"
+    }]);
   });
 
-  it("skips journeys that only use runtime locators", async () => {
+  it("conservatively selects locator-only journeys for affected modules", async () => {
     const changeSet: ChangeSet = {
       version: 1,
       base: "origin/main",
@@ -275,9 +277,9 @@ describe("ImpactResolver", () => {
       changeSet
     });
 
-    expect(impact.skippedJourneys).toEqual([{
+    expect(impact.selectedJourneys.p1).toEqual([{
       id: ".taphound/journeys/generated-search.json",
-      reason: "journey uses only runtime locators; no semantic anchor binding"
+      reason: "affected module requires conservative coverage for a locator-only journey"
     }]);
   });
 

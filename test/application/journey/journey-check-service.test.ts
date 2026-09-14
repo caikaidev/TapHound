@@ -59,6 +59,7 @@ function fakeStore(options: FakeStoreOptions = {
 }
 
 function metaJson(overrides: {
+  status?: "verified" | "promoted";
   journeyPath?: string;
   projectHash?: string;
   configHash?: string;
@@ -66,7 +67,15 @@ function metaJson(overrides: {
 } = {}): string {
   return `${JSON.stringify({
     version: 1,
-    status: "verified",
+    status: overrides.status ?? "verified",
+    ...(overrides.status === "promoted"
+      ? {
+          promotion: {
+            promotedAt: "2026-09-11T00:00:00.000Z",
+            reason: "release coverage"
+          }
+        }
+      : {}),
     generationId: "generation-1",
     journeyPath: overrides.journeyPath ?? ".taphound/journeys/search.json",
     bindings: {
@@ -130,6 +139,20 @@ describe("JourneyCheckService", () => {
       noMeta: 0,
       invalid: 0
     });
+  });
+
+  it("preserves promoted as the fresh lifecycle state", async () => {
+    const result = await check({
+      journeys: {
+        ".taphound/journeys/search.json": `${JSON.stringify(runtimeJourney)}\n`
+      },
+      metas: {
+        ".taphound/journeys/search.json": metaJson({ status: "promoted" })
+      }
+    });
+
+    expect(result.entries[0]?.status).toBe("fresh");
+    expect(result.entries[0]?.lifecycle).toBe("promoted");
   });
 
   it("classifies a Journey without a sidecar as no-meta", async () => {

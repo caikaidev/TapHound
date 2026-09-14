@@ -153,7 +153,8 @@ export class ContractVerifier {
     }
 
     const contract = loaded.contract;
-    const needsKnowledge = contract.preconditions.some(
+    const needsKnowledge = contract.targetScreen !== undefined
+      || contract.preconditions.some(
       (precondition) => precondition.kind === "screen"
         || precondition.kind === "anchor"
     ) || contract.assertions.some(
@@ -192,27 +193,63 @@ export class ContractVerifier {
         };
       }
     }
+    if (
+      contract.targetScreen !== undefined
+      && !knowledge?.screens.some(
+        (screen) => screen.id === contract.targetScreen
+      )
+    ) {
+      return {
+        view: this.invalidView(startedAt, {
+          reason: "KNOWLEDGE_UNAVAILABLE",
+          message: `Contract targetScreen ${contract.targetScreen} is not present in Project Knowledge`,
+          environment,
+          provenance
+        }),
+        exitCode: 2
+      };
+    }
 
     const preconditionOutcomes: ContractPreconditionOutcome[] = [];
     const assertionOutcomes: ContractAssertionOutcome[] = [];
     const hooks: VerifyHooks = {
       beforeSteps: async (context) => {
-        preconditionOutcomes.push(...await this.evaluatePreconditions(
+        const outcomes = await this.evaluatePreconditions(
           context,
           contract,
           knowledge,
           input.config.run.packageName
-        ));
-        return aggregateStatus(preconditionOutcomes);
+        );
+        preconditionOutcomes.push(...outcomes);
+        const result = aggregateStatus(preconditionOutcomes);
+        const screen = contract.preconditions.find(
+          (precondition, index) => (
+            precondition.kind === "screen"
+            && outcomes[index]?.status === "passed"
+          )
+        );
+        return screen?.kind === "screen"
+          ? { ...result, screen: screen.screen }
+          : result;
       },
       afterSteps: async (context) => {
-        assertionOutcomes.push(...await this.evaluateAssertions(
+        const outcomes = await this.evaluateAssertions(
           context,
           contract,
           knowledge,
           input.config.run.packageName
-        ));
-        return aggregateAssertionStatus(assertionOutcomes);
+        );
+        assertionOutcomes.push(...outcomes);
+        const result = aggregateAssertionStatus(assertionOutcomes);
+        const screen = contract.assertions.find(
+          (assertion, index) => (
+            assertion.type === "screen"
+            && outcomes[index]?.status === "passed"
+          )
+        );
+        return screen?.type === "screen"
+          ? { ...result, screen: screen.screen }
+          : result;
       }
     };
 
@@ -637,10 +674,32 @@ export class ContractVerifier {
     };
   };
 
-  private readonly checkElement = (
+  private readonly checkElement = async (
     assertion: Extract<ContractAssertion, { type: "element" }>,
     context: VerifyHookContext
-  ): Assessed => {
+  ): Promise<Assessed> => {
+    if (assertion.packageName !== undefined) {
+      try {
+        const foreground = await context.adb.foregroundComponent({
+          packageName: assertion.packageName,
+          deviceSerial: context.deviceSerial,
+          timeoutMs: assertion.timeoutMs
+        });
+        if (foreground.packageName !== assertion.packageName) {
+          return {
+            status: "failed",
+            message: `Expected foreground package ${assertion.packageName}, found ${foreground.packageName}`
+          };
+        }
+      } catch (error) {
+        return {
+          status: "unresolved",
+          message: `Foreground package lookup failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        };
+      }
+    }
     const resolution = resolveLocator(
       context.snapshot.roots,
       assertion.locator,
@@ -677,9 +736,12 @@ export class ContractVerifier {
     report: VerifyResult["report"]
   ): ContractVerdictView["evidence"] => {
     const screenshotFinal = report.artifacts.screenshots.length > 0;
-    const uiHierarchyFinal = report.steps.some(
-      (step) => step.locator?.status === "found"
+    const screenshotAnyStep = screenshotFinal || report.steps.some(
+      (step) => step.locator?.annotatedScreenshotPath !== undefined
     );
+    const uiHierarchyFinal = (
+      report.artifacts.uiHierarchies?.length ?? 0
+    ) > 0;
     const logcatFinal = report.artifacts.logcats.length > 0;
     const logcatAnyStep = report.steps.some(
       (step) => step.logcatPath !== undefined
@@ -690,7 +752,9 @@ export class ContractVerifier {
     }): boolean => {
       switch (requirement.kind) {
       case "screenshot":
-        return screenshotFinal;
+        return requirement.scope === "anyStep"
+          ? screenshotAnyStep
+          : screenshotFinal;
       case "uiHierarchy":
         return uiHierarchyFinal;
       case "logcat":

@@ -99,6 +99,6 @@ export function deviceIdentityResolver(
       return Promise.resolve(undefined);
     }
     const requested = { ...identity };
-    return current(requested).catch((): undefined => undefined);
+    return current.call(adb, requested).catch((): undefined => undefined);
   };
 }

@@ -27,11 +27,11 @@ taphound observe --project <path> [--config <path>] [--device <serial>] \
 
 `taphound observe` runs the same `doctor` preflight as `record` and `verify`.
 The doctor check is runtime-backend-aware: the default `runtime.backend=auto`
-resolves to the Mobile MCP backend, so it verifies the Mobile MCP server and
-diagnoses the device through Mobile MCP tools; set `runtime.backend=adb` (or
-`TAPHOUND_RUNTIME_BACKEND=adb`) to check the ADB + Android CLI toolchain
-instead. It then validates the config, confirms the selected backend and an
-online device are available, and chooses a device. A config validation failure
+resolves to the capability-complete ADB + Android CLI backend. Set
+`runtime.backend=mobile-mcp` (or `TAPHOUND_RUNTIME_BACKEND=mobile-mcp`) to
+verify and diagnose through the Mobile MCP server instead. It then validates
+the config, confirms the selected backend and an online device are available,
+and chooses a device. A config validation failure
 exits with code `2` (`CONFIG_INVALID`). A doctor failure exits with code `3`
 (`ENVIRONMENT_MISSING_TOOL` or the specific failing check). When the selected
 runtime backend lacks a capability the observation needs (for example an

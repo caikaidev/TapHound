@@ -49,6 +49,7 @@ export class KnowledgeBootstrapper {
     const screens = new Map<string, ScreenDefinition>();
 
     for (const module of input.modules) {
+      const sourceFiles = module.manifest.files.map((file) => file.path);
       const activitiesByScreen = new Map<string, string[]>();
       for (const activity of module.summary.activities) {
         for (const screen of activity.screens) {
@@ -88,7 +89,8 @@ export class KnowledgeBootstrapper {
               ) ? ["actionable" as const] : [])
             ],
             identity: { kind: "element", locator },
-            description: `Bootstrapped from Project Context screen ${rawScreen}`
+            description: `Bootstrapped from Project Context screen ${rawScreen}`,
+            sourceFiles
           }));
           anchorsByScreenAndLocator.set(
             `${rawScreen}\0${locatorKey(locator)}`,
@@ -104,7 +106,8 @@ export class KnowledgeBootstrapper {
             id: activityAnchorId,
             status: "inferred",
             roles: ["screenIdentity"],
-            identity: { kind: "activity", activity }
+            identity: { kind: "activity", activity },
+            sourceFiles
           }));
           anchorIds.push(activityAnchorId);
         }
@@ -119,7 +122,8 @@ export class KnowledgeBootstrapper {
             predicates: activity === undefined
               ? []
               : [{ kind: "activityIs", activity }],
-            description: `Bootstrapped from Project Context screen ${rawScreen}`
+            description: `Bootstrapped from Project Context screen ${rawScreen}`,
+            sourceFiles
           }));
         }
       }
@@ -138,6 +142,7 @@ export class KnowledgeBootstrapper {
     }
     const transitions: TransitionDefinition[] = [];
     for (const module of input.modules) {
+      const sourceFiles = module.manifest.files.map((file) => file.path);
       for (const transition of module.summary.transitions) {
         const from = screenByActivity.get(transition.fromActivity) ?? [];
         const to = screenByActivity.get(transition.toActivity) ?? [];
@@ -158,7 +163,8 @@ export class KnowledgeBootstrapper {
             id: anchorId,
             status: "inferred",
             roles: ["actionable"],
-            identity: { kind: "element", locator }
+            identity: { kind: "element", locator },
+            sourceFiles
           }));
         }
         const id = stableId(`${from[0] as string}-to-${to[0] as string}-${anchorId}`);
@@ -174,6 +180,7 @@ export class KnowledgeBootstrapper {
             targetScreen: to[0],
             timeoutMs: 5000
           },
+          sourceFiles,
           observations: { attempts: 0, successes: 0, recoveryCost: 0 }
         }));
       }

@@ -134,6 +134,29 @@ describe("AdbRuntimeBackend", () => {
     expect(vi.mocked(factory.open)).not.toHaveBeenCalled();
   });
 
+  it("preserves the adb port receiver for device identity", async () => {
+    const { backend, adb } = adbRuntimeFixture();
+    adb.deviceIdentity = function (this: AdbPort): Promise<{
+      manufacturer: string;
+      model: string;
+      sdkLevel: number;
+    }> {
+      if (this !== adb) {
+        return Promise.reject(new Error("deviceIdentity lost its receiver"));
+      }
+      return Promise.resolve({
+        manufacturer: "example",
+        model: "emulator",
+        sdkLevel: 36
+      });
+    };
+    const session = await backend.openSession({ deviceSerial: "emulator-5554" });
+
+    await expect(session.deviceIdentity?.({
+      packageName: "com.example.app"
+    })).resolves.toMatchObject({ model: "emulator", sdkLevel: 36 });
+  });
+
   it("passes ui snapshot options to the factory on first open", async () => {
     const { backend, factory } = adbRuntimeFixture();
     const signal = new AbortController().signal;

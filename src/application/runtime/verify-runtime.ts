@@ -33,8 +33,8 @@ import type {
   UiSnapshot,
   UiSnapshotProvider
 } from "../../ports/ui-snapshot.js";
-import type { UiStabilityProbe } from "../../ports/ui-stability.js";
 import type { DeviceAssignment } from "../devices/resolve-device-assignments.js";
+import { uiStabilityProbe } from "../ui/ui-stability-probe.js";
 import { LogcatCollector } from "../collector/logcat-collector.js";
 import { logcatStopFailed } from "../collector/logcat-stop.js";
 import type { ReportWriter } from "../report/report-writer.js";
@@ -57,6 +57,7 @@ export type VerifyHookStatus = "passed" | "failed" | "unresolved";
 export interface VerifyHookResult {
   status: VerifyHookStatus;
   message?: string | undefined;
+  screen?: string | undefined;
 }
 
 export interface VerifyHookContext {
@@ -191,22 +192,6 @@ function layerForFailure(code: FailureCode): keyof TapHoundReport["layers"] {
 
 function soleRoleForJourney(journey: Journey): string {
   return journey.devices[0]?.role ?? DEFAULT_DEVICE_ROLE;
-}
-
-function stabilityProbe(
-  provider: UiSnapshotProvider,
-  fallback: UiStabilityProbe
-): UiStabilityProbe {
-  const withCapability = provider as UiSnapshotProvider & {
-    supportsStability?: boolean;
-    sample?: unknown;
-    reset?: unknown;
-  };
-  return withCapability.supportsStability === true
-    && typeof withCapability.sample === "function"
-    && typeof withCapability.reset === "function"
-    ? (withCapability as unknown as UiStabilityProbe)
-    : fallback;
 }
 
 function taskHookOutcome(
@@ -591,7 +576,7 @@ export class VerifyRuntime {
             adb: runtime.views.adb,
             screenshots: runtime.views.screenshots,
             annotatedScreens: runtime.views.annotatedScreens,
-            uiStability: stabilityProbe(provider, runtime.views.uiStability),
+            uiStability: uiStabilityProbe(provider, runtime.views.uiStability),
             uiSnapshotProvider: provider,
             clock: this.dependencies.clock,
             logcat: runtime.logcat,
@@ -750,28 +735,37 @@ export class VerifyRuntime {
           phase: "runtime"
         });
       }
-    } finally {
-      for (const runtime of runtimes) {
-        if (runtime.provider === undefined) {
-          continue;
-        }
-        try {
-          await runtime.provider.close();
-        } catch (error) {
-          secondaryErrors.push({
-            code: "INTERNAL_ERROR",
-            message: errorMessage(error),
-            phase: "uiSnapshotClose"
-          });
-        }
-      }
     }
 
     const screenshotEntries: TapHoundReport["artifacts"]["screenshots"] = [];
+    const uiHierarchyEntries: NonNullable<
+      TapHoundReport["artifacts"]["uiHierarchies"]
+    > = [];
     const logcatEntries: TapHoundReport["artifacts"]["logcats"] = [];
     input.progress?.({ stage: "collecting" });
     if (coverage === undefined) {
       for (const runtime of runtimes) {
+        if (
+          runtime.provider !== undefined
+          && runtime.readySnapshot !== undefined
+        ) {
+          const uiHierarchyPath = `ui-hierarchy-${runtime.role}.json`;
+          try {
+            const snapshot = await runtime.provider.capture({
+              reason: "evidence",
+              ...(input.signal === undefined ? {} : { signal: input.signal }),
+              timeoutMs: input.config.idle.timeoutMs
+            });
+            await session.writeJson(uiHierarchyPath, snapshot);
+            uiHierarchyEntries.push({
+              role: runtime.role,
+              path: uiHierarchyPath
+            });
+          } catch (error) {
+            collectionFailure(errorMessage(error));
+          }
+        }
+
         const screenshotPath = `screenshot-${runtime.role}.png`;
         try {
           const screenshot = await runtime.session.captureScreenshot({
@@ -803,6 +797,17 @@ export class VerifyRuntime {
             collectionFailure(errorMessage(error));
           }
         }
+      }
+    }
+    for (const runtime of runtimes) {
+      try {
+        await runtime.session.close();
+      } catch (error) {
+        secondaryErrors.push({
+          code: "INTERNAL_ERROR",
+          message: errorMessage(error),
+          phase: "runtimeSessionClose"
+        });
       }
     }
 
@@ -867,11 +872,22 @@ export class VerifyRuntime {
       },
       layers,
       steps,
+      screens: Array.from(new Map(
+        hookOutcomes.flatMap((outcome) => (
+          outcome.status === "passed" && outcome.screen !== undefined
+            ? [[outcome.screen, {
+                screen: outcome.screen,
+                status: "matched" as const
+              }] as const]
+            : []
+        ))
+      ).values()),
       artifacts: {
         directory: session.finalDirectory,
         report: "report.json",
         summary: "summary.txt",
         screenshots: screenshotEntries,
+        uiHierarchies: uiHierarchyEntries,
         logcats: logcatEntries,
         stepLogs: steps.flatMap((step) => (
           step.logcatPath === undefined ? [] : [step.logcatPath]

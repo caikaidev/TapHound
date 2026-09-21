@@ -31,6 +31,14 @@ RuntimeSession                          (bound to one deviceSerial)
   close()                                releases the snapshot provider
 ```
 
+Text input: `adb shell input text` cannot type non-ASCII characters (the
+device-side `KeyCharacterMap` resolves them to no events and the command
+fails). When the input text contains non-ASCII characters, the ADB backend
+delivers it through the [mobilenext devicekit](https://github.com/mobile-next/devicekit-android)
+app instead: it sets the clipboard by broadcast, pastes into the focused
+element with `KEYCODE_PASTE`, and clears the clipboard again. Install the
+devicekit app on the device to record or replay non-ASCII `inputText` steps.
+
 Implementations:
 
 | Backend | Location | Role |
@@ -49,6 +57,19 @@ Implementations:
 - **`openUiSnapshots` options apply only to the first call.** Later calls
   return the memoized provider. A failed open evicts the memo so a retry can
   re-open.
+- **Device-side layout temp files are self-healing.** Every UIAutomator-based
+  capture writes a uniquely named XML file under
+  `/data/local/tmp/taphound-uiautomator-*.xml` and removes it best-effort in a
+  `finally` block (5s timeout). Because a killed process or a timed-out dump
+  can still leak a file, providers also sweep the whole prefix glob: the
+  system-uiautomator factory sweeps once during `open()` and again on
+  `close()`, and `AndroidCliAdapter` sweeps once per instance before its
+  first layout read. Sweeps are best-effort (errors swallowed, 5s timeout);
+  they only ever delete the `taphound-uiautomator-` prefix, never unrelated
+  files in `/data/local/tmp`. A concurrent capture on the same device may
+  fail closed with `UI_SNAPSHOT_FAILED` if a sweep removes its in-flight
+  file; device work is serialized per Case, so this only affects
+  deliberately concurrent host processes.
 - **Capability-gated members fail closed.** `annotatedScreens` and
   `startActivityByIntent` are `undefined` on backends that lack the
   capability. Callers must check before use; a missing member is a hard error

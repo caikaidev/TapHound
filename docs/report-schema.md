@@ -11,6 +11,7 @@ summary.txt
 screenshot-<role>.png
 ui-hierarchy-<role>.json
 logcat-<role>.txt
+checkpoints/<id>-<condition-index>-ui.json
 steps/001-logcat.txt
 steps/001-layout-diff.json
 steps/001-fallback-annotated.png
@@ -35,13 +36,36 @@ Only the optional evidence actually produced appears in `artifacts`. The report 
 - `steps`: per-step Action, Locator, Idle, Activity, Expect, and log-slice
   results. Locator results retain the requested Locator identity, not only the
   field that matched. Each step records the `device` role that executed it.
-- `screens`: structured Knowledge Screen matches captured during verification.
+- `checkpoints` (optional): evaluated named Journey Checkpoints in execution
+  order, with `id`, optional after-step `stepIndex`, aggregate `status`
+  (`passed`, `failed`, `unresolved`), and each Activity, Screen, visible-element,
+  absent-element, or structured Logcat event condition with its own status and
+  requested identity. `allOf` conditions include `startedAtMs`, successful
+  `matchedAtMs`, and evidence references; UI facts reference fresh Checkpoint
+  snapshots. Event facts contain match count, optional matched-line SHA-256,
+  window start, and the scoped Logcat artifact reference, not the raw matched
+  message. The declared event fields remain in the requested condition identity.
+  An unexecuted Checkpoint is not recorded. Failures use
+  `CHECKPOINT_FAILED` or `CHECKPOINT_UNRESOLVED` (exit 1); the report remains
+  V4 and final artifacts are still collected.
+- `screens`: structured Knowledge Screen outcomes (`matched`, `ambiguous`,
+  `unresolved`) when produced by verification. Contract hooks and evaluated
+  Screen Checkpoints emit `matched` outcomes when detection is unambiguous.
 - `artifacts`: paths to the report, summary, per-device screenshots and logs
   (`screenshots`/`uiHierarchies`/`logcats` arrays of `{role, path}`), and step
   logs. UI hierarchy entries refer to actual serialized final snapshots.
 - `fallbackUsed`: whether any step used an explicit annotated fallback.
 - `primaryFailure`: the first primary failure.
 - `secondaryErrors`: collection or internal secondary errors that occurred after the primary failure.
+- `logcatEvidence` (optional): `{role,status:"incomplete",droppedLines,droppedBytes,lastDroppedAtMs?}`
+  when bounded Logcat buffering discarded unparsed or App-PID lines. Drops
+  belonging only to unrelated parsed PIDs do not mark scoped evidence
+  incomplete. A requirement needing whole-run Logcat evidence cannot pass.
+  Structured-event windows starting after the last relevant drop can still be
+  complete. A legacy positive `logcat` expectation may pass from a retained
+  matching line because it does not assert absence or uniqueness.
+  The retained raw artifact includes unparsed diagnostics and scoped app-PID
+  lines, not parsed logs from unrelated packages.
 
 A post-processing failure must not overwrite `primaryFailure`. For example, when a screenshot fails after a Locator failure, the Locator remains the primary failure and the screenshot issue goes into `secondaryErrors`.
 
@@ -69,6 +93,7 @@ A post-processing failure must not overwrite `primaryFailure`. For example, when
 - `EXPECT_ACTIVITY_FAILED`
 - `EXPECT_ELEMENT_FAILED`
 - `EXPECT_LOGCAT_FAILED`
+- `EXPECT_LOGCAT_AMBIGUOUS`
 - `BRIDGE_NO_ESCAPE`
 - `BRIDGE_NOT_RETURNED`
 - `WAIT_TIMEOUT`
@@ -82,6 +107,7 @@ A post-processing failure must not overwrite `primaryFailure`. For example, when
 - `MANUAL_STEP_REQUIRED`
 - `CONTEXT_INVALID`
 - `CONTEXT_STALE`
+- `BRIEF_INVALID`
 - `CONTEXT_MODULE_NOT_FOUND`
 - `CONTEXT_MODULE_INCOMPLETE`
 - `CONTEXT_SCHEMA_INVALID`
@@ -121,6 +147,11 @@ A post-processing failure must not overwrite `primaryFailure`. For example, when
 - `CONTRACT_JOURNEY_DRIFT`
 - `CONTRACT_EVIDENCE_INSUFFICIENT`
 - `CONTRACT_KNOWLEDGE_UNAVAILABLE`
+- `REPLAY_POLICY_UNAVAILABLE`
+- `CHECKPOINT_FAILED`
+- `CHECKPOINT_UNRESOLVED`
+- `BASELINE_INCOMPARABLE`
+- `BASELINE_EMPTY`
 - `GIT_ROOT_NOT_FOUND`
 - `GIT_REF_INVALID`
 - `COLLECTION_FAILED`
@@ -146,6 +177,14 @@ detected. The Locator report
 includes matched fields and fallback evidence; on Idle timeout the last Layout
 Diff is saved; Activity and Expect each record the expected value, actual
 result, and fixed failure code.
+
+A passed, unique `logcatEvent` expectation can include `capture` (name,
+type, value length, source step, declared window start and matched line SHA-256).
+The raw bound value is not included in the report; requested Locators retain
+their original `${name}` reference. A passed, hashed structured event may also
+record `logcatEvent.requestErrorClass` when the app emits a valid
+`fields.errorClass` (`client`, `auth`, `network`, `server`). Classification
+uses only these references, not unstructured log text.
 
 When a step targets a semantic Knowledge `anchor`, the Locator report records
 `matchedBy: "anchor"`, the resolved `anchorId`, and an `anchor` sub-report whose

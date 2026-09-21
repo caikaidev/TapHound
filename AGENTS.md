@@ -12,13 +12,14 @@ TapHound does not build or install APKs. The target package must already be
 installed before recording, generation, or verification.
 
 `taphound init` scans `assets/skills/` and installs every skill directory
-containing a `SKILL.md`. Two skills ship with TapHound:
+containing a `SKILL.md`. Five skills ship with TapHound:
 
 - `taphound-journey-generator` drives one deterministic Journey generation session.
   Requirement analysis, planning, coding, build/install, multi-Case
-  orchestration, completion gates, diagnosis, and IM-Log belong to external
-  Workflow Skills. They may consume TapHound's public CLI JSON and evidence,
-  but TapHound does not package or own those workflows.
+  orchestration, completion gates, diagnosis, and IM-Log belong to Workflow
+  Skills. `taphound-case-suite` owns durable multi-Case Journey orchestration.
+  They consume TapHound's public CLI JSON and evidence, not Core generation
+  internals.
 - `taphound-journey-brief-author` generates and maintains the Project Context
   Bundle (root index plus one shard per Gradle module) by analyzing source
   evidence through read-only `taphound project`/`context` commands, and
@@ -26,6 +27,28 @@ containing a `SKILL.md`. Two skills ship with TapHound:
   read-only `taphound observe`. It is the recommended producer of the Project
   Context and Brief that `taphound-journey-generator` consumes. It uses only read-only
   commands and never modifies device state.
+- `taphound-case-suite` freezes one user-approved Case catalog and maintains a
+  project-owned, revisioned `case-ledger.json` plus generated `STATUS.md`.
+  It serializes device mutation to one Case, records recovery and next actions,
+  validates hash-bound Base Flow proofs, and marks a Case verified only after
+  generation finalization plus a different-run independent Replay. Its helper
+  never reads or writes Core generation bundles directly.
+- `taphound-accept` orchestrates one intentional behavior-change Case using a
+  hash-bound Contract and an independent strict Replay; Contract Verdict
+  `pass` is its completion gate.
+- `taphound-preserve` orchestrates one behavior-preservation Case using a
+  pre-change Baseline and independent post-change Replay; `equivalent: true`
+  is its completion gate. Both Workflow Skills store redacted provenance
+  manifests under the ignored build subtree and never bypass Core policies.
+  For two worktrees it also packages a digest-checked `handoff.md` entry and
+  portable pre-change evidence bundle; the target agent validates and stages
+  frozen assets before independent post-change Replay (see
+  `docs/workflow-skills.md`). The APK install hash is Agent A's attestation,
+  not a measurement of the installed device binary.
+  Large UI refactors use its separate `ui-refactor.mjs` gate: A freezes a
+  behavior Case and real old-APK Replay, B generates a different Journey and
+  independently proves the same exact observables. That result is
+  frozen-observable conformance, not Core Baseline equivalence.
 
 The Journey Skill may consume one optional project-relative
 `taphound-journey-brief.md` through a `journeyBrief: {path, sha256}` binding.
@@ -156,6 +179,7 @@ layout; derive every path from it instead of writing `.taphound` literals:
       generations/<id>/   # authoritative generation bundles (+ .locks)
       jobs/<id>/          # detached finalize stdout and progress
       runs/<runId>/       # verify reports, screenshots, Logcat
+      workflows/<caseId>/ # ephemeral Workflow provenance and command JSON
 ```
 
 `artifactsDir` is optional and defaults to `.taphound/build/runs`. It may
@@ -350,8 +374,14 @@ step result evidence for audit.
 `generation recover --decision retry` is the only CLI transition out of an
 interrupted action or dead receipt-free verification attempt. The explicit
 decision is required because the interrupted action or replay may already have
-produced business side effects. Long finalization can run with `--detach`; job
-stdout and progress stay outside the authoritative generation bundle.
+produced business side effects. Its result distinguishes step from verification
+recovery and names the next action; verification recovery requires rerunning
+`generation finalize`. A completed deterministic verification failure instead
+uses `generation reopen --reason <text>`, which preserves the failure in
+`verificationHistory` before allowing `generation step --replace <index>`.
+Long finalization can run with `--detach`; job stdout and progress stay outside
+the authoritative generation bundle, and an early child crash writes a
+structured `DETACHED_PROCESS_CRASHED` result instead of leaving empty output.
 
 `FileSystemGenerationSessionStore` owns `.taphound/build/generations` and is the
 authoritative persistence boundary for generation state and immutable evidence.
@@ -444,8 +474,13 @@ the `adb` backend instead of `auto`/mobile-mcp
 - `scrollTo` swipes a `container` up to `maxSwipes` until the anchor or
   `locator` resolves uniquely, then stops without acting. Exhaustion is
   `SCROLL_TARGET_NOT_FOUND`; annotated fallback is not allowed.
-- `AdbPort` uses `appProcesses` for process discovery. `LogcatCollector` scopes
-  to a PID set with `scopeToPids`.
+- `AdbPort` uses `appProcesses` for process discovery. Streaming Logcat starts
+  with `-T 1`; generation observes and binds the App PID set before starting
+  the per-step collector. `LogcatCollector` may also add later PIDs with
+  `scopeToPids`, and completeness ignores drops from unrelated parsed PIDs.
+  A retained line can prove a positive legacy `logcat` expectation despite
+  other scoped drops; unique `logcatEvent` evidence remains fail-closed on any
+  relevant drop in its window.
 - Machine-readable `verify` and `generation` commands must emit exactly one JSON
   value to stdout. Progress and diagnostics go to stderr, and JSON `exitCode`
   must match the process exit code.

@@ -101,7 +101,7 @@ When identity fields still match repeated elements, a Locator can add a stable a
 }
 ```
 
-`within` resolves first and limits matching to that element's descendants. `index` is then applied to the remaining candidates in Layout traversal order, after every supplied identity field has narrowed the set. The Recorder and `generation manual` prefer a unique identity, then a stable ancestor scope, and use `index` when identical candidates remain. An unresolved scope, a missing identity match, or an out-of-range index returns `LOCATOR_NOT_FOUND`; multiple matches without an index return `LOCATOR_AMBIGUOUS`. TapHound never guesses a target.
+`within` resolves first and limits matching to that element's descendants. `index` is then applied to the remaining candidates in Layout traversal order, after every supplied identity field has narrowed the set. The Recorder and `generation manual` prefer a unique identity, then a stable ancestor scope, and use `index` when identical candidates remain. During Replay, a target Action whose Locator is only absent polls fresh Layout snapshots at 100 ms intervals up to `idle.timeoutMs`; this covers controls rendered shortly after Activity readiness. An unresolved scope, a missing identity match, or an out-of-range index then returns `LOCATOR_NOT_FOUND`. Multiple matches without an index return `LOCATOR_AMBIGUOUS` immediately, and indexed semantic-evidence drift also fails immediately. TapHound never guesses a target.
 
 Newly recorded or generated indexed steps may also contain Core-owned
 `evidence` with a versioned `semanticSha256`. The digest excludes coordinates,
@@ -142,7 +142,11 @@ themselves.
   and fails with `WAIT_TIMEOUT` when the element does not appear in time. The
   two fields must be provided together. This is the cross-device
   synchronization primitive, e.g. waiting on the receiver device for a message
-  the sender device just sent.
+  the sender device just sent. An optional `markerId` declares the start of an
+  explicit Logcat observation window. It is timestamped after the wait's
+  before-Activity/process checks. Marker IDs must be
+  unique; Logcat expectations may reference only a marker declared in this or
+  an earlier wait step.
 - `bridge`: executes a cross-application flow. Core clicks the `triggerLocator`,
   detects that the foreground escaped the target package, optionally executes
   deterministic `externalSteps` (or resolves a named `flow`) inside the escaped
@@ -451,6 +455,31 @@ The Recorder does not auto-generate business assertions. A step may carry one `e
 {
   "type": "element",
   "locator": { "resourceId": "search_input" },
+  "enabled": true,
+  "timeoutMs": 3000
+}
+```
+
+Optional predicates assert the resolved element's state. `enabled` compares the
+element's `enabled` flag exactly; `clickable: true` requires the element to be
+clickable, `clickable: false` requires it to be non-clickable (an element
+without a `clickable` attribute counts as non-clickable). Predicates are
+evaluated on every poll, so an expectation such as `enabled: true` also acts
+as a wait-until-enabled with the declared `timeoutMs`.
+
+`absent: true` inverts the expectation: it passes when the locator matches
+zero elements and fails when the element (or an ambiguous multi-match) is
+still present at timeout. Ambiguity is never treated as absence. `absent`
+cannot be combined with `enabled` or `clickable` predicates. An absent
+expectation passes on the first poll that observes zero matches, so place it
+on a step after the state has settled; it does not wait for a still-present
+element to disappear before starting to evaluate.
+
+```json
+{
+  "type": "element",
+  "locator": { "resourceId": "keyboard_container" },
+  "absent": true,
   "timeoutMs": 3000
 }
 ```
@@ -468,7 +497,75 @@ The Recorder does not auto-generate business assertions. A step may carry one `e
 }
 ```
 
-Logcat is matched only within this step's `[T0, T1]` window. `match` may be `literal` or `regex`; the regex must be valid. For a full executable example see [`examples/search.journey.json`](../examples/search.journey.json).
+Logcat is matched only within this step's `[T0, T1]` window. `match` may be
+`literal` or `regex`; the regex must be valid. Collection starts from at most
+one retained device-buffer line (`logcat -T 1`) and is scoped to the App PID
+set before a generation action mutates the device. A retained matching line is
+sufficient for this positive, first-match expectation even if other scoped
+lines rolled out of the bounded buffer. If no match remains and scoped evidence
+was dropped, evaluation fails closed and reports `droppedLines`,
+`droppedBytes`, and `lastDroppedAtMs`. For a full executable example see
+[`examples/search.journey.json`](../examples/search.journey.json).
+
+### `logcatEvent`
+
+```json
+{
+  "type": "logcatEvent",
+  "tag": "SearchViewModel",
+  "event": "resultsReady",
+  "fields": { "query": "hello" },
+  "correlation": { "key": "requestId", "value": "fixed-test-id" },
+  "unique": true,
+  "window": { "from": "marker", "markerId": "search-start" },
+  "timeoutMs": 3000
+}
+```
+
+The app must write a threadtime Logcat message containing a JSON object such
+as `{"event":"resultsReady","fields":{"query":"hello","requestId":"fixed-test-id"}}`.
+The tag, event, declared fields, and correlation value match exactly; fields
+are scalar strings, numbers, or booleans. Unparsed and out-of-PID lines never
+match. `unique` must be `true`, with exactly one matching event across the
+declared window. TapHound watches until the timeout to detect duplicates, even
+if the first event arrives early. Zero matches fail with
+`EXPECT_LOGCAT_FAILED`; multiple matches fail with
+`EXPECT_LOGCAT_AMBIGUOUS`. Buffer loss inside the declared window remains an
+incomplete-evidence failure because uniqueness can no longer be proven.
+Legacy `logcat` remains positive first-match.
+
+`window.from` is `stepStart` by default, `runStart` for the current Replay,
+or `marker` for an explicit `wait.markerId`. Marker windows can cross steps.
+Every marker reference must point to this or a preceding wait step. Generation
+proposals only accept `stepStart`, because their session does not bind a
+Replay run start or Journey markers. Recorder does not invent business
+expectations. Raw values remain in Logcat artifacts, not the event summary
+in the report; avoid using sensitive fields in protocol inputs.
+
+### Event Capture and Replay Binding
+
+Only a uniquely matched step `logcatEvent` may capture a value. Declare
+`"capture": {"name":"requestId","field":"requestId","valueType":"identifier"}`
+in its expectation. `field` selects one key under the event's JSON `fields`;
+alternatively `"group":"correlation"` selects the declared correlation key.
+Choose exactly one. Types are `identifier` (ASCII letters, digits, `_`, `-`,
+1–64 characters), `string` (1–128 printable characters), or `integer`
+(a safe JSON integer, rendered as decimal text). At most 16 distinct captures
+are allowed per Journey. An invalid, missing or duplicated capture fails
+closed with `EXPECT_LOGCAT_FAILED`.
+
+Later steps on the same device may use an **exact** `${requestId}` value in
+`inputText.text`, a direct step `locator.text`, or
+`logcatEvent.correlation.value`. No partial interpolation, expressions, other
+locator identities, nested locators, checkpoints, bridge/external actions, or
+generation proposal references are permitted. Unknown, forward, and
+cross-device names fail schema validation or Replay before mutation.
+Bindings stay in this Replay's memory; an independent `verify` or generation
+`finalize` re-extracts them from its own matched events. Reports store only
+the capture name/type/length, source step and window, and matched line SHA-256.
+They retain the original `${name}` locator request, never the resolved value.
+Raw values may still occur in the device's Logcat artifact; treat those
+artifacts as sensitive.
 
 ### Expect Semantics
 
@@ -487,6 +584,12 @@ semantics; TapHound never applies fuzzy, prefix, or case-insensitive matching.
   boolean by `expect` and is not surfaced separately. The Locator
   short-circuit rules above apply, so a multi-field Locator that already
   resolves uniquely through `resourceId` will not also assert `text`.
+  Optional `enabled`/`clickable` predicates compare the resolved element's
+  state exactly on every poll (a missing `clickable` attribute counts as
+  `false`); a predicate that never matches within `timeoutMs` fails with
+  `EXPECT_ELEMENT_FAILED` and the failure message reports the expected and
+  actual state. `absent: true` passes only on zero matches and fails closed
+  on found, ambiguous, or evidence-mismatch resolutions.
 - **`logcat`**: `tag` is compared with exact full-string equality, preserving
   the full logger prefix. For example, a `tag` of `IM.SendMailActivity`
   matches only logcat lines whose tag is exactly `IM.SendMailActivity`; a

@@ -23,7 +23,10 @@ edit code → build APK → install to device → taphound verify → loop until
 ## Why TapHound for Android AI Testing?
 
 - **Deterministic Verification:** Leave behind the fragility of scripted UI automation. TapHound ships its own assertion model and replay engine to catch every regression precisely.
-- **AI-Agent Native:** Built-in `taphound-journey-brief-author` and `taphound-journey-generator` Skills adapt to agents like Droid, Claude Code, Codex, and Cursor to generate Project Context, per-Case Briefs, and Android test paths automatically.
+- **AI-Agent Native:** Built-in Brief Author, Journey Generator, Case Suite,
+  Accept, and Preserve Skills adapt to agents like Droid, Claude Code, Codex,
+  and Cursor. Multi-Case plans persist in a revisioned Ledger instead of chat
+  memory.
 - **Non-invasive Build:** Focused on testing and verification, TapHound stays independent of APK compilation and install, driving native Android UI automation against an already-installed target APK.
 
 ## Requirements
@@ -106,7 +109,9 @@ See the [local testing guide](docs/local-testing.md) for source, npm tarball, an
   `config idle` hot-adjusts the session's idle policy without restarting, and
   `step --replace <index>` rewinds an active session by deterministically
   replaying the stored prefix and binding a fresh snapshot.
-- `init`: install TapHound's two built-in Skills (`taphound-journey-brief-author`, `taphound-journey-generator`) for AI agents.
+- `init`: install all five built-in Skills (`taphound-journey-brief-author`,
+  `taphound-journey-generator`, `taphound-case-suite`, `taphound-accept`, and
+  `taphound-preserve`) for AI agents.
 - `align camera`: probe the device's default camera app and write a deterministic
   `flows/external/camera/photo-capture.json` External Flow. Requires
   `--force` to overwrite an existing flow.
@@ -271,19 +276,22 @@ Supported actions include `click`, `longClick`, `inputText`, `swipe`, `scrollTo`
 
 ## AI-Agent-Driven Android Test Path Generation
 
-The repository ships two Skills.
+The repository ships five Skills.
 [`taphound-journey-brief-author`](assets/skills/taphound-journey-brief-author/SKILL.md)
 generates and maintains the Project Context Bundle from source evidence and
 produces one Brief per Case.
 [`taphound-journey-generator`](assets/skills/taphound-journey-generator/SKILL.md) drives one
 deterministic Journey scenario from Context and live device state through final
 Replay.
+[`taphound-case-suite`](assets/skills/taphound-case-suite/SKILL.md) freezes a
+user-approved multi-Case catalog, serializes device work, persists recovery
+state, and requires finalization plus independent Replay before marking a Case
+verified. `taphound-accept` and `taphound-preserve` provide one-Case behavior
+change and behavior-preservation gates.
 
-Requirement analysis, planning, coding, build/install, multi-Case scheduling,
-completion gates, and diagnosis belong to external Workflow Skills. Those
-orchestrators may invoke TapHound once per independent Case and adapt its
-public CLI JSON, Report, and evidence into their own protocols. TapHound does
-not prescribe or package a development workflow.
+Requirement analysis, planning, coding, and build/install remain external.
+Packaged Workflow Skills orchestrate TapHound's public CLI JSON, Reports, and
+evidence without bypassing Core.
 
 An orchestrator can bind an optional project-relative
 `taphound-journey-brief.md` as `journeyBrief: {path, sha256}`. The Brief
@@ -312,9 +320,9 @@ The Journey Skill guides agents such as Droid, Claude Code, Codex, and Cursor:
    expired confirmations. Confirmation defaults to a local TTY; after the user
    explicitly reviews the exact challenge, a sandboxed Agent can pass
    `generation confirm --decision approve|decline`. An interrupted in-flight
-   action can only be reactivated with the explicit
+   action or interrupted verification can only be reactivated with the explicit
    `generation recover --decision retry` acknowledgement because it may already
-   have executed.
+   have executed. Recovery JSON identifies the kind and next action.
 6. Use `generation finalize --detach` for long replay verification, then poll
    `generation status` (or use `--wait`). TapHound publishes the Journey only
    after exact verification passes.
@@ -329,10 +337,14 @@ taphound generation start \
 ```
 
 The device is bound at `generation start`; subsequent `observe`, `step`,
-`confirm`, `manual`, `bridge`, `status`, `recover`, and `archive` commands use
+`confirm`, `manual`, `bridge`, `status`, `recover`, `reopen`, and `archive` commands use
 that binding via the session. `generation start --external-flow <name...>` binds
 named External Flows by content hash so `generation bridge --flow <name>` can
-resolve them deterministically later. See the Skill's [`GUIDE.md`](assets/skills/taphound-journey-generator/GUIDE.md) for the full workflow.
+resolve them deterministically later. `generation start --brief <path>` binds a
+project-relative Journey Brief: Core reads the file, computes the SHA-256
+itself, and persists `sourceBrief` in the session and Journey meta sidecar, so
+`journey check` reports `brief-drift`/`brief-missing` when the Brief changes or
+disappears. See the Skill's [`GUIDE.md`](assets/skills/taphound-journey-generator/GUIDE.md) for the full workflow.
 
 Generation may optionally bind a strict Goal Spec and committed Knowledge hash.
 Bounded re-planning is limited to Generation and known Transitions. Finalize
@@ -354,11 +366,14 @@ correction, `generation step --replace <index>` replays the stored candidate
 prefix `[0, index)`, truncates the session to that prefix, and binds a fresh
 snapshot, so re-proposals continue from the stored prefix instead of
 restarting the session; indices inside the bound Base Flow prefix are
-rejected.
+rejected. If final Replay has already failed deterministically, run
+`generation reopen --reason <text>` first. It preserves the failure in
+`verificationHistory`, resets verification to `notRun`, and then permits the
+audited replace/finalize repair cycle.
 
 ### Installing the TapHound Testing Skills for Other AI Agents
 
-`taphound init` copies TapHound's two built-in Skills into each agent's Skill directory.
+`taphound init` copies TapHound's five built-in Skills into each agent's Skill directory.
 Interactively select at least one agent:
 
 ```bash
@@ -481,6 +496,12 @@ taphound verify-changes --target my-app --base origin/main --head WORKTREE
 
 Each verification writes to an independent directory, always containing `report.json` and `summary.txt`, with step logs provided based on actual execution. A final screenshot and full Logcat are collected on a best-effort basis. The original verification failure is preserved in `primaryFailure`; screenshot or logcat collection issues go into `secondaryErrors` and never overwrite an existing original failure. When verification itself passes but collection fails, the first collection error becomes `primaryFailure` (with code `COLLECTION_FAILED`) and the rest enter `secondaryErrors`; corresponding optional artifacts may be missing.
 
+Streaming Logcat begins at `-T 1` and uses bounded storage. Generation binds
+the live App PID set before each per-step stream starts. Buffer loss from an
+unrelated parsed PID does not invalidate App-scoped evidence. A retained match
+is enough for a positive legacy `logcat` assertion; exact-once
+`logcatEvent` evidence still fails closed if relevant lines were dropped.
+
 ## FAQ
 
 **Q: How does TapHound combine with LLMs for Android AI verification?**
@@ -503,5 +524,7 @@ A: No. Replay, device operations, and assertions are fully deterministic, with n
 - The Recorder only provides swipe for scrollable elements that have bounds from the Android CLI; Replay does not guess swipe regions for elements missing bounds.
 - Annotated screenshot fallback applies only to `click` and `longClick`, and requires an explicitly saved `#label`.
 - Replay, device operations, and assertions are fully deterministic, with no AI or visual inference.
-- The repository provides two Agent Skills installable via `taphound init`, but there is no dedicated SubAgent wrapper yet.
+- The repository provides five Agent Skills installable via `taphound init`,
+  including durable multi-Case orchestration, but there is no dedicated
+  SubAgent wrapper yet.
 - Regular tests do not require a real device; Replay and Generation device acceptance requires explicitly setting `TAPHOUND_ACCEPTANCE_DEVICE=1` and meeting external Android prerequisites.

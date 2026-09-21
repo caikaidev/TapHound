@@ -197,7 +197,8 @@ node dist/cli/main.js local sync my-app --json
 ```
 
 Without a sync the workspace is empty and `--target` analysis fails with
-`CONTEXT_INVALID` ("Context shard does not exist"). Sync never copies the
+`CONTEXT_INVALID` ("Project Context index does not exist: ...") plus a
+remediation hint naming `taphound local sync`. Sync never copies the
 `build/` subtree (runtime-isolated) and is idempotent.
 
 ## Verification against a Local Target

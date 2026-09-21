@@ -23,7 +23,10 @@ TapHound 只负责验证。编译和安装 APK 是独立的前置步骤，由开
 ## 为什么选择 TapHound 进行 Android AI 测试？
 
 - **确定性验证（Deterministic Verification）：** 告别脚本化 UI 自动化的脆弱性。TapHound 拥有自研的断言模型与回放机制，精准捕捉每一次回归。
-- **AI 代理原生（AI-Agent Native）：** 内置 `taphound-journey-brief-author`、`taphound-journey-generator` 两个 Skill，适配 Droid、Claude Code、Codex、Cursor 等 AI Agent，自动生成 Project Context、每个 Case 的 Brief 与 Android 测试路径。
+- **AI 代理原生（AI-Agent Native）：** 内置 Brief Author、Journey
+  Generator、Case Suite、Accept 与 Preserve 五个 Skill，适配 Droid、Claude
+  Code、Codex、Cursor 等 AI Agent；多 Case 计划持久化在 revisioned Ledger
+  中，而不是依赖聊天记忆。
 - **无需侵入式构建：** 专注测试与验证，独立于 APK 编译与安装流程，可直接对已安装的目标 APK 进行原生 Android UI 自动化测试。
 
 ## 环境要求
@@ -98,12 +101,13 @@ git diff --exit-code -- assets/brand/png
   `draft`、`stale`、`suspect`、`retired`；invalid Journey 没有生命周期状态）。
   `--strict` 在存在非 fresh Journey 时以非零码退出，可用于 CI 门禁。
 - `generation start` / `observe` / `next` / `step` / `confirm` / `manual` /
-  `bridge` / `status` / `recover` / `config idle` / `archive` / `list` /
+  `bridge` / `status` / `recover` / `reopen` / `config idle` / `archive` / `list` /
   `finalize`：管理确定性 Journey 生成会话。
   `bridge` 通过已绑定的 External Flow 记录跨应用流程（如相机、选择器、分享）。
   `config idle` 无需重启会话即可热调整 idle 策略；`step --replace <index>`
   通过确定性重放已存储前缀并绑定全新 snapshot，回退活动会话。
-- `init`：为 AI Agent 安装 TapHound 两个内置 Skill（`taphound-journey-brief-author`、`taphound-journey-generator`）。
+- `init`：为 AI Agent 安装 TapHound 五个内置 Skill（Brief Author、Journey
+  Generator、Case Suite、Accept、Preserve）。
 - `align camera`：探测设备默认相机应用并写入确定性
   `flows/external/camera/photo-capture.json` External Flow。覆盖已存在的 flow 需要
   `--force`。
@@ -234,16 +238,18 @@ Recorder 不自动生成业务 `expect`。Activity、Element 或 Logcat 断言�
 
 ## AI 驱动的 Android 测试路径生成 (Agent-Driven Generation)
 
-源码仓库提供两个 Skill：
+源码仓库提供五个 Skill：
 [`taphound-journey-brief-author`](assets/skills/taphound-journey-brief-author/SKILL.md)
 负责从源码证据生成与维护 Project Context Bundle，并为每个 Case 生成 Brief；
 [`taphound-journey-generator`](assets/skills/taphound-journey-generator/SKILL.md) 负责单个
 Journey 场景，从 Context 与实时设备状态一直执行到最终 Replay。
+[`taphound-case-suite`](assets/skills/taphound-case-suite/SKILL.md) 冻结用户确认的
+多 Case 清单，串行化设备操作，持久化恢复状态，并且只有 finalize 与独立 Replay
+都通过后才把 Case 标记为 verified。`taphound-accept` 与
+`taphound-preserve` 分别提供单 Case 行为变更和行为保持 Gate。
 
-Requirement Analysis、Planning、Coding、Build/Install、多 Case 调度、完成 Gate
-和 Diagnosis 属于外部 Workflow Skills。外部编排器可以针对每个独立 Case 调用
-一次 TapHound，并把公开 CLI JSON、Report 和 Evidence 转换为自己的协议。
-TapHound 不规定、也不打包完整开发 Workflow。
+Requirement Analysis、Planning、Coding 和 Build/Install 仍属于外部流程；
+打包的 Workflow Skills 只编排公开 CLI JSON、Report 与 Evidence，不绕过 Core。
 
 外部编排器可以把项目内的 `taphound-journey-brief.md` 通过
 `journeyBrief: {path, sha256}` 绑定到一个 Case。Brief 提供前置条件、预期
@@ -266,7 +272,8 @@ Journey Skill 会指导 Droid、Claude Code、Codex、Cursor 等 Agent：
 5. 使用 `generation status` 检查持久化状态，包括待确认与已过期 challenge。确认默认
    使用本地 TTY；用户明确审阅具体 challenge 后，沙箱 Agent 可运行
    `generation confirm --decision approve|decline`。中断的 in-flight action
-   可能已执行，只有显式运行 `generation recover --decision retry` 承认该风险后才会恢复。
+   或 verification 可能已执行，只有显式运行 `generation recover --decision retry`
+   承认该风险后才会恢复；恢复结果会给出类型和下一步操作。
 6. 长耗时 Replay 使用 `generation finalize --detach`，随后轮询
    `generation status`（或使用 `--wait`）。只有精确验证通过后才发布 Journey。
 
@@ -280,10 +287,13 @@ taphound generation start \
 ```
 
 设备在 `generation start` 时绑定，后续 `observe`、`step`、`confirm`、`manual`、
-`bridge`、`status`、`recover` 和 `archive` 命令通过 session 使用该绑定。
+`bridge`、`status`、`recover`、`reopen` 和 `archive` 命令通过 session 使用该绑定。
 `generation start --external-flow <name...>` 按内容哈希绑定具名 External Flow，
-供后续 `generation bridge --flow <name>` 确定性解析。完整流程见 Skill 的
-[`GUIDE.md`](assets/skills/taphound-journey-generator/GUIDE.md)。
+供后续 `generation bridge --flow <name>` 确定性解析。`generation start --brief
+<path>` 绑定项目内相对路径的 Journey Brief：Core 自行读取文件并计算 SHA-256，
+将 `sourceBrief` 持久化进 session 与 Journey meta 边车；`journey check` 会在
+Brief 内容变化时报告 `brief-drift`、文件缺失时报告 `brief-missing`。完整流程见
+Skill 的 [`GUIDE.md`](assets/skills/taphound-journey-generator/GUIDE.md)。
 
 Generation 也可选择绑定严格 Goal Spec 与已提交的 Knowledge hash。受限重规划
 只发生在 Generation，并且只能走已知 Transition；Finalize 仍从初始状态精确
@@ -301,11 +311,14 @@ step JSON 会分别报告 freshness、证据准备、观察、action、idle 等�
 收集及可选后续观察的耗时。当某个 locator 或 step 需要修正时，
 `generation step --replace <index>` 会重放已存储的候选前缀 `[0, index)`，将会话
 截断到该前缀并绑定全新 snapshot，使重新提案从已存储前缀继续而无需重启会话；
-落在绑定的 Base Flow 前缀内的索引会被拒绝。
+落在绑定的 Base Flow 前缀内的索引会被拒绝。若最终 Replay 已确定性失败，先运行
+`generation reopen --reason <text>`；它会把失败保存在
+`verificationHistory`，将 verification 重置为 `notRun`，然后允许继续执行带审计记录的
+replace/finalize 修补流程。
 
 ### 为外部 AI Agent 安装 TapHound 测试技能 (Installing the Skills)
 
-`taphound init` 将 TapHound 两个内置 Skill 复制到各 Agent 的 Skill 目录。交互式多选至少选择一个 Agent：
+`taphound init` 将 TapHound 五个内置 Skill 复制到各 Agent 的 Skill 目录。交互式多选至少选择一个 Agent：
 
 ```bash
 taphound init
@@ -364,6 +377,11 @@ taphound verify --project . --journey .taphound/journeys/search.json --json
 ```
 
 `--json` 模式保证 stdout 只有一个最终 JSON 值，进度和诊断写入 stderr。详见 [Agent 集成](docs/agent-integration.md) 与 [报告协议](docs/report-schema.md)。
+
+流式 Logcat 使用 `-T 1` 启动并采用有界缓冲。Generation 会在每步 Logcat
+启动前绑定实时 App PID 集合；仅属于其他已解析 PID 的丢弃日志不会使 App 证据
+失效。普通正向 `logcat` 断言只要保留了匹配行即可通过；要求唯一性的
+`logcatEvent` 若在窗口内丢失相关日志，仍会失败关闭。
 
 ### 单次重放之外：确定性验证链
 
@@ -442,5 +460,6 @@ A：不会。Replay、设备操作和断言完全确定性，不包含 AI 或视
 - Recorder 只为 Android CLI 返回了 bounds 的 scrollable 元素提供 swipe；Replay 不会为缺失 bounds 的元素猜测滑动区域。
 - 标注截图回退只适用于 click 与 longClick，且必须显式保存 `#编号`。
 - Replay、设备操作和断言完全确定性，不包含 AI 或视觉推理。
-- 源码仓库提供两个 Agent Skill，可通过 `taphound init` 为其他 Agent 安装，但尚无专用 SubAgent 封装。
+- 源码仓库提供五个 Agent Skill，可通过 `taphound init` 为其他 Agent 安装，其中
+  包含持久化多 Case 编排；目前仍无专用 SubAgent 封装。
 - 普通测试不要求真实设备；Replay 与 Generation 真机验收需要显式设置 `TAPHOUND_ACCEPTANCE_DEVICE=1` 并满足外部 Android 前提。

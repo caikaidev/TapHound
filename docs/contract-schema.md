@@ -69,6 +69,7 @@ meta sidecar, and lifecycle (`verified` / `promoted` / `stale`). A Contract
     { "type": "activity", "activity": "com.example.app.SearchResultsActivity", "timeoutMs": 3000 },
     { "type": "screen", "screen": "search-results", "timeoutMs": 3000 }
   ],
+  "requiredCheckpoints": ["search-results-ready"],
   "evidenceRequirements": [
     { "kind": "screenshot", "scope": "final", "required": true },
     { "kind": "logcat", "scope": "anyStep", "required": true }
@@ -88,6 +89,7 @@ meta sidecar, and lifecycle (`verified` / `promoted` / `stale`). A Contract
 | `journey` | `{ path, sha256 }` — hash binding; drift is `CONTRACT_JOURNEY_DRIFT` |
 | `preconditions` | unique kinds: `installed`, `activity`, `screen`, `anchor` |
 | `assertions` | at least one: `activity`, `element` (`visibility: visible\|absent`), `screen` |
+| `requiredCheckpoints` | optional unique IDs (default `[]`) defined by the bound Journey; each must be evaluated successfully |
 | `evidenceRequirements` | unique `kind:scope` pairs; `screenshot`/`uiHierarchy`/`logcat`, `final`/`anyStep`, `required` |
 
 Journey hash is `hashJourney` (canonical content), matching
@@ -125,23 +127,43 @@ Evaluated once against the final post-journey snapshot through the optional
 |---|---|---|
 | `screenshot` | report has at least one final screenshot | final screenshot or an annotated step screenshot |
 | `uiHierarchy` | report has at least one serialized final UI hierarchy | same serialized hierarchy artifact (step-specific hierarchy artifacts are not emitted) |
-| `logcat` | report has at least one Logcat artifact | at least one step wrote a scoped Logcat |
+| `logcat` | report has at least one Logcat artifact and no buffer overflow | at least one step wrote a scoped Logcat and no buffer overflow |
 
 Missing **required** evidence yields `inconclusive` with
 `EVIDENCE_INSUFFICIENT`.
+
+## Required Checkpoints
+
+`requiredCheckpoints` refers to the bound Journey's inline, hash-bound
+Checkpoints. Validation rejects unknown or duplicate IDs. Replay evaluates
+them after their step or at Journey completion. The Verdict's optional
+`checkpoints` array gives each required ID a `passed`, `failed`, `unresolved`,
+or `notRun` outcome. A result must have the same evaluation point and
+complete condition identities as the bound definition. Missing, duplicate,
+incomplete, or unresolved results cannot pass. A failed required Checkpoint
+produces `fail/CHECKPOINT_FAILED`; missing or unresolved evidence on an
+otherwise passed run produces `inconclusive/CHECKPOINT_UNRESOLVED`. When a
+different step fails first, the underlying `RUN_FAILED` remains authoritative.
+For a passed `allOf` Logcat event condition, the Verdict also requires one
+match, a matched-line SHA-256, an artifact reference, and no Logcat drops
+within its declared window; otherwise the required Checkpoint is unresolved.
+An overflow before `condition.startedAtMs` is distinguishable via
+`logcatEvidence.lastDroppedAtMs`. Without drop timing, evidence remains
+unresolved.
 
 ## Verdict
 
 `ContractVerdictViewSchema` (version `1`) carries: `contractId`,
 `contractSha256`, `journeySha256`, `verdict`, `reason`, per-precondition /
-per-assertion / per-evidence results, `reportPath`, `reportStatus`,
+per-assertion / per-evidence results, optional per-required-Checkpoint results,
+`reportPath`, `reportStatus`,
 timestamps, and the environment.
 
 | Verdict | Reasons |
 |---|---|
 | `pass` | `CONTRACT_OK` |
-| `fail` | `RUN_FAILED`, `PRECONDITION_FAILED`, `ASSERTION_FAILED` |
-| `inconclusive` | `RUN_ERROR`, `RUN_MANUAL_REQUIRED`, `PRECONDITION_UNRESOLVED`, `ASSERTION_UNRESOLVED`, `EVIDENCE_INSUFFICIENT` |
+| `fail` | `RUN_FAILED`, `CHECKPOINT_FAILED`, `PRECONDITION_FAILED`, `ASSERTION_FAILED` |
+| `inconclusive` | `RUN_ERROR`, `RUN_MANUAL_REQUIRED`, `CHECKPOINT_UNRESOLVED`, `PRECONDITION_UNRESOLVED`, `ASSERTION_UNRESOLVED`, `EVIDENCE_INSUFFICIENT` |
 | `needsReview` | `REVIEW_FINDINGS` (only via `contract review`, never produced by Core) |
 | `invalid` | `CONTRACT_INVALID`, `JOURNEY_MISSING`, `JOURNEY_DRIFT`, `KNOWLEDGE_UNAVAILABLE` |
 
@@ -156,13 +178,13 @@ record (reviewer `source`, `model`, `promptVersion`, `findings`, `applied`,
 ## Commands
 
 ```bash
-taphound contract validate --contract .taphound/contracts/mail-search-return.json --json
+taphound contract --contract .taphound/contracts/mail-search-return.json --json
 taphound verify --contract .taphound/contracts/mail-search-return.json --json
 taphound contract review --verdict <run>/verdict.json --findings <run>/findings.json --json
 taphound playbook validate --playbook .taphound/playbooks/behavior-regression.json --json
 ```
 
-`contract validate` is read-only: schema + hash binding, no device, no
+`contract --contract` is read-only: schema + hash binding, no device, no
 mutation. `verify --contract` runs the full flow (doctor, install, launch,
 replay, hooks, evidence, verdict). `contract review` merges external reviewer
 findings into a stored `verdict.json`: a lower-trust layer may escalate

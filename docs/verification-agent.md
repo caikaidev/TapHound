@@ -45,7 +45,7 @@ Input
   evidenceDir?      (optional baseline evidence for re-verify)
 
 Procedure
-  1. Read the Contract (hash shown by `contract validate`).
+  1. Read the Contract (hash shown by `taphound contract --contract <path> --json`).
   2. Run:  taphound verify --contract <path> --device <serial> --json
   3. Parse the single JSON Verdict. Never reinterpret evidence; quote it.
   4. If verdict == "pass"  →  return PASS with reportPath/verdict.json refs.
@@ -89,7 +89,7 @@ Constraints (enforced by the Skill, not by Core):
 |---|---|
 | `taphound verify --contract <path> --json` | the verification run; one Verdict JSON on stdout |
 | `taphound verify --diff <ref> --json` | minimal Journey set a Git change affects; one `overall` verdict |
-| `taphound contract validate --json` | static pre-check (schema + Journey hash binding) |
+| `taphound contract --contract <path> --json` | static pre-check (schema + Journey hash binding) |
 | `taphound failure classify --report <path> --json` | structured failure contract (§5 diagnosis) |
 | `taphound baseline compare --baseline <path> --report <path> --json` | behavior drift against a known-good run |
 | `docs/contract-schema.md` | Verdict/reason semantics |

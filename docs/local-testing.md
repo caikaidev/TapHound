@@ -131,13 +131,56 @@ When exactly one device is online, run the repository acceptance entry:
 TAPHOUND_ACCEPTANCE_DEVICE=1 npm run acceptance:device
 ```
 
-This command verifies a full Replay of an existing Journey. The generation protocol has a separate real-device acceptance entry, which creates a Project Context, executes `generation start → observe → step → finalize`, and requires the final state to be `verified`:
+This command verifies a full Replay of
+`.taphound/journeys/acceptance-search.json`. Its submit step checks a
+query-specific accessibility state set by the demo app only when the button
+is pressed. The separate `.taphound/journeys/search.json` stays bound to the
+False-Done benchmark Contract and retains its strict Logcat expectation.
+The app still writes a `SearchViewModel` Info log and TapHound collects
+Logcat evidence, but device log policies may suppress that line, so the
+device acceptance gate does not depend on it. The generation protocol
+has a separate real-device acceptance entry, which creates a Project Context,
+executes `generation start → observe → step → finalize`, and requires the final
+state to be `verified`:
 
 ```bash
 TAPHOUND_ACCEPTANCE_DEVICE=1 npm run acceptance:generation
 ```
 
 Both entries are explicit opt-in; passing the normal test suite is not evidence that real-device Replay or Generation acceptance passed. You must run `npm run build` first.
+
+For P3 structured Logcat and shared-Checkpoint acceptance, rebuild and
+reinstall the demo APK from this checkout, then verify the separate
+source-backed `acceptance-event.json`. It checks a unique JSON
+`SearchEvent/resultsReady` on submit and an `allOf` Checkpoint with a
+cross-step `wait.markerId` window. It does not replace the False-Done Journey:
+
+```bash
+node dist/cli/main.js verify \
+  --project examples/taphound-android-demo \
+  --device <serial> \
+  --journey examples/taphound-android-demo/.taphound/journeys/acceptance-event.json \
+  --json
+
+node dist/cli/main.js verify \
+  --project examples/taphound-android-demo \
+  --device <serial> \
+  --contract examples/taphound-android-demo/.taphound/contracts/acceptance-event.json \
+  --json
+```
+
+The separate Contract requires the Checkpoint and a source-backed UI result.
+Logcat starts from at most one retained device-buffer line. Generation binds
+the current App PID set before starting its per-step stream, and late PID
+scoping tracks completeness only for the selected PIDs. A passed event window
+is still comparable when its `startedAtMs` is **after** `lastDroppedAtMs`;
+drops within the window make a unique event unresolved. A retained match may
+still satisfy a positive legacy `logcat` expectation. Whole-run Logcat evidence
+requirements still fail closed on relevant overflow. Validate that Context source hashes match the
+installed APK before Generation; `context refresh --accept-source-changes`
+is appropriate only after reviewing the corresponding module summary.
+The existing `acceptance:generation` script rewrites its Context and
+`generated-search.json` assets, so do not run it over unrelated local edits.
 
 The Mobile MCP runtime backend is an explicit alternative to the default ADB
 runtime and has its own opt-in acceptance entry. It requires

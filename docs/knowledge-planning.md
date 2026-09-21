@@ -209,8 +209,12 @@ multimodal layer under the Escalation Policy.
 ## Journey promotion
 
 `generation finalize` exports each verified Journey with a
-`<name>.meta.json` sidecar in `status: "verified"`. High-value Journeys can
-then be promoted into durable assets:
+`<name>.meta.json` sidecar in `status: "verified"`. The sidecar carries
+`bindings.knowledgeHash` when generation used planning;
+new sidecars bind the Journey content hash and the exact strict Replay policy.
+Older sidecars remain readable for lifecycle commands but cannot supply a
+strict independent Replay policy. High-value Journeys can then be promoted
+into durable assets:
 
 ```bash
 taphound journey promote \

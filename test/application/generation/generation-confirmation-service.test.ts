@@ -306,6 +306,10 @@ describe("GenerationConfirmationService", () => {
         stepIndex: 0,
         snapshotHash: hashRuntimeSnapshot(runtime),
         actionSummary: "Back from com.example.app.MainActivity",
+        reason: {
+          rule: "policyActionRequiresConfirmation",
+          message: "back is listed in confirmationRequiredActions"
+        },
         expiresAt: "2026-07-22T12:00:30.000Z",
         status: "pending"
       }
@@ -317,6 +321,64 @@ describe("GenerationConfirmationService", () => {
     expect(test.current()).toMatchObject({
       revision: 3,
       pendingConfirmation: result.challenge
+    });
+  });
+
+  it("names the Core rule that raised a semantic confirmation", async () => {
+    const runtime: RuntimeSnapshot = {
+      ...snapshot(),
+      layout: [{
+        id: "clear",
+        resourceId: "iv_clear",
+        clickable: true,
+        enabled: true,
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+        children: []
+      }]
+    };
+    const test = harness();
+    test.mutate((current) => ({
+      ...current,
+      bindings: {
+        ...current.bindings,
+        snapshotHash: hashRuntimeSnapshot(runtime)
+      },
+      target: {
+        ...current.target,
+        interactionPolicy: {
+          allowedActions: ["click"],
+          confirmationRequiredActions: [],
+          forbiddenActions: []
+        }
+      }
+    }));
+
+    const result = await test.service.request({
+      generationId: "generation-1",
+      proposal: {
+        action: "click",
+        locator: { resourceId: "iv_clear" },
+        binding: {
+          generationId: "generation-1",
+          baseRevision: runtime.baseRevision,
+          snapshotHash: hashRuntimeSnapshot(runtime)
+        },
+        activity: { before: activity }
+      },
+      snapshot: runtime
+    });
+
+    expect(result).toMatchObject({
+      status: "confirmationRequired",
+      challenge: {
+        reason: {
+          rule: "semanticSideEffect",
+          category: "destructive",
+          matchedTerm: "clear",
+          message:
+            "click targets a destructive control (matched term \"clear\")"
+        }
+      }
     });
   });
 

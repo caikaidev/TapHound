@@ -32,7 +32,13 @@ describe("RiskEvaluator", () => {
     expect(evaluator.evaluate("click", policy({
       allowedActions: ["click"],
       confirmationRequiredActions: ["click"]
-    }))).toEqual({ effectiveRisk: "confirmationRequired" });
+    }))).toEqual({
+      effectiveRisk: "confirmationRequired",
+      reason: {
+        rule: "policyActionRequiresConfirmation",
+        message: "click is listed in confirmationRequiredActions"
+      }
+    });
   });
 
   it("allows only explicitly allowed actions without confirmation", () => {
@@ -43,7 +49,11 @@ describe("RiskEvaluator", () => {
 
   it("defaults unknown or unlisted actions to confirmation", () => {
     expect(evaluator.evaluate("wait", policy())).toEqual({
-      effectiveRisk: "confirmationRequired"
+      effectiveRisk: "confirmationRequired",
+      reason: {
+        rule: "actionNotAllowlisted",
+        message: "wait is not listed in allowedActions"
+      }
     });
   });
 
@@ -80,9 +90,11 @@ describe("RiskEvaluator", () => {
       }
     }, policy({ allowedActions: ["click"] }), snapshot)).toEqual({
       effectiveRisk: "confirmationRequired",
-      semanticSideEffect: {
+      reason: {
+        rule: "semanticSideEffect",
         category: "hardCommit",
-        matchedTerm: "send"
+        matchedTerm: "send",
+        message: "click targets a hardCommit control (matched term \"send\")"
       }
     });
   });
@@ -169,7 +181,11 @@ describe("RiskEvaluator", () => {
       allowedActions: ["click"],
       confirmationRequiredActions: ["click"]
     }), snapshot)).toEqual({
-      effectiveRisk: "confirmationRequired"
+      effectiveRisk: "confirmationRequired",
+      reason: {
+        rule: "policyActionRequiresConfirmation",
+        message: "click is listed in confirmationRequiredActions"
+      }
     });
   });
 
@@ -240,9 +256,11 @@ describe("RiskEvaluator", () => {
       }
     }, policy({ allowedActions: ["click"] }), snapshot)).toMatchObject({
       effectiveRisk: "confirmationRequired",
-      semanticSideEffect: {
+      reason: {
+        rule: "semanticSideEffect",
         category: "destructive",
-        matchedTerm: "delete"
+        matchedTerm: "delete",
+        message: "click targets a destructive control (matched term \"delete\")"
       }
     });
   });
@@ -279,9 +297,11 @@ describe("RiskEvaluator", () => {
       }
     }, policy({ allowedActions: ["click"] }), snapshot)).toMatchObject({
       effectiveRisk: "confirmationRequired",
-      semanticSideEffect: {
+      reason: {
+        rule: "semanticSideEffect",
         category: "hardCommit",
-        matchedTerm: "send"
+        matchedTerm: "send",
+        message: "click targets a hardCommit control (matched term \"send\")"
       }
     });
   });

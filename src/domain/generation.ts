@@ -135,6 +135,28 @@ export const GenerationInFlightSchema = z.strictObject({
   }).optional()
 });
 
+export const ConfirmationReasonSchema = z.strictObject({
+  rule: z.enum([
+    "policyActionRequiresConfirmation",
+    "actionNotAllowlisted",
+    "semanticSideEffect"
+  ]),
+  message: z.string().trim().min(1),
+  category: z.enum(["hardCommit", "destructive", "account"]).optional(),
+  matchedTerm: z.string().trim().min(1).optional()
+}).superRefine((reason, context) => {
+  const semantic = reason.rule === "semanticSideEffect";
+  if (
+    semantic !== (reason.category !== undefined)
+    || semantic !== (reason.matchedTerm !== undefined)
+  ) {
+    context.addIssue({
+      code: "custom",
+      message: "category and matchedTerm belong to the semanticSideEffect rule"
+    });
+  }
+});
+
 export const PendingConfirmationSchema = z.strictObject({
   challengeId: GenerationSessionIdSchema,
   stepIndex: z.number().int().nonnegative(),
@@ -142,6 +164,7 @@ export const PendingConfirmationSchema = z.strictObject({
   snapshotHash: Sha256Schema,
   evidenceHash: Sha256Schema,
   actionSummary: z.string().trim().min(1),
+  reason: ConfirmationReasonSchema.optional(),
   expiresAt: z.iso.datetime(),
   status: z.enum(["pending", "approved"]),
   approvalMode: z.enum(["localTty", "delegated"]).optional()
@@ -430,6 +453,7 @@ export const GenerationSessionSchema = z.strictObject({
 
 export type GenerationVariables = z.infer<typeof GenerationVariablesSchema>;
 export type GenerationInFlight = z.infer<typeof GenerationInFlightSchema>;
+export type ConfirmationReason = z.infer<typeof ConfirmationReasonSchema>;
 export type PendingConfirmation = z.infer<typeof PendingConfirmationSchema>;
 export type GenerationSession = z.infer<typeof GenerationSessionSchema>;
 export type GenerationPlanning = z.infer<typeof GenerationPlanningSchema>;

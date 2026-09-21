@@ -152,6 +152,11 @@ export class InquirerGenerationPrompt implements GenerationPromptPort {
     this.diagnostics.write(
       `TapHound confirmation: ${challenge.actionSummary}\n`
     );
+    if (challenge.reason !== undefined) {
+      this.diagnostics.write(
+        `Reason (${challenge.reason.rule}): ${challenge.reason.message}\n`
+      );
+    }
     const answer = await this.ask(
       (context) => this.prompts.confirm({
         message: `Approve action at step ${String(challenge.stepIndex)}?`,

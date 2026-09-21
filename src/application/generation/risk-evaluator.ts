@@ -1,3 +1,7 @@
+import {
+  ConfirmationReasonSchema,
+  type ConfirmationReason
+} from "../../domain/generation.js";
 import type { ProposedStep } from "../../domain/proposed-step.js";
 import type { InteractionPolicy } from "../../domain/project-context.js";
 import type { RuntimeSnapshot } from "../../domain/runtime-snapshot.js";
@@ -10,10 +14,7 @@ export type EffectiveRisk =
 
 export interface RiskEvaluation {
   effectiveRisk: EffectiveRisk;
-  semanticSideEffect?: {
-    category: "hardCommit" | "destructive" | "account";
-    matchedTerm: string;
-  } | undefined;
+  reason?: ConfirmationReason | undefined;
 }
 
 const SEMANTIC_TERMS = {
@@ -84,16 +85,33 @@ function semanticStrings(
   ];
 }
 
+type SemanticCategory = NonNullable<ConfirmationReason["category"]>;
+
+function semanticReason(
+  category: SemanticCategory,
+  matchedTerm: string,
+  action: ProposedStep["action"]
+): ConfirmationReason {
+  return ConfirmationReasonSchema.parse({
+    rule: "semanticSideEffect",
+    category,
+    matchedTerm,
+    message: `${action} targets a ${category} control (matched term "${
+      matchedTerm
+    }")`
+  });
+}
+
 function semanticSideEffect(
   proposal: ProposedStep,
   snapshot: RuntimeSnapshot
-): NonNullable<RiskEvaluation["semanticSideEffect"]> | undefined {
+): ConfirmationReason | undefined {
   const allTokens = semanticStrings(proposal, snapshot).flatMap(tokens);
   for (const category of ["destructive", "account"] as const) {
     const terms = SEMANTIC_TERMS[category];
     const matchedTerm = terms.find((term) => allTokens.includes(term));
     if (matchedTerm !== undefined) {
-      return { category, matchedTerm };
+      return semanticReason(category, matchedTerm, proposal.action);
     }
   }
   const matchedTerm = SEMANTIC_TERMS.hardCommit.find(
@@ -106,7 +124,7 @@ function semanticSideEffect(
     return undefined;
   }
   if (matchedTerm !== undefined) {
-    return { category: "hardCommit", matchedTerm };
+    return semanticReason("hardCommit", matchedTerm, proposal.action);
   }
   return undefined;
 }
@@ -127,7 +145,13 @@ export class RiskEvaluator {
       return { effectiveRisk: "forbidden" };
     }
     if (policy.confirmationRequiredActions.includes(action)) {
-      return { effectiveRisk: "confirmationRequired" };
+      return {
+        effectiveRisk: "confirmationRequired",
+        reason: ConfirmationReasonSchema.parse({
+          rule: "policyActionRequiresConfirmation",
+          message: `${action} is listed in confirmationRequiredActions`
+        })
+      };
     }
     if (policy.allowedActions.includes(action)) {
       if (typeof actionOrProposal !== "string" && snapshot !== undefined) {
@@ -135,12 +159,18 @@ export class RiskEvaluator {
         if (semantic !== undefined) {
           return {
             effectiveRisk: "confirmationRequired",
-            semanticSideEffect: semantic
+            reason: semantic
           };
         }
       }
       return { effectiveRisk: "safe" };
     }
-    return { effectiveRisk: "confirmationRequired" };
+    return {
+      effectiveRisk: "confirmationRequired",
+      reason: ConfirmationReasonSchema.parse({
+        rule: "actionNotAllowlisted",
+        message: `${action} is not listed in allowedActions`
+      })
+    };
   }
 }

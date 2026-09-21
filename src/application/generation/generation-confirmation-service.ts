@@ -260,6 +260,7 @@ export class GenerationConfirmationService {
       snapshotHash: proposal.binding.snapshotHash,
       evidenceHash: hashGenerationConfirmationEvidence(evidence),
       actionSummary: summarizeProposedStep(proposal),
+      ...(risk.reason === undefined ? {} : { reason: risk.reason }),
       expiresAt: new Date(
         this.dependencies.now().getTime()
           + this.dependencies.confirmationTtlMs

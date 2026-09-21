@@ -102,7 +102,7 @@ function baseDependencies(exitCodes: number[]): DiffDependencies {
       version: 1,
       run: { packageName: "com.example.app", activity: ".MainActivity" },
       idle: { pollIntervalMs: 200, stablePolls: 2, timeoutMs: 5000 },
-      artifactsDir: "reports"
+      artifactsDir: ".taphound/build/runs"
     })),
     cwd: () => "/project",
     stdout: new BufferOutput(),

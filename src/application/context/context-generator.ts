@@ -9,7 +9,11 @@ import {
   type ProjectContext,
   type ProjectContextModule
 } from "../../domain/project-context.js";
-import { CONTEXT_DIR, TAPHOUND_DIR } from "../../domain/workspace.js";
+import {
+  assertProjectPathUnder,
+  CONTEXT_DIR,
+  TAPHOUND_DIR
+} from "../../domain/workspace.js";
 import type {
   ProjectIdentityInspector
 } from "../../ports/project-identity-inspector.js";
@@ -242,6 +246,19 @@ export class ContextGenerator {
         ? relativePath.slice(TAPHOUND_DIR.length + 1)
         : relativePath;
     const documentRelativePath = reduce(contextRelativePath);
+    try {
+      assertProjectPathUnder(
+        contextRoot,
+        documentRelativePath,
+        inWorkspace ? "context" : CONTEXT_DIR,
+        "Project Context output"
+      );
+    } catch (error) {
+      throw new ContextGenerateError(
+        "CONTEXT_INVALID",
+        error instanceof Error ? error.message : String(error)
+      );
+    }
 
     if (input.force !== true) {
       const existing = await this.dependencies.files.inspectProjectFile({

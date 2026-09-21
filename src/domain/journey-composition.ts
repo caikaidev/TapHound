@@ -54,6 +54,8 @@ export const ResolvedJourneyPathSchema = ProjectRelativePathSchema.refine(
   `Resolved Journey must be a normalized JSON file under ${JOURNEYS_DIR}`
 );
 
+export const JourneyOutputPathSchema = ResolvedJourneyPathSchema;
+
 export const IncludesSchema = z.array(FlowNameSchema).superRefine(
   (includes, context) => {
     const names = new Set<string>();

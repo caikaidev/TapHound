@@ -109,9 +109,9 @@ block, so switching it mid-session requires a new generation session.
 
 ### `artifactsDir` (optional)
 
-Default: `.taphound/build/runs`. May point outside `.taphound`, but any path
-inside `.taphound` must stay under `.taphound/build` — the project-bound
-authority subtree. `verify --reports` follows the same boundary.
+Default: `.taphound/build/runs`. Core report output must stay under
+`.taphound/build` — the project-bound authority subtree. `verify --reports`
+follows the same boundary.
 
 ## Recommended Configuration by App Profile
 

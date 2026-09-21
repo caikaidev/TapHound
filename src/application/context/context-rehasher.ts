@@ -12,6 +12,10 @@ import type {
 import { projectRelativePath } from "../../shared/paths.js";
 import { MAX_CONTEXT_SHARD_BYTES, type ContextLoader } from "./context-loader.js";
 import { assertShardIdentity } from "./shard-identity.js";
+import {
+  assertProjectPathUnder,
+  CONTEXT_DIR
+} from "../../domain/workspace.js";
 
 export type ContextRehashErrorCode =
   | "CONTEXT_INVALID"
@@ -68,6 +72,19 @@ export class ContextRehasher {
       input.contextPath,
       (message) => new ContextRehashError("CONTEXT_INVALID", message)
     );
+    try {
+      assertProjectPathUnder(
+        input.projectRoot,
+        contextRelativePath,
+        CONTEXT_DIR,
+        "Project Context output"
+      );
+    } catch (error) {
+      throw new ContextRehashError(
+        "CONTEXT_INVALID",
+        error instanceof Error ? error.message : String(error)
+      );
+    }
 
     const { bundle, indexHash } = await this.dependencies.loader.readIndex({
       projectRoot: input.projectRoot,

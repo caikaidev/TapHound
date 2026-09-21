@@ -27,6 +27,7 @@ import {
   ResolvedProjectContextSchema,
   type ResolvedProjectContext
 } from "../../domain/project-context.js";
+import { JourneyOutputPathSchema } from "../../domain/journey-composition.js";
 import {
   hashJourney,
   TapHoundReportSchema,
@@ -36,7 +37,6 @@ import {
   TapHoundConfigSchema,
   type TapHoundConfig
 } from "../../domain/config.js";
-import { BUILD_DIR } from "../../domain/workspace.js";
 import {
   GenerationSessionStoreError,
   type GenerationSessionStore
@@ -108,15 +108,17 @@ interface ExpectedVerification {
   tools: Record<string, string>;
 }
 
-export const GenerationOutputPathSchema = ProjectRelativePathSchema.refine(
-  (path) => path.split("/").every(
-    (segment) => segment.length > 0 && segment !== "."
-  ),
-  "Generation output path must be normalized"
-).refine(
-  (path) => path !== BUILD_DIR && !path.startsWith(`${BUILD_DIR}/`),
-  "Generation output cannot overlap the authoritative bundle"
-);
+export const GenerationOutputPathSchema = JourneyOutputPathSchema;
+export const GenerationWorkspaceOutputPathSchema =
+  ProjectRelativePathSchema.refine(
+    (path) => path.startsWith("journeys/")
+      && path.endsWith(".json")
+      && !path.endsWith(".resolve.json")
+      && path.split("/").every(
+        (segment) => segment.length > 0 && segment !== "."
+      ),
+    "Generation workspace output must be a normalized JSON file under journeys"
+  );
 
 export type GenerationFinalizationStage =
   | "precondition"
@@ -275,7 +277,11 @@ export class GenerationFinalizer {
     const context = ResolvedProjectContextSchema.parse(input.context);
     const project = ProjectDescriptionSchema.parse(input.project);
     const canonicalProjectRoot = await realpath(input.projectRoot);
-    const outputPath = GenerationOutputPathSchema.parse(input.outputPath);
+    const outputPath = (
+      input.workspaceRoot === undefined
+        ? GenerationOutputPathSchema
+        : GenerationWorkspaceOutputPathSchema
+    ).parse(input.outputPath);
     const name = input.name === undefined
       ? derivedJourneyName(outputPath)
       : z.string().trim().min(1).parse(input.name);

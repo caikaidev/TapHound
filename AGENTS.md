@@ -182,9 +182,10 @@ layout; derive every path from it instead of writing `.taphound` literals:
       workflows/<caseId>/ # ephemeral Workflow provenance and command JSON
 ```
 
-`artifactsDir` is optional and defaults to `.taphound/build/runs`. It may
-point outside `.taphound`, but any path inside `.taphound` must remain under
-`.taphound/build`; the same boundary applies to `verify --reports`.
+`artifactsDir` is optional and defaults to `.taphound/build/runs`. Core
+artifacts must stay under `.taphound/build`; the same boundary applies to
+`verify --reports`. Local Target workspaces are already rooted under
+`.taphound/local/<id>/`.
 `record`, `verify`, and every `generation` subcommand refuse to run with
 `CONFIG_INVALID` (exit code 2) when the legacy `.taphound/generations`,
 `.taphound/jobs`, or `.taphound/runs` directories, or root-level timestamped

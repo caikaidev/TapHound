@@ -8,6 +8,8 @@ import {
   KNOWLEDGE_DIR,
   KNOWLEDGE_RECEIPTS_DIR,
   activeGenerationBundleName,
+  assertArtifactDirectory,
+  assertProjectPathUnder,
   legacyWorkspaceMessage,
   localTargetWorkspaceRoot,
   parseSnapshotEvidenceReference,
@@ -25,6 +27,24 @@ describe("workspace paths", () => {
       ".taphound/build/knowledge-receipts"
     );
     expect(BENCHMARK_RUNS_DIR).toBe(".taphound/build/benchmark-runs");
+  });
+
+  it("rejects Core artifacts and generated files outside .taphound", () => {
+    expect(() => {
+      assertArtifactDirectory("/project", "reports");
+    }).toThrow(/\.taphound\/build/i);
+    expect(() => assertProjectPathUnder(
+      "/project",
+      "journeys/search.json",
+      ".taphound/journeys",
+      "Journey output"
+    )).toThrow(/\.taphound\/journeys/i);
+    expect(assertProjectPathUnder(
+      "/project",
+      ".taphound/journeys/search.json",
+      ".taphound/journeys",
+      "Journey output"
+    )).toBe("/project/.taphound/journeys/search.json");
   });
 });
 

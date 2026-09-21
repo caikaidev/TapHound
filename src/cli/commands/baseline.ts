@@ -1,5 +1,3 @@
-import { resolve } from "node:path";
-
 import { Command } from "commander";
 
 import type { CliDependencies } from "../dependencies.js";
@@ -9,10 +7,11 @@ import {
   type FailureCode
 } from "../../domain/failure.js";
 import {
-  failureOutput,
-  writeJson,
-  writeLine
-} from "../output.js";
+  BASELINES_DIR,
+  BUILD_DIR,
+  assertProjectPathUnder
+} from "../../domain/workspace.js";
+import { failureOutput, writeJson, writeLine } from "../output.js";
 import { assertNoLegacyWorkspace } from "../workspace-guard.js";
 
 
@@ -73,7 +72,7 @@ function createCaptureCommand(dependencies: CliDependencies): Command {
     .option("--contract-sha256 <sha256>", "Assert the passing Verdict's Contract sha256")
     .option("--verdict <path>", "Passing Contract verdict.json for the source report")
     .option("--no-screen-facts", "Exclude Screen facts from this Baseline")
-    .requiredOption("--out <path>", "Baseline JSON output path")
+    .requiredOption("--out <path>", "Baseline output under .taphound/baselines")
     .option("--json", "Emit one machine-readable JSON value")
     .action(async (options: CaptureOptions): Promise<void> => {
       const json = options.json === true;
@@ -98,20 +97,38 @@ function createCaptureCommand(dependencies: CliDependencies): Command {
         return;
       }
       try {
+        const reportPath = assertProjectPathUnder(
+          options.project,
+          options.report,
+          BUILD_DIR,
+          "Verification report"
+        );
+        const verdictPath = options.verdict === undefined
+          ? undefined
+          : assertProjectPathUnder(
+              options.project,
+              options.verdict,
+              BUILD_DIR,
+              "Contract verdict"
+            );
+        const outputPath = assertProjectPathUnder(
+          options.project,
+          options.out,
+          BASELINES_DIR,
+          "Baseline output"
+        );
         const baseline = await dependencies.baselineService.captureFromReport(
-          resolve(options.project, options.report),
+          reportPath,
           {
             id: options.id,
             journeySha256: options.journeySha256,
             contractSha256: options.contractSha256,
-            verdictPath: options.verdict === undefined
-              ? undefined
-              : resolve(options.project, options.verdict),
+            ...(verdictPath === undefined ? {} : { verdictPath }),
             includeScreenFacts: options.screenFacts
           }
         );
         await dependencies.baselineService.write({
-          path: resolve(options.project, options.out),
+          path: outputPath,
           baseline
         });
         if (json) {
@@ -166,13 +183,31 @@ function createCompareCommand(dependencies: CliDependencies): Command {
         return;
       }
       try {
+        const baselinePath = assertProjectPathUnder(
+          options.project,
+          options.baseline,
+          BASELINES_DIR,
+          "Baseline"
+        );
+        const reportPath = assertProjectPathUnder(
+          options.project,
+          options.report,
+          BUILD_DIR,
+          "Verification report"
+        );
+        const verdictPath = options.verdict === undefined
+          ? undefined
+          : assertProjectPathUnder(
+              options.project,
+              options.verdict,
+              BUILD_DIR,
+              "Contract verdict"
+            );
         const result = await dependencies.baselineService.compare({
-          baselinePath: resolve(options.project, options.baseline),
-          reportPath: resolve(options.project, options.report),
+          baselinePath,
+          reportPath,
           journeySha256: options.journeySha256,
-          verdictPath: options.verdict === undefined
-            ? undefined
-            : resolve(options.project, options.verdict)
+          ...(verdictPath === undefined ? {} : { verdictPath })
         });
         if (json) {
           writeJson(dependencies.stdout, result);

@@ -183,17 +183,8 @@
       "type": "string",
       "minLength": 1,
       "default": ".taphound/build/runs",
-      "description": "Verify report output directory. May point outside .taphound, but any path inside .taphound must stay under .taphound/build (enforced at runtime).",
-      "not": {
-        "anyOf": [
-          {
-            "pattern": "^\\.taphound$"
-          },
-          {
-            "pattern": "^\\.taphound/(?!build(/|$)).+"
-          }
-        ]
-      }
+      "description": "Verify report output directory. Must stay under .taphound/build (enforced at runtime).",
+      "pattern": "^\\.taphound/build(?:/|$)"
     }
   }
 }

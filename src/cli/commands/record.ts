@@ -11,6 +11,7 @@ import {
   assertArtifactDirectory,
   CONFIG_PATH
 } from "../../domain/workspace.js";
+import { ResolvedJourneyPathSchema } from "../../domain/journey-composition.js";
 import type { CliDependencies } from "../dependencies.js";
 import {
   errorMessage,
@@ -36,15 +37,20 @@ export function createRecordCommand(dependencies: CliDependencies): Command {
     .option("--config <path>", "TapHound config path", CONFIG_PATH)
     .option("--device <serial>", "Select an online Android device")
     .requiredOption("--name <name>", "Journey name")
-    .requiredOption("--output <path>", "Journey output path")
+    .requiredOption("--output <path>", "Journey output under .taphound/journeys")
     .option("--json", "Emit machine-readable JSON")
     .action(async (options: RecordOptions): Promise<void> => {
       let config;
+      let outputPath: string;
       try {
         config = TapHoundConfigSchema.parse(await dependencies.readJson(
           resolve(options.project, options.config)
         ));
         assertArtifactDirectory(options.project, config.artifactsDir);
+        outputPath = resolve(
+          options.project,
+          ResolvedJourneyPathSchema.parse(options.output)
+        );
         await assertNoLegacyWorkspace(dependencies, options.project);
       } catch (error) {
         const output = failureOutput(2, "CONFIG_INVALID", errorMessage(error));
@@ -93,7 +99,7 @@ export function createRecordCommand(dependencies: CliDependencies): Command {
           projectRoot: options.project,
           deviceSerial,
           journeyName: options.name,
-          outputPath: resolve(options.project, options.output),
+          outputPath,
           ...(dependencies.signal === undefined
             ? {}
             : { signal: dependencies.signal })

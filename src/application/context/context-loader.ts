@@ -17,7 +17,11 @@ import type {
   ProjectInventoryInspector
 } from "../../ports/project-inventory-inspector.js";
 import { projectRelativePath } from "../../shared/paths.js";
-import { TAPHOUND_DIR } from "../../domain/workspace.js";
+import {
+  assertProjectPathUnder,
+  CONTEXT_DIR,
+  TAPHOUND_DIR
+} from "../../domain/workspace.js";
 import { compareStrings } from "../../shared/strings.js";
 import { assertShardIdentity } from "./shard-identity.js";
 
@@ -271,9 +275,26 @@ export class ContextLoader {
       input.contextPath,
       (message) => new ContextLoadError("CONTEXT_INVALID", message)
     );
+    const relativeContextPath = this.contextRelativePath(
+      input.workspaceRoot,
+      contextPath
+    );
+    try {
+      assertProjectPathUnder(
+        contextRoot,
+        relativeContextPath,
+        input.workspaceRoot === undefined ? CONTEXT_DIR : "context",
+        "Project Context"
+      );
+    } catch (error) {
+      throw new ContextLoadError(
+        "CONTEXT_INVALID",
+        error instanceof Error ? error.message : String(error)
+      );
+    }
     const loaded = await this.readStableDocument({
       root: contextRoot,
-      relativePath: this.contextRelativePath(input.workspaceRoot, contextPath),
+      relativePath: relativeContextPath,
       label: "Project Context index"
     });
     const parsedBundle = ProjectContextSchema.safeParse(loaded.document);

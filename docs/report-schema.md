@@ -1,9 +1,8 @@
 # TapHound Report Schema v4
 
 TapHound Report is written to `.taphound/build/runs/<runId>/` by default, or to
-the configured `<artifactsDir>/<runId>/`. A custom path may be outside
-`.taphound`; if it is inside `.taphound`, it must remain under
-`.taphound/build/`. The same rule applies to `verify --reports`.
+the configured `<artifactsDir>/<runId>/`. The configured path must remain
+under `.taphound/build/`. The same rule applies to `verify --reports`.
 
 ```text
 report.json

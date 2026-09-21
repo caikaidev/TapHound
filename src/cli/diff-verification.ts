@@ -198,6 +198,11 @@ export async function runDiffVerification(
           workspaceRoot: resolvedTarget.workspaceRoot
         })
       );
+      assertArtifactDirectory(
+        resolvedTarget.workspaceRoot,
+        config.artifactsDir,
+        "."
+      );
     } else {
       const rawConfig = await dependencies.readJson(
         resolve(options.project, options.config)

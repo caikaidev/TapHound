@@ -251,9 +251,8 @@ under `.taphound/build/`, so a single ignore line covers all generated data.
 
 Add `.taphound/build/` to `.gitignore` and commit the rest. TapHound creates
 `.taphound/.gitignore` with `build/` before record, verify, or generation work
-and never rewrites a file you already own. `artifactsDir` and `verify
---reports` may point outside `.taphound`, but any path inside `.taphound` must
-stay under `.taphound/build/`. Earlier layouts used
+and never rewrites a file you already own. `artifactsDir` and `verify --reports`
+must stay under `.taphound/build/`. Earlier layouts used
 `.taphound/generations`, `.taphound/jobs`, and `.taphound/runs`; TapHound stops
 with `CONFIG_INVALID` and prints the exact `mv` commands when it finds them.
 Root-level timestamped Verify run directories are detected the same way.

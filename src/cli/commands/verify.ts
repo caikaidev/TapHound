@@ -390,7 +390,7 @@ async function runTargetVerify(
       ? synthesized.artifactsDir
       : resolve(workspaceRoot, options.reports)
   });
-  assertArtifactDirectory(resolved.resolvedPath, config.artifactsDir);
+  assertArtifactDirectory(resolved.workspaceRoot, config.artifactsDir, ".");
 
   const fileName = name.endsWith(".json") ? name : `${name}.json`;
   let journey;
@@ -433,7 +433,7 @@ export function createVerifyCommand(dependencies: CliDependencies): Command {
     .option("--device <serial>", "Select an online Android device")
     .option("--package <name>", "Override run.packageName")
     .option("--activity <name>", "Override run.activity")
-    .option("--reports <path>", "Override report output directory (resolved against the workspace in --target mode)")
+    .option("--reports <path>", "Report output under .taphound/build")
     .option("--target <id>", "Registered local target id")
     .option("--targets <path>", "Targets workspace base path")
     .option("--policy-from-meta", "Require the bound strict Generation Replay policy")

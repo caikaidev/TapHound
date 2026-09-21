@@ -25,7 +25,11 @@ import {
   exitCodeForFailure
 } from "../../domain/failure.js";
 import { TargetError } from "../../domain/target.js";
-import { CONFIG_PATH } from "../../domain/workspace.js";
+import {
+  assertProjectPathUnder,
+  CONFIG_PATH,
+  CONTEXT_DIR
+} from "../../domain/workspace.js";
 import type { CliDependencies } from "../dependencies.js";
 import {
   errorMessage,
@@ -48,6 +52,23 @@ interface ResolvedTargetContext {
   projectRoot: string;
   contextRoot: string;
   config: TapHoundConfig;
+}
+
+function contextPath(
+  root: string,
+  requested: string,
+  workspaceRoot: string | undefined
+): string {
+  const relativePath = workspaceRoot !== undefined
+    && requested.startsWith(".taphound/")
+    ? requested.slice(".taphound/".length)
+    : requested;
+  return assertProjectPathUnder(
+    root,
+    relativePath,
+    workspaceRoot === undefined ? CONTEXT_DIR : "context",
+    "Project Context output"
+  );
 }
 
 function targetsHome(
@@ -176,7 +197,7 @@ function createContextOperation(
     .option("--config <path>", "TapHound config path", CONFIG_PATH)
     .option(
       "--context <path>",
-      "Project Context index path",
+      "Project Context path under .taphound/context",
       ".taphound/context/project-context.json"
     )
     .option("--module <id...>", "Select Context modules")
@@ -218,7 +239,11 @@ function createContextOperation(
         const loaded = await dependencies.contextLoader.load({
           projectRoot,
           ...(contextRoot === undefined ? {} : { workspaceRoot: contextRoot }),
-          contextPath: resolve(contextRoot ?? projectRoot, options.context),
+          contextPath: contextPath(
+            contextRoot ?? projectRoot,
+            options.context,
+            contextRoot
+          ),
           ...(options.module === undefined ? {} : { moduleIds: options.module }),
           allowIncomplete: name === "status"
         });
@@ -266,7 +291,7 @@ function createContextListCommand(dependencies: CliDependencies): Command {
     .option("--project <path>", "Android project root", dependencies.cwd())
     .option(
       "--context <path>",
-      "Project Context index path",
+      "Project Context path under .taphound/context",
       ".taphound/context/project-context.json"
     )
     .option("--json", "Emit one machine-readable JSON value")
@@ -277,7 +302,7 @@ function createContextListCommand(dependencies: CliDependencies): Command {
       try {
         const { bundle, indexHash } = await dependencies.contextLoader.readIndex({
           projectRoot: options.project,
-          contextPath: resolve(options.project, options.context)
+          contextPath: contextPath(options.project, options.context, undefined)
         });
         const output = {
           status: "listed",
@@ -375,7 +400,7 @@ function createContextRefreshCommand(dependencies: CliDependencies): Command {
     .option("--project <path>", "Android project root", dependencies.cwd())
     .option(
       "--context <path>",
-      "Project Context index path",
+      "Project Context path under .taphound/context",
       ".taphound/context/project-context.json"
     )
     .option("--module <id...>", "Refresh only the listed Context modules")
@@ -392,7 +417,7 @@ function createContextRefreshCommand(dependencies: CliDependencies): Command {
       try {
         const result = await dependencies.contextRefresher.refresh({
           projectRoot: options.project,
-          contextPath: resolve(options.project, options.context),
+          contextPath: contextPath(options.project, options.context, undefined),
           ...(options.module === undefined ? {} : { moduleIds: options.module }),
           ...(options.acceptSourceChanges === undefined
             ? {}
@@ -471,7 +496,7 @@ function createContextGenerateCommand(dependencies: CliDependencies): Command {
     .option("--project <path>", "Android project root", dependencies.cwd())
     .option(
       "--context <path>",
-      "Project Context index path",
+      "Project Context path under .taphound/context",
       ".taphound/context/project-context.json"
     )
     .option("--force", "Overwrite an existing Project Context")
@@ -491,7 +516,11 @@ function createContextGenerateCommand(dependencies: CliDependencies): Command {
         const result = await dependencies.contextGenerator.generate({
           projectRoot,
           ...(contextRoot === undefined ? {} : { contextRoot }),
-          contextPath: resolve(contextRoot ?? projectRoot, options.context),
+          contextPath: contextPath(
+            contextRoot ?? projectRoot,
+            options.context,
+            contextRoot
+          ),
           ...(options.force === undefined ? {} : { force: options.force })
         });
         const output = { ...result, exitCode: 0 };
@@ -551,7 +580,7 @@ function createContextRehashCommand(dependencies: CliDependencies): Command {
     .option("--project <path>", "Android project root", dependencies.cwd())
     .option(
       "--context <path>",
-      "Project Context index path",
+      "Project Context path under .taphound/context",
       ".taphound/context/project-context.json"
     )
     .option("--module <id...>", "Rehash only the listed Context modules")
@@ -560,7 +589,7 @@ function createContextRehashCommand(dependencies: CliDependencies): Command {
       try {
         const result = await dependencies.contextRehasher.rehash({
           projectRoot: options.project,
-          contextPath: resolve(options.project, options.context),
+          contextPath: contextPath(options.project, options.context, undefined),
           ...(options.module === undefined ? {} : { moduleIds: options.module })
         });
         const output = { ...result, exitCode: 0 };

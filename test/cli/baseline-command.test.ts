@@ -31,7 +31,7 @@ const baseline: Baseline = {
   }],
   elements: [{ locator: { resourceId: "search" }, kind: "present" }],
   screens: [{ screen: "search", status: "matched" }],
-  sourceReportPath: "/runs/run-1/report.json"
+  sourceReportPath: "/project/.taphound/build/runs/run-1/report.json"
 };
 
 const equivalentResult: RegressionCompareResult = {
@@ -95,7 +95,7 @@ describe("baseline capture", () => {
     await createProgram(dependencies).parseAsync([
       "node", "taphound", "baseline", "capture",
       "--project", "/project",
-      "--report", "runs/run-1/report.json",
+      "--report", ".taphound/build/runs/run-1/report.json",
       "--out", ".taphound/baselines/search.json",
       "--json"
     ]);
@@ -106,7 +106,7 @@ describe("baseline capture", () => {
     expect(output.id).toBe("search-baseline");
     const capture = dependencies.baselineService?.captureFromReport as ReturnType<typeof vi.fn>;
     expect(capture).toHaveBeenCalledWith(
-      "/project/runs/run-1/report.json",
+      "/project/.taphound/build/runs/run-1/report.json",
       {
         id: undefined,
         journeySha256: undefined,
@@ -124,7 +124,7 @@ describe("baseline capture", () => {
     await createProgram(dependencies).parseAsync([
       "node", "taphound", "baseline", "capture",
       "--project", "/project",
-      "--report", "runs/run-1/report.json",
+      "--report", ".taphound/build/runs/run-1/report.json",
       "--out", ".taphound/baselines/search.json",
       "--json"
     ]);
@@ -141,16 +141,16 @@ describe("baseline capture", () => {
     await createProgram(dependencies).parseAsync([
       "node", "taphound", "baseline", "capture",
       "--project", "/project",
-      "--report", "runs/run-1/report.json",
-      "--verdict", "runs/run-1/verdict.json",
+      "--report", ".taphound/build/runs/run-1/report.json",
+      "--verdict", ".taphound/build/runs/run-1/verdict.json",
       "--no-screen-facts",
       "--out", ".taphound/baselines/search.json",
       "--json"
     ]);
     expect(dependencies.baselineService?.captureFromReport).toHaveBeenCalledWith(
-      "/project/runs/run-1/report.json",
+      "/project/.taphound/build/runs/run-1/report.json",
       expect.objectContaining({
-        verdictPath: "/project/runs/run-1/verdict.json",
+        verdictPath: "/project/.taphound/build/runs/run-1/verdict.json",
         includeScreenFacts: false
       })
     );
@@ -166,7 +166,7 @@ describe("baseline compare", () => {
       "node", "taphound", "baseline", "compare",
       "--project", "/project",
       "--baseline", ".taphound/baselines/search.json",
-      "--report", "runs/run-2/report.json",
+      "--report", ".taphound/build/runs/run-2/report.json",
       "--json"
     ]);
     expect(exitCodes).toEqual([0]);
@@ -183,15 +183,15 @@ describe("baseline compare", () => {
       "node", "taphound", "baseline", "compare",
       "--project", "/project",
       "--baseline", ".taphound/baselines/search.json",
-      "--report", "runs/run-2/report.json",
-      "--verdict", "runs/run-2/verdict.json",
+      "--report", ".taphound/build/runs/run-2/report.json",
+      "--verdict", ".taphound/build/runs/run-2/verdict.json",
       "--json"
     ]);
     expect(dependencies.baselineService?.compare).toHaveBeenCalledWith({
       baselinePath: "/project/.taphound/baselines/search.json",
-      reportPath: "/project/runs/run-2/report.json",
+      reportPath: "/project/.taphound/build/runs/run-2/report.json",
       journeySha256: undefined,
-      verdictPath: "/project/runs/run-2/verdict.json"
+      verdictPath: "/project/.taphound/build/runs/run-2/verdict.json"
     });
     expect(exitCodes).toEqual([0]);
   });
@@ -211,7 +211,7 @@ describe("baseline compare", () => {
       "node", "taphound", "baseline", "compare",
       "--project", "/project",
       "--baseline", ".taphound/baselines/search.json",
-      "--report", "runs/run-2/report.json",
+      "--report", ".taphound/build/runs/run-2/report.json",
       "--json"
     ]);
     expect(exitCodes).toEqual([2]);
@@ -242,7 +242,7 @@ describe("baseline compare", () => {
       "node", "taphound", "baseline", "compare",
       "--project", "/project",
       "--baseline", ".taphound/baselines/search.json",
-      "--report", "runs/run-2/report.json",
+      "--report", ".taphound/build/runs/run-2/report.json",
       "--json"
     ]);
     expect(exitCodes).toEqual([1]);
@@ -274,7 +274,7 @@ describe("baseline compare", () => {
       "node", "taphound", "baseline", "compare",
       "--project", "/project",
       "--baseline", ".taphound/baselines/search.json",
-      "--report", "runs/run-2/report.json"
+      "--report", ".taphound/build/runs/run-2/report.json"
     ]);
     expect(exitCodes).toEqual([1]);
     const output = (dependencies.stdout as BufferOutput).value;

@@ -20,6 +20,10 @@ import { MAX_CONTEXT_SHARD_BYTES, type ContextLoader } from "./context-loader.js
 import { MAX_CONTEXT_EVIDENCE_BYTES } from "./context-validator.js";
 import { semanticSha256 } from "./evidence-hash.js";
 import { assertShardIdentity } from "./shard-identity.js";
+import {
+  assertProjectPathUnder,
+  CONTEXT_DIR
+} from "../../domain/workspace.js";
 
 export type ContextRefreshErrorCode =
   | "CONTEXT_INVALID"
@@ -182,6 +186,19 @@ export class ContextRefresher {
       input.contextPath,
       (message) => new ContextRefreshError("CONTEXT_INVALID", message)
     );
+    try {
+      assertProjectPathUnder(
+        input.projectRoot,
+        indexPath,
+        CONTEXT_DIR,
+        "Project Context output"
+      );
+    } catch (error) {
+      throw new ContextRefreshError(
+        "CONTEXT_INVALID",
+        error instanceof Error ? error.message : String(error)
+      );
+    }
     const { bundle, indexHash } = await this.dependencies.loader.readIndex({
       projectRoot: input.projectRoot,
       contextPath: input.contextPath

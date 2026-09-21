@@ -214,7 +214,7 @@ function jsonOutput(dependencies: CliDependencies): Record<string, unknown> {
 }
 
 function contextPathResolved(workspaceRoot: string): string {
-  return `${workspaceRoot}/.taphound/context/project-context.json`;
+  return `${workspaceRoot}/context/project-context.json`;
 }
 
 describe("taphound context --target", () => {
@@ -228,7 +228,7 @@ describe("taphound context --target", () => {
       launchActivity: "com.example.app.MainActivity",
       modules: [],
       indexHash: "b".repeat(64),
-      contextPath: ".taphound/context/project-context.json"
+      contextPath: "context/project-context.json"
     });
 
     await runContext(dependencies, [

@@ -79,30 +79,37 @@ function isSameOrDescendant(parent: string, candidate: string): boolean {
 
 export function assertArtifactDirectory(
   projectRoot: string,
-  artifactsDir: string
+  artifactsDir: string,
+  relativeAuthorityRoot = BUILD_DIR
 ): void {
-  const workspace = resolve(projectRoot, TAPHOUND_DIR);
-  const build = resolve(projectRoot, BUILD_DIR);
+  const build = resolve(projectRoot, relativeAuthorityRoot);
   const candidate = resolve(projectRoot, artifactsDir);
-  if (
-    isSameOrDescendant(workspace, candidate)
-    && !isSameOrDescendant(build, candidate)
-  ) {
+  if (!isSameOrDescendant(build, candidate)) {
     throw new Error(
-      `Artifact path inside ${TAPHOUND_DIR}/ must stay under ${BUILD_DIR}/: ${artifactsDir}`
+      `Artifact output must stay under ${BUILD_DIR}/: ${artifactsDir}`
     );
   }
 }
 
 export function isInvalidRelativeArtifactDirectory(path: string): boolean {
   const normalized = posix.normalize(path.replaceAll("\\", "/"));
-  return (
-    normalized === TAPHOUND_DIR
-    || normalized.startsWith(`${TAPHOUND_DIR}/`)
-  ) && !(
-    normalized === BUILD_DIR
-    || normalized.startsWith(`${BUILD_DIR}/`)
-  );
+  return !posix.isAbsolute(normalized)
+    && normalized !== BUILD_DIR
+    && !normalized.startsWith(`${BUILD_DIR}/`);
+}
+
+export function assertProjectPathUnder(
+  projectRoot: string,
+  outputPath: string,
+  relativeRoot: string,
+  label: string
+): string {
+  const root = resolve(projectRoot, relativeRoot);
+  const candidate = resolve(projectRoot, outputPath);
+  if (!isSameOrDescendant(root, candidate)) {
+    throw new Error(`${label} must stay under ${relativeRoot}/: ${outputPath}`);
+  }
+  return candidate;
 }
 
 export const LEGACY_WORKSPACE_DIRECTORIES = [

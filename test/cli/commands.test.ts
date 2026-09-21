@@ -520,7 +520,7 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
       "--project", "/project",
       "--config", "/project/.taphound/config.json",
       "--name", "Recorded",
-      "--output", "/project/.taphound/journeys/recorded.json"
+      "--output", ".taphound/journeys/recorded.json"
     ]);
 
     expect(test.value.recorder.record).toHaveBeenCalledWith({
@@ -532,6 +532,27 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
     });
     expect(test.stdout.value).toContain("Recorded 1 step");
     expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("rejects recording a Journey outside .taphound/journeys", async () => {
+    const test = dependencies();
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "record",
+      "--project", "/project",
+      "--config", "/project/.taphound/config.json",
+      "--name", "Recorded",
+      "--output", "journeys/recorded.json",
+      "--json"
+    ]);
+
+    expect(test.value.recorder.record).not.toHaveBeenCalled();
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "error",
+      exitCode: 2,
+      failure: { code: "CONFIG_INVALID" }
+    });
+    expect(test.exitCodes).toEqual([2]);
   });
 
   it("applies verify Package, Activity, device, and report overrides", async () => {
@@ -547,7 +568,7 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
       "--device", "pixel-1",
       "--package", "com.override.app",
       "--activity", ".StartActivity",
-      "--reports", "/tmp/taphound-reports"
+      "--reports", ".taphound/build/custom-runs"
     ]);
 
     expect(test.value.doctor.run).toHaveBeenCalledWith({
@@ -565,7 +586,7 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
           packageName: "com.override.app",
           activity: ".StartActivity"
         },
-        artifactsDir: "/tmp/taphound-reports"
+        artifactsDir: ".taphound/build/custom-runs"
       },
       journey: runtimeJourney
     });
@@ -1991,7 +2012,7 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
         "node", "taphound", "context", command,
         "--project", "/project",
         "--config", ".taphound/config.json",
-        "--context", "project.context.json",
+        "--context", ".taphound/context/project.context.json",
         "--json"
       ]);
 
@@ -2151,7 +2172,7 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
       "node", "taphound", "context", "validate",
       "--project", "/project",
       "--config", ".taphound/config.json",
-      "--context", "project.context.json",
+      "--context", ".taphound/context/project.context.json",
       "--json"
     ]);
 
@@ -2215,7 +2236,7 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
       "node", "taphound", "context", "status",
       "--project", "/project",
       "--config", ".taphound/config.json",
-      "--context", "project.context.json",
+      "--context", ".taphound/context/project.context.json",
       "--json"
     ]);
 

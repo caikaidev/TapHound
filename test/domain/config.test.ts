@@ -171,7 +171,7 @@ describe("TapHoundConfigSchema", () => {
     expect(DEFAULT_ARTIFACTS_DIR).toBe(".taphound/build/runs");
   });
 
-  it("keeps an explicit artifactsDir override", () => {
+  it("keeps an explicit absolute target workspace artifactsDir override", () => {
     expect(TapHoundConfigSchema.parse({
       ...validConfig,
       artifactsDir: "/tmp/taphound-runs"
@@ -196,10 +196,8 @@ describe("TapHoundConfigSchema", () => {
   it.each([
     ".taphound/build",
     ".taphound/build/runs",
-    "reports",
-    "../shared-taphound-reports",
     "/tmp/taphound-runs"
-  ])("accepts artifact output outside authority paths at %s", (artifactsDir) => {
+  ])("accepts artifact output under the Core build root at %s", (artifactsDir) => {
     expect(TapHoundConfigSchema.parse({
       ...validConfig,
       artifactsDir

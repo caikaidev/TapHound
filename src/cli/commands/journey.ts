@@ -405,7 +405,11 @@ function createCheckCommand(dependencies: CliDependencies): Command {
           config = targetContext?.config ?? TapHoundConfigSchema.parse(
             await dependencies.readJson(resolve(options.project, options.config))
           );
-          assertArtifactDirectory(projectRoot, config.artifactsDir);
+          assertArtifactDirectory(
+            workspaceRoot ?? projectRoot,
+            config.artifactsDir,
+            workspaceRoot === undefined ? undefined : "."
+          );
         } catch (error) {
           throw new JourneyCheckError(
             "CONFIG_INVALID",

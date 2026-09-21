@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CONTEXT_DIR } from "./workspace.js";
 
 const QualifiedNameSchema = z.string().regex(
   /^(?:[A-Za-z_$][\w$]*\.)+[A-Za-z_$][\w$]*$/,
@@ -38,6 +39,12 @@ export const ProjectRelativePathSchema = z.string()
     ),
     "Path must stay within the project"
   );
+
+const ContextDocumentPathSchema = ProjectRelativePathSchema.refine(
+  (path) => path.startsWith(`${CONTEXT_DIR}/`)
+    || path.startsWith("context/"),
+  "Context documents must stay under the TapHound context directory"
+);
 
 const ContextFileSchema = z.strictObject({
   path: ProjectRelativePathSchema,
@@ -117,7 +124,7 @@ export const ContextModuleReferenceSchema = z.strictObject({
   id: z.string().trim().min(1),
   projectDir: ProjectRelativePathSchema,
   kind: z.enum(["application", "feature", "library"]),
-  contextPath: ProjectRelativePathSchema,
+  contextPath: ContextDocumentPathSchema,
   sha256: z.string().regex(/^[a-f\d]{64}$/),
   features: NonemptyUniqueStringsSchema,
   activities: z.array(QualifiedNameSchema).superRefine((values, context) => {

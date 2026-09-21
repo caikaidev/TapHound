@@ -1384,32 +1384,31 @@ describe("GenerationFinalizer", () => {
     });
   });
 
-  it("rejects output paths that overlap the authoritative generation bundle", async () => {
+  it("rejects output paths outside the committed Journey directory", async () => {
     const test = await fixture();
     const invalid = input(test.root);
     invalid.outputPath = ".taphound/build/generations/generation-1/journey.json";
 
     await expect(test.finalize.finalize(invalid)).rejects.toThrow(
-      /authoritative bundle/i
+      /\.taphound\/journeys/i
     );
     expect(test.forceStop).not.toHaveBeenCalled();
     expect(test.verify).not.toHaveBeenCalled();
   });
 
-  it("accepts committed Journey outputs and rejects the build subtree", () => {
+  it("accepts committed Journey outputs and rejects other paths", () => {
     expect(
       GenerationOutputPathSchema.parse(".taphound/journeys/x.json")
     ).toBe(".taphound/journeys/x.json");
-    expect(GenerationOutputPathSchema.parse("journeys/x.json")).toBe(
-      "journeys/x.json"
-    );
+    expect(() => GenerationOutputPathSchema.parse("journeys/x.json"))
+      .toThrow(/\.taphound\/journeys/i);
     for (const invalid of [
       ".taphound/build",
       ".taphound/build/runs/x.json",
       ".taphound/build/generations/generation-1/journey.json"
     ]) {
       expect(() => GenerationOutputPathSchema.parse(invalid)).toThrow(
-        /authoritative bundle/i
+        /\.taphound\/journeys/i
       );
     }
   });

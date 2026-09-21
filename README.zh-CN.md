@@ -214,9 +214,8 @@ TapHound 在 Android 项目中只留下一份可预测的目录结构：需要�
 
 请把 `.taphound/build/` 加入 `.gitignore`，其余内容提交入库。在 record、verify
 或 generation 工作前，TapHound 会写入内容为 `build/` 的 `.taphound/.gitignore`，
-并且永远不会覆盖你自己维护的同名文件。`artifactsDir` 与 `verify --reports` 可以
-指向 `.taphound` 外部，但位于 `.taphound` 内部时必须保持在 `.taphound/build/`
-下面。旧结构使用 `.taphound/generations`、`.taphound/jobs` 与
+并且永远不会覆盖你自己维护的同名文件。`artifactsDir` 与 `verify --reports` 必须
+保持在 `.taphound/build/` 下面。旧结构使用 `.taphound/generations`、`.taphound/jobs` 与
 `.taphound/runs`；一旦检测到这些目录，TapHound 会以 `CONFIG_INVALID` 停止并打印
 需要执行的 `mv` 命令；根目录中散落的时间戳 Verify run 也会按相同方式检测。
 

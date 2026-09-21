@@ -11,7 +11,8 @@ import {
 
 import {
   GenerationFinalizationError,
-  GenerationOutputPathSchema
+  GenerationOutputPathSchema,
+  GenerationWorkspaceOutputPathSchema
 } from "../../application/generation/generation-finalizer.js";
 import {
   GenerationOperationError,
@@ -1618,7 +1619,10 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
         "--context <path>",
         "Project Context path (legacy sessions without a stored snapshot)"
       )
-      .requiredOption("--output <path>", "Project-relative Journey output")
+      .requiredOption(
+        "--output <path>",
+        "Journey output under .taphound/journeys (workspace-relative with --target)"
+      )
       .option("--name <name>", "Generated Journey name")
       .option("--device <serial>", "Select an online Android device")
       .option(
@@ -1637,7 +1641,10 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
           dependencies,
           options
         );
-      const outputPath = GenerationOutputPathSchema.parse(options.output);
+      const outputPath = (workspaceRoot === undefined
+        ? GenerationOutputPathSchema
+        : GenerationWorkspaceOutputPathSchema
+      ).parse(options.output);
       const name = options.name === undefined
         ? undefined
         : z.string().trim().min(1).parse(options.name);

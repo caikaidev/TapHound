@@ -66,8 +66,8 @@ async function fixture(options: {
     runtime: { backend: "adb" },
     idle: { pollIntervalMs: 10, stablePolls: 1, timeoutMs: 10000 },
     artifactsDir: options.blockedReports === true
-      ? "blocked/reports"
-      : "reports"
+      ? ".taphound/build/blocked/reports"
+      : ".taphound/build/runs"
   })}\n`);
   await writeFile(journeyPath, `${JSON.stringify({
     version: 2,
@@ -82,7 +82,8 @@ async function fixture(options: {
     }]
   })}\n`);
   if (options.blockedReports === true) {
-    await writeFile(join(root, "blocked"), "not a directory");
+    await mkdir(join(workspace, "build"), { recursive: true });
+    await writeFile(join(workspace, "build", "blocked"), "not a directory");
   }
   return { root, bin, configPath, journeyPath };
 }

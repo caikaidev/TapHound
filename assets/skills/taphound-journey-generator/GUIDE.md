@@ -1033,7 +1033,7 @@ Each Goal is an independent generation session and does not affect others.
 | `LOCATOR_NOT_FOUND` | Locator not found in current layout | Re-observe, try a different locator |
 | `LOCATOR_AMBIGUOUS` | Locator matches multiple elements | Narrow with identity fields or `within`, then use zero-based `index` only if duplicates remain |
 | `ACTION_UNSUPPORTED` | Element does not support the action | Check element clickable/scrollable properties |
-| `SNAPSHOT_STALE` | Device state has changed | Re-observe |
+| `SNAPSHOT_STALE` | Device state has changed | Re-observe. For `wait` proposals a pure Layout change (e.g. a loading indicator settling) is tolerated automatically; Activity, process, or package drift still requires re-observe |
 | `PACKAGE_ESCAPE` | Foreground would switch to another app | Use `generation bridge` with `--flow` (auto) or without (manual) instead of `generation step` |
 | `BRIDGE_NO_ESCAPE` | Trigger did not leave the target app within `escapeTimeoutMs` (default 3s) | Check that the trigger actually opens an external app |
 | `SCENARIO_PACKAGE_MISMATCH` | Escaped package not in known system list for scenario | Use `--scenario custom` with `--description` |

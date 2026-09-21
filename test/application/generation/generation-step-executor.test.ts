@@ -488,6 +488,62 @@ describe("GenerationStepExecutor", () => {
     expect(test.androidCli.layoutDiff).not.toHaveBeenCalled();
   });
 
+  it("hands the bound snapshot to the freshness guard as Layout tolerance for wait", async () => {
+    const runtime = snapshot();
+    const base = session(runtime);
+    const test = harness(session(runtime, {
+      target: {
+        ...base.target,
+        interactionPolicy: {
+          ...base.target.interactionPolicy,
+          allowedActions: [...base.target.interactionPolicy.allowedActions, "wait"]
+        }
+      }
+    }));
+    const waitProposal: ProposedStep = {
+      action: "wait",
+      binding: proposal(runtime).binding,
+      activity: { before: activity }
+    };
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: waitProposal,
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(test.guard).toHaveBeenCalledWith(
+      waitProposal.binding,
+      undefined,
+      undefined,
+      { layoutChangeFrom: runtime }
+    );
+    expect(test.current().candidateSteps[0]).toMatchObject({
+      action: "wait"
+    });
+  });
+
+  it("does not tolerate Layout drift for targeted proposals", async () => {
+    const runtime = snapshot();
+    const test = harness(session(runtime));
+
+    await expect(test.execute({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime,
+      source: "planner"
+    })).resolves.toMatchObject({ status: "succeeded" });
+
+    expect(test.guard).toHaveBeenCalledWith(
+      proposal(runtime).binding,
+      undefined,
+      undefined,
+      undefined
+    );
+  });
+
   it("durably begins a fresh safe step before ADB action and appends literals with provenance", async () => {
     const runtime = snapshot();
     const test = harness(session(runtime));

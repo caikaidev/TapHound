@@ -213,6 +213,75 @@ describe("SnapshotReobservationGuard", () => {
     ).rejects.toMatchObject({ code: "SNAPSHOT_STALE" });
   });
 
+  it("tolerates a pure Layout change when the bound snapshot is handed back", async () => {
+    const test = harness();
+    test.readLayout.mockResolvedValueOnce([{
+      ...layout[0],
+      children: [{
+        id: "loading-gone",
+        enabled: true,
+        bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+        children: []
+      }]
+    }]);
+
+    const observed = await test.guard.assertFresh(
+      binding(test),
+      undefined,
+      undefined,
+      { layoutChangeFrom: snapshot() }
+    );
+
+    expect(observed.layout[0]?.children[0]?.id).toBe("loading-gone");
+  });
+
+  it.each([
+    ["Activity", (test: ReturnType<typeof harness>): void => {
+      test.foregroundComponent.mockResolvedValueOnce({
+        packageName: "com.example.app",
+        activity: "com.example.app.OtherActivity"
+      });
+    }],
+    ["PID", (test: ReturnType<typeof harness>): void => {
+      test.appProcesses.mockResolvedValueOnce([
+        { pid: 99, name: "com.example.app" }
+      ]);
+    }]
+  ])("stays fail-closed on %s drift despite Layout tolerance", async (
+    _name,
+    change
+  ) => {
+    const test = harness();
+    change(test);
+
+    await expect(test.guard.assertFresh(
+      binding(test),
+      undefined,
+      undefined,
+      { layoutChangeFrom: snapshot() }
+    )).rejects.toMatchObject({ code: "SNAPSHOT_STALE" });
+  });
+
+  it("rejects Layout tolerance for a snapshot that is not the bound one", async () => {
+    const test = harness();
+    test.readLayout.mockResolvedValueOnce([{
+      ...layout[0],
+      children: [{
+        id: "changed",
+        enabled: true,
+        bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+        children: []
+      }]
+    }]);
+
+    await expect(test.guard.assertFresh(
+      binding(test),
+      undefined,
+      undefined,
+      { layoutChangeFrom: snapshot({ activity: "com.example.app.Other" }) }
+    )).rejects.toMatchObject({ code: "SNAPSHOT_STALE" });
+  });
+
   it("lets only the exact approved challenge bridge confirmation revisions", async () => {
     const test = harness();
     const approved = {

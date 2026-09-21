@@ -741,7 +741,13 @@ export class GenerationStepExecutor {
       fresh = await freshnessGuard.assertFresh(
         proposal.binding,
         input.signal,
-        approved
+        approved,
+        // A wait proposal has no Locator target; a pure Layout change (a
+        // loading indicator that settled between bind and execute) is not
+        // a reason to force a re-observe round trip.
+        proposal.action === "wait"
+          ? { layoutChangeFrom: snapshot }
+          : undefined
       );
       timing.freshnessCheckMs = (
         this.dependencies.clock.now() - freshnessStartedAt
@@ -876,7 +882,10 @@ export class GenerationStepExecutor {
         authoritativePid,
         proposal.activity.before,
         input.signal,
-        fresh,
+        // The freshness guard already tolerated a pure Layout change for
+        // wait proposals, so the pre-action hash gate must not re-impose
+        // it; package, process, and Activity checks above still apply.
+        proposal.action === "wait" ? undefined : fresh,
         this.dependencies.idle.timeoutMs,
         this.adoptFreshSnapshotUi(fresh)
       );

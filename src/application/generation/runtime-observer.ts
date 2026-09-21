@@ -508,7 +508,8 @@ export class SnapshotReobservationGuard {
   public readonly assertFresh = async (
     input: ProposalBinding,
     signal?: AbortSignal,
-    approvedConfirmation?: PendingConfirmation
+    approvedConfirmation?: PendingConfirmation,
+    tolerance?: { layoutChangeFrom?: RuntimeSnapshot | undefined }
   ): Promise<RuntimeSnapshot> => {
     try {
       const binding = ProposalBindingSchema.parse(input);
@@ -583,6 +584,21 @@ const runtime = await collectRuntime(
             })
       });
       if (hashRuntimeSnapshot(snapshot) !== binding.snapshotHash) {
+        // A targetless proposal (wait) does not consume the Layout, so a
+        // pure Layout change (for example a loading indicator that
+        // disappeared between binding and execution) is tolerated when the
+        // caller hands back the authoritative bound Snapshot and every
+        // other hashed field still matches. Any other drift stays
+        // fail-closed.
+        const bound = tolerance?.layoutChangeFrom;
+        if (
+          bound !== undefined
+          && hashRuntimeSnapshot(bound) === binding.snapshotHash
+          && hashRuntimeSnapshot({ ...snapshot, layout: [] })
+            === hashRuntimeSnapshot({ ...bound, layout: [] })
+        ) {
+          return snapshot;
+        }
         throw new GenerationOperationError(
           "SNAPSHOT_STALE",
           "Runtime snapshot changed after proposal"

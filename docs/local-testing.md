@@ -74,7 +74,7 @@ mkdir -p /private/tmp/taphound-pack-smoke
 npm pack --json \
   --pack-destination /private/tmp/taphound-pack-smoke \
   --cache /private/tmp/taphound-npm-cache
-shasum -a 256 /private/tmp/taphound-pack-smoke/taphound-0.2.0-dev.6.tgz
+shasum -a 256 /private/tmp/taphound-pack-smoke/taphound-0.2.0-dev.7.tgz
 ```
 
 Record the digest, size, shasum, integrity, and entryCount from `npm pack --json`
@@ -89,7 +89,7 @@ mkdir -p /private/tmp/taphound-install-smoke
 npm install \
   --prefix /private/tmp/taphound-install-smoke \
   --cache /private/tmp/taphound-npm-cache \
-  /private/tmp/taphound-pack-smoke/taphound-0.2.0-dev.6.tgz
+  /private/tmp/taphound-pack-smoke/taphound-0.2.0-dev.7.tgz
 /private/tmp/taphound-install-smoke/node_modules/.bin/taphound --help
 test ! -e "/private/tmp/taphound-install-smoke/node_modules/.bin/$(printf 'a\160r')"
 ```

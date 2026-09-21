@@ -143,6 +143,55 @@ describe("GenerationStarter", () => {
     });
   });
 
+  it("reports the failure message and the device Activity at failure time", () => {
+    const step = validReport().steps[0];
+    if (step === undefined) {
+      throw new Error("report fixture requires one step");
+    }
+    const report = validReport({
+      status: "failed",
+      primaryFailure: {
+        code: "EXPECT_ELEMENT_FAILED",
+        message: "element Expect did not match before timeout",
+        phase: "step",
+        stepIndex: 0
+      },
+      steps: [{
+        ...step,
+        status: "failed",
+        activity: {
+          before: {
+            status: "passed",
+            expected: "com.example.app.MainActivity",
+            actual: "com.example.app.MainActivity"
+          },
+          after: {
+            status: "passed",
+            expected: "com.example.app.MainActivity",
+            actual: "com.example.app.lock.GestureVerifierActivity"
+          }
+        }
+      }]
+    });
+
+    expect(flowReplayFailureDetails({
+      flowName: "core/launch-home",
+      reportPath: "/reports/base/report.json",
+      journey: runtimeJourney,
+      report
+    })).toMatchObject({
+      primaryFailure: {
+        code: "EXPECT_ELEMENT_FAILED",
+        stepIndex: 0,
+        message: "element Expect did not match before timeout"
+      },
+      actualActivity: {
+        before: "com.example.app.MainActivity",
+        after: "com.example.app.lock.GestureVerifierActivity"
+      }
+    });
+  });
+
   it("creates distinct Core-owned generation and Journey bindings", async () => {
     const test = starter();
 

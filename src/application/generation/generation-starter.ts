@@ -161,6 +161,9 @@ export function flowReplayFailureDetails(input: {
   const stepIndex = primaryFailure?.stepIndex;
   const relatedStepIndex = stepIndex
     ?? (primaryFailure?.phase === "readiness" ? 0 : undefined);
+  const stepReport = relatedStepIndex === undefined
+    ? undefined
+    : input.report.steps[relatedStepIndex];
   return {
     flowName: input.flowName,
     reportPath: input.reportPath,
@@ -169,7 +172,8 @@ export function flowReplayFailureDetails(input: {
       : {
           code: primaryFailure.code,
           phase: primaryFailure.phase,
-          stepIndex: stepIndex ?? null
+          stepIndex: stepIndex ?? null,
+          message: primaryFailure.message
         },
     failedStep: failedFlowStepSummary(
       relatedStepIndex === undefined
@@ -177,6 +181,15 @@ export function flowReplayFailureDetails(input: {
         : input.journey.steps[relatedStepIndex],
       relatedStepIndex
     ),
+    // The device state at the moment of failure, so an environment blocker
+    // (lock screen, permission dialog) is distinguishable from a genuine
+    // regression without re-dumping the UI hierarchy.
+    actualActivity: stepReport?.activity === undefined
+      ? null
+      : {
+          before: stepReport.activity.before.actual ?? null,
+          after: stepReport.activity.after.actual ?? null
+        },
     recovery: [
       "Check that the first Flow step starts from a stable Activity deterministically reached after cold launch.",
       "Replace a transient Splash transition with a Home readiness anchor such as wait: Home -> Home plus an expectation for a unique Home element.",

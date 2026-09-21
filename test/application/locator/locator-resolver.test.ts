@@ -120,6 +120,27 @@ describe("resolveLocator", () => {
     });
   });
 
+  it("summarizes the screen when no element matches the Locator", () => {
+    const result = resolveLocator([
+      element({
+        id: "lock",
+        resourceId: "gv_verifier",
+        clickable: true
+      }),
+      element({ id: "title", text: "示例应用已锁定" })
+    ], { resourceId: "chat_recycler_session_list" });
+
+    expect(result.status).toBe("failed");
+    if (result.status !== "failed") {
+      return;
+    }
+    expect(result.code).toBe("LOCATOR_NOT_FOUND");
+    expect(result.message).toContain("No Layout element matches the Locator.");
+    expect(result.message).toContain("Screen shows 2 element(s)");
+    expect(result.message).toContain("#gv_verifier");
+    expect(result.message).toContain('"示例应用已锁定"');
+  });
+
   it("selects an ordinal after identity-field narrowing", () => {
     const roots = [
       element({ id: "one", resourceId: "row", text: "Same" }),

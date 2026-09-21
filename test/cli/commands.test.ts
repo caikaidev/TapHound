@@ -1156,7 +1156,8 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
           primaryFailure: {
             code: "LOCATOR_NOT_FOUND",
             phase: "locator",
-            stepIndex: 0
+            stepIndex: 0,
+            message: "shared navigation changed"
           },
           failedStep: {
             stepIndex: 0,
@@ -1171,6 +1172,10 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
               locator: { resourceId: "search_results" },
               timeoutMs: 3_000
             }
+          },
+          actualActivity: {
+            before: "com.example.app.MainActivity",
+            after: "com.example.app.SearchActivity"
           },
           recovery: [
             "Check that the first Flow step starts from a stable Activity deterministically reached after cold launch.",

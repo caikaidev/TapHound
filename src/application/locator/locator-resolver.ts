@@ -16,6 +16,7 @@ import {
   flattenLayout,
   type LayoutEntry
 } from "./layout-traversal.js";
+import { summarizeLayoutElements } from "./layout-failure-summary.js";
 
 export interface LocatedTarget {
   status: "found";
@@ -187,7 +188,8 @@ function resolveEntry(
     return {
       status: "failed",
       code: "LOCATOR_NOT_FOUND",
-      message: "No Layout element matches the Locator"
+      message: "No Layout element matches the Locator."
+        + ` ${summarizeLayoutElements(allEntries.map((entry) => entry.element))}`
     };
   }
   if (locator.index !== undefined) {
@@ -213,7 +215,8 @@ function resolveEntry(
     return {
       status: "failed",
       code: "LOCATOR_NOT_FOUND",
-      message: "No Layout element matches the Locator"
+      message: "No Layout element matches the Locator."
+        + ` ${summarizeLayoutElements(allEntries.map((entry) => entry.element))}`
     };
   }
   return {

@@ -302,27 +302,17 @@ describe("TapHound documentation examples", () => {
       for (const command of ["doctor", "record", "verify"]) {
         expect(doc).toContain(`taphound ${command}`);
       }
-      for (const workflow of [
-        "project describe",
-        "context validate",
-        "journey resolve",
-        "generation start",
-        "knowledge status",
-        "benchmark validate",
-        "playbook validate",
-        "baseline capture",
-        "failure classify",
-        "verify --diff",
-        "taphound init",
-        "ui-cache status"
-      ]) {
-        expect(doc).toContain(workflow);
-      }
+      // The README is the overview: positioning, capabilities, quick start,
+      // and links out to the docs that own each detailed workflow.
+      expect(doc).toContain("taphound init");
+      expect(doc).toContain("verify --diff");
       expect(doc).toContain("Node.js 22");
       expect(doc).toContain("macOS");
-      expect(doc).toContain("scrollTo");
+      expect(doc).toContain(".taphound/config.json");
       expect(doc).toContain(".taphound/journeys/");
-      expect(doc).toContain(".taphound/build/");
+      expect(doc).toContain("docs/journey-schema.md");
+      expect(doc).toContain("docs/config-schema.md");
+      expect(doc).toContain("docs/agent-integration.md");
     }
     // Chinese-specific content lives in the zh-CN README.
     expect(readmeZh).toContain("Android CLI 官方 Journey");

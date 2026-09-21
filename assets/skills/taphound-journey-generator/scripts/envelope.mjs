@@ -52,14 +52,19 @@ function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function exactKeys(where, value, required, optional = []) {
+function exactKeys(where, value, required, optional = [], subject = undefined) {
   if (!isPlainObject(value)) {
     fail("ENVELOPE_INVALID", `${where} must be a JSON object`);
   }
   const allowed = new Set([...required, ...optional]);
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) {
-      fail("ENVELOPE_INVALID", `${where}: unknown field "${key}"`);
+      const name = subject ?? where;
+      fail(
+        "ENVELOPE_INVALID",
+        `${where}: unknown field "${key}"; ${name} allows fields: `
+          + [...required, ...optional].join(", ")
+      );
     }
   }
   for (const key of required) {
@@ -95,7 +100,8 @@ function validateLocator(where, value) {
     where,
     value,
     [],
-    ["resourceId", "text", "contentDescription", "index", "within", "evidence"]
+    ["resourceId", "text", "contentDescription", "index", "within", "evidence"],
+    "locator"
   );
   if (
     value.resourceId === undefined
@@ -144,7 +150,10 @@ function validateLocator(where, value) {
 }
 
 function validateBinding(where, value) {
-  exactKeys(where, value, ["generationId", "baseRevision", "snapshotHash"]);
+  exactKeys(
+    where, value, ["generationId", "baseRevision", "snapshotHash"], [],
+    "binding"
+  );
   if (
     typeof value.generationId !== "string"
     || !generationIdPattern.test(value.generationId)
@@ -167,7 +176,7 @@ function validateBinding(where, value) {
 }
 
 function validateActivity(where, value) {
-  exactKeys(where, value, ["before"]);
+  exactKeys(where, value, ["before"], [], "activity");
   validateQualifiedName(`${where}.before`, value.before);
 }
 
@@ -176,7 +185,10 @@ function validateExpect(where, value) {
     fail("ENVELOPE_INVALID", `${where} must be a JSON object`);
   }
   if (value.type === "activity") {
-    exactKeys(where, value, ["type", "value", "timeoutMs"]);
+    exactKeys(
+      where, value, ["type", "value", "timeoutMs"], [],
+      'expect.type "activity"'
+    );
     validateQualifiedName(`${where}.value`, value.value);
     positiveInteger(`${where}.timeoutMs`, value.timeoutMs);
     return;
@@ -186,7 +198,8 @@ function validateExpect(where, value) {
       where,
       value,
       ["type", "locator", "timeoutMs"],
-      ["enabled", "clickable", "absent"]
+      ["enabled", "clickable", "absent"],
+      'expect.type "element"'
     );
     validateLocator(`${where}.locator`, value.locator);
     for (const key of ["enabled", "clickable", "absent"]) {
@@ -205,7 +218,10 @@ function validateExpect(where, value) {
     return;
   }
   if (value.type === "logcat") {
-    exactKeys(where, value, ["type", "tag", "pattern", "match", "timeoutMs"], ["level"]);
+    exactKeys(
+      where, value, ["type", "tag", "pattern", "match", "timeoutMs"],
+      ["level"], 'expect.type "logcat"'
+    );
     nonEmptyString(`${where}.tag`, value.tag);
     nonEmptyString(`${where}.pattern`, value.pattern);
     if (!logcatMatches.has(value.match)) {
@@ -237,7 +253,10 @@ function validateProposal(where, value) {
       `${where}.action must be one of ${[...proposalShapes.keys()].map((action) => `"${action}"`).join(", ")}`
     );
   }
-  exactKeys(where, value, shape.required, shape.optional);
+  exactKeys(
+    where, value, shape.required, shape.optional,
+    `action "${String(value.action)}"`
+  );
   if (value.locator !== undefined) {
     validateLocator(`${where}.locator`, value.locator);
   }

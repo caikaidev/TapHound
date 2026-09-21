@@ -178,6 +178,36 @@ describe("journey-generator envelope helper", () => {
     expect(result.output.message).toContain("unknown field");
   });
 
+  it("names the expected fields when a known expect type gets a foreign field", async () => {
+    const input = await put("envelope.json", envelope({
+      proposal: proposal({
+        expect: {
+          type: "activity",
+          locator: { resourceId: "search_button" }
+        }
+      })
+    }));
+    const result = command("validate", "--input", input);
+    expect(result.code).toBe(2);
+    expect(result.output.code).toBe("ENVELOPE_INVALID");
+    expect(result.output.message).toContain('unknown field "locator"');
+    expect(result.output.message).toContain(
+      'expect.type "activity" allows fields: type, value, timeoutMs'
+    );
+  });
+
+  it("names the expected fields when an action gets a foreign field", async () => {
+    const input = await put("envelope.json", envelope({
+      proposal: proposal({ durationMs: 500 })
+    }));
+    const result = command("validate", "--input", input);
+    expect(result.code).toBe(2);
+    expect(result.output.code).toBe("ENVELOPE_INVALID");
+    expect(result.output.message).toContain(
+      'action "click" allows fields: action, locator, binding, activity, expect'
+    );
+  });
+
   it("rejects an envelope that carries both snapshot and snapshotRef", async () => {
     const input = await put("envelope.json", {
       version: 1,

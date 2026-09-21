@@ -4,7 +4,10 @@ import {
   KnowledgeIdSchema,
   KnowledgeSha256Schema
 } from "./knowledge.js";
-import { EvidenceRequirementSchema } from "./contract.js";
+import {
+  ContractVerdictReasonSchema,
+  EvidenceRequirementSchema
+} from "./contract.js";
 
 export const PlaybookKindSchema = z.enum([
   "feature-acceptance",
@@ -66,22 +69,7 @@ export const EscalationWhenSchema = z.strictObject({
     "needsReview",
     "invalid"
   ])).min(1).optional(),
-  reasons: z.array(z.enum([
-    "CONTRACT_OK",
-    "RUN_FAILED",
-    "RUN_ERROR",
-    "RUN_MANUAL_REQUIRED",
-    "PRECONDITION_FAILED",
-    "PRECONDITION_UNRESOLVED",
-    "ASSERTION_FAILED",
-    "ASSERTION_UNRESOLVED",
-    "EVIDENCE_INSUFFICIENT",
-    "REVIEW_FINDINGS",
-    "JOURNEY_DRIFT",
-    "JOURNEY_MISSING",
-    "KNOWLEDGE_UNAVAILABLE",
-    "CONTRACT_INVALID"
-  ])).min(1).optional()
+  reasons: z.array(ContractVerdictReasonSchema).min(1).optional()
 }).refine(
   (when) => when.verdicts !== undefined || when.reasons !== undefined,
   "An escalation condition needs at least one signal"

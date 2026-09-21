@@ -21,6 +21,8 @@ describe("exitCodeForFailure", () => {
     "EXPECT_ACTIVITY_FAILED",
     "EXPECT_ELEMENT_FAILED",
     "EXPECT_LOGCAT_FAILED",
+    "CHECKPOINT_FAILED",
+    "CHECKPOINT_UNRESOLVED",
     "COLLECTION_FAILED",
     "WAIT_TIMEOUT"
   ] as const)("maps %s to verification exit code 1", (failure) => {
@@ -29,6 +31,8 @@ describe("exitCodeForFailure", () => {
 
   it("maps invalid input to exit code 2", () => {
     expect(exitCodeForFailure("CONFIG_INVALID")).toBe(2);
+    expect(exitCodeForFailure("BASELINE_INCOMPARABLE")).toBe(2);
+    expect(exitCodeForFailure("BASELINE_EMPTY")).toBe(2);
   });
 
   it.each([
@@ -48,7 +52,7 @@ describe("exitCodeForFailure", () => {
   });
 
   it("defines exactly the approved failure vocabulary", () => {
-    expect(FAILURE_CODES).toHaveLength(78);
+    expect(FAILURE_CODES).toHaveLength(85);
   });
 
   it.each([

@@ -73,6 +73,100 @@ function logcatOptions(adb: AdbPort): LogcatOptions {
 }
 
 describe("ExpectationEvaluator", () => {
+  it("binds app-emitted errorClass to one hashed event without copying other fields", async () => {
+    const adb = adbPort();
+    const clock = new FakeClock();
+    const collector = new LogcatCollector(adb, clock);
+    await collector.start({ deviceSerial: context.deviceSerial });
+    collector.scopeToPids([1234]);
+    logcatOptions(adb).onStdoutLine(
+      '07-19 15:00:00.123 1234 1235 E App: {"event":"failed","fields":{"errorClass":"network","request":"private-value"}}'
+    );
+    const evaluator = new ExpectationEvaluator(adb, androidCli(), collector, clock);
+    const result = await evaluator.evaluate({
+      type: "logcatEvent", tag: "App", event: "failed",
+      fields: {}, unique: true, window: { from: "stepStart" }, timeoutMs: 100
+    }, context);
+    expect(result).toMatchObject({
+      status: "passed", logcatEvent: { requestErrorClass: "network", matchedCount: 1 }
+    });
+    expect(JSON.stringify(result)).not.toContain("private-value");
+  });
+
+  it("matches exactly one structured event across a declared marker window without publishing its raw value", async () => {
+    const adb = adbPort();
+    const clock = new FakeClock();
+    const collector = new LogcatCollector(adb, clock);
+    await collector.start({ deviceSerial: context.deviceSerial });
+    collector.scopeToPids([1234]);
+    clock.currentTime = 10;
+    logcatOptions(adb).onStdoutLine(
+      '07-19 15:00:00.123  1234  1235 I Search:Trace: {"event":"submitted","fields":{"request":"private-value","success":true}}'
+    );
+    const evaluator = new ExpectationEvaluator(adb, androidCli(), collector, clock);
+    const result = await evaluator.evaluate({
+      type: "logcatEvent",
+      tag: "Search:Trace",
+      event: "submitted",
+      fields: { success: true },
+      correlation: { key: "request", value: "private-value" },
+      unique: true,
+      window: { from: "marker", markerId: "search-start" },
+      timeoutMs: 100
+    }, {
+      ...context,
+      stepStartedAt: 50,
+      markers: new Map([["search-start", 5]])
+    });
+    expect(result).toMatchObject({
+      status: "passed",
+      type: "logcatEvent",
+      durationMs: 100,
+      logcatEvent: {
+        matchedCount: 1,
+        window: { from: "marker", markerId: "search-start" },
+        startedAtMs: 5,
+        matchedLineSha256: expect.stringMatching(/^[a-f\d]{64}$/) as string
+      }
+    });
+    expect(JSON.stringify(result)).not.toContain("private-value");
+  });
+
+  it("fails closed on duplicate structured events and on a correlation mismatch", async () => {
+    const adb = adbPort();
+    const clock = new FakeClock();
+    const collector = new LogcatCollector(adb, clock);
+    await collector.start({ deviceSerial: context.deviceSerial });
+    collector.scopeToPids([1234]);
+    const line = '07-19 15:00:00.123  1234  1235 I App: {"event":"ready","fields":{"id":"abc"}}';
+    logcatOptions(adb).onStdoutLine(line);
+    logcatOptions(adb).onStdoutLine(line);
+    const evaluator = new ExpectationEvaluator(adb, androidCli(), collector, clock);
+    const expectEvent = {
+      type: "logcatEvent" as const,
+      tag: "App",
+      event: "ready",
+      fields: {},
+      unique: true as const,
+      window: { from: "stepStart" as const },
+      timeoutMs: 100
+    };
+    expect(await evaluator.evaluate(expectEvent, context)).toMatchObject({
+      status: "failed",
+      code: "EXPECT_LOGCAT_AMBIGUOUS",
+      logcatEvent: { matchedCount: 2 }
+    });
+    expect(await evaluator.evaluate({
+      ...expectEvent,
+      correlation: { key: "id", value: "different" }
+    }, context)).toMatchObject({
+      status: "failed",
+      code: "EXPECT_LOGCAT_FAILED",
+      message: "Logcat event did not appear before timeout",
+      logcatEvent: { matchedCount: 0 }
+    });
+  });
+
   it("fails immediately when an injected Activity observation guard rejects", async () => {
     const adb = adbPort();
     vi.mocked(adb.currentActivity).mockResolvedValue(
@@ -324,6 +418,205 @@ describe("ExpectationEvaluator", () => {
     });
   });
 
+  it("passes an enabled predicate when the resolved element matches", async () => {
+    const adb = adbPort();
+    const cli = androidCli();
+    vi.mocked(cli.layout).mockResolvedValue([{
+      id: "btn_next",
+      resourceId: "btn_next",
+      enabled: true,
+      clickable: true,
+      bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+      children: []
+    }]);
+    const clock = new FakeClock();
+    const evaluator = new ExpectationEvaluator(
+      adb,
+      cli,
+      new LogcatCollector(adb, clock),
+      clock
+    );
+
+    await expect(evaluator.evaluate({
+      type: "element",
+      locator: { resourceId: "btn_next" },
+      enabled: true,
+      clickable: true,
+      timeoutMs: 200
+    }, context)).resolves.toMatchObject({
+      status: "passed",
+      type: "element"
+    });
+  });
+
+  it("passes a disabled predicate when the resolved element is disabled", async () => {
+    const adb = adbPort();
+    const cli = androidCli();
+    vi.mocked(cli.layout).mockResolvedValue([{
+      id: "btn_next",
+      resourceId: "btn_next",
+      enabled: false,
+      clickable: false,
+      bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+      children: []
+    }]);
+    const clock = new FakeClock();
+    const evaluator = new ExpectationEvaluator(
+      adb,
+      cli,
+      new LogcatCollector(adb, clock),
+      clock
+    );
+
+    await expect(evaluator.evaluate({
+      type: "element",
+      locator: { resourceId: "btn_next" },
+      enabled: false,
+      clickable: false,
+      timeoutMs: 200
+    }, context)).resolves.toMatchObject({
+      status: "passed",
+      type: "element"
+    });
+  });
+
+  it("fails an enabled predicate at timeout when the element stays disabled", async () => {
+    const adb = adbPort();
+    const cli = androidCli();
+    vi.mocked(cli.layout).mockResolvedValue([{
+      id: "btn_next",
+      resourceId: "btn_next",
+      enabled: false,
+      bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+      children: []
+    }]);
+    const clock = new FakeClock();
+    const evaluator = new ExpectationEvaluator(
+      adb,
+      cli,
+      new LogcatCollector(adb, clock),
+      clock,
+      100
+    );
+
+    const result = await evaluator.evaluate({
+      type: "element",
+      locator: { resourceId: "btn_next" },
+      enabled: true,
+      timeoutMs: 100
+    }, context);
+    expect(result).toMatchObject({
+      status: "failed",
+      code: "EXPECT_ELEMENT_FAILED"
+    });
+    expect(result.status === "failed" ? result.message : undefined)
+      .toContain("expected enabled=true");
+  });
+
+  it("passes an absent expectation when the locator has no matches", async () => {
+    const adb = adbPort();
+    const cli = androidCli();
+    vi.mocked(cli.layout).mockResolvedValue([{
+      id: "search_input",
+      resourceId: "search_input",
+      enabled: true,
+      bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+      children: []
+    }]);
+    const clock = new FakeClock();
+    const evaluator = new ExpectationEvaluator(
+      adb,
+      cli,
+      new LogcatCollector(adb, clock),
+      clock
+    );
+
+    await expect(evaluator.evaluate({
+      type: "element",
+      locator: { resourceId: "btn_next" },
+      absent: true,
+      timeoutMs: 200
+    }, context)).resolves.toMatchObject({
+      status: "passed",
+      type: "element"
+    });
+  });
+
+  it("fails an absent expectation at timeout when the element remains present", async () => {
+    const adb = adbPort();
+    const cli = androidCli();
+    vi.mocked(cli.layout).mockResolvedValue([{
+      id: "btn_next",
+      resourceId: "btn_next",
+      enabled: true,
+      bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+      children: []
+    }]);
+    const clock = new FakeClock();
+    const evaluator = new ExpectationEvaluator(
+      adb,
+      cli,
+      new LogcatCollector(adb, clock),
+      clock,
+      100
+    );
+
+    const result = await evaluator.evaluate({
+      type: "element",
+      locator: { resourceId: "btn_next" },
+      absent: true,
+      timeoutMs: 100
+    }, context);
+    expect(result).toMatchObject({
+      status: "failed",
+      code: "EXPECT_ELEMENT_FAILED"
+    });
+    expect(result.status === "failed" ? result.message : undefined)
+      .toContain("expected absent element matched by resourceId");
+  });
+
+  it("fails an absent expectation at timeout when the locator stays ambiguous", async () => {
+    const adb = adbPort();
+    const cli = androidCli();
+    vi.mocked(cli.layout).mockResolvedValue([
+      {
+        id: "first",
+        resourceId: "result",
+        enabled: true,
+        center: { x: 10, y: 10 },
+        children: []
+      },
+      {
+        id: "second",
+        resourceId: "result",
+        enabled: true,
+        center: { x: 20, y: 20 },
+        children: []
+      }
+    ]);
+    const clock = new FakeClock();
+    const evaluator = new ExpectationEvaluator(
+      adb,
+      cli,
+      new LogcatCollector(adb, clock),
+      clock,
+      100
+    );
+
+    const result = await evaluator.evaluate({
+      type: "element",
+      locator: { resourceId: "result" },
+      absent: true,
+      timeoutMs: 100
+    }, context);
+    expect(result).toMatchObject({
+      status: "failed",
+      code: "EXPECT_ELEMENT_FAILED"
+    });
+    expect(result.status === "failed" ? result.message : undefined)
+      .toContain("expected absent element still resolvable");
+  });
+
   it("matches a literal Logcat line by tag, level, and step window", async () => {
     const adb = adbPort();
     const clock = new FakeClock();
@@ -381,6 +674,84 @@ describe("ExpectationEvaluator", () => {
       match: "regex",
       timeoutMs: 200
     }, context)).resolves.toMatchObject({ status: "passed" });
+  });
+
+  it("accepts retained positive Logcat evidence after the scoped buffer rolls", async () => {
+    const adb = adbPort();
+    const clock = new FakeClock();
+    const collector = new LogcatCollector(adb, clock, {
+      maxLines: 2, maxBytes: 1_000
+    });
+    await collector.start({ deviceSerial: context.deviceSerial, pids: [1234] });
+    const options = logcatOptions(adb);
+    clock.currentTime = 1;
+    options.onStdoutLine(
+      "07-19 15:00:00.121  1234  1235 D SearchViewModel: old noise"
+    );
+    clock.currentTime = 2;
+    options.onStdoutLine(
+      "07-19 15:00:00.122  1234  1235 D SearchViewModel: query=hello world"
+    );
+    clock.currentTime = 3;
+    options.onStdoutLine(
+      "07-19 15:00:00.123  1234  1235 D SearchViewModel: new noise"
+    );
+    const evaluator = new ExpectationEvaluator(
+      adb,
+      androidCli(),
+      collector,
+      clock
+    );
+
+    await expect(evaluator.evaluate({
+      type: "logcat",
+      tag: "SearchViewModel",
+      pattern: "query=hello world",
+      match: "literal",
+      timeoutMs: 200
+    }, context)).resolves.toMatchObject({
+      status: "passed",
+      matchedLine: expect.stringContaining("query=hello world") as string
+    });
+    expect(collector.completeSince(context.stepStartedAt)).toBe(false);
+  });
+
+  it("reports scoped buffer-loss diagnostics when no Logcat match remains", async () => {
+    const adb = adbPort();
+    const clock = new FakeClock();
+    const collector = new LogcatCollector(adb, clock, {
+      maxLines: 1, maxBytes: 1_000
+    });
+    await collector.start({ deviceSerial: context.deviceSerial, pids: [1234] });
+    const options = logcatOptions(adb);
+    clock.currentTime = 1;
+    options.onStdoutLine(
+      "07-19 15:00:00.121  1234  1235 D SearchViewModel: old noise"
+    );
+    clock.currentTime = 2;
+    options.onStdoutLine(
+      "07-19 15:00:00.122  1234  1235 D SearchViewModel: new noise"
+    );
+    const evaluator = new ExpectationEvaluator(
+      adb,
+      androidCli(),
+      collector,
+      clock
+    );
+
+    await expect(evaluator.evaluate({
+      type: "logcat",
+      tag: "SearchViewModel",
+      pattern: "missing",
+      match: "literal",
+      timeoutMs: 200
+    }, context)).resolves.toMatchObject({
+      status: "failed",
+      code: "EXPECT_LOGCAT_FAILED",
+      message: expect.stringMatching(
+        /droppedLines=1, droppedBytes=\d+, lastDroppedAtMs=1/
+      ) as string
+    });
   });
 
   it("does not match Logcat received before the step window", async () => {

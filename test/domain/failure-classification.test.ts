@@ -7,6 +7,7 @@ import {
   STEP_INDEXED_FAILURE_TYPES,
   type FailureClassification
 } from "../../src/domain/failure-classification.js";
+import { FAILURE_CODES } from "../../src/domain/failure.js";
 
 const valid: FailureClassification = {
   version: 1,
@@ -64,13 +65,19 @@ describe("FailureClassificationSchema", () => {
 describe("failure taxonomy maps", () => {
   it("covers every failure code", () => {
     const codes = Object.keys(FAILURE_CODE_TYPES);
-    expect(codes.length).toBeGreaterThan(50);
+    expect(codes.sort()).toEqual([...FAILURE_CODES].sort());
     for (const code of codes) {
       const type = FAILURE_CODE_TYPES[code];
       expect(type).toBeDefined();
       const stage = type === undefined ? undefined : FAILURE_TYPE_STAGES[type];
       expect(stage).toBeDefined();
     }
+  });
+
+  it("maps Checkpoint failures to the assertion stage", () => {
+    expect(FAILURE_CODE_TYPES.CHECKPOINT_FAILED).toBe("checkpoint_failed");
+    expect(FAILURE_CODE_TYPES.CHECKPOINT_UNRESOLVED).toBe("checkpoint_failed");
+    expect(FAILURE_TYPE_STAGES.checkpoint_failed).toBe("assertion");
   });
 
   it("classifies the anchor families distinctly", () => {

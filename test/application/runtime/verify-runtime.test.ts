@@ -6,10 +6,15 @@ import {
   type VerifyInput,
   type VerifyProgressEvent
 } from "../../../src/application/runtime/verify-runtime.js";
-import type { StepRunner } from "../../../src/application/runtime/step-runner.js";
+import {
+  StepRunner,
+  type ReplayBinding
+} from "../../../src/application/runtime/step-runner.js";
 import { adbRuntimeCapabilities } from "../../../src/adapters/runtime/adb-runtime-backend.js";
 import type { AppProcess } from "../../../src/domain/app-process.js";
 import type { Journey } from "../../../src/domain/journey.js";
+import { hashJourney } from "../../../src/domain/report.js";
+import type { LoadedKnowledgeBundle } from "../../../src/ports/knowledge-registry.js";
 import type { RuntimeSession } from "../../../src/ports/runtime-backend.js";
 import type { CommandResult } from "../../../src/ports/process-runner.js";
 import {
@@ -37,6 +42,269 @@ const alive: readonly AppProcess[] = [
 ];
 
 describe("VerifyRuntime", () => {
+  it("starts with an empty Binding map on every independent verify call", async () => {
+    const test = runtimeFixture();
+    const maps: Map<string, ReplayBinding>[] = [];
+    const runtime = new VerifyRuntime({
+      ...test.dependencies,
+      createStepRunner: (options): StepRunner => {
+        if (options.bindings === undefined) throw new Error("Missing Replay bindings");
+        maps.push(options.bindings);
+        return new StepRunner(options);
+      }
+    });
+    const first = await runtime.verify(input());
+    expect(first.status).toBe("passed");
+    expect(maps).toHaveLength(1);
+    maps[0]?.set("old", {
+      value: "secret", valueType: "identifier", sourceStepIndex: 0,
+      window: { from: "runStart" }, startedAtMs: 0,
+      evidenceSha256: "a".repeat(64)
+    });
+    vi.mocked(test.adb.currentActivity).mockReset()
+      .mockResolvedValueOnce("com.example.app.MainActivity")
+      .mockResolvedValueOnce("com.example.app.MainActivity")
+      .mockResolvedValue("com.example.app.SearchActivity");
+    const second = await runtime.verify(input());
+    expect(second.status).toBe("passed");
+    expect(maps).toHaveLength(2);
+    expect(maps[1]).not.toBe(maps[0]);
+    expect(maps[1]?.has("old")).toBe(false);
+  });
+
+  it("binds an allOf event to a marker from a previous step and publishes condition evidence", async () => {
+    const test = runtimeFixture();
+    const original = runtimeJourney.steps[0];
+    if (original === undefined) throw new Error("Journey fixture needs a step");
+    const foreground = vi.mocked(test.adb.foregroundComponent);
+    const originalForeground = foreground.getMockImplementation();
+    foreground.mockImplementation(async (options) => {
+      const current = await originalForeground?.(options);
+      const stream = vi.mocked(test.adb.startLogcat).mock.calls[0]?.[0];
+      stream?.onStdoutLine(
+        '09-15 15:00:00.123  42  42 D Search: {"event":"results","fields":{"query":"hello"}}'
+      );
+      return current ?? {
+        packageName: "com.example.app", activity: "com.example.app.SearchActivity"
+      };
+    });
+    const result = await new VerifyRuntime(test.dependencies).verify({
+      ...input(),
+      journey: {
+        ...runtimeJourney,
+        steps: [original, {
+          action: "wait", markerId: "search-start",
+          activity: {
+            before: "com.example.app.SearchActivity",
+            after: "com.example.app.SearchActivity"
+          }
+        }],
+        checkpoints: [{
+          version: 1, id: "search-ready", name: "Search ready", status: "inferred",
+          stepIndex: 1, expect: { visibleElements: [], absentElements: [],
+            timeoutMs: 200, allOf: [
+            { kind: "absentElement", locator: { resourceId: "spinner" } },
+            { kind: "logcatEvent", expect: {
+              type: "logcatEvent", tag: "Search", event: "results",
+              fields: { query: "hello" }, unique: true,
+              window: { from: "marker", markerId: "search-start" }
+            } }
+          ] }
+        }]
+      }
+    });
+    expect(result.status).toBe("passed");
+    expect(result.report.steps[1]?.marker).toMatchObject({
+      id: "search-start"
+    });
+    expect(result.report.checkpoints).toMatchObject([{
+      id: "search-ready", status: "passed", conditions: [
+        { kind: "absentElement", status: "passed",
+          evidenceRef: "checkpoints/search-ready-0-ui.json" },
+        { kind: "logcatEvent", status: "passed", matchedCount: 1,
+          evidenceRef: "logcat-default.txt" }
+      ]
+    }]);
+    expect(result.report.checkpoints?.[0]?.conditions[1]?.startedAtMs)
+      .toBe(result.report.steps[1]?.marker?.startedAtMs);
+  });
+
+  it("evaluates step and final Checkpoints in order and includes their evidence", async () => {
+    const test = runtimeFixture();
+    const result = await new VerifyRuntime(test.dependencies).verify({
+      ...input(),
+      journey: {
+        ...runtimeJourney,
+        checkpoints: [{
+          version: 1,
+          id: "after-search",
+          name: "After search",
+          stepIndex: 0,
+          status: "inferred",
+          expect: {
+            activity: "com.example.app.SearchActivity",
+            visibleElements: [{ resourceId: "search" }],
+            absentElements: [{ resourceId: "spinner" }]
+          }
+        }, {
+          version: 1,
+          id: "at-end",
+          name: "At end",
+          status: "inferred",
+          expect: {
+            visibleElements: [{ resourceId: "search" }],
+            absentElements: []
+          }
+        }]
+      }
+    });
+    expect(result.status).toBe("passed");
+    expect(result.report.checkpoints).toMatchObject([
+      { id: "after-search", stepIndex: 0, status: "passed", conditions: [
+        { kind: "activity", status: "passed" },
+        { kind: "visibleElement", status: "passed" },
+        { kind: "absentElement", status: "passed" }
+      ] },
+      { id: "at-end", status: "passed" }
+    ]);
+    expect(result.report.checkpoints?.[1]).not.toHaveProperty("stepIndex");
+    expect(result.report.journey.sha256).not.toBe(hashJourney(runtimeJourney));
+  });
+
+  it("fails the run and stops before the next step on a failed Checkpoint", async () => {
+    const test = runtimeFixture();
+    const first = runtimeJourney.steps[0];
+    if (first === undefined) throw new Error("Journey fixture needs a step");
+    const result = await new VerifyRuntime(test.dependencies).verify({
+      ...input(),
+      journey: {
+        ...runtimeJourney,
+        steps: [first, {
+          action: "wait",
+          activity: {
+            before: "com.example.app.SearchActivity",
+            after: "com.example.app.SearchActivity"
+          }
+        }],
+        checkpoints: [{
+          version: 1,
+          id: "missing-result",
+          name: "Missing result",
+          stepIndex: 0,
+          status: "inferred",
+          expect: {
+            visibleElements: [{ resourceId: "not-present" }],
+            absentElements: []
+          }
+        }]
+      }
+    });
+    expect(result).toMatchObject({
+      status: "failed",
+      exitCode: 1,
+      report: {
+        primaryFailure: {
+          code: "CHECKPOINT_FAILED",
+          phase: "checkpoint",
+          stepIndex: 0
+        },
+        checkpoints: [{ id: "missing-result", status: "failed" }]
+      }
+    });
+    expect(result.report.steps).toHaveLength(1);
+    expect(result.report.artifacts.screenshots).toHaveLength(1);
+  });
+
+  it("fails closed when a Screen Checkpoint has no Knowledge loader", async () => {
+    const test = runtimeFixture();
+    const result = await new VerifyRuntime(test.dependencies).verify({
+      ...input(),
+      journey: {
+        ...runtimeJourney,
+        checkpoints: [{
+          version: 1,
+          id: "search-screen",
+          name: "Search screen",
+          stepIndex: 0,
+          status: "inferred",
+          expect: { screen: "search", visibleElements: [], absentElements: [] }
+        }]
+      }
+    });
+    expect(result).toMatchObject({
+      status: "failed",
+      exitCode: 1,
+      report: {
+        primaryFailure: { code: "CHECKPOINT_UNRESOLVED" },
+        checkpoints: [{
+          id: "search-screen",
+          status: "unresolved",
+          conditions: [{ kind: "screen", status: "unresolved" }]
+        }]
+      }
+    });
+  });
+
+  it("writes ordinary Journey Screen evidence from a Knowledge Checkpoint", async () => {
+    const test = runtimeFixture();
+    const knowledge: LoadedKnowledgeBundle = {
+      index: {
+        version: 1,
+        packageName: "com.example.app",
+        revision: 1,
+        anchors: [],
+        screens: [],
+        transitions: []
+      },
+      indexSha256: "a".repeat(64),
+      knowledgeHash: "b".repeat(64),
+      anchors: [{
+        version: 1,
+        id: "search-element",
+        status: "observed",
+        roles: ["screenIdentity"],
+        identity: {
+          kind: "element",
+          locator: { resourceId: "search" }
+        }
+      }],
+      screens: [{
+        version: 1,
+        id: "search",
+        status: "observed",
+        requiredAnchors: ["search-element"],
+        optionalAnchors: [],
+        forbiddenAnchors: [],
+        predicates: []
+      }],
+      transitions: []
+    };
+    const loadKnowledge = vi.fn(() => Promise.resolve(knowledge));
+    const result = await new VerifyRuntime({
+      ...test.dependencies,
+      loadKnowledge
+    }).verify({
+      ...input(),
+      journey: {
+        ...runtimeJourney,
+        checkpoints: [{
+          version: 1,
+          id: "search-screen",
+          name: "Search screen",
+          status: "inferred",
+          expect: { screen: "search", visibleElements: [], absentElements: [] }
+        }]
+      }
+    });
+    expect(result).toMatchObject({
+      status: "passed",
+      report: {
+        checkpoints: [{ id: "search-screen", status: "passed" }],
+        screens: [{ screen: "search", status: "matched" }]
+      }
+    });
+    expect(loadKnowledge).toHaveBeenCalledOnce();
+  });
   it("orchestrates the full deterministic verification order", async () => {
     const test = runtimeFixture();
 
@@ -62,6 +330,7 @@ describe("VerifyRuntime", () => {
       }
     });
     expect(result.report.schemaVersion).toBe(4);
+    expect(result.report.checkpoints).toBeUndefined();
     expect(result.report.environment.devices).toEqual([
       {
         role: "default",
@@ -126,13 +395,11 @@ describe("VerifyRuntime", () => {
 
   it("still reports collecting progress when a step fails", async () => {
     const test = runtimeFixture();
+    let layoutCalls = 0;
     vi.mocked(test.androidCli.layout)
-      .mockImplementationOnce(() => {
-        test.order.push("baseline");
-        return Promise.resolve([]);
-      })
-      .mockImplementationOnce(() => {
-        test.order.push("step-layout");
+      .mockImplementation(() => {
+        test.order.push(layoutCalls === 0 ? "baseline" : "step-layout");
+        layoutCalls += 1;
         return Promise.resolve([]);
       });
     const events: VerifyProgressEvent[] = [];
@@ -346,13 +613,11 @@ describe("VerifyRuntime", () => {
 
   it("preserves a step failure when screenshot collection also fails", async () => {
     const test = runtimeFixture();
+    let layoutCalls = 0;
     vi.mocked(test.androidCli.layout)
-      .mockImplementationOnce(() => {
-        test.order.push("baseline");
-        return Promise.resolve([]);
-      })
-      .mockImplementationOnce(() => {
-        test.order.push("step-layout");
+      .mockImplementation(() => {
+        test.order.push(layoutCalls === 0 ? "baseline" : "step-layout");
+        layoutCalls += 1;
         return Promise.resolve([]);
       });
     vi.mocked(test.screenshots.capture).mockImplementation(() => {

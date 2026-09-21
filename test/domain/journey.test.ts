@@ -5,7 +5,9 @@ import {
   JourneySchema,
   JourneyStepSchema
 } from "../../src/domain/journey.js";
+import { hashJourney } from "../../src/domain/report.js";
 import searchJourney from "../fixtures/journeys/search.json" with { type: "json" };
+import checkpointJourney from "../fixtures/journeys/checkpoint.json" with { type: "json" };
 
 const activity = {
   before: "com.example.app.MainActivity",
@@ -24,6 +26,117 @@ function journey(steps: unknown[], devices: unknown = singleDevice): {
 }
 
 describe("JourneySchema", () => {
+  it("accepts unique prior event captures only in approved binding positions", () => {
+    const source = {
+      action: "wait", activity,
+      expect: {
+        type: "logcatEvent", tag: "Demo", event: "Issued",
+        fields: {}, timeoutMs: 100,
+        capture: { name: "token", field: "token", valueType: "identifier" }
+      }
+    };
+    const input = { action: "inputText", text: "${token}", activity };
+    const next = {
+      action: "click", locator: { text: "${token}" }, activity,
+      expect: {
+        type: "logcatEvent", tag: "Demo", event: "Accepted",
+        fields: {}, correlation: { key: "token", value: "${token}" },
+        timeoutMs: 100
+      }
+    };
+    expect(() => JourneySchema.parse(journey([source, input, next]))).not.toThrow();
+    expect(() => JourneySchema.parse(journey([{
+      ...source, expect: {
+        ...source.expect,
+        capture: { name: "token", group: "correlation", valueType: "string" }
+      }
+    }]))).toThrow(/declared correlation key/);
+    expect(() => JourneySchema.parse(journey([{
+      ...source, expect: {
+        ...source.expect,
+        capture: { name: "token", field: "token", group: "correlation",
+          valueType: "string" }
+      }
+    }]))).toThrow(/exactly one/);
+    expect(() => JourneySchema.parse(journey([input, source]))).toThrow(/earlier unique/);
+    expect(() => JourneySchema.parse(journey([source, source]))).toThrow(/unique and limited/);
+    expect(() => JourneySchema.parse(journey([source, {
+      ...next, locator: { resourceId: "${token}" }
+    }]))).toThrow(/approved fields/);
+    expect(() => JourneySchema.parse(journey([source, {
+      ...next, activity: { before: "${token}", after: activity.after }
+    }]))).toThrow();
+    expect(() => JourneySchema.parse(journey([source, {
+      ...next, expect: { ...next.expect, tag: "${token}" }
+    }]))).toThrow(/approved fields/);
+    expect(() => JourneySchema.parse(journey([source, {
+      ...input, text: "prefix-${token}"
+    }]))).toThrow(/approved fields/);
+    expect(() => JourneyStepSchema.parse({
+      ...next, locator: { text: "${token}", within: { text: "${token}" } }
+    })).toThrow(/approved fields/);
+    expect(() => JourneySchema.parse(journey([source, {
+      ...input, device: "second"
+    }], [{ role: "default" }, { role: "second" }]))).toThrow(/same device/);
+  });
+
+  it("binds inline Checkpoints to the Journey and validates unique, in-range references", () => {
+    const base = journey([{ action: "wait", activity }]);
+    const checkpoint = {
+      version: 1,
+      id: "after-wait",
+      name: "After wait",
+      stepIndex: 0,
+      expect: { visibleElements: [{ resourceId: "search" }] }
+    };
+    const parsed = JourneySchema.parse({ ...base, checkpoints: [checkpoint] });
+    expect(parsed.checkpoints).toMatchObject([{ id: "after-wait", stepIndex: 0 }]);
+    expect(hashJourney(parsed)).not.toBe(hashJourney(JourneySchema.parse(base)));
+    expect(() => JourneySchema.parse({
+      ...base, checkpoints: [checkpoint, checkpoint]
+    })).toThrow(/Duplicate Checkpoint/);
+    expect(() => JourneySchema.parse({
+      ...base, checkpoints: [{ ...checkpoint, stepIndex: 1 }]
+    })).toThrow(/stepIndex must reference/);
+  });
+  it("reads the checked-in Checkpoint Journey fixture", () => {
+    expect(JourneySchema.parse(checkpointJourney).checkpoints).toMatchObject([
+      { id: "search-ready", stepIndex: 0 }
+    ]);
+  });
+
+  it("accepts element expectation predicates and rejects contradictory absent combinations", () => {
+    const elementStep = (stepExpect: unknown): unknown => journey([
+      { action: "wait", activity, expect: stepExpect }
+    ]);
+    expect(() => JourneySchema.parse(elementStep({
+      type: "element",
+      locator: { resourceId: "btn_next" },
+      enabled: true,
+      clickable: false,
+      timeoutMs: 100
+    }))).not.toThrow();
+    expect(() => JourneySchema.parse(elementStep({
+      type: "element",
+      locator: { resourceId: "btn_next" },
+      absent: true,
+      timeoutMs: 100
+    }))).not.toThrow();
+    expect(() => JourneySchema.parse(elementStep({
+      type: "element",
+      locator: { resourceId: "btn_next" },
+      absent: true,
+      enabled: true,
+      timeoutMs: 100
+    }))).toThrow(/cannot combine/);
+    expect(() => JourneySchema.parse(elementStep({
+      type: "element",
+      locator: { resourceId: "btn_next" },
+      absent: true,
+      clickable: false,
+      timeoutMs: 100
+    }))).toThrow(/cannot combine/);
+  });
   it("parses a valid TapHound Journey fixture", () => {
     const parsed = JourneySchema.parse(searchJourney);
 

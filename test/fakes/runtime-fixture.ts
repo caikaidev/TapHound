@@ -154,7 +154,10 @@ export function runtimeFixture(
   };
   const adb: AdbPort = {
     devices: vi.fn(),
-    foregroundComponent: vi.fn(),
+    foregroundComponent: vi.fn(() => Promise.resolve({
+      packageName: "com.example.app",
+      activity: "com.example.app.SearchActivity"
+    })),
     currentActivity: vi.fn((identity: AppIdentity) => {
       const value = activityScript(identity.deviceSerial).shift()
         ?? "com.example.app.SearchActivity";

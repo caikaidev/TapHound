@@ -1,7 +1,10 @@
 import { z } from "zod";
 
 import { KnowledgeIdSchema } from "./knowledge.js";
+import { CheckpointDefinitionSchema } from "./checkpoint.js";
 import { LocatorSchema } from "./layout.js";
+import { LogcatEventExpectSchema } from "./logcat-event.js";
+import { bindingName, checkBindingReferences } from "./binding-reference.js";
 
 const QualifiedActivitySchema = z.string().regex(
   /^(?:[A-Za-z_$][\w$]*\.)+[A-Za-z_$][\w$]*$/,
@@ -40,8 +43,22 @@ const ActivityExpectSchema = z.strictObject({
 const ElementExpectSchema = z.strictObject({
   type: z.literal("element"),
   locator: LocatorSchema,
+  enabled: z.boolean().optional(),
+  clickable: z.boolean().optional(),
+  absent: z.boolean().optional(),
   packageName: QualifiedNameSchema.optional(),
   timeoutMs: z.number().int().positive()
+}).superRefine((expectation, context) => {
+  if (
+    expectation.absent === true
+    && (expectation.enabled !== undefined || expectation.clickable !== undefined)
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["absent"],
+      message: "absent element expectations cannot combine enabled or clickable predicates"
+    });
+  }
 });
 
 const LogcatExpectSchema = z.strictObject({
@@ -69,7 +86,8 @@ const LogcatExpectSchema = z.strictObject({
 export const ExpectSchema = z.discriminatedUnion("type", [
   ActivityExpectSchema,
   ElementExpectSchema,
-  LogcatExpectSchema
+  LogcatExpectSchema,
+  LogcatEventExpectSchema
 ]);
 
 const ExternalCommonStepShape = {
@@ -135,6 +153,14 @@ export const ExternalStepSchema = z.discriminatedUnion("action", [
   ExternalBackStepSchema,
   ExternalWaitStepSchema
 ]).superRefine((step, context) => {
+  checkBindingReferences(step, context, []);
+  if (step.expect?.type === "logcatEvent"
+    && step.expect.capture !== undefined) {
+    context.addIssue({
+      code: "custom", path: ["expect", "capture"],
+      message: "External steps cannot capture replay bindings"
+    });
+  }
   const stepRecord = step as Record<string, unknown>;
   const locator = stepRecord.locator as
     | { resourceId?: unknown; evidence?: unknown }
@@ -254,6 +280,7 @@ const BackStepSchema = z.strictObject({
 
 const WaitStepSchema = z.strictObject({
   action: z.literal("wait"),
+  markerId: KnowledgeIdSchema.optional(),
   until: z.strictObject({ element: LocatorSchema }).optional(),
   timeoutMs: z.number().int().positive().optional(),
   ...CommonStepShape
@@ -320,14 +347,149 @@ export const JourneyStepSchema = z.discriminatedUnion("action", [
   BackStepSchema,
   WaitStepSchema,
   BridgeStepSchema
-]);
+]).superRefine((step, context) => {
+  if (step.expect?.type === "logcatEvent"
+    && step.expect.capture?.group === "correlation"
+    && step.expect.correlation === undefined) {
+    context.addIssue({
+      code: "custom", path: ["expect", "capture", "group"],
+      message: "Correlation Capture requires a declared correlation key"
+    });
+  }
+  checkBindingReferences(step, context, [
+    ...(step.action === "inputText" ? [["text"]] : []),
+    ...(step.action === "click" || step.action === "longClick"
+      || step.action === "swipe" || step.action === "scrollTo"
+      ? [["locator", "text"]] : []),
+    ["expect", "correlation", "value"]
+  ]);
+});
 
 export const JourneySchema = z.strictObject({
   version: z.literal(2),
   name: z.string().trim().min(1),
   devices: z.array(DeviceDeclarationSchema).min(1),
-  steps: z.array(JourneyStepSchema).min(1)
+  steps: z.array(JourneyStepSchema).min(1),
+  checkpoints: z.array(CheckpointDefinitionSchema).optional()
 }).superRefine((journey, context) => {
+  const captures = new Map<string, { index: number; role: string }>();
+  const soleRoleForCapture = journey.devices[0]?.role ?? DEFAULT_DEVICE_ROLE;
+  for (const [index, step] of journey.steps.entries()) {
+    const role = step.device ?? soleRoleForCapture;
+    const allowed = [
+      ...(step.action === "inputText" ? [["text"]] : []),
+      ...(step.action === "click" || step.action === "longClick"
+        || step.action === "swipe" || step.action === "scrollTo"
+        ? [["locator", "text"]] : []),
+      ["expect", "correlation", "value"]
+    ];
+    const refs = [
+      ...(step.action === "inputText" ? [step.text] : []),
+      ...("locator" in step && step.locator !== undefined
+        ? [step.locator.text] : []),
+      ...(step.expect?.type === "logcatEvent"
+        ? [step.expect.correlation?.value] : [])
+    ];
+    for (const ref of refs) {
+      if (typeof ref !== "string" || bindingName(ref) === undefined) continue;
+      const capture = captures.get(bindingName(ref) ?? "");
+      if (capture === undefined || capture.index >= index || capture.role !== role) {
+        context.addIssue({
+          code: "custom", path: ["steps", index],
+          message: "Binding must come from an earlier unique event on the same device"
+        });
+      }
+    }
+    // The step schema is also used independently by generation and recording.
+    checkBindingReferences(step, context, allowed.map((path) => ["steps", index, ...path]),
+      ["steps", index]);
+    if (step.expect?.type !== "logcatEvent" || step.expect.capture === undefined) continue;
+    const name = step.expect.capture.name;
+    if (captures.has(name) || captures.size >= 16) {
+      context.addIssue({
+        code: "custom", path: ["steps", index, "expect", "capture"],
+        message: "Capture names must be unique and limited to 16 per Journey"
+      });
+    } else {
+      captures.set(name, { index, role });
+    }
+  }
+  for (const [index, checkpoint] of (journey.checkpoints ?? []).entries()) {
+    checkBindingReferences(checkpoint, context, [], ["checkpoints", index]);
+    for (const condition of checkpoint.expect.allOf ?? []) {
+      if (condition.kind === "logcatEvent" && condition.expect.capture !== undefined) {
+        context.addIssue({
+          code: "custom", path: ["checkpoints", index],
+          message: "Checkpoint conditions cannot capture replay bindings"
+        });
+      }
+    }
+  }
+  const markerIndexes = new Map<string, number>();
+  for (const [index, step] of journey.steps.entries()) {
+    if (step.action !== "wait" || step.markerId === undefined) {
+      continue;
+    }
+    if (markerIndexes.has(step.markerId)) {
+      context.addIssue({
+        code: "custom",
+        path: ["steps", index, "markerId"],
+        message: `Duplicate marker id: ${step.markerId}`
+      });
+    }
+    markerIndexes.set(step.markerId, index);
+  }
+  for (const [index, checkpoint] of (journey.checkpoints ?? []).entries()) {
+    for (const condition of checkpoint.expect.allOf ?? []) {
+      if (condition.kind !== "logcatEvent"
+        || condition.expect.window.from !== "marker") {
+        continue;
+      }
+      const markerIndex = markerIndexes.get(condition.expect.window.markerId);
+      if (markerIndex === undefined
+        || (checkpoint.stepIndex !== undefined && markerIndex > checkpoint.stepIndex)) {
+        context.addIssue({
+          code: "custom",
+          path: ["checkpoints", index, "expect", "allOf"],
+          message: "Checkpoint event marker must be declared by a preceding wait step"
+        });
+      }
+    }
+  }
+  for (const [index, step] of journey.steps.entries()) {
+    if (step.expect?.type !== "logcatEvent" || step.expect.window.from !== "marker") {
+      continue;
+    }
+    const markerIndex = markerIndexes.get(step.expect.window.markerId);
+    if (markerIndex === undefined || markerIndex > index) {
+      context.addIssue({
+        code: "custom",
+        path: ["steps", index, "expect", "window"],
+        message: "Logcat event marker must refer to this or an earlier wait step"
+      });
+    }
+  }
+  const checkpointIds = new Set<string>();
+  for (const [index, checkpoint] of (journey.checkpoints ?? []).entries()) {
+    if (checkpointIds.has(checkpoint.id)) {
+      context.addIssue({
+        code: "custom",
+        path: ["checkpoints", index, "id"],
+        message: `Duplicate Checkpoint id: ${checkpoint.id}`
+      });
+    }
+    checkpointIds.add(checkpoint.id);
+    if (
+      checkpoint.stepIndex !== undefined
+      && checkpoint.stepIndex >= journey.steps.length
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["checkpoints", index, "stepIndex"],
+        message: "Checkpoint stepIndex must reference a Journey step"
+      });
+    }
+  }
   const roles = new Set<string>();
   for (const [index, device] of journey.devices.entries()) {
     if (roles.has(device.role)) {

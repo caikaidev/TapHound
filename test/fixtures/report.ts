@@ -47,6 +47,7 @@ export function validReport(
       durationMs: 300,
       locator: {
         status: "found",
+        requested: { resourceId: "com.example.app:id/search" },
         matchedBy: "resourceId",
         fallbackUsed: false
       },
@@ -84,4 +85,32 @@ export function validReport(
     fallbackUsed: false,
     ...overrides
   };
+}
+
+export function validCheckpointReport(): TapHoundReport {
+  return validReport({
+    checkpoints: [{
+      id: "search-ready",
+      stepIndex: 0,
+      status: "passed",
+      conditions: [
+        {
+          kind: "activity",
+          status: "passed",
+          expected: "com.example.app.SearchActivity",
+          actual: "com.example.app.SearchActivity"
+        },
+        {
+          kind: "visibleElement",
+          status: "passed",
+          locator: { resourceId: "search" }
+        },
+        {
+          kind: "absentElement",
+          status: "passed",
+          locator: { resourceId: "spinner" }
+        }
+      ]
+    }]
+  });
 }

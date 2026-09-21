@@ -6,6 +6,8 @@ import {
   type StepRunnerOptions
 } from "../../../src/application/runtime/step-runner.js";
 import type { JourneyStep } from "../../../src/domain/journey.js";
+import { JourneySchema } from "../../../src/domain/journey.js";
+import { StepReportSchema } from "../../../src/domain/report.js";
 import type {
   LayoutElement,
   Locator
@@ -277,6 +279,142 @@ function mainActivityAdb(): AdbPort {
 }
 
 describe("StepRunner", () => {
+  it("re-extracts bindings on each independent Replay without exposing raw values", async () => {
+    const journey = JourneySchema.parse({
+      version: 2, name: "Binding", devices: [{ role: "default" }],
+      steps: [{
+        action: "wait", activity: { before: checkpoint.before, after: checkpoint.before },
+        expect: {
+          type: "logcatEvent", tag: "Demo", event: "Issued",
+          fields: { status: "ok" }, timeoutMs: 100,
+          capture: { name: "token", field: "token", valueType: "identifier" }
+        }
+      }, {
+        action: "inputText", text: "${token}",
+        activity: { before: checkpoint.before, after: checkpoint.before }
+      }, {
+        action: "click", locator: { text: "${token}" },
+        activity: { before: checkpoint.before, after: checkpoint.before }
+      }]
+    });
+    const [first, second, third] = journey.steps;
+    if (first === undefined || second === undefined || third === undefined) {
+      throw new Error("Missing binding steps");
+    }
+    for (const value of ["firstToken", "secondToken"]) {
+      const adb = adbPort();
+      vi.mocked(adb.currentActivity).mockReset().mockResolvedValue(checkpoint.before);
+      const cli = androidCli();
+      vi.mocked(cli.layout).mockResolvedValue([{
+        id: "bound", text: value, clickable: true,
+        enabled: true, bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+        children: []
+      }]);
+      const { runner } = fixture({ adb, androidCli: cli });
+      vi.mocked(adb.startLogcat).mock.calls[0]?.[0].onStdoutLine(
+        `09-15 01:00:00.000 42 42 I Demo: ${
+          JSON.stringify({ event: "Issued", fields: { status: "ok", token: value } })
+        }`
+      );
+      const capture = await runner.run(first, 0);
+      expect(capture.status).toBe("passed");
+      expect(capture.report.expectation?.capture).toMatchObject({
+        name: "token", length: value.length, sourceStepIndex: 0
+      });
+      expect(capture.report.expectation?.capture?.evidenceSha256)
+        .toMatch(/^[a-f\d]{64}$/);
+      expect(StepReportSchema.parse(capture.report)).toEqual(capture.report);
+      expect(JSON.stringify(capture.report)).not.toContain(value);
+      const typed = await runner.run(second, 1);
+      expect(typed.status).toBe("passed");
+      expect(adb.inputText).toHaveBeenCalledWith(value, "emulator-5554", undefined);
+      expect(JSON.stringify(typed.report)).not.toContain(value);
+      const located = await runner.run(third, 2);
+      expect(located.status).toBe("passed");
+      expect(located.report.locator?.requested).toEqual({ text: "${token}" });
+      expect(JSON.stringify(located.report)).not.toContain(value);
+    }
+  });
+
+  it("resolves an integer Capture as a numeric event correlation", async () => {
+    const adb = adbPort();
+    vi.mocked(adb.currentActivity).mockReset().mockResolvedValue(checkpoint.before);
+    const { runner } = fixture({ adb });
+    const emit = (event: string): void => {
+      vi.mocked(adb.startLogcat).mock.calls[0]?.[0].onStdoutLine(
+        `09-15 01:00:00.000 42 42 I Demo: ${
+          JSON.stringify({ event, fields: { count: 42 } })
+        }`
+      );
+    };
+    emit("Issued");
+    const captured = await runner.run({
+      action: "wait", activity: { before: checkpoint.before, after: checkpoint.before },
+      expect: {
+        type: "logcatEvent", tag: "Demo", event: "Issued", fields: {},
+        correlation: { key: "count", value: 42 },
+        capture: { name: "count", group: "correlation", valueType: "integer" },
+        window: { from: "stepStart" }, unique: true, timeoutMs: 100
+      }
+    }, 0);
+    expect(captured.status).toBe("passed");
+    emit("Accepted");
+    const correlated = await runner.run({
+      action: "wait", activity: { before: checkpoint.before, after: checkpoint.before },
+      expect: {
+        type: "logcatEvent", tag: "Demo", event: "Accepted", fields: {},
+        correlation: { key: "count", value: "${count}" },
+        window: { from: "stepStart" }, unique: true, timeoutMs: 100
+      }
+    }, 1);
+    expect(correlated.status).toBe("passed");
+  });
+
+  it("fails closed on absent, wrong-type, or oversized event Capture", async () => {
+    const step = {
+      action: "wait" as const,
+      activity: { before: checkpoint.before, after: checkpoint.before },
+      expect: {
+        type: "logcatEvent" as const, tag: "Demo", event: "Issued",
+        fields: {}, timeoutMs: 100, unique: true as const,
+        window: { from: "stepStart" as const },
+        capture: {
+          name: "token", field: "token", valueType: "identifier" as const
+        }
+      }
+    };
+    for (const value of [undefined, 123, "x".repeat(65)]) {
+      const adb = adbPort();
+      vi.mocked(adb.currentActivity).mockReset().mockResolvedValue(checkpoint.before);
+      const { runner } = fixture({ adb });
+      vi.mocked(adb.startLogcat).mock.calls[0]?.[0].onStdoutLine(
+        `09-15 01:00:00.000 42 42 I Demo: ${
+          JSON.stringify({ event: "Issued", fields: { token: value } })
+        }`
+      );
+      const result = await runner.run(step, 0);
+      expect(result.status).toBe("failed");
+      if (result.status === "failed") {
+        expect(result.failure.code).toBe("EXPECT_LOGCAT_FAILED");
+      }
+    }
+  });
+
+  it("does not execute an action when the Replay binding is absent", async () => {
+    const adb = adbPort();
+    vi.mocked(adb.currentActivity).mockReset().mockResolvedValue(checkpoint.before);
+    const { runner } = fixture({ adb });
+    const result = await runner.run({
+      action: "inputText", text: "${token}",
+      activity: { before: checkpoint.before, after: checkpoint.before }
+    }, 1);
+    expect(result.status).toBe("failed");
+    if (result.status === "failed") {
+      expect(result.failure.code).toBe("EXPECT_LOGCAT_FAILED");
+    }
+    expect(adb.inputText).not.toHaveBeenCalled();
+  });
+
   it("executes the complete successful step flow", async () => {
     const test = fixture();
 
@@ -290,6 +428,7 @@ describe("StepRunner", () => {
         status: "passed",
         locator: {
           status: "found",
+          requested: clickStep().locator,
           matchedBy: "resourceId",
           fallbackUsed: false
         },
@@ -341,6 +480,82 @@ describe("StepRunner", () => {
       status: "failed",
       failure: { code: "LOCATOR_NOT_FOUND" }
     });
+    expect(test.adb.tap).not.toHaveBeenCalled();
+  });
+
+  it("polls a generated Action locator until a late element appears", async () => {
+    const adb = adbPort();
+    let actionCompleted = false;
+    vi.mocked(adb.tap).mockImplementationOnce(() => {
+      actionCompleted = true;
+      return Promise.resolve(commandResult());
+    });
+    vi.mocked(adb.foregroundComponent).mockImplementation(() => (
+      Promise.resolve({
+        packageName: "com.example.app",
+        activity: actionCompleted ? checkpoint.after : checkpoint.before
+      })
+    ));
+    const cli = androidCli();
+    let layoutReads = 0;
+    vi.mocked(cli.layout).mockImplementation(() => {
+      layoutReads += 1;
+      return Promise.resolve(layoutReads < 3
+        ? []
+        : [{
+            id: "search",
+            resourceId: "search",
+            enabled: true,
+            bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+            children: []
+          }]);
+    });
+    const test = fixture({
+      adb,
+      androidCli: cli,
+      generatedReplayPolicy: true
+    });
+
+    const result = await test.runner.run(clickStep(), 0);
+
+    expect(result).toMatchObject({
+      status: "passed",
+      report: {
+        locator: {
+          status: "found",
+          requested: clickStep().locator,
+          matchedBy: "resourceId"
+        }
+      }
+    });
+    expect(layoutReads).toBe(3);
+    expect(test.clock.sleeps.slice(0, 2)).toEqual([100, 100]);
+    expect(adb.tap).toHaveBeenCalledOnce();
+  });
+
+  it("does not poll an ambiguous Action locator", async () => {
+    const cli = androidCli();
+    const element = {
+      id: "search",
+      resourceId: "search",
+      enabled: true,
+      bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+      children: []
+    };
+    vi.mocked(cli.layout).mockResolvedValue([
+      element,
+      { ...element, id: "search-2" }
+    ]);
+    const test = fixture({ androidCli: cli });
+
+    const result = await test.runner.run(clickStep(), 0);
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { code: "LOCATOR_AMBIGUOUS" }
+    });
+    expect(cli.layout).toHaveBeenCalledOnce();
+    expect(test.clock.sleeps).toEqual([]);
     expect(test.adb.tap).not.toHaveBeenCalled();
   });
 
@@ -417,6 +632,7 @@ describe("StepRunner", () => {
       report: {
         locator: {
           status: "found",
+          requested: clickStep().locator,
           fallbackUsed: true,
           fallbackLabel: "#7",
           annotatedScreenshotPath: "steps/001-fallback-annotated.png"

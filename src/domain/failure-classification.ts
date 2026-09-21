@@ -23,6 +23,7 @@ export const FailureTypeSchema = z.enum([
   "interaction",
   "action_failed",
   "expect_failed",
+  "checkpoint_failed",
   "contract_invalid",
   "evidence_failed",
   "alignment_failed",
@@ -54,6 +55,10 @@ export const FailureClassificationSchema = z.strictObject({
   actual: z.string().trim().min(1).optional(),
   locator: LocatorSchema.optional(),
   evidenceRefs: z.array(z.string().trim().min(1)).default([]),
+  requestOutcome: z.strictObject({
+    errorClass: z.enum(["client", "auth", "network", "server", "unknown"]),
+    evidenceRefs: z.array(z.string().trim().min(1))
+  }).optional(),
   sourceReportPath: z.string().trim().min(1)
 });
 
@@ -87,6 +92,7 @@ export const FAILURE_CODE_TYPES: Readonly<Record<string, FailureType>> = {
   EXPECT_ACTIVITY_FAILED: "expect_failed",
   EXPECT_ELEMENT_FAILED: "expect_failed",
   EXPECT_LOGCAT_FAILED: "expect_failed",
+  EXPECT_LOGCAT_AMBIGUOUS: "expect_failed",
   BRIDGE_NO_ESCAPE: "interaction",
   BRIDGE_NOT_RETURNED: "timeout",
   WAIT_TIMEOUT: "timeout",
@@ -99,6 +105,7 @@ export const FAILURE_CODE_TYPES: Readonly<Record<string, FailureType>> = {
   EXTERNAL_STEP_FAILED: "interaction",
   CONTEXT_INVALID: "internal_error",
   CONTEXT_STALE: "contract_invalid",
+  BRIEF_INVALID: "contract_invalid",
   CONTEXT_MODULE_NOT_FOUND: "internal_error",
   CONTEXT_MODULE_INCOMPLETE: "internal_error",
   CONTEXT_SCHEMA_INVALID: "internal_error",
@@ -141,6 +148,11 @@ export const FAILURE_CODE_TYPES: Readonly<Record<string, FailureType>> = {
   CONTRACT_JOURNEY_DRIFT: "contract_invalid",
   CONTRACT_EVIDENCE_INSUFFICIENT: "evidence_failed",
   CONTRACT_KNOWLEDGE_UNAVAILABLE: "capability_missing",
+  REPLAY_POLICY_UNAVAILABLE: "contract_invalid",
+  CHECKPOINT_FAILED: "checkpoint_failed",
+  CHECKPOINT_UNRESOLVED: "checkpoint_failed",
+  BASELINE_INCOMPARABLE: "contract_invalid",
+  BASELINE_EMPTY: "contract_invalid",
   COLLECTION_FAILED: "collection_failed",
   INTERNAL_ERROR: "internal_error"
 } as const;
@@ -159,6 +171,7 @@ export const FAILURE_TYPE_STAGES: Readonly<Record<FailureType, FailureStage>> = 
   interaction: "interaction",
   action_failed: "interaction",
   expect_failed: "assertion",
+  checkpoint_failed: "assertion",
   contract_invalid: "setup",
   evidence_failed: "evidence",
   alignment_failed: "setup",
@@ -174,5 +187,6 @@ export const STEP_INDEXED_FAILURE_TYPES: ReadonlySet<FailureType> = new Set([
   "activity_mismatch",
   "app_crash",
   "timeout",
-  "expect_failed"
+  "expect_failed",
+  "checkpoint_failed"
 ]);

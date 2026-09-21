@@ -112,6 +112,33 @@ function evidenceRefsFor(report: TapHoundReport): string[] {
   return refs;
 }
 
+function requestOutcomeFor(report: TapHoundReport): NonNullable<
+  FailureClassification["requestOutcome"]
+> {
+  const failedIndex = report.primaryFailure?.stepIndex;
+  const events = report.steps.filter((step) => (
+    step.expectation?.type === "logcatEvent"
+    && step.expectation.status === "passed"
+    && step.expectation.logcatEvent?.matchedCount === 1
+    && step.expectation.logcatEvent.matchedLineSha256 !== undefined
+    && (failedIndex === undefined || step.index <= failedIndex)
+  ));
+  if (events.length === 0) {
+    return { errorClass: "unknown", evidenceRefs: [] };
+  }
+  const classes = new Set(events.map(
+    (step) => step.expectation?.logcatEvent?.requestErrorClass
+  ));
+  const errorClass = classes.size === 1
+    ? [...classes][0] ?? "unknown"
+    : "unknown";
+  const refs = new Set([report.artifacts.report]);
+  for (const step of events) {
+    if (step.logcatPath !== undefined) refs.add(step.logcatPath);
+  }
+  return { errorClass, evidenceRefs: [...refs] };
+}
+
 function locatorFor(
   type: FailureType,
   report: TapHoundReport
@@ -192,6 +219,7 @@ export class FailureClassifier {
         : { actual: expectedActual.actual }),
       ...(locator === undefined ? {} : { locator }),
       evidenceRefs: evidenceRefsFor(report),
+      requestOutcome: requestOutcomeFor(report),
       sourceReportPath: report.artifacts.report
     });
     return classification;

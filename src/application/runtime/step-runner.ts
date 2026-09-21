@@ -27,6 +27,9 @@ import type {
   UiSnapshotProvider
 } from "../../ports/ui-snapshot.js";
 import type { LogcatCollector } from "../collector/logcat-collector.js";
+import { captureLogcatEvent } from "../collector/logcat-event.js";
+import { bindingName } from "../../domain/binding-reference.js";
+import type { LogcatEventWindow } from "../../domain/logcat-event.js";
 import { ActionExecutor, type ActionTarget } from "../interaction/action-executor.js";
 import { FallbackResolver } from "../interaction/fallback-resolver.js";
 import { ScrollToExecutor } from "../interaction/scroll-to-executor.js";
@@ -57,8 +60,20 @@ export interface StepRunnerOptions {
   idle: IdleConfig;
   requireFocusedInput?: boolean;
   generatedReplayPolicy?: boolean | undefined;
+  runStartedAt?: number | undefined;
+  markers?: Map<string, number> | undefined;
+  bindings?: Map<string, ReplayBinding> | undefined;
   manualReplay?: boolean | undefined;
   anchorResolver?: AnchorResolverPort | undefined;
+}
+
+export interface ReplayBinding {
+  value: string;
+  valueType: "string" | "integer" | "identifier";
+  sourceStepIndex: number;
+  window: LogcatEventWindow;
+  startedAtMs: number;
+  evidenceSha256: string;
 }
 
 const WAIT_UNTIL_POLL_INTERVAL_MS = 100;
@@ -96,8 +111,10 @@ export class StepRunner {
   private readonly expectationEvaluator: ExpectationEvaluator;
   private readonly scrollToExecutor: ScrollToExecutor;
   private currentViewport: DisplayViewport | undefined;
+  private readonly bindings: Map<string, ReplayBinding>;
 
   public constructor(private readonly options: StepRunnerOptions) {
+    this.bindings = options.bindings ?? new Map<string, ReplayBinding>();
     this.actionExecutor = new ActionExecutor(
       options.adb,
       options.deviceSerial,
@@ -213,11 +230,12 @@ export class StepRunner {
   private async captureLayout(
     reason: CaptureUiSnapshotOptions["reason"],
     timeoutMs: number,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    freshness: CaptureUiSnapshotOptions["freshness"] = "sameMutationEpoch"
   ): Promise<readonly LayoutElement[]> {
     const snapshot = await this.options.uiSnapshotProvider.capture({
       reason,
-      freshness: "sameMutationEpoch",
+      freshness,
       timeoutMs,
       ...(signal === undefined ? {} : { signal })
     });
@@ -305,7 +323,8 @@ export class StepRunner {
   }
 
   private async captureGeneratedLayout(
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    freshness: CaptureUiSnapshotOptions["freshness"] = "sameMutationEpoch"
   ): Promise<readonly LayoutElement[]> {
     await this.assertGeneratedForeground(
       this.currentExpectedActivity,
@@ -315,7 +334,8 @@ export class StepRunner {
     const layout = await this.captureLayout(
       "locate",
       this.options.idle.timeoutMs,
-      signal
+      signal,
+      freshness
     );
     await this.assertGeneratedForeground(
       this.currentExpectedActivity,
@@ -330,6 +350,7 @@ export class StepRunner {
     index: number,
     signal?: AbortSignal
   ): Promise<StepRunResult> {
+    const originalStep = step;
     const startedAt = this.options.clock.now();
     const logcatPath = stepPath(index, "logcat.txt");
     const activityReport: NonNullable<StepReport["activity"]> = {
@@ -361,16 +382,23 @@ export class StepRunner {
       status: StepRunResult["status"],
       failure?: ReportFailure
     ): Promise<StepRunResult> => {
-      if (report.locator !== undefined && report.locator.requested === undefined) {
-        const requested = step.action === "bridge"
-          ? step.triggerLocator
-          : "locator" in step
-            ? step.locator
+      if (report.locator !== undefined) {
+        const requested = originalStep.action === "bridge"
+          ? originalStep.triggerLocator
+          : "locator" in originalStep
+            ? originalStep.locator
             : undefined;
         if (requested !== undefined) {
           report.locator.requested = requested;
         }
+        if (report.locator.message !== undefined) {
+          report.locator.message = this.redact(report.locator.message);
+        }
       }
+      if (report.expectation?.message !== undefined) {
+        report.expectation.message = this.redact(report.expectation.message);
+      }
+      if (failure !== undefined) failure.message = this.redact(failure.message);
       const finishedAt = this.options.clock.now();
       report.finishedAtMs = finishedAt;
       report.durationMs = finishedAt - startedAt;
@@ -443,6 +471,11 @@ export class StepRunner {
         `Expected Activity ${step.activity.before}, found ${before}`
       );
     }
+    try {
+      step = this.resolveStepBindings(step);
+    } catch {
+      return fail("EXPECT_LOGCAT_FAILED", "Replay binding is missing or invalid");
+    }
     const generatedPid = this.options.generatedReplayPolicy === true
       ? await this.primaryPid(identity)
       : undefined;
@@ -451,6 +484,11 @@ export class StepRunner {
       && generatedPid === null
     ) {
       return fail("APP_CRASHED", "Generated replay process is not running");
+    }
+    if (step.action === "wait" && step.markerId !== undefined) {
+      const startedAtMs = this.options.clock.now();
+      this.options.markers?.set(step.markerId, startedAtMs);
+      report.marker = { id: step.markerId, startedAtMs };
     }
 
     let target: ActionTarget | undefined;
@@ -517,6 +555,7 @@ export class StepRunner {
       if (triggerResolution.status !== "found") {
         report.locator = {
           status: "failed",
+          requested: step.triggerLocator,
           fallbackUsed: false,
           message: triggerResolution.message
         };
@@ -533,6 +572,7 @@ export class StepRunner {
       };
       report.locator = {
         status: "found",
+        requested: step.triggerLocator,
         matchedBy: triggerResolution.matchedBy,
         fallbackUsed: false
       };
@@ -688,6 +728,7 @@ export class StepRunner {
         if (resolution.status === "found") {
           report.locator = {
             status: "found",
+            requested: step.until.element,
             matchedBy: resolution.matchedBy,
             fallbackUsed: false
           };
@@ -696,6 +737,7 @@ export class StepRunner {
         if (this.options.clock.now() >= deadline) {
           report.locator = {
             status: "failed",
+            requested: step.until.element,
             fallbackUsed: false,
             message: resolution.message
           };
@@ -828,9 +870,58 @@ export class StepRunner {
             "Step has no runtime locator fallback"
           );
         }
-        const resolution = resolveLocator(layout, step.locator, {
+        let resolution = resolveLocator(layout, step.locator, {
           viewport: this.currentViewport
         });
+        const locatorDeadline = this.options.clock.now()
+          + this.options.idle.timeoutMs;
+        while (
+          resolution.status !== "found"
+          && resolution.code === "LOCATOR_NOT_FOUND"
+          && resolution.evidenceMismatch !== true
+          && this.options.clock.now() < locatorDeadline
+        ) {
+          try {
+            await this.options.clock.sleep(
+              Math.min(
+                WAIT_UNTIL_POLL_INTERVAL_MS,
+                locatorDeadline - this.options.clock.now()
+              ),
+              signal
+            );
+          } catch (error) {
+            if (isAborted(signal)) {
+              return finish("cancelled");
+            }
+            throw error;
+          }
+          if (isAborted(signal)) {
+            return finish("cancelled");
+          }
+          try {
+            layout = this.options.generatedReplayPolicy === true
+              ? await this.captureGeneratedLayout(signal, "forceFresh")
+              : await this.captureLayout(
+                  "locate",
+                  Math.max(1, locatorDeadline - this.options.clock.now()),
+                  signal,
+                  "forceFresh"
+                );
+          } catch (error) {
+            if (
+              error !== null
+              && typeof error === "object"
+              && "code" in error
+              && error.code === "ACTIVITY_BEFORE_MISMATCH"
+            ) {
+              return fail("ACTIVITY_BEFORE_MISMATCH", errorMessage(error));
+            }
+            throw error;
+          }
+          resolution = resolveLocator(layout, step.locator, {
+            viewport: this.currentViewport
+          });
+        }
         if (resolution.status === "found") {
           target = {
             point: resolution.point,
@@ -840,6 +931,7 @@ export class StepRunner {
           };
           report.locator = {
             status: "found",
+            requested: step.locator,
             matchedBy: resolution.matchedBy,
             fallbackUsed: false,
             ...(step.anchor === undefined ? {} : { anchorId: step.anchor }),
@@ -851,6 +943,7 @@ export class StepRunner {
           if (resolution.evidenceMismatch === true) {
             report.locator = {
               status: "failed",
+              requested: step.locator,
               fallbackUsed: false,
               message: resolution.message
             };
@@ -871,6 +964,7 @@ export class StepRunner {
               : resolution.message;
             report.locator = {
               status: "failed",
+              requested: step.locator,
               fallbackUsed: fallback.status === "failed"
                 && fallback.label !== undefined
                 && fallback.annotatedScreenshotPath !== undefined,
@@ -888,6 +982,7 @@ export class StepRunner {
           target = targetForPoint(fallback.point);
           report.locator = {
             status: "found",
+            requested: step.locator,
             fallbackUsed: true,
             fallbackLabel: fallback.label,
             annotatedScreenshotPath: annotatedPath
@@ -1109,7 +1204,13 @@ export class StepRunner {
         {
           packageName: this.options.packageName,
           deviceSerial: this.options.deviceSerial,
-          stepStartedAt: startedAt
+          stepStartedAt: startedAt,
+          ...(this.options.runStartedAt === undefined
+            ? {}
+            : { runStartedAt: this.options.runStartedAt }),
+          ...(this.options.markers === undefined
+            ? {}
+            : { markers: this.options.markers })
         },
         signal,
         generatedPid === undefined || generatedPid === null
@@ -1141,13 +1242,19 @@ export class StepRunner {
       report.expectation = expectation.status === "passed"
         ? {
             type: expectation.type,
-            status: "passed"
+            status: "passed",
+            ...(expectation.logcatEvent === undefined
+              ? {}
+              : { logcatEvent: expectation.logcatEvent })
           }
         : {
             type: expectation.type,
             status: "failed",
             code: expectation.code,
-            message: expectation.message
+            message: expectation.message,
+            ...(expectation.logcatEvent === undefined
+              ? {}
+              : { logcatEvent: expectation.logcatEvent })
           };
       if (expectation.status === "failed") {
         return fail(expectation.code, expectation.message);
@@ -1173,9 +1280,83 @@ export class StepRunner {
           return fail("ACTIVITY_AFTER_MISMATCH", errorMessage(error));
         }
       }
+      if (step.expect.type === "logcatEvent"
+        && step.expect.capture !== undefined) {
+        const line = this.expectationEvaluator.matchedEventFor(expectation);
+        const evidence = expectation.logcatEvent;
+        const value = line === undefined
+          ? undefined
+          : captureLogcatEvent(line, step.expect, step.expect.capture);
+        if (value === undefined || evidence?.matchedLineSha256 === undefined
+          || this.bindings.has(step.expect.capture.name)) {
+          return fail("EXPECT_LOGCAT_FAILED", "Matched event Capture is invalid or duplicated");
+        }
+        this.bindings.set(step.expect.capture.name, {
+          value,
+          valueType: step.expect.capture.valueType,
+          sourceStepIndex: index,
+          window: evidence.window,
+          startedAtMs: evidence.startedAtMs,
+          evidenceSha256: evidence.matchedLineSha256
+        });
+        report.expectation.capture = {
+          name: step.expect.capture.name,
+          valueType: step.expect.capture.valueType,
+          length: value.length,
+          sourceStepIndex: index,
+          window: evidence.window,
+          startedAtMs: evidence.startedAtMs,
+          evidenceSha256: evidence.matchedLineSha256
+        };
+      }
     }
 
     return finish("passed");
+  }
+
+  private redact(message: string): string {
+    let sanitized = message;
+    for (const { value } of this.bindings.values()) {
+      sanitized = sanitized.replaceAll(value, "[bound value]");
+    }
+    return sanitized;
+  }
+
+  private resolveStepBindings(step: JourneyStep): JourneyStep {
+    const lookup = (value: string): ReplayBinding | undefined => {
+      const name = bindingName(value);
+      if (name === undefined) return undefined;
+      const binding = this.bindings.get(name);
+      if (binding === undefined) throw new Error("Missing Replay binding");
+      return binding;
+    };
+    const resolve = (value: string): string => {
+      const binding = lookup(value);
+      if (binding === undefined) return value;
+      return binding.value;
+    };
+    let next = step;
+    if (step.action === "inputText") {
+      next = { ...step, text: resolve(step.text) };
+    } else if ("locator" in step && step.locator?.text !== undefined) {
+      next = { ...step, locator: { ...step.locator, text: resolve(step.locator.text) } };
+    }
+    if (step.expect?.type === "logcatEvent"
+      && typeof step.expect.correlation?.value === "string") {
+      next = {
+        ...next,
+        expect: {
+          ...step.expect,
+          correlation: {
+            ...step.expect.correlation,
+            value: lookup(step.expect.correlation.value)?.valueType === "integer"
+              ? Number(resolve(step.expect.correlation.value))
+              : resolve(step.expect.correlation.value)
+          }
+        }
+      };
+    }
+    return next;
   }
 
   private async executeExternalStepsForReplay(

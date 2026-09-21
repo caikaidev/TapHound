@@ -5,9 +5,51 @@ import {
   TapHoundReportSchema,
   hashJourney
 } from "../../src/domain/report.js";
-import { validReport } from "../fixtures/report.js";
+import { validCheckpointReport, validReport } from "../fixtures/report.js";
 
 describe("TapHoundReportSchema", () => {
+  it("refuses a falsely passed structured event without a unique artifact match", () => {
+    const event = {
+      kind: "logcatEvent" as const, status: "passed" as const,
+      expect: {
+        type: "logcatEvent" as const, tag: "Search", event: "results",
+        fields: {}, unique: true as const,
+        window: { from: "stepStart" as const }
+      },
+      matchedCount: 1, startedAtMs: 1, matchedAtMs: 2,
+      matchedLineSha256: "a".repeat(64), evidenceRef: "logcat-default.txt"
+    };
+    expect(TapHoundReportSchema.safeParse(validReport({
+      checkpoints: [{ id: "search-ready", status: "passed", conditions: [event] }]
+    })).success).toBe(true);
+    expect(TapHoundReportSchema.safeParse(validReport({
+      checkpoints: [{ id: "search-ready", status: "passed", conditions: [{
+        ...event, matchedCount: 0
+      }] }]
+    })).success).toBe(false);
+  });
+
+  it("accepts Checkpoint condition evidence and rejects inconsistent aggregates", () => {
+    expect(TapHoundReportSchema.parse(validCheckpointReport()))
+      .toEqual(validCheckpointReport());
+    const condition = {
+      kind: "absentElement" as const,
+      status: "passed" as const,
+      locator: { resourceId: "spinner" }
+    };
+    const checkpoint = {
+      id: "search-ready",
+      stepIndex: 0,
+      status: "passed" as const,
+      conditions: [condition]
+    };
+    expect(TapHoundReportSchema.parse(validReport({
+      checkpoints: [checkpoint]
+    })).checkpoints).toEqual([checkpoint]);
+    expect(() => TapHoundReportSchema.parse(validReport({
+      checkpoints: [{ ...checkpoint, status: "failed" }]
+    }))).toThrow(/Checkpoint status must reflect/);
+  });
   it("accepts the layered report contract", () => {
     expect(TapHoundReportSchema.parse(validReport())).toEqual(validReport());
   });

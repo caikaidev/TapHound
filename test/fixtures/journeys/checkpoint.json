@@ -1,0 +1,23 @@
+{
+  "version": 2,
+  "name": "Search checkpoint",
+  "devices": [{ "role": "default" }],
+  "steps": [{
+    "action": "wait",
+    "activity": {
+      "before": "com.example.app.SearchActivity",
+      "after": "com.example.app.SearchActivity"
+    }
+  }],
+  "checkpoints": [{
+    "version": 1,
+    "id": "search-ready",
+    "name": "Search ready",
+    "stepIndex": 0,
+    "expect": {
+      "activity": "com.example.app.SearchActivity",
+      "visibleElements": [{ "resourceId": "search" }],
+      "absentElements": [{ "resourceId": "spinner" }]
+    }
+  }]
+}

@@ -1,14 +1,20 @@
 import type {
   Baseline,
+  BaselineCheckpointFact,
+  BaselineElementFact,
   RegressionCompareResult,
   RegressionDiff
 } from "../../domain/checkpoint.js";
-import { RegressionCompareResultSchema } from "../../domain/checkpoint.js";
+import {
+  BaselineSchema,
+  RegressionCompareResultSchema
+} from "../../domain/checkpoint.js";
 import type { TapHoundReport } from "../../domain/report.js";
+import { BaselineError } from "./baseline-error.js";
 
 export interface RegressionCompareInput {
   baseline: Baseline;
-  current: Pick<TapHoundReport, "steps" | "screens">;
+  current: Pick<TapHoundReport, "steps" | "screens" | "checkpoints" | "logcatEvidence">;
   journeySha256: string;
   comparedAt: string;
 }
@@ -30,57 +36,32 @@ function currentActivities(steps: TapHoundReport["steps"]): Map<number, {
   return map;
 }
 
-function currentElements(steps: TapHoundReport["steps"]): Set<string> {
-  const set = new Set<string>();
-  for (const step of steps) {
-    const locator = step.locator;
-    if (locator === undefined) {
-      continue;
-    }
-    if (locator.status === "failed") {
-      set.add(`absent:${reportLocatorKey(locator)}`);
-    } else {
-      set.add(`present:${reportLocatorKey(locator)}`);
-    }
-  }
-  return set;
+function elementIdentity(fact: Pick<
+  BaselineElementFact,
+  "locator" | "anchorId"
+>): string {
+  return fact.anchorId === undefined
+    ? JSON.stringify(["locator", fact.locator])
+    : JSON.stringify(["anchor", fact.anchorId]);
 }
 
-function reportLocatorKey(locator: {
-  anchorId?: string | undefined;
-  matchedBy?: string | undefined;
-  requested?: {
-    resourceId?: string | undefined;
-    text?: string | undefined;
-    contentDescription?: string | undefined;
-  } | undefined;
-  message?: string | undefined;
-}): string {
-  if (locator.anchorId !== undefined) {
-    return `resourceId:anchor:${locator.anchorId}`;
-  }
-  if (locator.requested !== undefined) {
-    return baselineLocatorKey(locator.requested);
-  }
-  const via = locator.matchedBy ?? "unknown";
-  return `${via}:${via}`;
+function conditionIdentity(
+  fact: BaselineCheckpointFact
+): string {
+  return JSON.stringify([
+    fact.kind,
+    "locator" in fact ? fact.locator
+      : "expect" in fact ? fact.expect : fact.expected
+  ]);
 }
-
-function baselineLocatorKey(locator: {
-  resourceId?: string | undefined;
-  text?: string | undefined;
-  contentDescription?: string | undefined;
-}): string {
-  if (locator.resourceId !== undefined) {
-    return `resourceId:${locator.resourceId}`;
-  }
-  if (locator.text !== undefined) {
-    return `text:${locator.text}`;
-  }
-  if (locator.contentDescription !== undefined) {
-    return `contentDescription:${locator.contentDescription}`;
-  }
-  return "unknown";
+function reportConditionIdentity(
+  condition: NonNullable<TapHoundReport["checkpoints"]>[number]["conditions"][number]
+): string {
+  return JSON.stringify([
+    condition.kind,
+    "locator" in condition ? condition.locator
+      : "expect" in condition ? condition.expect : condition.expected
+  ]);
 }
 
 /**
@@ -95,6 +76,21 @@ function baselineLocatorKey(locator: {
 export const compareRegression = (
   input: RegressionCompareInput
 ): RegressionCompareResult => {
+  BaselineSchema.parse(input.baseline);
+  if (input.baseline.elements.some(
+    (fact) => fact.stepIndex === undefined || fact.kind === "absent"
+  )) {
+    throw new BaselineError(
+      "BASELINE_INCOMPARABLE",
+      "Legacy element facts without a step or verified absence must be recaptured"
+    );
+  }
+  if (input.baseline.screens.some((fact) => fact.status !== "matched")) {
+    throw new BaselineError(
+      "BASELINE_INCOMPARABLE",
+      "An unresolved Screen fact cannot establish equivalence"
+    );
+  }
   const regressions: RegressionDiff[] = [];
   const currentActs = currentActivities(input.current.steps);
   for (const fact of input.baseline.activities) {
@@ -125,30 +121,142 @@ export const compareRegression = (
       });
     }
   }
-  const currentEls = currentElements(input.current.steps);
   for (const fact of input.baseline.elements) {
-    const key = `${fact.kind}:${baselineLocatorKey(fact.locator)}`;
-    if (!currentEls.has(key)) {
+    const stepIndex = fact.stepIndex;
+    if (stepIndex === undefined) {
+      throw new BaselineError(
+        "BASELINE_INCOMPARABLE",
+        "Element fact has no step identity"
+      );
+    }
+    const current = input.current.steps.find(
+      (step) => step.index === stepIndex
+    )?.locator;
+    if (current?.status === "found" && (
+      current.anchorId === undefined
+      && current.requested === undefined
+    )) {
+      throw new BaselineError(
+        "BASELINE_INCOMPARABLE",
+        `Current locator at step ${String(stepIndex)} has no stable identity`
+      );
+    }
+    if (
+      current?.status !== "found"
+      || fact.kind !== "present"
+      || elementIdentity({
+        anchorId: current.anchorId,
+        locator: current.requested
+      }) !== elementIdentity(fact)
+    ) {
       regressions.push({
         kind: "element",
-        locator: fact.locator,
+        ...(fact.locator === undefined ? {} : { locator: fact.locator }),
+        stepIndex,
         expected: `${fact.kind} element`,
-        actual: "missing"
+        actual: current?.status === "found"
+          ? "different element"
+          : "missing"
+      });
+      continue;
+    }
+    if (fact.matchedBy !== undefined && current.matchedBy !== fact.matchedBy) {
+      regressions.push({
+        kind: "element",
+        ...(fact.locator === undefined ? {} : { locator: fact.locator }),
+        stepIndex,
+        expected: `matched by ${fact.matchedBy}`,
+        actual: `matched by ${current.matchedBy ?? "none"}`
+      });
+    }
+    if (
+      fact.fallbackUsed !== undefined
+      && fact.fallbackUsed !== current.fallbackUsed
+    ) {
+      regressions.push({
+        kind: "element",
+        ...(fact.locator === undefined ? {} : { locator: fact.locator }),
+        stepIndex,
+        expected: `annotated fallback ${String(fact.fallbackUsed)}`,
+        actual: `annotated fallback ${String(current.fallbackUsed)}`
       });
     }
   }
-  const currentScreens = new Set(
-    (input.current.screens ?? [])
-      .map((screen) => screen.screen)
+  const currentScreens = new Map(
+    (input.current.screens ?? []).map((screen) => [
+      screen.screen, screen.status
+    ])
   );
   for (const fact of input.baseline.screens) {
-    if (!currentScreens.has(fact.screen)) {
+    const currentStatus = currentScreens.get(fact.screen);
+    if (currentStatus !== fact.status) {
       regressions.push({
         kind: "screen",
         screen: fact.screen,
         expected: fact.status,
-        actual: "missing"
+        actual: currentStatus ?? "missing"
       });
+    }
+  }
+  const checkpointFacts = input.baseline.checkpoints ?? [];
+  const checkpointIds = new Set(checkpointFacts.map((fact) => fact.checkpointId));
+  for (const id of checkpointIds) {
+    const baselineConditions = checkpointFacts.filter((fact) => fact.checkpointId === id);
+    const matches = (input.current.checkpoints ?? []).filter((entry) => entry.id === id);
+    const checkpoint = matches[0];
+    if (matches.length !== 1 || checkpoint === undefined) {
+      throw new BaselineError(
+        "BASELINE_INCOMPARABLE",
+        `Checkpoint ${id} has no unique current evaluation`
+      );
+    }
+    if (
+      checkpoint.stepIndex !== baselineConditions[0]?.stepIndex
+      || checkpoint.conditions.length !== baselineConditions.length
+      || checkpoint.conditions.some((condition) => !baselineConditions.some(
+        (fact) => conditionIdentity(fact) === reportConditionIdentity(condition)
+      ))
+    ) {
+      throw new BaselineError(
+        "BASELINE_INCOMPARABLE",
+        `Checkpoint ${id} does not have the same condition identities`
+      );
+    }
+    for (const fact of baselineConditions) {
+      const condition = checkpoint.conditions.find((entry) => (
+        conditionIdentity(fact) === reportConditionIdentity(entry)
+      ));
+      if (condition?.status === "unresolved"
+        || (condition?.kind === "logcatEvent" && condition.status === "passed"
+          && (condition.matchedCount !== 1
+            || condition.matchedLineSha256 === undefined
+            || condition.matchedAtMs === undefined
+            || condition.evidenceRef === undefined))
+        || (fact.kind === "logcatEvent"
+          && input.current.logcatEvidence?.some((entry) => (
+            entry.lastDroppedAtMs === undefined
+              || (condition?.kind === "logcatEvent"
+                && entry.lastDroppedAtMs >= condition.startedAtMs)
+          )) === true)) {
+        throw new BaselineError(
+          "BASELINE_INCOMPARABLE",
+          `Checkpoint ${id} has unresolved current evidence`
+        );
+      }
+      if (condition?.status !== "passed") {
+        regressions.push({
+          kind: fact.kind === "activity"
+            ? "activity"
+            : fact.kind === "screen" ? "screen"
+              : fact.kind === "logcatEvent" ? "logcatEvent" : "element",
+          checkpointId: id,
+          ...(fact.stepIndex === undefined ? {} : { stepIndex: fact.stepIndex }),
+          ...("locator" in fact ? { locator: fact.locator } : {}),
+          ...(fact.kind === "screen" ? { screen: fact.expected } : {}),
+          expected: `passed ${fact.kind}`,
+          actual: condition?.status ?? "missing"
+        });
+      }
     }
   }
   const result = RegressionCompareResultSchema.parse({
@@ -156,6 +264,12 @@ export const compareRegression = (
     baselineId: input.baseline.id,
     journeySha256: input.journeySha256,
     comparedAt: input.comparedAt,
+    coverage: {
+      activities: input.baseline.activities.length,
+      elements: input.baseline.elements.length,
+      screens: input.baseline.screens.length,
+      ...(checkpointFacts.length === 0 ? {} : { checkpoints: checkpointFacts.length })
+    },
     equivalent: regressions.length === 0,
     regressions
   });

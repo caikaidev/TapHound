@@ -66,6 +66,45 @@ describe("FailureClassifier", () => {
     now: (): Date => new Date("2026-07-19T10:00:06.000Z")
   });
 
+  it("attributes only digest-bound, app-emitted request classes and no raw payload", () => {
+    const event = (errorClass?: "auth" | "server"): TapHoundReport["steps"][number] => ({
+      index: 0, action: "wait", status: "passed",
+      startedAtMs: 0, finishedAtMs: 100, durationMs: 100,
+      logcatPath: "steps/001-logcat.txt",
+      expectation: {
+        type: "logcatEvent", status: "passed",
+        logcatEvent: {
+          matchedCount: 1, matchedLineSha256: "b".repeat(64),
+          window: { from: "stepStart" }, startedAtMs: 0,
+          ...(errorClass === undefined ? {} : { requestErrorClass: errorClass })
+        }
+      }
+    });
+    const withEvent = (steps: TapHoundReport["steps"]): TapHoundReport => {
+      const failed = report().steps[0];
+      if (failed === undefined) throw new Error("Missing failed step fixture");
+      return report({ steps: [...steps, failed] });
+    };
+    const auth = classifier.classify({ report: withEvent([event("auth")]) });
+    expect(auth.requestOutcome).toEqual({
+      errorClass: "auth",
+      evidenceRefs: ["/runs/run-1/report.json", "steps/001-logcat.txt"]
+    });
+    expect(JSON.stringify(auth)).not.toContain("private-request-token");
+    expect(classifier.classify({
+      report: withEvent([event()])
+    }).requestOutcome?.errorClass).toBe("unknown");
+    expect(classifier.classify({
+      report: withEvent([event("auth"), { ...event("server"), index: 1 }])
+    }).requestOutcome?.errorClass).toBe("unknown");
+    expect(classifier.classify({
+      report: withEvent([event("auth"), { ...event(), index: 1 }])
+    }).requestOutcome?.errorClass).toBe("unknown");
+    expect(classifier.classify({
+      report: report()
+    }).requestOutcome).toEqual({ errorClass: "unknown", evidenceRefs: [] });
+  });
+
   it("classifies a LOCATOR_NOT_FOUND as target_not_found with evidence refs", () => {
     const result = classifier.classify({ report: report() });
     expect(result.type).toBe("target_not_found");

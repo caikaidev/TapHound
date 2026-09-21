@@ -12,6 +12,8 @@ export type LogLevel = "V" | "D" | "I" | "W" | "E" | "F" | "A";
 
 export interface LogcatLine {
   receivedAt: number;
+  /** Device threadtime timestamp without a year; receivedAt remains the monotonic window clock. */
+  deviceTimestamp?: string | undefined;
   raw: string;
   pid?: number | undefined;
   tid?: number | undefined;
@@ -23,14 +25,24 @@ export interface LogcatLine {
 export interface LogcatMetadata {
   deviceSerial: string;
   pids: readonly number[];
+  droppedLines?: number | undefined;
+  droppedBytes?: number | undefined;
+  lastDroppedAtMs?: number | undefined;
 }
 
 export interface StartLogcatOptions {
   deviceSerial: string;
+  pids?: readonly number[] | undefined;
   signal?: AbortSignal | undefined;
 }
 
-const THREADTIME = /^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+\s+(\d+)\s+(\d+)\s+([VDIWEFA])\s+([^:]+):\s?(.*)$/;
+const THREADTIME = /^(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+)\s+(\d+)\s+(\d+)\s+([VDIWEFA])\s+(.+?):\s(.*)$/;
+
+interface DroppedEvidence {
+  lines: number;
+  bytes: number;
+  lastDroppedAt: number;
+}
 
 function parseLine(raw: string, receivedAt: number): LogcatLine {
   const match = THREADTIME.exec(raw);
@@ -38,8 +50,10 @@ function parseLine(raw: string, receivedAt: number): LogcatLine {
     return { receivedAt, raw };
   }
 
-  const [, pid, tid, level, tag, message] = match;
+  const [, deviceTimestamp, pid, tid, level, tag, message] = match;
   if (
+    deviceTimestamp === undefined
+    ||
     pid === undefined
     || tid === undefined
     || level === undefined
@@ -50,6 +64,7 @@ function parseLine(raw: string, receivedAt: number): LogcatLine {
   }
   return {
     receivedAt,
+    deviceTimestamp,
     raw,
     pid: Number(pid),
     tid: Number(tid),
@@ -71,6 +86,8 @@ function startupFailure(result: CommandResult): string {
 
 export class LogcatCollector {
   private readonly collected: LogcatLine[] = [];
+  private bufferedBytes = 0;
+  private readonly droppedByPid = new Map<number | undefined, DroppedEvidence>();
   private readonly stderr: string[] = [];
   private readonly scopedPids = new Set<number>();
   private running?: RunningCommand | undefined;
@@ -79,36 +96,47 @@ export class LogcatCollector {
 
   public constructor(
     private readonly adb: AdbPort,
-    private readonly clock: Clock
-  ) {}
-
-  public async start(options: StartLogcatOptions): Promise<void> {
-    if (this.running !== undefined) {
-      throw new Error("Logcat collector already started");
+    private readonly clock: Clock,
+    private readonly limits: { maxLines: number; maxBytes: number } = {
+      maxLines: 10000,
+      maxBytes: 2 * 1024 * 1024
     }
-
-    const logcatOptions: LogcatOptions = {
-      deviceSerial: options.deviceSerial,
-      onStdoutLine: (line): void => {
-        this.collected.push(parseLine(line, this.clock.now()));
-      },
-      onStderrLine: (line): void => {
-        this.stderr.push(line);
-      },
-      ...(options.signal === undefined ? {} : { signal: options.signal })
-    };
-    this.running = this.adb.startLogcat(logcatOptions);
-    this.streamMetadata = { deviceSerial: options.deviceSerial };
-    const startupResult = await this.running.started;
-    if (startupResult !== undefined) {
-      throw new Error(startupFailure(startupResult));
+  ) {
+    if (!Number.isInteger(limits.maxLines) || limits.maxLines < 1
+      || !Number.isInteger(limits.maxBytes) || limits.maxBytes < 1) {
+      throw new Error("Logcat buffer limits must be positive integers");
     }
   }
 
-  public scopeToPids(pids: readonly number[]): void {
-    if (this.streamMetadata === undefined) {
-      throw new Error("Logcat collector has not started");
+  private append(line: string): void {
+    const parsed = parseLine(line, this.clock.now());
+    if (this.scopedPids.size > 0 && parsed.pid !== undefined
+      && !this.scopedPids.has(parsed.pid)) {
+      return;
     }
+    const bytes = Buffer.byteLength(line, "utf8") + 1;
+    this.collected.push(parsed);
+    this.bufferedBytes += bytes;
+    while (
+      this.collected.length > this.limits.maxLines
+      || this.bufferedBytes > this.limits.maxBytes
+    ) {
+      const dropped = this.collected.shift();
+      if (dropped === undefined) {
+        break;
+      }
+      const size = Buffer.byteLength(dropped.raw, "utf8") + 1;
+      this.bufferedBytes -= size;
+      const previous = this.droppedByPid.get(dropped.pid);
+      this.droppedByPid.set(dropped.pid, {
+        lines: (previous?.lines ?? 0) + 1,
+        bytes: (previous?.bytes ?? 0) + size,
+        lastDroppedAt: dropped.receivedAt
+      });
+    }
+  }
+
+  private addScopedPids(pids: readonly number[]): void {
     for (const pid of pids) {
       if (!Number.isInteger(pid) || pid <= 0) {
         throw new Error("Logcat PID must be a positive integer");
@@ -117,23 +145,92 @@ export class LogcatCollector {
     }
   }
 
+  private droppedEvidence(): DroppedEvidence | undefined {
+    const relevant = [
+      this.droppedByPid.get(undefined),
+      ...[...this.scopedPids].map((pid) => this.droppedByPid.get(pid))
+    ].filter((entry): entry is DroppedEvidence => entry !== undefined);
+    if (relevant.length === 0) {
+      return undefined;
+    }
+    return {
+      lines: relevant.reduce((total, entry) => total + entry.lines, 0),
+      bytes: relevant.reduce((total, entry) => total + entry.bytes, 0),
+      lastDroppedAt: Math.max(...relevant.map((entry) => entry.lastDroppedAt))
+    };
+  }
+
+  public async start(options: StartLogcatOptions): Promise<void> {
+    if (this.running !== undefined) {
+      throw new Error("Logcat collector already started");
+    }
+    this.addScopedPids(options.pids ?? []);
+
+    const logcatOptions: LogcatOptions = {
+      deviceSerial: options.deviceSerial,
+      onStdoutLine: (line): void => {
+        this.append(line);
+      },
+      onStderrLine: (line): void => {
+        this.stderr.push(line);
+        if (this.stderr.length > 100) {
+          this.stderr.shift();
+        }
+      },
+      ...(options.signal === undefined ? {} : { signal: options.signal })
+    };
+    this.running = this.adb.startLogcat(logcatOptions);
+    this.streamMetadata = { deviceSerial: options.deviceSerial };
+    const startupResult = await this.running.started;
+    if (startupResult !== undefined) {
+      throw new Error(
+        this.stderr.join("\n").trim() || startupFailure(startupResult)
+      );
+    }
+  }
+
+  public scopeToPids(pids: readonly number[]): void {
+    if (this.streamMetadata === undefined) {
+      throw new Error("Logcat collector has not started");
+    }
+    this.addScopedPids(pids);
+  }
+
   public metadata(): LogcatMetadata {
     if (this.streamMetadata === undefined) {
       throw new Error("Logcat collector has not started");
     }
+    const dropped = this.droppedEvidence();
     return {
       deviceSerial: this.streamMetadata.deviceSerial,
-      pids: [...this.scopedPids].sort((left, right) => left - right)
+      pids: [...this.scopedPids].sort((left, right) => left - right),
+      ...(dropped === undefined ? {} : {
+        droppedLines: dropped.lines,
+        droppedBytes: dropped.bytes,
+        lastDroppedAtMs: dropped.lastDroppedAt
+      })
     };
   }
 
   public lines(): readonly LogcatLine[] {
     if (this.scopedPids.size === 0) {
-      return [...this.collected];
+      return [];
     }
+    return this.collected.filter(
+      (line) => line.pid !== undefined && this.scopedPids.has(line.pid)
+    );
+  }
+
+  /** Includes unparsed lines as raw artifacts, within the declared buffer limit. */
+  public rawLines(): readonly LogcatLine[] {
     return this.collected.filter(
       (line) => line.pid === undefined || this.scopedPids.has(line.pid)
     );
+  }
+
+  public completeSince(startedAt: number): boolean {
+    const dropped = this.droppedEvidence();
+    return dropped === undefined || dropped.lastDroppedAt < startedAt;
   }
 
   public diagnosticLines(): readonly string[] {

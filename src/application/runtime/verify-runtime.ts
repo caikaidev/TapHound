@@ -28,6 +28,7 @@ import type {
   RuntimeSessionPortViewsFactory
 } from "../../ports/runtime-session-ports.js";
 import type { AnchorResolverPort } from "../../ports/anchor-resolver.js";
+import type { LoadedKnowledgeBundle } from "../../ports/knowledge-registry.js";
 import type { AdbPort } from "../../ports/adb.js";
 import type {
   UiSnapshot,
@@ -36,6 +37,10 @@ import type {
 import type { DeviceAssignment } from "../devices/resolve-device-assignments.js";
 import { uiStabilityProbe } from "../ui/ui-stability-probe.js";
 import { LogcatCollector } from "../collector/logcat-collector.js";
+import {
+  CheckpointEvaluator,
+  type CheckpointEvaluation
+} from "../checkpoint/checkpoint-evaluator.js";
 import { logcatStopFailed } from "../collector/logcat-stop.js";
 import type { ReportWriter } from "../report/report-writer.js";
 import { ActivityWaiter } from "./activity-waiter.js";
@@ -44,7 +49,8 @@ import { ProcessWaiter } from "./process-waiter.js";
 import {
   StepRunner,
   type StepRunResult,
-  type StepRunnerOptions
+  type StepRunnerOptions,
+  type ReplayBinding
 } from "./step-runner.js";
 
 export type VerifyProgressEvent =
@@ -115,6 +121,11 @@ export interface VerifyRuntimeDependencies {
   createRunId: () => string;
   createStepRunner?: ((options: StepRunnerOptions) => StepRunnerLike) | undefined;
   anchorResolverFor?: ((projectRoot: string, workspaceRoot?: string  ) => AnchorResolverPort) | undefined;
+  loadKnowledge?: ((input: {
+    projectRoot: string;
+    workspaceRoot?: string | undefined;
+    packageName: string;
+  }) => Promise<LoadedKnowledgeBundle>) | undefined;
 }
 
 export interface VerifyResult {
@@ -182,6 +193,9 @@ function layerForFailure(code: FailureCode): keyof TapHoundReport["layers"] {
     return "activityCheckpoint";
   }
   if (code.startsWith("EXPECT_")) {
+    return "explicitExpect";
+  }
+  if (code === "CHECKPOINT_FAILED" || code === "CHECKPOINT_UNRESOLVED") {
     return "explicitExpect";
   }
   if (code === "COLLECTION_FAILED") {
@@ -322,6 +336,8 @@ export class VerifyRuntime {
       resolve(input.projectRoot, input.config.artifactsDir),
       runId
     );
+    const logcatRunStartedAt = this.dependencies.clock.now();
+    const markers = new Map<string, number>();
     const coverage = deviceCoverageFailure(input.journey, input.devices);
     const assignmentByRole = new Map(
       input.devices.map((assignment) => [assignment.role, assignment])
@@ -338,6 +354,11 @@ export class VerifyRuntime {
     const collectionErrors: ReportFailure[] = [];
     const hookOutcomes: VerifyHookOutcome[] = [];
     const steps: TapHoundReport["steps"] = [];
+    const checkpoints: NonNullable<TapHoundReport["checkpoints"]> = [];
+    const checkpointScreens: NonNullable<TapHoundReport["screens"]> = [];
+    const checkpointEvaluator = new CheckpointEvaluator();
+    let knowledge: LoadedKnowledgeBundle | undefined;
+    let knowledgeError: string | undefined;
     const layers: TapHoundReport["layers"] = {
       run: "notRun",
       structural: "notRun",
@@ -377,8 +398,87 @@ export class VerifyRuntime {
     };
 
     try {
+      if (input.journey.checkpoints?.some(
+        (checkpoint) => checkpoint.expect.screen !== undefined
+          || checkpoint.expect.allOf?.some((condition) => condition.kind === "screen")
+      )) {
+        if (this.dependencies.loadKnowledge === undefined) {
+          knowledgeError = "Project Knowledge loader is not configured";
+        } else {
+          try {
+            knowledge = await this.dependencies.loadKnowledge({
+              projectRoot: input.projectRoot,
+              ...(input.workspaceRoot === undefined
+                ? {}
+                : { workspaceRoot: input.workspaceRoot }),
+              packageName: input.config.run.packageName
+            });
+          } catch (error) {
+            knowledgeError = `Project Knowledge unavailable: ${errorMessage(error)}`;
+          }
+        }
+      }
+      const evaluateCheckpoint = async (
+        checkpoint: NonNullable<Journey["checkpoints"]>[number],
+        runtime: DeviceRuntime,
+        stepStartedAt?: number
+      ): Promise<boolean> => {
+        if (runtime.provider === undefined) {
+          setPrimary(
+            "CHECKPOINT_UNRESOLVED",
+            `Checkpoint ${checkpoint.id} has no UI snapshot provider`,
+            "checkpoint",
+            checkpoint.stepIndex
+          );
+          return false;
+        }
+        const evaluation: CheckpointEvaluation = await checkpointEvaluator.evaluate({
+          checkpoint,
+          provider: runtime.provider,
+          adb: runtime.views.adb,
+          packageName: input.config.run.packageName,
+          deviceSerial: runtime.deviceSerial,
+          timeoutMs: input.config.idle.timeoutMs,
+          clock: this.dependencies.clock,
+          logcat: runtime.logcat,
+          runStartedAt: logcatRunStartedAt,
+          markers,
+          logcatEvidenceRef: `logcat-${runtime.role}.txt`,
+          ...(stepStartedAt === undefined ? {} : { stepStartedAt }),
+          writeSnapshot: (path, snapshot) => session.writeJson(path, snapshot),
+          ...(knowledge === undefined ? {} : { knowledge }),
+          ...(knowledgeError === undefined ? {} : { knowledgeError }),
+          ...(input.signal === undefined ? {} : { signal: input.signal })
+        });
+        checkpoints.push(evaluation.report);
+        if (evaluation.matchedScreen !== undefined) {
+          checkpointScreens.push({
+            screen: evaluation.matchedScreen,
+            status: "matched"
+          });
+        }
+        if (evaluation.report.status !== "passed") {
+          setPrimary(
+            evaluation.report.status === "failed"
+              ? "CHECKPOINT_FAILED"
+              : "CHECKPOINT_UNRESOLVED",
+            `Checkpoint ${checkpoint.id} ${evaluation.report.status}: ${
+              evaluation.report.conditions
+                .filter((condition) => condition.status !== "passed")
+                .map((condition) => condition.message ?? condition.kind)
+                .join("; ")
+            }`,
+            "checkpoint",
+            checkpoint.stepIndex
+          );
+          return false;
+        }
+        return true;
+      };
       const createStepRunner = this.dependencies.createStepRunner
         ?? ((options: StepRunnerOptions): StepRunnerLike => new StepRunner(options));
+      // Fresh for every Replay, shared only across device runners in this run.
+      const bindings = new Map<string, ReplayBinding>();
       if (coverage === undefined) {
         for (const declaration of input.journey.devices) {
           const assignment = assignmentByRole.get(declaration.role);
@@ -580,6 +680,9 @@ export class VerifyRuntime {
             uiSnapshotProvider: provider,
             clock: this.dependencies.clock,
             logcat: runtime.logcat,
+            runStartedAt: logcatRunStartedAt,
+            markers,
+            bindings,
             artifacts: session,
             packageName: input.config.run.packageName,
             deviceSerial: runtime.deviceSerial,
@@ -687,6 +790,45 @@ export class VerifyRuntime {
             );
             break;
           }
+          const runtime = runtimeByRole.get(role);
+          if (runtime === undefined) {
+            throw new Error("Checkpoint device runtime is unavailable");
+          }
+          let checkpointFailed = false;
+          for (const checkpoint of input.journey.checkpoints ?? []) {
+            if (checkpoint.stepIndex !== index) {
+              continue;
+            }
+            if (!await evaluateCheckpoint(checkpoint, runtime, result.report.startedAtMs)) {
+              checkpointFailed = true;
+              break;
+            }
+          }
+          if (checkpointFailed) {
+            break;
+          }
+        }
+
+        if (
+          steps.length === input.journey.steps.length
+          && steps.every((step) => step.status === "passed")
+          && checkpoints.every((checkpoint) => checkpoint.status === "passed")
+        ) {
+          const lastStep = input.journey.steps.at(-1);
+          const lastRole = lastStep === undefined
+            ? soleRole
+            : stepDeviceRole(lastStep, soleRole);
+          const runtime = runtimeByRole.get(lastRole);
+          for (const checkpoint of input.journey.checkpoints ?? []) {
+            if (checkpoint.stepIndex !== undefined) {
+              continue;
+            }
+            if (runtime === undefined || !await evaluateCheckpoint(
+              checkpoint, runtime, steps.at(-1)?.startedAtMs
+            )) {
+              break;
+            }
+          }
         }
 
         if (input.hooks?.afterSteps !== undefined) {
@@ -790,7 +932,7 @@ export class VerifyRuntime {
             }
             await session.writeText(
               logcatPath,
-              runtime.logcat.lines().map((line) => line.raw).join("\n")
+              runtime.logcat.rawLines().map((line) => line.raw).join("\n")
             );
             logcatEntries.push({ role: runtime.role, path: logcatPath });
           } catch (error) {
@@ -836,6 +978,26 @@ export class VerifyRuntime {
         : "failed";
     const report: TapHoundReport = {
       schemaVersion: 4,
+      ...(runtimes.some((runtime) => runtime.logcatStarted
+        && (runtime.logcat.metadata().droppedLines ?? 0) > 0)
+        ? {
+            logcatEvidence: runtimes.flatMap((runtime) => {
+              if (!runtime.logcatStarted) {
+                return [];
+              }
+              const metadata = runtime.logcat.metadata();
+              return metadata.droppedLines === undefined ? [] : [{
+                role: runtime.role,
+                droppedLines: metadata.droppedLines,
+                droppedBytes: metadata.droppedBytes ?? 0,
+                ...(metadata.lastDroppedAtMs === undefined ? {} : {
+                  lastDroppedAtMs: metadata.lastDroppedAtMs
+                }),
+                status: "incomplete" as const
+              }];
+            })
+          }
+        : {}),
       runId,
       status,
       startedAt: startedAt.toISOString(),
@@ -872,15 +1034,19 @@ export class VerifyRuntime {
       },
       layers,
       steps,
+      ...(input.journey.checkpoints === undefined ? {} : { checkpoints }),
       screens: Array.from(new Map(
-        hookOutcomes.flatMap((outcome) => (
-          outcome.status === "passed" && outcome.screen !== undefined
-            ? [[outcome.screen, {
+        [
+          ...hookOutcomes.flatMap((outcome) => (
+            outcome.status === "passed" && outcome.screen !== undefined
+              ? [[outcome.screen, {
                 screen: outcome.screen,
                 status: "matched" as const
               }] as const]
-            : []
-        ))
+              : []
+          )),
+          ...checkpointScreens.map((screen) => [screen.screen, screen] as const)
+        ]
       ).values()),
       artifacts: {
         directory: session.finalDirectory,

@@ -81,6 +81,7 @@ describe("LogcatCollector", () => {
     });
     expect(collector.lines()).toEqual([{
       receivedAt: 125,
+      deviceTimestamp: "07-19 15:00:00.123",
       raw: "07-19 15:00:00.123  1234  1235 D SearchViewModel: query=hello world",
       pid: 1234,
       tid: 1235,
@@ -90,6 +91,27 @@ describe("LogcatCollector", () => {
     }]);
   });
 
+  it("applies known PIDs before startup output can enter the buffer", async () => {
+    const adb = adbPort();
+    vi.mocked(adb.startLogcat).mockImplementation((options) => {
+      options.onStdoutLine(
+        "07-19 15:00:00.100  41  41 D Other: startup noise"
+      );
+      options.onStdoutLine(
+        "07-19 15:00:00.101  42  42 D App: startup evidence"
+      );
+      return runningCommand();
+    });
+    const collector = new LogcatCollector(adb, new FakeClock());
+
+    await collector.start({ deviceSerial: "device", pids: [42] });
+
+    expect(collector.lines().map((line) => line.message))
+      .toEqual(["startup evidence"]);
+    expect(collector.rawLines().map((line) => line.message))
+      .toEqual(["startup evidence"]);
+  });
+
   it("preserves an unparsed line as raw evidence", async () => {
     const adb = adbPort();
     const collector = new LogcatCollector(adb, new FakeClock());
@@ -97,10 +119,11 @@ describe("LogcatCollector", () => {
 
     captureOptions(adb).onStdoutLine("--------- beginning of main");
 
-    expect(collector.lines()).toEqual([{
+    expect(collector.rawLines()).toEqual([{
       receivedAt: 0,
       raw: "--------- beginning of main"
     }]);
+    expect(collector.lines()).toEqual([]);
   });
 
   it("slices lines using an inclusive monotonic time window", async () => {
@@ -111,16 +134,93 @@ describe("LogcatCollector", () => {
     const options = captureOptions(adb);
 
     clock.currentTime = 9;
-    options.onStdoutLine("before");
+    options.onStdoutLine("07-19 15:00:00.001  42  42 D App: before");
     clock.currentTime = 10;
-    options.onStdoutLine("start");
+    options.onStdoutLine("07-19 15:00:00.002  42  42 D App: start");
     clock.currentTime = 20;
-    options.onStdoutLine("end");
+    options.onStdoutLine("07-19 15:00:00.003  42  42 D App: end");
     clock.currentTime = 21;
-    options.onStdoutLine("after");
+    options.onStdoutLine("07-19 15:00:00.004  42  42 D App: after");
+    collector.scopeToPids([42]);
 
     expect(collector.linesBetween(10, 20).map((line) => line.raw))
-      .toEqual(["start", "end"]);
+      .toEqual([
+        "07-19 15:00:00.002  42  42 D App: start",
+        "07-19 15:00:00.003  42  42 D App: end"
+      ]);
+  });
+
+  it("parses colon-containing tags without confusing message colons", async () => {
+    const adb = adbPort();
+    const collector = new LogcatCollector(adb, new FakeClock());
+    await collector.start({ deviceSerial: "device" });
+    collector.scopeToPids([42]);
+    captureOptions(adb).onStdoutLine(
+      "07-19 15:00:00.123  42  42 I Network:Search: result: ready"
+    );
+    expect(collector.lines()[0]).toMatchObject({
+      deviceTimestamp: "07-19 15:00:00.123",
+      tag: "Network:Search",
+      message: "result: ready"
+    });
+  });
+
+  it("excludes unparsed lines from matching while keeping raw artifacts", async () => {
+    const adb = adbPort();
+    const collector = new LogcatCollector(adb, new FakeClock());
+    await collector.start({ deviceSerial: "device" });
+    collector.scopeToPids([42]);
+    captureOptions(adb).onStdoutLine("not threadtime App: secret");
+    expect(collector.lines()).toEqual([]);
+    expect(collector.rawLines()).toHaveLength(1);
+  });
+
+  it("bounds retained lines and bytes and declares dropped evidence", async () => {
+    const adb = adbPort();
+    const clock = new FakeClock();
+    const collector = new LogcatCollector(adb, clock, {
+      maxLines: 2, maxBytes: 100
+    });
+    await collector.start({ deviceSerial: "device" });
+    const options = captureOptions(adb);
+    clock.currentTime = 1;
+    options.onStdoutLine("07-19 15:00:00.001  42  42 D App: first");
+    clock.currentTime = 2;
+    options.onStdoutLine("07-19 15:00:00.002  42  42 D App: second");
+    clock.currentTime = 3;
+    options.onStdoutLine("07-19 15:00:00.003  42  42 D App: third");
+    collector.scopeToPids([42]);
+    expect(collector.lines()).toHaveLength(2);
+    expect(collector.completeSince(1)).toBe(false);
+    expect(collector.completeSince(2)).toBe(true);
+    expect(collector.metadata()).toMatchObject({
+      droppedLines: 1,
+      droppedBytes: expect.any(Number) as number
+    });
+  });
+
+  it("does not treat another PID's dropped lines as scoped evidence loss", async () => {
+    const adb = adbPort();
+    const clock = new FakeClock();
+    const collector = new LogcatCollector(adb, clock, {
+      maxLines: 2, maxBytes: 200
+    });
+    await collector.start({ deviceSerial: "device" });
+    const options = captureOptions(adb);
+    clock.currentTime = 1;
+    options.onStdoutLine("07-19 15:00:00.001  41  41 D Other: first");
+    clock.currentTime = 2;
+    options.onStdoutLine("07-19 15:00:00.002  41  41 D Other: second");
+    clock.currentTime = 3;
+    options.onStdoutLine("07-19 15:00:00.003  41  41 D Other: third");
+
+    collector.scopeToPids([42]);
+
+    expect(collector.completeSince(0)).toBe(true);
+    expect(collector.metadata()).toEqual({
+      deviceSerial: "device",
+      pids: [42]
+    });
   });
 
   it("starts before launch and scopes buffered and future lines to the App PID", async () => {
@@ -135,6 +235,7 @@ describe("LogcatCollector", () => {
       "07-19 15:00:00.101  42  42 D App: startup"
     );
 
+    expect(collector.lines()).toEqual([]);
     collector.scopeToPids([42]);
     options.onStdoutLine(
       "07-19 15:00:00.102  41  41 D Other: ignore later"
@@ -148,6 +249,8 @@ describe("LogcatCollector", () => {
       pids: [42]
     });
     expect(collector.lines().map((line) => line.message))
+      .toEqual(["startup", "ready"]);
+    expect(collector.rawLines().map((line) => line.message))
       .toEqual(["startup", "ready"]);
   });
 

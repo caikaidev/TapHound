@@ -95,7 +95,12 @@ the observe result).
    - `logcat`: a specific log line should be emitted (e.g., the source code
      shows `Log.i("SearchViewModel", "submitted query=" + query)` — use
      `tag: "SearchViewModel"`, `pattern: "submitted query=..."`,
-     `match: "literal"`).
+     `match: "literal"`). A `literal` pattern must be the stable prefix of the
+     logged message, never a whole line copied from a device run: drop every
+     run-varying tail such as `@1f3a2b` identity hashes, object `toString()`
+     dumps, timestamps, durations, counts, and generated IDs. When only a
+     varying middle can identify the event, use `match: "regex"` and anchor
+     the stable words instead of the varying text.
    - `activity`: a specific Activity should be foregrounded.
    - Do not add expectations you cannot verify from source code or Context.
    - Do not invent log patterns that don't exist in the source.

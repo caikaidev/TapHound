@@ -629,6 +629,20 @@ Run it after each campaign, then start new sessions under the evolved hash.
   match against the `observe` snapshot, not static XML.
 - `inputText` steps do not include a `locator` — the Core uses the
   currently focused element.
+- `inputText` with non-ASCII text (CJK, emoji, accents) is not typed through
+  `adb shell input text`, which cannot deliver those characters. The ADB
+  backend automatically routes non-ASCII text through the mobilenext
+  devicekit clipboard (set clipboard by broadcast, `KEYCODE_PASTE`, clear
+  clipboard). That app must be installed on the device, otherwise the step
+  fails with a message naming
+  `https://github.com/mobile-next/devicekit-android`. Do not work around a
+  missing devicekit by substituting ASCII text when the Case requires the
+  original characters.
+- `logcat` expectations bind a pattern, not a captured line. Keep `literal`
+  patterns to the stable prefix emitted by the source and drop run-varying
+  tails (identity hashes like `@1f3a2b`, timestamps, durations, IDs), or
+  switch to `match: "regex"` anchored on the stable words. A whole line
+  copied from one device run will not reproduce on replay.
 - `generation status --json` exposes `pendingConfirmation.expired`. While a
   challenge remains pending, `observe` returns
   `RISK_CONFIRMATION_REQUIRED`, not a retryable observation failure. An

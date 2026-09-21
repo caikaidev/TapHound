@@ -6,6 +6,7 @@ import android.util.Log
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
+import org.json.JSONObject
 
 class SearchActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -19,7 +20,15 @@ class SearchActivity : Activity() {
         findViewById<Button>(R.id.submit_search).setOnClickListener {
             val query = input.text.toString()
             result.text = query
+            result.contentDescription = "submitted query=$query"
             Log.i("SearchViewModel", "submitted query=$query")
+            Log.i(
+                "SearchEvent",
+                JSONObject()
+                    .put("event", "resultsReady")
+                    .put("fields", JSONObject().put("query", query))
+                    .toString()
+            )
         }
     }
 }

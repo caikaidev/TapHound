@@ -7,6 +7,8 @@ import { describe, expect, it } from "vitest";
 
 import { TapHoundConfigSchema } from "../../src/domain/config.js";
 import { JourneySchema } from "../../src/domain/journey.js";
+import { AcceptanceContractSchema } from "../../src/domain/contract.js";
+import { hashJourney } from "../../src/domain/report.js";
 
 const root = join(process.cwd(), "examples", "taphound-android-demo");
 
@@ -19,6 +21,57 @@ async function json(relativePath: string): Promise<unknown> {
 }
 
 describe("TapHound Android acceptance fixture", () => {
+  it("binds the P4 event Capture Journey to existing demo source without modifying benchmarks", async () => {
+    const journey = JourneySchema.parse(
+      await json(".taphound/journeys/acceptance-binding.json")
+    );
+    const search = await text("app/src/main/java/dev/taphound/demo/SearchActivity.kt");
+    expect(search).toContain('.put("fields", JSONObject().put("query", query))');
+    expect(journey.steps[4]?.expect).toMatchObject({
+      type: "logcatEvent",
+      capture: { name: "query", field: "query", valueType: "string" }
+    });
+    expect(journey.steps[5]).toMatchObject({
+      action: "inputText", text: "${query}"
+    });
+    expect(journey.steps[6]?.expect).toMatchObject({
+      type: "logcatEvent",
+      correlation: { key: "query", value: "${query}" },
+      window: { from: "marker", markerId: "binding-start" }
+    });
+  });
+
+  it("binds the structured event and required Checkpoint to source-backed demo behavior", async () => {
+    const journey = JourneySchema.parse(
+      await json(".taphound/journeys/acceptance-event.json")
+    );
+    const contract = AcceptanceContractSchema.parse(
+      await json(".taphound/contracts/acceptance-event.json")
+    );
+    const search = await text(
+      "app/src/main/java/dev/taphound/demo/SearchActivity.kt"
+    );
+    expect(search).toContain('Log.i(\n                "SearchEvent"');
+    expect(search).toContain('.put("event", "resultsReady")');
+    expect(search).toContain('.put("fields", JSONObject().put("query", query))');
+    expect(journey.steps[1]).toMatchObject({
+      action: "wait", markerId: "search-start"
+    });
+    expect(journey.steps[4]?.expect).toMatchObject({
+      type: "logcatEvent", tag: "SearchEvent", event: "resultsReady",
+      fields: { query: "hello world" }, window: { from: "stepStart" }
+    });
+    expect(journey.checkpoints?.[0]?.expect.allOf).toMatchObject([
+      { kind: "visibleElement" }, { kind: "absentElement" }, {
+        kind: "logcatEvent", expect: {
+          window: { from: "marker", markerId: "search-start" }
+        }
+      }
+    ]);
+    expect(contract.journey.sha256).toBe(hashJourney(journey));
+    expect(contract.requiredCheckpoints).toEqual(["search-event-ready"]);
+  });
+
   it("includes a pinned, executable Gradle Wrapper", async () => {
     const wrapperScript = join(root, "gradlew");
     const wrapperProperties = await text(
@@ -99,23 +152,39 @@ describe("TapHound Android acceptance fixture", () => {
     ]));
   });
 
-  it("matches the deterministic Logcat expectation to App behavior", async () => {
-    const journey = JourneySchema.parse(await json(".taphound/journeys/search.json"));
+  it("matches submission evidence to the demo behavior", async () => {
+    const benchmark = JourneySchema.parse(await json(".taphound/journeys/search.json"));
+    const journey = JourneySchema.parse(
+      await json(".taphound/journeys/acceptance-search.json")
+    );
     const search = await text(
       "app/src/main/java/dev/taphound/demo/SearchActivity.kt"
     );
-    const logcat = journey.steps.find(
-      (step) => step.expect?.type === "logcat"
-    )?.expect;
-
-    expect(logcat).toMatchObject({
+    expect(benchmark.steps[3]?.expect).toMatchObject({
       type: "logcat",
       tag: "SearchViewModel",
       level: "I",
-      pattern: "submitted query=hello world",
-      match: "literal"
+      pattern: "submitted query=hello world"
     });
+    expect(journey.steps.slice(0, 3)).toEqual(benchmark.steps.slice(0, 3));
+    expect(journey.steps[3]).toMatchObject({
+      action: "click",
+      locator: { resourceId: "submit_search" },
+      activity: benchmark.steps[3]?.activity
+    });
+    expect(journey.steps[3]?.expect).toMatchObject({
+      type: "element",
+      locator: { contentDescription: "submitted query=hello world" }
+    });
+    expect(search).toContain('result.contentDescription = "submitted query=$query"');
     expect(search).toContain('Log.i("SearchViewModel", "submitted query=$query")');
+    const generation = await readFile(
+      join(process.cwd(), "scripts", "acceptance-generation.mjs"),
+      "utf8"
+    );
+    expect(generation).toContain(
+      'locator: { contentDescription: "submitted query=hello world" }'
+    );
   });
 
   it("requires explicit opt-in before the device acceptance runner invokes TapHound", async () => {
@@ -133,6 +202,7 @@ describe("TapHound Android acceptance fixture", () => {
     expect(runner).toContain("TAPHOUND_ACCEPTANCE_DEVICE");
     expect(runner).toContain('"dist", "cli", "main.js"');
     expect(runner).toContain("verify");
+    expect(runner).toContain('"acceptance-search.json"');
     expect(runner).toContain("--json");
     expect(scripts?.["acceptance:device"])
       .toBe("node scripts/acceptance-device.mjs");

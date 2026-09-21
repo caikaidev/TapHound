@@ -39,13 +39,22 @@ not own and never bypasses:
   known-good run.
 - `taphound knowledge feature-map --markdown` — low-token registry projection
   for orientation.
-- `taphound contract validate` / `contract review` / `playbook validate` —
+- `taphound contract` / `contract review` / `playbook validate` —
   Acceptance Contract and Escalation Policy tooling.
 - `taphound local sync <id>` — copy project assets into a local target's
   workspace before `--target` runs.
 
 This Skill's own contract remains unchanged: one Case Goal, one deterministic
 generation session, final Replay in `generation finalize`.
+
+Generation commands canonicalize a relative `--project` before binding it.
+Replay waits up to the bound idle timeout when an action locator is absent,
+using fresh snapshots; ambiguity and locator-evidence drift still fail
+immediately. If final Replay deterministically fails, use `generation reopen
+--reason <text>` before `generation step --replace <index>` so the failed
+attempt remains in `verificationHistory`. Interrupted verification continues
+to use `generation recover --decision retry`, whose `nextAction` requires
+rerunning finalize.
 
 This Skill requires a valid Project Context as a prerequisite. The
 `taphound-journey-brief-author` Skill is the recommended producer — it analyzes
@@ -58,7 +67,8 @@ to run first; it never generates or repairs Context itself.
 All file references are relative to `assets/skills/taphound-journey-generator/`.
 The directory contains `prompts/` (Flow selection, step generation,
 completion check, Brief validation), `schemas/` (JSON Schemas for proposals,
-observe output, Flows, Journey sources), and `templates/` (example files).
+observe output, Flows, Journey sources), `templates/` (example files), and
+`scripts/envelope.mjs` (offline envelope validation plus binding auto-fill).
 Read the relevant schema and prompt before each phase.
 
 ## How to Use This Skill
@@ -95,9 +105,13 @@ risk confirmation, recovery, or final Replay rules.
 
 ## Optional Journey Brief Contract
 
-`journeyBrief` is the Skill-level handoff for one Journey Case. It is not a
-TapHound Core CLI option. When present, it carries `{path, sha256}` pointing
-to a project-relative `taphound-journey-brief.md`. Read
+`journeyBrief` is the Skill-level handoff for one Journey Case. When present,
+it carries `{path, sha256}` pointing to a project-relative
+`taphound-journey-brief.md`. Bind the same path into Core with
+`generation start --brief <path>`: Core reads the file itself, computes the
+SHA-256 (never trust an agent-supplied hash), and persists `sourceBrief` in
+the session and the exported meta sidecar, so `journey check` reports
+`brief-drift` or `brief-missing` when the Brief later changes. Read
 `prompts/consume-journey-brief.md` for validation rules: verify the SHA-256,
 validate frontmatter (`schemaVersion: 2`, `kind: taphound.journeyBrief`),
 require fixed sections (`Goal`, `Preconditions`, `Expected Journey`,
@@ -269,7 +283,18 @@ them with `MANUAL_STEP_REQUIRED`.
 
    c. **Generate proposed step**: Read `prompts/generate-step.md`. Build the
       envelope (proposed step + binding + full snapshot) and write to a temp
-      file:
+      file. Prefer the offline helper instead of hand-copying binding fields:
+      ```bash
+      node <skill>/scripts/envelope.mjs bind \
+        --input <draft-envelope-path> \
+        --from <previous-observe-or-step-output-path> \
+        --out <envelope-path>
+      ```
+      The draft envelope needs only `version` and `proposal` (binding may be
+      omitted or stale); `bind` fills `proposal.binding` from the preceding
+      observe output, step output, or raw binding, adds `snapshotRef` when
+      absent, and validates the result offline. The helper contract:
+      `node <skill>/scripts/envelope.mjs help`. The resulting shape:
       ```json
       {
         "version": 1,
@@ -512,12 +537,14 @@ Run it after each campaign, then start new sessions under the evolved hash.
    The newly published Journey must classify as `fresh`. `journey check`
    audits every committed Journey under `.taphound/journeys` by comparing
    its sidecar bindings (project, config, and `contextSelection` module
-   hashes) against the live project. `--strict` exits `1` when any Journey
+   hashes, plus the Brief content hash when `sourceBrief` is bound) against
+   the live project. `--strict` exits `1` when any Journey
    is stale, invalid, or missing its sidecar — suitable for CI. Sidecars
    published before `contextSelection` was recorded classify as `stale`
    with reason `meta-legacy`; re-running `generation finalize` on the
    original session with the same `--output` re-exports the sidecar with
-   the field.
+   the field. A bound Brief that changed or disappeared reports
+   `brief-drift` or `brief-missing` respectively.
 
 5. Promote the replay-verified Journey into a durable asset when it should
    become a protected baseline:

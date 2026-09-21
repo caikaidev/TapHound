@@ -33,6 +33,14 @@ export const KNOWLEDGE_RECEIPTS_DIR = `${BUILD_DIR}/knowledge-receipts`;
 export const BENCHMARK_RUNS_DIR = `${BUILD_DIR}/benchmark-runs`;
 export const FALSE_DONE_DIR = `${TAPHOUND_DIR}/false-done`;
 export const FALSE_DONE_RUNS_DIR = `${BUILD_DIR}/false-done-runs`;
+export const WORKFLOWS_DIR = `${BUILD_DIR}/workflows`;
+
+export function workflowManifestPath(caseId: string): string {
+  if (!/^[a-z][a-z0-9-]{0,63}$/.test(caseId)) {
+    throw new Error("Workflow Case id must be a safe lowercase path component");
+  }
+  return `${WORKFLOWS_DIR}/${caseId}/manifest.json`;
+}
 export const TARGETS_DIR = "benchmarks";
 export const TARGETS_CONFIG_PATH = `${TARGETS_DIR}/targets.json`;
 export const TARGETS_LOCAL_CONFIG_PATH = `${TARGETS_DIR}/targets.local.json`;

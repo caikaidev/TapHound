@@ -220,6 +220,7 @@ taphound generation start \
   --module :feature:search \
   --device emulator-5554 \
   --base-flow search/open \
+  --brief taphound-journey-brief.md \
   --json
 ```
 
@@ -227,6 +228,13 @@ Omit `--base-flow` when no existing Flow applies. With a base Flow, Core first
 cold-launches and exactly replays the resolved prefix. A clean replay becomes
 the immutable candidate prefix, and the first `observe` starts from the Flow's
 exit Activity.
+
+Omit `--brief` when no Journey Brief is bound. When the invocation carries a
+`journeyBrief: {path, sha256}` binding, pass the same project-relative path via
+`--brief`: Core reads the file itself, computes the SHA-256 content hash (never
+trust an agent-supplied hash), and binds `sourceBrief` into the session and the
+exported meta sidecar. An unreadable file or an escaping path fails with
+`BRIEF_INVALID` before any device work.
 
 **Output** (`--json` mode writes exactly one JSON object to stdout):
 
@@ -359,7 +367,21 @@ the AI might generate:
 ### 3.6 Step 4 — Build Envelope and Execute
 
 Combine the AI-generated proposed step with the binding and snapshot into
-a complete envelope:
+a complete envelope. Prefer the offline helper so binding fields are never
+hand-copied and envelope errors surface before submit:
+
+```bash
+node <skill>/scripts/envelope.mjs bind \
+  --input /tmp/taphound-step-draft.json \
+  --from /tmp/taphound-observe-output.json \
+  --out /tmp/taphound-step.json
+```
+
+The draft needs only `version` and `proposal` (binding may be omitted or
+stale); `bind` fills `proposal.binding` from the preceding observe/step
+output, adds `snapshotRef` when absent, and validates offline. To check an
+already-complete envelope without binding, run `validate --input` instead.
+The resulting envelope:
 
 ```json
 {
@@ -707,6 +729,24 @@ Rules:
   trail; the published manifest is rebuilt from the surviving evidence at
   finalize.
 
+If final Replay already completed with deterministic `verification.status:
+"failed"`, first reopen the session with an explicit audit reason:
+
+```bash
+taphound generation reopen \
+  --project /path/to/android-project \
+  --session <generationId> \
+  --reason "repair the failed locator at step 2" \
+  --json
+```
+
+Reopen appends the previous failure, failed revision, reason, and timestamp
+to `verificationHistory`, then atomically resets verification to `notRun`.
+It does not change candidate steps. Use `generation step --replace <index>`
+next, then rerun `generation finalize`. Do not use `reopen` for an
+interrupted `running` verification; that path requires `generation recover`
+and explicit retry acknowledgement.
+
 ### 3.8 Step 6 — Finalize and Verify
 
 After all steps are complete, start finalize detached:
@@ -740,7 +780,9 @@ taphound generation status \
 ```
 
 After verification and publication become terminal, parse the detached
-finalize JSON at `outputPath`.
+finalize JSON at `outputPath`. A detached child that exits or is killed before
+writing normal command JSON produces a structured
+`DETACHED_PROCESS_CRASHED` result there instead of leaving a zero-byte file.
 
 **Success**:
 
@@ -835,8 +877,8 @@ and classifies each entry:
 
 | Status | Meaning |
 |--------|---------|
-| `fresh` | Journey parses and every sidecar binding matches the live project (project/config hashes, journey path, and each `contextSelection` module's `sha256` against the live Context index) |
-| `stale` | Structurally valid but a binding drifted: `project-hash`, `config-hash`, `journey-path-mismatch`, `module-drift`, `module-missing`, or `meta-legacy` |
+| `fresh` | Journey parses and every sidecar binding matches the live project (project/config hashes, journey path, and each `contextSelection` module's `sha256` against the live Context index, plus the bound Brief file's content hash when `sourceBrief` is present) |
+| `stale` | Structurally valid but a binding drifted: `project-hash`, `config-hash`, `journey-path-mismatch`, `module-drift`, `module-missing`, `meta-legacy`, `brief-drift`, or `brief-missing` |
 | `no-meta` | No sidecar exists, so freshness cannot be proven |
 | `invalid` | Journey or sidecar is unreadable or fails its schema |
 
@@ -856,6 +898,12 @@ Sidecars published before `contextSelection` was recorded classify as
 `generation finalize` on the original session with the same `--output`
 re-exports the sidecar with the field; publication to the same path is
 idempotent and does not repeat the verification replay.
+
+A sidecar bound with `sourceBrief` re-hashes the Brief file on every check:
+changed content reports `brief-drift` and a removed file reports
+`brief-missing` (both `stale`). Re-run `generation finalize` on the original
+session after the Brief changes to re-bind the new hash, or retire the
+Journey if the Brief's Goal no longer applies.
 
 ### 3.12 Promote a Verified Journey
 
@@ -1002,6 +1050,7 @@ Each Goal is an independent generation session and does not affect others.
 | `MANUAL_STEP_REQUIRED` | Non-interactive finalize encountered a `replayMode: "manual"` step | Bind an External Flow (`--flow`) or run finalize in a TTY |
 | `APP_CRASHED` | App process crashed | Check Logcat, restart app |
 | `IDLE_TIMEOUT` | Configured idle strategy did not stabilize | Inspect `failure.details.idle`; hot-adjust with `generation config idle`, then re-observe |
+| `EXPECT_LOGCAT_FAILED` with `droppedLines` diagnostics | No retained match can be trusted after scoped Logcat buffer loss | Inspect the step Logcat and diagnostics; retry only after reducing same-PID noise or narrowing the assertion. A retained positive match already passes automatically |
 | `VERIFICATION_FAILED` from `step --replace` | The stored prefix no longer replays exactly | Session is untouched; inspect the failure, fix the root cause, or continue without replace |
 | `RISK_CONFIRMATION_REQUIRED` | Action requires user confirmation or a pending challenge blocks progress | Inspect `generation status`, present the exact challenge, and apply only the user's explicit decision |
 | `ACTION_FORBIDDEN` | Action is forbidden by policy | Use a different action or adjust policy |
@@ -1041,9 +1090,15 @@ taphound generation recover \
 
 `recover` only clears the recovery lock after explicit acknowledgement. It
 does not commit the previous action, capture a post-action snapshot, or return
-`nextBinding`/`nextSnapshotRef`. Run `generation observe` afterward. If the
-action already took effect, stop rather than continuing with a candidate that
-omits it or automatically repeating it.
+`nextBinding`/`nextSnapshotRef`. Its JSON includes `recoveryKind` and
+`nextAction`: after step recovery, inspect with `generation observe` before
+deciding whether to retry; after verification recovery, rerun
+`generation finalize`. If an action already took effect, stop rather than
+continuing with a candidate that omits it or automatically repeating it.
+
+A deterministic final Replay failure is not an interrupted attempt and is not
+eligible for `recover`. Use `generation reopen --reason <text>` to preserve
+that failure in the session audit history before repairing steps.
 
 The config, including `idle.strategy`, is bound when the session starts. The
 idle policy alone can be hot-adjusted mid-session through

@@ -224,11 +224,8 @@ const stepTemplates = [
       before: "dev.taphound.demo.SearchActivity"
     },
     expect: {
-      type: "logcat",
-      tag: "SearchViewModel",
-      level: "I",
-      pattern: "submitted query=hello world",
-      match: "literal",
+      type: "element",
+      locator: { contentDescription: "submitted query=hello world" },
       timeoutMs: 3000
     }
   }

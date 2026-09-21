@@ -1,0 +1,83 @@
+{
+  "version": 2,
+  "name": "Demo independent event Binding acceptance",
+  "devices": [{ "role": "default" }],
+  "steps": [
+    {
+      "action": "click",
+      "locator": { "resourceId": "open_search" },
+      "activity": {
+        "before": "dev.taphound.demo.MainActivity",
+        "after": "dev.taphound.demo.SearchActivity"
+      }
+    },
+    {
+      "action": "wait",
+      "markerId": "binding-start",
+      "activity": {
+        "before": "dev.taphound.demo.SearchActivity",
+        "after": "dev.taphound.demo.SearchActivity"
+      }
+    },
+    {
+      "action": "click",
+      "locator": { "resourceId": "search_input" },
+      "activity": {
+        "before": "dev.taphound.demo.SearchActivity",
+        "after": "dev.taphound.demo.SearchActivity"
+      }
+    },
+    {
+      "action": "inputText",
+      "text": "hello world",
+      "activity": {
+        "before": "dev.taphound.demo.SearchActivity",
+        "after": "dev.taphound.demo.SearchActivity"
+      }
+    },
+    {
+      "action": "click",
+      "locator": { "resourceId": "submit_search" },
+      "activity": {
+        "before": "dev.taphound.demo.SearchActivity",
+        "after": "dev.taphound.demo.SearchActivity"
+      },
+      "expect": {
+        "type": "logcatEvent",
+        "tag": "SearchEvent",
+        "event": "resultsReady",
+        "fields": { "query": "hello world" },
+        "capture": {
+          "name": "query",
+          "field": "query",
+          "valueType": "string"
+        },
+        "window": { "from": "stepStart" },
+        "timeoutMs": 1200
+      }
+    },
+    {
+      "action": "inputText",
+      "text": "${query}",
+      "activity": {
+        "before": "dev.taphound.demo.SearchActivity",
+        "after": "dev.taphound.demo.SearchActivity"
+      }
+    },
+    {
+      "action": "wait",
+      "activity": {
+        "before": "dev.taphound.demo.SearchActivity",
+        "after": "dev.taphound.demo.SearchActivity"
+      },
+      "expect": {
+        "type": "logcatEvent",
+        "tag": "SearchEvent",
+        "event": "resultsReady",
+        "correlation": { "key": "query", "value": "${query}" },
+        "window": { "from": "marker", "markerId": "binding-start" },
+        "timeoutMs": 1200
+      }
+    }
+  ]
+}

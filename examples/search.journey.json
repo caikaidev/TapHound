@@ -25,6 +25,7 @@
         "locator": {
           "resourceId": "search_input"
         },
+        "enabled": true,
         "timeoutMs": 3000
       }
     },

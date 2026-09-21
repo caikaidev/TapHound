@@ -22,8 +22,66 @@ describe("FileSystemSkillInstaller", () => {
     const installer = new FileSystemSkillInstaller();
     const names = await installer.listSkillNames();
 
-    expect(names).toContain("taphound-journey-generator");
-    expect(names.length).toBeGreaterThanOrEqual(1);
+    expect([...names].sort()).toEqual([
+      "taphound-accept",
+      "taphound-case-suite",
+      "taphound-journey-brief-author",
+      "taphound-journey-generator",
+      "taphound-preserve"
+    ]);
+  });
+
+  it("installs the multi-Case Suite workflow with its durable Ledger helper", async () => {
+    const installer = new FileSystemSkillInstaller();
+    const target = await mkdtemp(join(tmpdir(), "taphound-case-suite-skill-"));
+    try {
+      const destination = join(target, "taphound-case-suite");
+      await installer.installTo("taphound-case-suite", destination);
+      const content = await readFile(join(destination, "SKILL.md"), "utf8");
+      expect(content).toContain("one Case at a time");
+      expect(content).toContain("case-ledger.json");
+      expect(content).toContain("independent Replay");
+      expect(await readdir(join(destination, "schemas")))
+        .toContain("case-ledger.schema.json");
+      expect(await readFile(
+        join(destination, "scripts", "ledger.mjs"), "utf8"
+      )).toContain("CASE_SUITE_REVISION_CONFLICT");
+    } finally {
+      await rm(target, { recursive: true, force: true });
+    }
+  });
+
+  it("installs both public-CLI-only Workflow Skills", async () => {
+    const installer = new FileSystemSkillInstaller();
+    const target = await mkdtemp(join(tmpdir(), "taphound-workflow-skills-"));
+    try {
+      for (const name of ["taphound-accept", "taphound-preserve"]) {
+        const destination = join(target, name);
+        await installer.installTo(name, destination);
+        const content = await readFile(join(destination, "SKILL.md"), "utf8");
+        expect(content).toContain("workflowManifestPath(caseId)");
+        expect(content).toContain("PAUSED");
+        expect(content).toContain("taphound verify");
+        expect(content).not.toContain("FileSystemGenerationSessionStore");
+        if (name === "taphound-accept") {
+          expect(content).toContain(
+            "taphound contract --project <project> --contract <path> --json"
+          );
+          expect(content).not.toContain("taphound contract validate");
+        } else {
+          expect(content).toContain("scripts/handoff.mjs");
+          const helper = await readFile(join(destination, "scripts", "handoff.mjs"), "utf8");
+          expect(helper).toContain('status: "PAUSED"');
+          const refactor = await readFile(
+            join(destination, "scripts", "ui-refactor.mjs"), "utf8"
+          );
+          expect(refactor).toContain("frozen observables");
+          expect(content).toContain("Large UI refactor");
+        }
+      }
+    } finally {
+      await rm(target, { recursive: true, force: true });
+    }
   });
 
   it("installs a named skill payload to a target directory", async () => {

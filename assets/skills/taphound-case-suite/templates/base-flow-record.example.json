@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "expectedRevision": 4,
+  "name": "mail/open-target-message",
+  "path": ".taphound/flows/mail/open-target-message.json",
+  "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "exitActivity": "com.example.mail.MailDetailActivity",
+  "journey": {
+    "path": ".taphound/journeys/flow-proofs/mail-open-target-message.json",
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "resolutionManifest": {
+    "path": ".taphound/journeys/flow-proofs/mail-open-target-message.resolve.json",
+    "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "report": {
+    "path": ".taphound/build/runs/base-flow-proof/report.json",
+    "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  }
+}

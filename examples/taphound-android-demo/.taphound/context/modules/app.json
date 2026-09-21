@@ -19,41 +19,49 @@
       {
         "path": "app/src/main/AndroidManifest.xml",
         "sha256": "ca7814285418d72ff2270b3c64103fdf44d0b57238ce3e306e2c6e596408e937",
+        "semanticSha256": "473cfba7ae52e2b62d5f43ca584630582c3690040d728c8ccdd6e26439153dd4",
         "confidence": "sourceConfirmed"
       },
       {
         "path": "app/src/main/java/dev/taphound/demo/MainActivity.kt",
         "sha256": "c34dce18189c80c27b9b57f1650c698fadfc1d957b36060cd4762afce9b8065c",
+        "semanticSha256": "c78d2b8b7512c30f5c70cf5cf61ed0d457d93e5391d3c1d52c6836b4d50026f9",
         "confidence": "sourceConfirmed"
       },
       {
         "path": "app/src/main/java/dev/taphound/demo/SearchActivity.kt",
-        "sha256": "c8775ad47ad3f667502d3d3743698595efe4c1e8d16d4979db653474ba4ec358",
+        "sha256": "3ff5efad5c7f55592723101bbca2b0bf43c1651ace38de1bff530ed68ce058d6",
+        "semanticSha256": "24e4a766530c3bbcce56e5f3518051b72f1b42cd3ce5ca365627d15692f26338",
         "confidence": "sourceConfirmed"
       },
       {
         "path": "app/src/main/java/dev/taphound/demo/ComposeActivity.kt",
         "sha256": "85b8b8c9981f5ba6b3f4dc4050bcc30e19f383f32f5d37c86b230afc17a537fe",
+        "semanticSha256": "3fee69ad93ca5558adcfb8f3a76a97b935760d567bf120ab1d487d9092fc96dc",
         "confidence": "sourceConfirmed"
       },
       {
         "path": "app/src/main/java/dev/taphound/demo/HybridActivity.kt",
         "sha256": "e8fc4634fc6699cece680281dd354b126a55991458c6e7e1d325698cff414f4a",
+        "semanticSha256": "56d61c6361cdd477f729d73cc1b9cb6694beb7ab66aab46ee3a8d22ff5d52e0e",
         "confidence": "sourceConfirmed"
       },
       {
         "path": "app/src/main/res/layout/activity_main.xml",
         "sha256": "58437fe977d58e239dabafd96322d1636d02355837c99f59580e57afe52e07ac",
+        "semanticSha256": "401bd36073b4632755ab314097a8d09cd23bb6db21f1898b40f76c1af985c3ae",
         "confidence": "sourceConfirmed"
       },
       {
         "path": "app/src/main/res/layout/activity_hybrid.xml",
         "sha256": "9033c7041b6534d9a26ba112216c548416f28b78e01488608d8f14b6af920e10",
+        "semanticSha256": "83a1ac608f6d8c05bd2c6fb6e5f1a543ec3fc2272fd7d039dd950af20e706649",
         "confidence": "sourceConfirmed"
       },
       {
         "path": "app/src/main/res/layout/activity_search.xml",
         "sha256": "0f7e35a8ba7a3fdbb80e3d790070d60b14d338d47a9ff5674c051276618881e1",
+        "semanticSha256": "695fb1cc583fbf01f5f18cc75409a81de33d0527243bc99358530049633c4ec4",
         "confidence": "sourceConfirmed"
       }
     ]
@@ -136,6 +144,11 @@
       {
         "tag": "SearchViewModel",
         "pattern": "submitted query=hello world",
+        "match": "literal"
+      },
+      {
+        "tag": "SearchEvent",
+        "pattern": "\"event\":\"resultsReady\"",
         "match": "literal"
       }
     ]

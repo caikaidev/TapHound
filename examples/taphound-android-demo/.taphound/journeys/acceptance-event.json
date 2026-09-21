@@ -1,0 +1,91 @@
+{
+  "version": 2,
+  "name": "TapHound demo structured event acceptance",
+  "devices": [{ "role": "default" }],
+  "steps": [
+    {
+      "action": "click",
+      "locator": { "resourceId": "open_search" },
+      "activity": {
+        "before": "dev.taphound.demo.MainActivity",
+        "after": "dev.taphound.demo.SearchActivity"
+      },
+      "expect": {
+        "type": "element",
+        "locator": { "resourceId": "search_input" },
+        "timeoutMs": 3000
+      }
+    },
+    {
+      "action": "wait",
+      "markerId": "search-start",
+      "activity": {
+        "before": "dev.taphound.demo.SearchActivity",
+        "after": "dev.taphound.demo.SearchActivity"
+      }
+    },
+    {
+      "action": "click",
+      "locator": { "resourceId": "search_input" },
+      "activity": {
+        "before": "dev.taphound.demo.SearchActivity",
+        "after": "dev.taphound.demo.SearchActivity"
+      }
+    },
+    {
+      "action": "inputText",
+      "text": "hello world",
+      "activity": {
+        "before": "dev.taphound.demo.SearchActivity",
+        "after": "dev.taphound.demo.SearchActivity"
+      }
+    },
+    {
+      "action": "click",
+      "locator": { "resourceId": "submit_search" },
+      "activity": {
+        "before": "dev.taphound.demo.SearchActivity",
+        "after": "dev.taphound.demo.SearchActivity"
+      },
+      "expect": {
+        "type": "logcatEvent",
+        "tag": "SearchEvent",
+        "event": "resultsReady",
+        "fields": { "query": "hello world" },
+        "unique": true,
+        "window": { "from": "stepStart" },
+        "timeoutMs": 1200
+      }
+    }
+  ],
+  "checkpoints": [{
+    "version": 1,
+    "id": "search-event-ready",
+    "name": "Search event and UI ready",
+    "stepIndex": 4,
+    "expect": {
+      "allOf": [
+        {
+          "kind": "visibleElement",
+          "locator": { "contentDescription": "submitted query=hello world" }
+        },
+        {
+          "kind": "absentElement",
+          "locator": { "resourceId": "spinner" }
+        },
+        {
+          "kind": "logcatEvent",
+          "expect": {
+            "type": "logcatEvent",
+            "tag": "SearchEvent",
+            "event": "resultsReady",
+            "fields": { "query": "hello world" },
+            "unique": true,
+            "window": { "from": "marker", "markerId": "search-start" }
+          }
+        }
+      ],
+      "timeoutMs": 1200
+    }
+  }]
+}

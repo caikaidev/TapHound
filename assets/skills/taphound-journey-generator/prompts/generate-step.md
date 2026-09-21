@@ -86,7 +86,12 @@ the observe result).
 7. **Add expect (optional)**: Only if there is a deterministic, verifiable
    outcome:
    - `element`: a specific element should appear after the action (e.g., a
-     search input field appears after clicking "open search").
+     search input field appears after clicking "open search"). Optional
+     predicates: `enabled` and `clickable` compare the resolved element's
+     state exactly on every poll (so `enabled: true` also waits-until-enabled
+     within `timeoutMs`); `absent: true` passes only when the locator matches
+     zero elements — use it for "element disappears" semantics, never combined
+     with `enabled`/`clickable`.
    - `logcat`: a specific log line should be emitted (e.g., the source code
      shows `Log.i("SearchViewModel", "submitted query=" + query)` — use
      `tag: "SearchViewModel"`, `pattern: "submitted query=..."`,
@@ -99,7 +104,9 @@ the observe result).
 
 A single JSON object matching one of the step types in
 `schemas/proposed-step-envelope.json` `$defs/ProposedStep`, but **without**
-the `binding` field. The caller wraps it with binding and snapshot.
+the `binding` field. The caller wraps it with binding and snapshot using
+`scripts/envelope.mjs bind` (offline validation, binding auto-filled from the
+preceding observe/step output).
 
 Example (click):
 ```json

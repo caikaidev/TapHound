@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "expectedRevision": 0,
+  "caseId": "MD-001",
+  "from": "pending",
+  "to": "briefing",
+  "reason": "Claim the first eligible Case"
+}

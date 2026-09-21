@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://taphound.dev/schemas/base-flow-record-v1.json",
+  "title": "TapHound Verified Base Flow Record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version", "expectedRevision", "name", "path", "sha256",
+    "exitActivity", "journey", "resolutionManifest", "report"
+  ],
+  "properties": {
+    "version": { "const": 1 },
+    "expectedRevision": { "type": "integer", "minimum": 0 },
+    "name": { "type": "string", "minLength": 1 },
+    "path": { "type": "string", "minLength": 1 },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "exitActivity": { "type": "string", "minLength": 1 },
+    "journey": { "$ref": "case-ledger-v1.json#/$defs/artifact" },
+    "resolutionManifest": { "$ref": "case-ledger-v1.json#/$defs/artifact" },
+    "report": { "$ref": "case-ledger-v1.json#/$defs/artifact" }
+  }
+}

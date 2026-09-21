@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "id": "acceptance-event",
+  "goal": "Submitting the demo query shows the result and uniquely logs the structured event",
+  "journey": {
+    "path": ".taphound/journeys/acceptance-event.json",
+    "sha256": "123f1526fd0f80db8a404907344301771c6b23541cac1555d39b8360f273e267"
+  },
+  "preconditions": [{ "kind": "installed" }],
+  "assertions": [{
+    "type": "element",
+    "locator": { "contentDescription": "submitted query=hello world" },
+    "visibility": "visible",
+    "timeoutMs": 3000
+  }],
+  "requiredCheckpoints": ["search-event-ready"],
+  "evidenceRequirements": [{
+    "kind": "screenshot",
+    "required": true
+  }]
+}

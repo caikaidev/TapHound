@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "suiteId": "mail-detail-2.90.0",
+  "title": "Mail detail regression baseline",
+  "projectRoot": "/absolute/path/to/android-project",
+  "deviceSerial": "emulator-5554",
+  "contextPath": ".taphound/context/project-context.json",
+  "cases": [
+    {
+      "id": "MD-001",
+      "order": 1,
+      "title": "Open mail detail",
+      "sourceText": "Open the deterministic fixture message and verify the detail page.",
+      "risk": "readOnly",
+      "dependsOn": []
+    },
+    {
+      "id": "MD-002",
+      "order": 2,
+      "title": "Expand an aggregated message",
+      "sourceText": "Open an aggregated thread and expand its first collapsed message.",
+      "risk": "readOnly",
+      "dependsOn": ["MD-001"],
+      "plannedBaseFlow": "mail/open-target-message"
+    }
+  ]
+}

@@ -25,11 +25,11 @@ export default tseslint.config(
     }
   },
   {
-    files: ["scripts/**/*.mjs"],
+    files: ["scripts/**/*.mjs", "assets/skills/**/scripts/**/*.mjs"],
     ...tseslint.configs.disableTypeChecked
   },
   {
-    files: ["scripts/**/*.mjs"],
+    files: ["scripts/**/*.mjs", "assets/skills/**/scripts/**/*.mjs"],
     rules: {
       "@typescript-eslint/explicit-function-return-type": "off"
     }

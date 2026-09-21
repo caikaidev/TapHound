@@ -119,8 +119,27 @@
           "properties": {
             "type": { "const": "element" },
             "locator": { "$ref": "#/$defs/Locator" },
+            "enabled": { "type": "boolean" },
+            "clickable": { "type": "boolean" },
+            "absent": { "type": "boolean" },
             "timeoutMs": { "type": "integer", "minimum": 1 }
-          }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": { "absent": { "const": true } },
+                "required": ["absent"]
+              },
+              "then": {
+                "not": {
+                  "anyOf": [
+                    { "required": ["enabled"] },
+                    { "required": ["clickable"] }
+                  ]
+                }
+              }
+            }
+          ]
         },
         {
           "type": "object",

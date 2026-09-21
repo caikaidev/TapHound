@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://taphound.dev/schemas/case-catalog-v1.json",
+  "title": "TapHound Frozen Case Catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version", "kind", "suiteId", "title", "projectRoot",
+    "contextPath", "createdAt", "cases"
+  ],
+  "properties": {
+    "version": { "const": 1 },
+    "kind": { "const": "taphound.caseCatalog" },
+    "suiteId": { "type": "string", "minLength": 1 },
+    "title": { "type": "string", "minLength": 1 },
+    "projectRoot": { "type": "string", "minLength": 1 },
+    "deviceSerial": { "type": "string", "minLength": 1 },
+    "contextPath": { "type": "string", "minLength": 1 },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "case-suite-input-v1.json#/$defs/case" }
+    }
+  }
+}

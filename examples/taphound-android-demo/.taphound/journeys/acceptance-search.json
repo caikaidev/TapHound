@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "name": "generated-search",
+  "name": "TapHound demo search acceptance",
   "devices": [
     {
       "role": "default"
@@ -21,7 +21,7 @@
         "locator": {
           "resourceId": "search_input"
         },
-        "timeoutMs": 10000
+        "timeoutMs": 3000
       }
     },
     {

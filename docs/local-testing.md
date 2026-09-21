@@ -78,7 +78,7 @@ shasum -a 256 /private/tmp/taphound-pack-smoke/taphound-0.2.0-dev.7.tgz
 ```
 
 Record the digest, size, shasum, integrity, and entryCount from `npm pack --json`
-in the audit for the exact release candidate. Do not compare a `dev.6` tarball
+in the audit for the exact release candidate. Do not compare the current tarball
 against the historical `dev.1` audit. Any difference between machines means
 you must redo the install smoke in this section.
 

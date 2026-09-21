@@ -24,7 +24,13 @@ describe("TapHound package metadata", () => {
     ) as PackageDocument;
 
     expect(document.name).toBe("taphound");
-    expect(document.version).toBe("0.2.0-dev.7");
+    expect(document.version).toMatch(/^\d+\.\d+\.\d+-dev\.\d+$/);
+
+    const lock = JSON.parse(
+      await readFile("package-lock.json", "utf8")
+    ) as { version?: string; packages?: Record<string, { version?: string }> };
+    expect(lock.version).toBe(document.version);
+    expect(lock.packages?.[""]?.version).toBe(document.version);
     expect(document.description)
       .toBe("Deterministic app journey recording and verification");
     expect(document.bin).toEqual({ taphound: "./dist/cli/main.js" });

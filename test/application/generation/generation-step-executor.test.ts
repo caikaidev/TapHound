@@ -20,6 +20,7 @@ import {
   type ProposedStep
 } from "../../../src/domain/proposed-step.js";
 import {
+  RuntimeSnapshotSchema,
   hashRuntimeSnapshot,
   type RuntimeSnapshot
 } from "../../../src/domain/runtime-snapshot.js";
@@ -1086,7 +1087,7 @@ describe("GenerationStepExecutor", () => {
       test.adb.foregroundComponent.mockImplementation((() => {
         if (
           actionCompleted
-          && ++postActionForegroundObservations === 4
+          && ++postActionForegroundObservations === 3
         ) {
           controller.abort();
         }
@@ -1320,6 +1321,114 @@ describe("GenerationStepExecutor", () => {
     });
     expect(test.current().state).toBe("recoveryRequired");
     expect(test.current().candidateSteps).toEqual([]);
+  });
+
+  it("reuses the freshness-proved Layout instead of capturing it again", async () => {
+    const runtime = RuntimeSnapshotSchema.parse({
+      ...snapshot(),
+      version: 2,
+      uiBackend: {
+        id: "system-uiautomator",
+        adapterVersion: "test-v1",
+        configSha256: "0".repeat(64)
+      },
+      uiObservationId: "test-observation",
+      uiCaptureDurationMs: 1,
+      viewport: {
+        width: 1080,
+        height: 1920,
+        rotation: 0,
+        coordinateSpace: "physicalDisplayPixels"
+      }
+    });
+    const test = harness(session(runtime));
+    test.guard.mockImplementation(
+      ((): Promise<RuntimeSnapshot> => Promise.resolve(runtime)) as never
+    );
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(test.androidCli.layout).toHaveBeenCalledTimes(1);
+    expect(test.current().candidateSteps).toHaveLength(1);
+  });
+
+  it("captures the pre-action Layout when the freshness snapshot is legacy", async () => {
+    const runtime = snapshot();
+    const test = harness(session(runtime));
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(test.androidCli.layout).toHaveBeenCalledTimes(2);
+  });
+
+  it("settles an Element Expect on the post-action Layout without observing again", async () => {
+    const runtime = snapshot();
+    const test = harness(session(runtime));
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: {
+        ...proposal(runtime),
+        expect: {
+          type: "element",
+          locator: { resourceId: "submit" },
+          timeoutMs: 1000
+        }
+      },
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result).toMatchObject({ status: "succeeded" });
+    expect(test.androidCli.layout).toHaveBeenCalledTimes(2);
+    expect(test.current().candidateSteps).toHaveLength(1);
+  });
+
+  it("observes again when the Element Expect misses the post-action Layout", async () => {
+    const runtime = snapshot();
+    const test = harness(session(runtime));
+    let captures = 0;
+    test.androidCli.layout.mockImplementation((() => {
+      captures += 1;
+      return Promise.resolve(captures >= 3
+        ? [target, {
+            id: "done",
+            resourceId: "done",
+            enabled: true,
+            bounds: { left: 0, top: 100, right: 100, bottom: 200 },
+            children: []
+          }]
+        : [target]);
+    }) as never);
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: {
+        ...proposal(runtime),
+        expect: {
+          type: "element",
+          locator: { resourceId: "done" },
+          timeoutMs: 1000
+        }
+      },
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result).toMatchObject({ status: "succeeded" });
+    expect(test.androidCli.layout).toHaveBeenCalledTimes(3);
   });
 
   it("funds guarded identity checks when an Element Expect budget is below one observation", async () => {

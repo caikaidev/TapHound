@@ -16,7 +16,11 @@ import {
   type GenerationSession,
   type PendingConfirmation
 } from "../../domain/generation.js";
-import { JourneyStepSchema, type JourneyStep } from "../../domain/journey.js";
+import {
+  JourneyStepSchema,
+  type Expectation,
+  type JourneyStep
+} from "../../domain/journey.js";
 import type { LayoutElement } from "../../domain/layout.js";
 import { uiBackendIdAsSelection } from "../../domain/ui-backend.js";
 import type { DisplayViewport } from "../../domain/geometry.js";
@@ -872,7 +876,9 @@ export class GenerationStepExecutor {
         authoritativePid,
         proposal.activity.before,
         input.signal,
-        fresh
+        fresh,
+        this.dependencies.idle.timeoutMs,
+        this.adoptFreshSnapshotUi(fresh)
       );
       timing.preActionObservationMs = (
         this.dependencies.clock.now() - preActionStartedAt
@@ -1200,6 +1206,7 @@ export class GenerationStepExecutor {
         if (finalStep.expect !== undefined) {
           const expectationStartedAt = this.dependencies.clock.now();
           let expectationRuntime: LiveRuntime | undefined;
+          let settledLayout: readonly LayoutElement[] | undefined = after.layout;
           const expectation = await new ExpectationEvaluator(
             this.boundViews().adb,
             this.boundUiSnapshotProvider(),
@@ -1241,6 +1248,11 @@ export class GenerationStepExecutor {
               | { status: "observed"; layout: readonly LayoutElement[] }
               | { status: "failed"; message: string }
             > => {
+              if (settledLayout !== undefined) {
+                const reused = settledLayout;
+                settledLayout = undefined;
+                return { status: "observed", layout: reused };
+              }
               try {
                 const guarded = await this.observeLive(
                   session,
@@ -1275,17 +1287,14 @@ export class GenerationStepExecutor {
             fail(expectation.code, expectation.message);
           } else {
             throwIfCancelled(input.signal);
-            postActionRuntime = finalStep.expect.type === "element"
-              && expectationRuntime !== undefined
-              ? expectationRuntime
-              : await this.observeLive(
-                  session,
-                  authoritativePid,
-                  finalStep.expect.type === "activity"
-                    ? finalStep.expect.value
-                    : after.activity,
-                  input.signal
-                );
+            postActionRuntime = await this.settledExpectationRuntime(
+              session,
+              authoritativePid,
+              finalStep.expect,
+              after,
+              expectationRuntime,
+              input.signal
+            );
             throwIfCancelled(input.signal);
           }
           timing.expectationMs = (
@@ -1480,6 +1489,62 @@ export class GenerationStepExecutor {
     await this.markRecovery(session.id, inFlight);
     return outcome;
   };
+
+  /**
+   * The freshness guard captured this Layout and proved it equals the
+   * authoritative binding hash, and nothing mutates the device between that
+   * capture and the pre-action observation, so re-capturing it would only
+   * repeat the most expensive device call of the step. Legacy v1 snapshots
+   * carry no UI metadata and still capture.
+   */
+  private adoptFreshSnapshotUi(
+    fresh: RuntimeSnapshot
+  ): readonly LayoutElement[] | undefined {
+    if (fresh.version !== 2) {
+      return undefined;
+    }
+    this.currentViewport = fresh.viewport;
+    this.currentUiSnapshot = {
+      observationId: fresh.uiObservationId,
+      capturedAt: fresh.capturedAt,
+      durationMs: fresh.uiCaptureDurationMs,
+      backend: fresh.uiBackend,
+      viewport: fresh.viewport
+    };
+    return fresh.layout;
+  }
+
+  /**
+   * A passing expectation already proves the post-action state: an `element`
+   * expectation proves it on the Layout it resolved against, and an `activity`
+   * expectation that matches the observed post-action Activity adds nothing to
+   * re-observe. Only a state the post-action observation cannot vouch for is
+   * observed again.
+   */
+  private async settledExpectationRuntime(
+    session: GenerationSession,
+    expectedPid: number,
+    expectation: Expectation,
+    after: LiveRuntime,
+    expectationRuntime: LiveRuntime | undefined,
+    signal?: AbortSignal
+  ): Promise<LiveRuntime> {
+    if (expectation.type === "element") {
+      return expectationRuntime ?? after;
+    }
+    if (
+      expectation.type === "activity"
+      && expectation.value === after.activity
+    ) {
+      return after;
+    }
+    return this.observeLive(
+      session,
+      expectedPid,
+      expectation.type === "activity" ? expectation.value : after.activity,
+      signal
+    );
+  }
 
   private async observeLive(
     session: GenerationSession,

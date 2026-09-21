@@ -934,6 +934,25 @@ describe("GenerationStepExecutor", () => {
     });
   });
 
+  it("binds live App PIDs before starting the per-step Logcat stream", async () => {
+    const runtime = snapshot();
+    const test = harness(session(runtime));
+
+    await expect(test.execute({
+      generationId: "generation-1",
+      proposal: proposal(runtime),
+      snapshot: runtime,
+      source: "planner"
+    })).resolves.toMatchObject({ status: "succeeded" });
+
+    const foregroundOrder = test.adb.foregroundComponent.mock
+      .invocationCallOrder[0];
+    const logcatOrder = test.adb.startLogcat.mock.invocationCallOrder[0];
+    expect(foregroundOrder).toBeDefined();
+    expect(logcatOrder).toBeDefined();
+    expect(foregroundOrder).toBeLessThan(logcatOrder as number);
+  });
+
   it("treats cancellation after begin as recoveryRequired", async () => {
     const runtime = snapshot();
     const test = harness(session(runtime));

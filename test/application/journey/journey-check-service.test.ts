@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it } from "vitest";
 
 import { hashGenerationBinding } from "../../../src/application/generation/generation-starter.js";
@@ -64,6 +66,7 @@ function metaJson(overrides: {
   projectHash?: string;
   configHash?: string;
   contextSelection?: Record<string, unknown> | null;
+  sourceBrief?: { path: string; sha256: string } | null;
 } = {}): string {
   return `${JSON.stringify({
     version: 1,
@@ -86,6 +89,9 @@ function metaJson(overrides: {
     ...(overrides.contextSelection === null
       ? {}
       : { contextSelection: overrides.contextSelection ?? contextSelection }),
+    ...(overrides.sourceBrief === undefined || overrides.sourceBrief === null
+      ? {}
+      : { sourceBrief: overrides.sourceBrief }),
     verification: {
       reportPath: "verification/report.json",
       reportSha256: "d".repeat(64),
@@ -103,10 +109,12 @@ function service(
 }
 
 async function check(
-  options: FakeStoreOptions = {}
+  options: FakeStoreOptions = {},
+  workspaceRoot?: string
 ): Promise<Awaited<ReturnType<JourneyCheckService["check"]>>> {
   return service(options).check({
     projectRoot: "/project",
+    ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
     config: runtimeConfig,
     project,
     bundle: projectContextIndex
@@ -347,5 +355,80 @@ describe("JourneyCheckService", () => {
 
     expect(result.entries[0]?.lifecycle).toBe("retired");
     expect(result.entries[0]?.status).toBe("stale");
+  });
+
+  it("verifies a matching source Brief binding as fresh", async () => {
+    const briefContent = "# Search Case Brief\n\nSearch for widget and open detail.\n";
+    const briefSha256 = createHash("sha256")
+      .update(briefContent)
+      .digest("hex");
+    const result = await check({
+      journeys: {
+        ".taphound/journeys/search.json": `${JSON.stringify(runtimeJourney)}\n`,
+        "docs/cases/search-brief.md": briefContent
+      },
+      metas: {
+        ".taphound/journeys/search.json": metaJson({
+          sourceBrief: { path: "docs/cases/search-brief.md", sha256: briefSha256 }
+        })
+      }
+    });
+
+    expect(result.entries[0]?.status).toBe("fresh");
+    expect(result.entries[0]?.lifecycle).toBe("verified");
+    expect(result.entries[0]?.reasons).toEqual([]);
+  });
+
+  it("reports drifted Brief content as brief-drift and stale", async () => {
+    const briefContent = "# Search Case Brief\n\nSearch for widget and open detail.\n";
+    const result = await check({
+      journeys: {
+        ".taphound/journeys/search.json": `${JSON.stringify(runtimeJourney)}\n`,
+        "docs/cases/search-brief.md": briefContent
+      },
+      metas: {
+        ".taphound/journeys/search.json": metaJson({
+          sourceBrief: { path: "docs/cases/search-brief.md", sha256: "0".repeat(64) }
+        })
+      }
+    });
+
+    expect(result.entries[0]?.status).toBe("stale");
+    expect(result.entries[0]?.reasons).toEqual(["brief-drift"]);
+    expect(result.entries[0]?.lifecycle).toBe("stale");
+  });
+
+  it("reports a missing Brief file as brief-missing and stale", async () => {
+    const result = await check({
+      journeys: {
+        ".taphound/journeys/search.json": `${JSON.stringify(runtimeJourney)}\n`
+      },
+      metas: {
+        ".taphound/journeys/search.json": metaJson({
+          sourceBrief: { path: "docs/cases/search-brief.md", sha256: "0".repeat(64) }
+        })
+      }
+    });
+
+    expect(result.entries[0]?.status).toBe("stale");
+    expect(result.entries[0]?.reasons).toEqual(["brief-missing"]);
+    expect(result.entries[0]?.lifecycle).toBe("stale");
+  });
+
+  it("skips Brief drift checks on local target workspaces", async () => {
+    const result = await check({
+      journeys: {
+        ".taphound/journeys/search.json": `${JSON.stringify(runtimeJourney)}\n`
+      },
+      metas: {
+        ".taphound/journeys/search.json": metaJson({
+          sourceBrief: { path: "docs/cases/search-brief.md", sha256: "0".repeat(64) }
+        })
+      }
+    }, "/workspace");
+
+    expect(result.entries[0]?.status).toBe("fresh");
+    expect(result.entries[0]?.reasons).toEqual([]);
+    expect(result.entries[0]?.lifecycle).toBe("verified");
   });
 });

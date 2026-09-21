@@ -97,7 +97,16 @@ export const ProposedStepSchema = z.discriminatedUnion("action", [
   BackStepSchema,
   WaitStepSchema,
   BridgeStepSchema
-]);
+]).superRefine((step, context) => {
+  if (step.expect?.type === "logcatEvent"
+    && step.expect.window.from !== "stepStart") {
+    context.addIssue({
+      code: "custom",
+      path: ["expect", "window"],
+      message: "Generation proposals support only stepStart Logcat event windows"
+    });
+  }
+});
 
 export type ProposedStep = z.infer<typeof ProposedStepSchema>;
 export type ProposalBinding = z.infer<typeof ProposalBindingSchema>;

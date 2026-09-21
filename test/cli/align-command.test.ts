@@ -47,6 +47,7 @@ function harness(result: AlignCameraResult): AlignTestHarness {
     runtimeObserver: { observe: vi.fn(() => Promise.reject(new Error("unused"))) },
     workspaceLayout: fakeWorkspaceLayout(),
     localTargets: defaultLocalTargets(),
+    readFile: vi.fn(() => Promise.resolve(Buffer.alloc(0))),
     readJson: vi.fn(() => Promise.resolve({
       version: 1,
       run: { packageName: "com.example.app", activity: ".MainActivity" },

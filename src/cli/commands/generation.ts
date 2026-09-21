@@ -1,4 +1,6 @@
+import { realpath } from "node:fs/promises";
 import { resolve } from "node:path";
+import { createHash } from "node:crypto";
 
 import { Command } from "commander";
 import { z } from "zod";
@@ -47,11 +49,13 @@ import {
 } from "../../domain/journey.js";
 import { LocatorSchema } from "../../domain/layout.js";
 import type { ResolvedProjectContext } from "../../domain/project-context.js";
+import { ProjectRelativePathSchema } from "../../domain/project-context.js";
 import { RuntimeSnapshotSchema } from "../../domain/runtime-snapshot.js";
 import { GoalSpecSchema } from "../../domain/route.js";
 import {
   assertArtifactDirectory,
   CONFIG_PATH,
+  CONTEXT_INDEX_PATH,
   JOBS_DIR
 } from "../../domain/workspace.js";
 import {
@@ -62,6 +66,7 @@ import {
 } from "../../ports/generation-prompt.js";
 import type { CliDependencies } from "../dependencies.js";
 import {
+  contextLoadHint,
   errorMessage,
   writeJson,
   writeLine
@@ -77,6 +82,7 @@ interface GenerationStartOptions {
   allowEvidenceDrift?: boolean | undefined;
   baseFlow?: string | undefined;
   externalFlow?: string[] | undefined;
+  brief?: string | undefined;
   goal?: string | undefined;
   compact?: boolean | undefined;
   target?: string | undefined;
@@ -142,6 +148,10 @@ interface GenerationRecoverOptions extends GenerationObserveOptions {
   decision: string;
 }
 
+interface GenerationReopenOptions extends GenerationObserveOptions {
+  reason: string;
+}
+
 interface GenerationConfigIdleOptions extends GenerationObserveOptions {
   strategy?: string | undefined;
   pollIntervalMs?: string | undefined;
@@ -163,6 +173,7 @@ type GenerationOptions =
   | GenerationManualOptions
   | GenerationBridgeOptions
   | GenerationRecoverOptions
+  | GenerationReopenOptions
   | GenerationFinalizeOptions
   | GenerationConfigIdleOptions
   | GenerationListOptions;
@@ -218,6 +229,9 @@ function writeFailure(
       message: errorMessage(error),
       ...(outputOptions.details !== undefined
         ? { details: outputOptions.details }
+        : error instanceof GenerationFinalizationError
+          && error.details !== undefined
+          ? { details: error.details }
         : error instanceof GenerationOperationError
           && error.details !== undefined
           ? { details: error.details }
@@ -250,6 +264,14 @@ async function loadConfig(
       errorMessage(error)
     );
   }
+}
+
+async function canonicalProjectRoot(
+  dependencies: CliDependencies,
+  projectRoot: string
+): Promise<string> {
+  const absolute = resolve(dependencies.cwd(), projectRoot);
+  return realpath(absolute).catch(() => absolute);
 }
 
 interface GenerationTargetContext {
@@ -315,9 +337,16 @@ async function generationConfig(
       config: context.config
     };
   }
+  const projectRoot = await canonicalProjectRoot(
+    dependencies,
+    options.project
+  );
   return {
-    projectRoot: options.project,
-    config: await loadConfig(dependencies, options)
+    projectRoot,
+    config: await loadConfig(dependencies, {
+      project: projectRoot,
+      config: options.config
+    })
   };
 }
 
@@ -435,12 +464,14 @@ function mappedFailure(
     return;
   }
   if (error instanceof ContextLoadError) {
+    const hint = contextLoadHint(error);
     writeFailure(
       dependencies,
       options,
       error.code === "CONTEXT_STALE" ? 1 : 2,
       error.code,
-      error
+      error,
+      hint === undefined ? {} : { hint }
     );
     return;
   }
@@ -461,6 +492,7 @@ function mappedFailure(
   if (error instanceof GenerationOperationError) {
     const exitCode = error.code === "CONFIG_INVALID"
       || error.code === "CONTEXT_INVALID"
+      || error.code === "BRIEF_INVALID"
       || error.code === "FLOW_INVALID"
       || error.code === "EXTERNAL_FLOW_NOT_FOUND"
       || error.code === "EXTERNAL_FLOW_STALE"
@@ -627,6 +659,10 @@ function createStartCommand(dependencies: CliDependencies): Command {
       "Bind external app flow(s) for deterministic bridge replay"
     )
     .option(
+      "--brief <path>",
+      "Bind a project-relative Journey Brief by Core-computed content hash"
+    )
+    .option(
       "--allow-evidence-drift",
       "Allow changed source evidence; replay remains mandatory"
     )
@@ -658,13 +694,32 @@ function createStartCommand(dependencies: CliDependencies): Command {
             "Reusable Flows are not supported for registered local targets yet"
           );
         }
+        if (targetContext !== undefined && options.brief !== undefined) {
+          throw new GenerationOperationError(
+            "BRIEF_INVALID",
+            "Journey Brief binding is not supported for registered local targets yet"
+          );
+        }
         const { projectRoot, workspaceRoot, config } =
           targetContext === undefined
-            ? {
-                projectRoot: options.project,
-                workspaceRoot: undefined,
-                config: await loadConfig(dependencies, options)
-              }
+            ? await (async (): Promise<{
+                projectRoot: string;
+                workspaceRoot: undefined;
+                config: TapHoundConfig;
+              }> => {
+                const canonical = await canonicalProjectRoot(
+                  dependencies,
+                  options.project
+                );
+                return {
+                  projectRoot: canonical,
+                  workspaceRoot: undefined,
+                  config: await loadConfig(dependencies, {
+                    project: canonical,
+                    config: options.config
+                  })
+                };
+              })()
             : {
                 projectRoot: targetContext.projectRoot,
                 workspaceRoot: targetContext.workspaceRoot,
@@ -673,7 +728,9 @@ function createStartCommand(dependencies: CliDependencies): Command {
         const contextPath = resolve(
           workspaceRoot ?? projectRoot,
           options.context === undefined
-            ? "context/project-context.json"
+            ? workspaceRoot === undefined
+              ? CONTEXT_INDEX_PATH
+              : "context/project-context.json"
             : options.context
         );
         const loaded = await dependencies.contextLoader.load({
@@ -686,6 +743,39 @@ function createStartCommand(dependencies: CliDependencies): Command {
           ...(options.module === undefined ? {} : { moduleIds: options.module })
         });
         const context = loaded.context;
+        const briefRequest = options.brief;
+        const sourceBrief = briefRequest === undefined
+          ? undefined
+          : await (async (): Promise<{ path: string; sha256: string }> => {
+            let briefPath: string;
+            try {
+              briefPath = ProjectRelativePathSchema.parse(briefRequest);
+            } catch (error) {
+              throw new GenerationOperationError(
+                "BRIEF_INVALID",
+                `Journey Brief path must stay within the project: ${briefRequest} (${
+                  error instanceof Error ? error.message : String(error)
+                })`
+              );
+            }
+            let bytes: Buffer;
+            try {
+              bytes = await dependencies.readFile(
+                resolve(workspaceRoot ?? projectRoot, briefPath)
+              );
+            } catch (error) {
+              throw new GenerationOperationError(
+                "BRIEF_INVALID",
+                `Journey Brief is not readable: ${briefPath} (${
+                  error instanceof Error ? error.message : String(error)
+                })`
+              );
+            }
+            return {
+              path: briefPath,
+              sha256: createHash("sha256").update(bytes).digest("hex")
+            };
+          })();
         const goalPath = options.goal;
         const planning = goalPath === undefined
           ? undefined
@@ -759,7 +849,7 @@ function createStartCommand(dependencies: CliDependencies): Command {
                 );
               }
               const resolution = await dependencies.journeyResolver.resolveFlow({
-                projectRoot: options.project,
+                projectRoot,
                 name: options.baseFlow as string
               }).catch((error: unknown) => {
                 throw new GenerationOperationError(
@@ -774,7 +864,7 @@ function createStartCommand(dependencies: CliDependencies): Command {
               const verification = await dependencies.verifier.verify({
                 config,
                 journey: resolution.journey,
-                projectRoot: options.project,
+                projectRoot,
                 devices: [{
                   role: resolution.journey.devices[0]?.role ?? DEFAULT_DEVICE_ROLE,
                   deviceSerial
@@ -825,7 +915,7 @@ function createStartCommand(dependencies: CliDependencies): Command {
             const resolved = [];
             for (const name of flowNames) {
               const resolution = await dependencies.externalFlowResolver
-                .resolve({ projectRoot: options.project, name })
+                .resolve({ projectRoot, name })
                 .catch((error: unknown) => {
                   throw new GenerationOperationError(
                     "FLOW_INVALID",
@@ -855,6 +945,7 @@ function createStartCommand(dependencies: CliDependencies): Command {
             : { signal: dependencies.signal }),
           ...(baseFlow === undefined ? {} : { baseFlow }),
           ...(externalFlows === undefined ? {} : { externalFlows }),
+          ...(sourceBrief === undefined ? {} : { sourceBrief }),
           ...(planning === undefined ? {} : { planning }),
           ...(options.allowEvidenceDrift === true
             ? { allowEvidenceDrift: true }
@@ -885,6 +976,9 @@ function createStartCommand(dependencies: CliDependencies): Command {
           ...(session.baseFlow === undefined
             ? {}
             : { baseFlow: session.baseFlow }),
+          ...(session.sourceBrief === undefined
+            ? {}
+            : { sourceBrief: session.sourceBrief }),
           ...(session.externalFlows.length === 0
             ? {}
             : { externalFlows: session.externalFlows }),
@@ -1855,14 +1949,67 @@ function createRecoverCommand(dependencies: CliDependencies): Command {
         );
       }
       const session = await runtime.recovery.retry(generationId);
+      const recoveryKind = before.recovery.kind;
+      const nextAction = recoveryKind === "verification"
+        ? "generation finalize"
+        : "retry the interrupted generation step";
       writeSuccess(dependencies, options, {
         status: "recovered",
         exitCode: 0,
         generationId,
         revision: session.revision,
+        recoveryKind,
+        nextAction,
         actionMayHaveExecuted: before.recovery.actionMayHaveExecuted,
         previousAttemptOutcome: before.recovery.attemptOutcome
-      }, `Generation ${generationId} recovered for explicit retry`);
+      }, recoveryKind === "verification"
+        ? `Generation ${generationId} verification recovered. Rerun generation finalize to verify again.`
+        : `Generation ${generationId} recovered. Explicitly retry the interrupted generation step.`);
+    } catch (error) {
+      mappedFailure(dependencies, options, error);
+    }
+  });
+}
+
+function createReopenCommand(dependencies: CliDependencies): Command {
+  return addCommonOptions(
+    new Command("reopen")
+      .description("Reopen a deterministically failed verification for audited step repair")
+      .requiredOption(
+        "--reason <text>",
+        "Reason for reopening the failed verification"
+      ),
+    dependencies
+  ).action(async (options: GenerationReopenOptions): Promise<void> => {
+    try {
+      const generationId = GenerationSessionIdSchema.parse(options.session);
+      const { projectRoot, workspaceRoot, config } = await generationConfig(
+        dependencies,
+        options
+      );
+      const runtime = requireRuntime(
+        dependencies,
+        projectRoot,
+        config,
+        workspaceRoot
+      );
+      await assertRuntimeConfig(runtime, generationId);
+      const session = await runtime.reopen.reopen({
+        generationId,
+        reason: options.reason
+      });
+      writeSuccess(dependencies, options, {
+        status: "reopened",
+        exitCode: 0,
+        generationId,
+        revision: session.revision,
+        verification: session.verification,
+        preservedFailure: session.verificationHistory?.at(-1),
+        nextAction: {
+          command: "generation step --replace <index>",
+          then: "generation finalize"
+        }
+      }, `Generation ${generationId} reopened. Repair with generation step --replace <index>, then rerun generation finalize.`);
     } catch (error) {
       mappedFailure(dependencies, options, error);
     }
@@ -2047,6 +2194,7 @@ export function createGenerationCommand(
     .addCommand(createBridgeCommand(dependencies))
     .addCommand(createStatusCommand(dependencies))
     .addCommand(createRecoverCommand(dependencies))
+    .addCommand(createReopenCommand(dependencies))
     .addCommand(createArchiveCommand(dependencies))
     .addCommand(createConfigCommand(dependencies))
     .addCommand(createListCommand(dependencies))

@@ -240,6 +240,7 @@ function dependencies(): {
           }
         }))
       },
+      readFile: vi.fn(() => Promise.resolve(Buffer.alloc(0))),
       readJson: vi.fn((path: string) => Promise.resolve(
         path.includes("journey")
           ? runtimeJourney
@@ -378,7 +379,7 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
       )
     );
 
-    expect(configOptions).toHaveLength(26);
+    expect(configOptions).toHaveLength(27);
     expect(configOptions.every(
       (option) => option.defaultValue === CONFIG_PATH
     )).toBe(true);
@@ -668,6 +669,30 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
     expect(test.exitCodes).toEqual([0]);
   });
 
+  it("defaults the generation Context path to the committed Context index", async () => {
+    const test = dependencies();
+    vi.mocked(test.value.readJson).mockImplementation((path) => Promise.resolve(
+      path.includes("context") ? generationContext : runtimeConfig
+    ));
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "generation", "start",
+      "--project", "/project",
+      "--config", ".taphound/config.json",
+      "--module", ":feature:search",
+      "--device", "emulator-5554",
+      "--json"
+    ]);
+
+    expect(test.value.contextLoader.load).toHaveBeenCalledWith({
+      projectRoot: "/project",
+      contextPath: "/project/.taphound/context/project-context.json",
+      allowIncomplete: true,
+      moduleIds: [":feature:search"]
+    });
+    expect(test.exitCodes).toEqual([0]);
+  });
+
   it("binds external flows to the session when --external-flow is given", async () => {
     const test = dependencies();
     vi.mocked(test.value.readJson).mockImplementation((path) => Promise.resolve(
@@ -767,6 +792,155 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
       }]
     });
     expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("binds a Journey Brief by Core-computed content hash when --brief is given", async () => {
+    const test = dependencies();
+    vi.mocked(test.value.readJson).mockImplementation((path) => Promise.resolve(
+      path.includes("context") ? generationContext : runtimeConfig
+    ));
+    const briefContent = "# Search Case Brief\n\nSearch for widget and open detail.\n";
+    vi.mocked(test.value.readFile).mockResolvedValueOnce(
+      Buffer.from(briefContent, "utf8")
+    );
+    vi.mocked(test.value.generationStarter.start).mockResolvedValueOnce({
+      version: 1 as const,
+      id: "generation-1",
+      revision: 0,
+      state: "active" as const,
+      bindings: {
+        projectHash: "d".repeat(64),
+        configHash: "e".repeat(64),
+        contextHash: "a".repeat(64),
+        snapshotHash: null
+      },
+      target: {
+        packageName: "com.example.app",
+        deviceSerial: "emulator-5554",
+        resetStrategy: "processOnly" as const,
+        interactionPolicy: {
+          allowedActions: ["click" as const],
+          confirmationRequiredActions: [],
+          forbiddenActions: ["back" as const]
+        }
+      },
+      contextSelection,
+      variables: {
+        runId: "journey-run-1",
+        timestamp: "2026-07-22T12:00:00.000Z",
+        randomHex: "00ff"
+      },
+      candidateSteps: [],
+      candidateSources: [],
+      inFlight: null,
+      pendingConfirmation: null,
+      verification: { status: "notRun" as const },
+      publication: { status: "notRun" as const },
+      sourceBrief: {
+        path: "docs/cases/search-brief.md",
+        sha256: createHash("sha256").update(briefContent).digest("hex")
+      },
+      externalFlows: []
+    });
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "generation", "start",
+      "--project", "/project",
+      "--config", ".taphound/config.json",
+      "--context", "context.json",
+      "--module", ":feature:search",
+      "--device", "emulator-5554",
+      "--brief", "docs/cases/search-brief.md",
+      "--json"
+    ]);
+
+    expect(test.value.readFile).toHaveBeenCalledWith(
+      "/project/docs/cases/search-brief.md"
+    );
+    const startInput = vi.mocked(
+      test.value.generationStarter.start
+    ).mock.calls[0]?.[0];
+    expect(startInput?.sourceBrief).toEqual({
+      path: "docs/cases/search-brief.md",
+      sha256: createHash("sha256").update(briefContent).digest("hex")
+    });
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "started",
+      exitCode: 0,
+      sourceBrief: {
+        path: "docs/cases/search-brief.md",
+        sha256: createHash("sha256").update(briefContent).digest("hex")
+      }
+    });
+    expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
+    expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("fails with BRIEF_INVALID when the Brief file is not readable", async () => {
+    const test = dependencies();
+    vi.mocked(test.value.readJson).mockImplementation((path) => Promise.resolve(
+      path.includes("context") ? generationContext : runtimeConfig
+    ));
+    vi.mocked(test.value.readFile).mockRejectedValueOnce(
+      new Error("ENOENT: no such file or directory")
+    );
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "generation", "start",
+      "--project", "/project",
+      "--config", ".taphound/config.json",
+      "--context", "context.json",
+      "--module", ":feature:search",
+      "--device", "emulator-5554",
+      "--brief", "docs/cases/missing-brief.md",
+      "--json"
+    ]);
+
+    expect(test.value.generationStarter.start).not.toHaveBeenCalled();
+    const unreadablePayload = JSON.parse(test.stdout.value) as {
+      status: string;
+      exitCode: number;
+      failure: { code: string; message: string };
+    };
+    expect(unreadablePayload.status).toBe("error");
+    expect(unreadablePayload.exitCode).toBe(2);
+    expect(unreadablePayload.failure.code).toBe("BRIEF_INVALID");
+    expect(unreadablePayload.failure.message).toContain(
+      "docs/cases/missing-brief.md"
+    );
+    expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
+    expect(test.exitCodes).toEqual([2]);
+  });
+
+  it("fails with BRIEF_INVALID when the Brief path escapes the project", async () => {
+    const test = dependencies();
+    vi.mocked(test.value.readJson).mockImplementation((path) => Promise.resolve(
+      path.includes("context") ? generationContext : runtimeConfig
+    ));
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "generation", "start",
+      "--project", "/project",
+      "--config", ".taphound/config.json",
+      "--context", "context.json",
+      "--module", ":feature:search",
+      "--device", "emulator-5554",
+      "--brief", "../escape-brief.md",
+      "--json"
+    ]);
+
+    expect(test.value.readFile).not.toHaveBeenCalled();
+    expect(test.value.generationStarter.start).not.toHaveBeenCalled();
+    const escapePayload = JSON.parse(test.stdout.value) as {
+      status: string;
+      exitCode: number;
+      failure: { code: string; message: string };
+    };
+    expect(escapePayload.status).toBe("error");
+    expect(escapePayload.exitCode).toBe(2);
+    expect(escapePayload.failure.code).toBe("BRIEF_INVALID");
+    expect(escapePayload.failure.message).toContain("../escape-brief.md");
+    expect(test.exitCodes).toEqual([2]);
   });
 
   it("fails with FLOW_INVALID when an external flow cannot be resolved", async () => {
@@ -1232,6 +1406,61 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
     expect(test.exitCodes).toEqual([0]);
   });
 
+  it("defaults the Journey check Context path to the committed Context index", async () => {
+    const test = dependencies();
+    const projectHash = hashGenerationBinding({
+      projectRoot: "/project",
+      packageName: "com.example.app",
+      launchActivity: "com.example.app.MainActivity"
+    });
+    const meta = `${JSON.stringify({
+      version: 1,
+      status: "verified",
+      generationId: "generation-1",
+      journeyPath: ".taphound/journeys/search.json",
+      bindings: {
+        projectHash,
+        configHash: hashGenerationBinding(runtimeConfig),
+        contextHash: "c".repeat(64)
+      },
+      contextSelection,
+      verification: {
+        reportPath: "verification/report.json",
+        reportSha256: "d".repeat(64),
+        runId: "verify-run",
+        runs: 1
+      },
+      manualOverrideStepIndexes: []
+    })}\n`;
+    test.value.journeyResolver = {
+      resolve: vi.fn(),
+      resolveFlow: vi.fn(),
+      listFlows: vi.fn()
+    };
+    test.value.journeyCompositionStore = {
+      read: vi.fn(() => Promise.resolve(
+        Buffer.from(`${JSON.stringify(runtimeJourney)}\n`, "utf8")
+      )),
+      listJourneyPaths: vi.fn(() => Promise.resolve([
+        ".taphound/journeys/search.json"
+      ])),
+      readJourneyMeta: vi.fn(() => Promise.resolve(Buffer.from(meta, "utf8"))),
+      writeText: vi.fn()
+    };
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "journey", "check",
+      "--project", "/project",
+      "--json"
+    ]);
+
+    expect(test.value.contextLoader.readIndex).toHaveBeenCalledWith({
+      projectRoot: "/project",
+      contextPath: "/project/.taphound/context/project-context.json"
+    });
+    expect(test.exitCodes).toEqual([0]);
+  });
+
   it("exits non-zero for drifted Journeys only under --strict", async () => {
     const test = dependencies();
     const projectHash = hashGenerationBinding({
@@ -1517,6 +1746,65 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
         message: "invalid Context JSON"
       }
     });
+    expect(test.exitCodes).toEqual([2]);
+  });
+
+  it("hints Context remediation when the generation Context index does not exist", async () => {
+    const test = dependencies();
+    vi.mocked(test.value.contextLoader.load).mockRejectedValueOnce(
+      new ContextLoadError(
+        "CONTEXT_INVALID",
+        "Project Context index does not exist: .taphound/context/project-context.json"
+      )
+    );
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "generation", "start",
+      "--project", "/project",
+      "--context", "context.json",
+      "--json"
+    ]);
+
+    const output = JSON.parse(test.stdout.value) as {
+      failure: { hint?: string };
+    };
+    expect(output.failure.hint).toContain("taphound context generate");
+    expect(output.failure.hint).toContain("taphound local sync");
+    expect(test.exitCodes).toEqual([2]);
+  });
+
+  it("hints Context remediation when the Journey check Context index does not exist", async () => {
+    const test = dependencies();
+    test.value.contextLoader = {
+      load: vi.fn(),
+      readIndex: vi.fn(() => Promise.reject(new ContextLoadError(
+        "CONTEXT_INVALID",
+        "Project Context index does not exist: .taphound/context/project-context.json"
+      )))
+    };
+    test.value.journeyResolver = {
+      resolve: vi.fn(),
+      resolveFlow: vi.fn(),
+      listFlows: vi.fn()
+    };
+    test.value.journeyCompositionStore = {
+      read: vi.fn(),
+      listJourneyPaths: vi.fn(),
+      readJourneyMeta: vi.fn(),
+      writeText: vi.fn()
+    };
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "journey", "check",
+      "--project", "/project",
+      "--json"
+    ]);
+
+    const output = JSON.parse(test.stdout.value) as {
+      failure: { hint?: string };
+    };
+    expect(output.failure.hint).toContain("taphound context generate");
+    expect(output.failure.hint).toContain("taphound local sync");
     expect(test.exitCodes).toEqual([2]);
   });
 

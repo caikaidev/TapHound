@@ -33,6 +33,7 @@ import {
   FileSystemJourneyWriter
 } from "../../../src/adapters/filesystem/journey-writer.js";
 import {
+  GenerationFinalizationError,
   GenerationFinalizer,
   GenerationOutputPathSchema
 } from "../../../src/application/generation/generation-finalizer.js";
@@ -57,6 +58,7 @@ import {
   hashJourney,
   type TapHoundReport
 } from "../../../src/domain/report.js";
+import { hashGoalSpec } from "../../../src/domain/route.js";
 import type {
   ProjectBoundGenerationMetaWriterPort
 } from "../../../src/ports/generation-meta-writer.js";
@@ -438,13 +440,14 @@ async function fixture(
     new FileSystemGenerationMetaWriter()
   ),
   journeyWriter: ProjectBoundJourneyWriterPort = new FileSystemJourneyWriter(),
-  storeOptions: FileSystemGenerationSessionStoreOptions = {}
+  storeOptions: FileSystemGenerationSessionStoreOptions = {},
+  initialSession: (root: string) => GenerationSession = session
 ): Promise<FinalizerFixture> {
   const root = await mkdtemp(join(tmpdir(), "taphound-finalizer-"));
   const canonicalRoot = await realpath(root);
   roots.push(root);
   const store = new FileSystemGenerationSessionStore(root, storeOptions);
-  await store.create(session(root));
+  await store.create(initialSession(root));
   const verify = vi.fn<VerifyFunction>(() => Promise.resolve({
     status: "passed" as const,
     exitCode: 0 as const,
@@ -560,6 +563,12 @@ describe("GenerationFinalizer", () => {
     expect(result.journey.name).toBe("generated");
     expect(result.meta.manualOverrideStepIndexes).toEqual([0]);
     expect(result.meta.contextSelection).toEqual(contextSelection);
+    expect(result.meta.journeySha256).toBe(hashJourney(result.journey));
+    expect(result.meta.replayPolicy).toEqual({
+      generatedReplayPolicy: true,
+      requireFocusedInput: true,
+      idle: config.idle
+    });
     expect(test.forceStop).not.toHaveBeenCalled();
     expect(test.verify).toHaveBeenCalledOnce();
     expect(test.verify).toHaveBeenCalledWith(expect.objectContaining({
@@ -609,6 +618,55 @@ describe("GenerationFinalizer", () => {
     expect(test.verify).toHaveBeenCalledOnce();
     const verifyInput = test.verify.mock.calls[0]?.[0];
     expect(verifyInput?.config.idle).toEqual(idlePolicy);
+    expect(result.meta.replayPolicy?.idle).toEqual(idlePolicy);
+  });
+
+  it("publishes the bound Knowledge hash for planning-enabled sessions", async () => {
+    const goal = {
+      version: 1 as const,
+      id: "open-search",
+      targetScreen: "search",
+      parameters: {},
+      limits: { maxSteps: 5, maxReplans: 2 }
+    };
+    const test = await fixture(undefined, undefined, {}, (root) => ({
+      ...session(root),
+      version: 2,
+      planning: {
+        knowledgeHash: "f".repeat(64),
+        goalHash: hashGoalSpec(goal),
+        goal,
+        currentScreen: null,
+        currentRoute: null,
+        replansUsed: 0,
+        maxReplans: 2,
+        maxSteps: 5
+      }
+    }));
+    const result = await test.finalize.finalize(input(test.root));
+    expect(result.meta.bindings.knowledgeHash).toBe("f".repeat(64));
+  });
+
+  it("publishes the session source Brief binding in the exported meta", async () => {
+    const test = await fixture(undefined, undefined, {}, (root) => ({
+      ...session(root),
+      sourceBrief: {
+        path: "docs/cases/search-brief.md",
+        sha256: "e".repeat(64)
+      }
+    }));
+
+    const result = await test.finalize.finalize(input(test.root));
+
+    expect(result.status).toBe("verified");
+    expect(result.meta.sourceBrief).toEqual({
+      path: "docs/cases/search-brief.md",
+      sha256: "e".repeat(64)
+    });
+    await expect(readFile(
+      join(test.root, ".taphound/journeys/generated.meta.json"),
+      "utf8"
+    )).resolves.toContain("docs/cases/search-brief.md");
   });
 
   it("persists replay progress phases during the owned verification attempt", async () => {
@@ -1082,10 +1140,36 @@ describe("GenerationFinalizer", () => {
       launchActivity: "com.example.app.OtherActivity"
     };
 
-    await expect(test.finalize.finalize(changed)).rejects.toMatchObject({
+    const error = await test.finalize.finalize(changed).catch(
+      (caught: unknown): unknown => caught
+    );
+    expect(error).toBeInstanceOf(GenerationFinalizationError);
+    if (!(error instanceof GenerationFinalizationError)) {
+      throw new Error("Expected GenerationFinalizationError");
+    }
+    expect(error).toMatchObject({
       code: "CONTEXT_STALE",
       stage: "precondition"
     });
+    const details = error.details as {
+      mismatches: {
+        binding: string;
+        expected: string;
+        actual: string;
+      }[];
+    };
+    expect(details.mismatches.find(
+      (entry) => entry.binding === "launchActivity"
+    )).toEqual({
+      binding: "launchActivity",
+      expected: "com.example.app.MainActivity",
+      actual: "com.example.app.OtherActivity"
+    });
+    const projectHash = details.mismatches.find(
+      (entry) => entry.binding === "projectHash"
+    );
+    expect(projectHash?.expected).toMatch(/^[a-f\d]{8}$/);
+    expect(projectHash?.actual).toMatch(/^[a-f\d]{8}$/);
     expect(test.forceStop).not.toHaveBeenCalled();
     expect(test.verify).not.toHaveBeenCalled();
   });

@@ -336,6 +336,37 @@ describe("GenerationStarter", () => {
     expect(test.prepare).not.toHaveBeenCalled();
   });
 
+  it("binds an optional source Brief and rejects invalid Brief shapes", async () => {
+    const test = starter();
+
+    const session = await test.service.start({
+      projectRoot: "/project",
+      config,
+      context,
+      project,
+      deviceSerial: "emulator-5554",
+      sourceBrief: {
+        path: "docs/cases/search-brief.md",
+        sha256: "e".repeat(64)
+      }
+    });
+
+    expect(session.sourceBrief).toEqual({
+      path: "docs/cases/search-brief.md",
+      sha256: "e".repeat(64)
+    });
+
+    await expect(test.service.start({
+      projectRoot: "/project",
+      config,
+      context,
+      project,
+      deviceSerial: "emulator-5554",
+      sourceBrief: { path: "../escape-brief.md", sha256: "e".repeat(64) }
+    })).rejects.toThrow();
+    expect(test.created).toEqual([session]);
+  });
+
   it("rejects a failed or mismatched base Flow replay", async () => {
     const test = starter();
     const validStep = validReport().steps[0];

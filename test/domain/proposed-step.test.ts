@@ -12,6 +12,22 @@ const binding = {
 };
 
 describe("ProposedStepSchema", () => {
+  it("accepts stepStart events but refuses unbound proposal windows", () => {
+    const proposal = {
+      binding, action: "wait",
+      activity: { before: "com.example.app.MainActivity" },
+      expect: {
+        type: "logcatEvent", tag: "Search", event: "submitted",
+        timeoutMs: 100, window: { from: "stepStart" }
+      }
+    };
+    expect(ProposedStepSchema.safeParse(proposal).success).toBe(true);
+    expect(ProposedStepSchema.safeParse({
+      ...proposal, expect: {
+        ...proposal.expect, window: { from: "runStart" }
+      }
+    }).success).toBe(false);
+  });
   it.each([
     {
       binding,

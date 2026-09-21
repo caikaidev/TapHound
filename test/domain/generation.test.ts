@@ -137,6 +137,7 @@ describe("generation error contract", () => {
       "CONFIG_INVALID",
       "CONTEXT_INVALID",
       "CONTEXT_STALE",
+      "BRIEF_INVALID",
       "KNOWLEDGE_INVALID",
       "KNOWLEDGE_STALE",
       "SCREEN_UNKNOWN",
@@ -213,6 +214,42 @@ describe("generation planning sessions", () => {
 });
 
 describe("generation finalization evidence schemas", () => {
+  it("accepts old meta and validates optional Replay policy and Knowledge binding", () => {
+    const legacy = {
+      version: 1,
+      status: "verified",
+      generationId: "generation-1",
+      journeyPath: ".taphound/journeys/generated.json",
+      bindings: {
+        projectHash: "a".repeat(64),
+        configHash: "b".repeat(64),
+        contextHash: "c".repeat(64)
+      },
+      verification: {
+        reportPath: "verification/report.json",
+        reportSha256: "d".repeat(64),
+        runId: "verify-run",
+        runs: 1
+      },
+      manualOverrideStepIndexes: []
+    };
+    expect(GenerationMetaSchema.parse(legacy).replayPolicy).toBeUndefined();
+    const current = {
+      ...legacy,
+      journeySha256: "e".repeat(64),
+      bindings: { ...legacy.bindings, knowledgeHash: "f".repeat(64) },
+      replayPolicy: {
+        generatedReplayPolicy: true,
+        requireFocusedInput: true,
+        idle: { strategy: "hybrid", pollIntervalMs: 100, stablePolls: 2, timeoutMs: 5000 }
+      }
+    };
+    expect(GenerationMetaSchema.parse(current)).toMatchObject(current);
+    expect(() => GenerationMetaSchema.parse({
+      ...current,
+      replayPolicy: { ...current.replayPolicy, unexpected: true }
+    })).toThrow();
+  });
   it("parses aligned strict verified meta and provenance", () => {    expect(GenerationMetaSchema.parse({
       version: 1,
       status: "verified",
@@ -248,6 +285,47 @@ describe("generation finalization evidence schemas", () => {
         { index: 1, source: "manualOverride" }
       ]
     }).steps).toHaveLength(2);
+  });
+
+  it("parses meta with a source Brief binding and rejects invalid shapes", () => {
+    const meta = {
+      version: 1,
+      status: "verified",
+      generationId: "generation-1",
+      journeyPath: ".taphound/journeys/generated.json",
+      bindings: {
+        projectHash: "a".repeat(64),
+        configHash: "b".repeat(64),
+        contextHash: "c".repeat(64)
+      },
+      sourceBrief: {
+        path: "docs/cases/search-brief.md",
+        sha256: "e".repeat(64)
+      },
+      verification: {
+        reportPath: "verification/report.json",
+        reportSha256: "d".repeat(64),
+        runId: "verify-run",
+        runs: 1
+      },
+      manualOverrideStepIndexes: []
+    };
+    expect(GenerationMetaSchema.parse(meta).sourceBrief).toEqual({
+      path: "docs/cases/search-brief.md",
+      sha256: "e".repeat(64)
+    });
+    expect(() => GenerationMetaSchema.parse({
+      ...meta,
+      sourceBrief: { path: "../escape.md", sha256: "e".repeat(64) }
+    })).toThrow();
+    expect(() => GenerationMetaSchema.parse({
+      ...meta,
+      sourceBrief: { path: "docs/cases/search-brief.md", sha256: "not-a-hash" }
+    })).toThrow();
+    expect(() => GenerationMetaSchema.parse({
+      ...meta,
+      sourceBrief: { path: "docs/cases/search-brief.md", extra: true }
+    })).toThrow();
   });
 
   it("parses promoted meta and enforces promotion lifecycle coherence", () => {
@@ -470,6 +548,33 @@ describe("GenerationSessionSchema", () => {
       ...parsed,
       candidateSources: ["planner"]
     })).toThrow(/provenance/i);
+  });
+
+  it("accepts an optional source Brief binding on sessions", () => {
+    const parsed = GenerationSessionSchema.parse({
+      ...(validSession() as object),
+      sourceBrief: {
+        path: "docs/cases/search-brief.md",
+        sha256: "e".repeat(64)
+      }
+    });
+    expect(parsed.sourceBrief).toEqual({
+      path: "docs/cases/search-brief.md",
+      sha256: "e".repeat(64)
+    });
+
+    expect(() => GenerationSessionSchema.parse({
+      ...(validSession() as object),
+      sourceBrief: { path: "/absolute/brief.md", sha256: "e".repeat(64) }
+    })).toThrow();
+    expect(() => GenerationSessionSchema.parse({
+      ...(validSession() as object),
+      sourceBrief: {
+        path: "docs/cases/search-brief.md",
+        sha256: "e".repeat(64),
+        extra: true
+      }
+    })).toThrow();
   });
 
   it("accepts external flow bindings and rejects duplicates", () => {

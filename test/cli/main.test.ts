@@ -62,6 +62,7 @@ function dependencies(exitCodes: number[]): CliDependencies {
     },
     workspaceLayout: fakeWorkspaceLayout(),
     localTargets: defaultLocalTargets(),
+    readFile: (): Promise<Buffer> => Promise.resolve(Buffer.alloc(0)),
     readJson: (path) => Promise.resolve(
       path.includes("journey") ? runtimeJourney : runtimeConfig
     ),

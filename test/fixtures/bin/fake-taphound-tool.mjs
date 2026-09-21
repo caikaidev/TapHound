@@ -34,6 +34,10 @@ if (executable === "android") {
     process.exit(0);
   }
   if (args[0] === "screen" && args[1] === "capture") {
+    if (process.env.TAPHOUND_FAKE_SCREEN_CAPTURE === "hang") {
+      setInterval(() => {}, 1000);
+      await new Promise(() => {});
+    }
     const output = args.find((argument) => argument.startsWith("--output="))
       ?.slice("--output=".length);
     if (output === undefined) {

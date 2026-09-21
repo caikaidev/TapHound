@@ -36,10 +36,12 @@ import {
 import { JourneySchema } from "../../domain/journey.js";
 import {
   assertArtifactDirectory,
-  CONFIG_PATH
+  CONFIG_PATH,
+  CONTEXT_INDEX_PATH
 } from "../../domain/workspace.js";
 import type { CliDependencies } from "../dependencies.js";
 import {
+  contextLoadHint,
   errorMessage,
   writeJson,
   writeLine
@@ -128,6 +130,9 @@ function writeFailure(
     || error instanceof TargetError
     || error instanceof ContextLoadError
     || error instanceof z.ZodError;
+  const hint = error instanceof ContextLoadError
+    ? contextLoadHint(error)
+    : undefined;
   const output = {
     status: "error" as const,
     exitCode: known ? 2 as const : 4 as const,
@@ -147,7 +152,8 @@ function writeFailure(
                   : error instanceof z.ZodError
                     ? "CONFIG_INVALID"
                     : "INTERNAL_ERROR",
-      message: errorMessage(error)
+      message: errorMessage(error),
+      ...(hint === undefined ? {} : { hint })
     }
   };
   if (options.json === true) {
@@ -415,7 +421,9 @@ function createCheckCommand(dependencies: CliDependencies): Command {
           contextPath: resolve(
             workspaceRoot ?? projectRoot,
             options.context === undefined
-              ? "context/project-context.json"
+              ? workspaceRoot === undefined
+                ? CONTEXT_INDEX_PATH
+                : "context/project-context.json"
               : options.context
           )
         });

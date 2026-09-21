@@ -1,4 +1,5 @@
 import type { DoctorReport } from "../application/doctor/doctor-service.js";
+import type { ContextLoadError } from "../application/context/context-loader.js";
 import type {
   FailureCode,
   TapHoundExitCode
@@ -45,4 +46,19 @@ export function doctorMessage(report: DoctorReport): string {
 
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+export function contextLoadHint(error: ContextLoadError): string | undefined {
+  if (
+    error.code !== "CONTEXT_INVALID"
+    || (!error.message.includes("index does not exist")
+      && !error.message.includes("shard does not exist"))
+  ) {
+    return undefined;
+  }
+  return "Project Context is missing at the resolved path. Generate the "
+    + "committed Context first with `taphound context generate`, or pass "
+    + "--context with an explicit index path. For a registered local "
+    + "target, run `taphound local sync <id>` before retrying. See "
+    + "docs/agent-integration.md and docs/local-target.md.";
 }

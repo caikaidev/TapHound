@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type { TapHoundConfig } from "../../domain/config.js";
 import {
   GenerationMetaSchema,
@@ -30,7 +32,9 @@ export type JourneyCheckReason =
   | "config-hash"
   | "meta-legacy"
   | "module-drift"
-  | "module-missing";
+  | "module-missing"
+  | "brief-drift"
+  | "brief-missing";
 
 export interface JourneyCheckDriftedModule {
   id: string;
@@ -267,6 +271,15 @@ export class JourneyCheckService {
         reasons.push("module-missing");
       }
     }
+    if (
+      meta.sourceBrief !== undefined
+      && input.workspaceRoot === undefined
+    ) {
+      reasons.push(...await this.briefDriftReason(
+        input.projectRoot,
+        meta.sourceBrief
+      ));
+    }
     const status = reasons.length === 0 ? "fresh" : "stale";
     return {
       name: journeyName(input.journeyPath),
@@ -283,13 +296,33 @@ export class JourneyCheckService {
       message: undefined
     };
   };
+
+  private async briefDriftReason(
+    projectRoot: string,
+    brief: { path: string; sha256: string }
+  ): Promise<[JourneyCheckReason] | []> {
+    let bytes: Buffer;
+    try {
+      bytes = await this.dependencies.store.read({
+        projectRoot,
+        relativePath: brief.path
+      });
+    } catch {
+      return ["brief-missing"];
+    }
+    return createHash("sha256").update(bytes).digest("hex") === brief.sha256
+      ? []
+      : ["brief-drift"];
+  }
 }
 
 const STALE_REASONS: ReadonlySet<JourneyCheckReason> = new Set([
   "journey-path-mismatch",
   "project-hash",
   "module-drift",
-  "module-missing"
+  "module-missing",
+  "brief-drift",
+  "brief-missing"
 ]);
 
 function lifecycleFor(

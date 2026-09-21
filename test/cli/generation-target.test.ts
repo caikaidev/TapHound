@@ -307,6 +307,22 @@ describe("generation --target", () => {
     expect(test.start).not.toHaveBeenCalled();
   });
 
+  it("rejects Journey Brief binding for registered local targets", async () => {
+    const test = harness();
+    await run(test, [
+      "generation", "start",
+      "--target", "work-app",
+      "--brief", "docs/cases/search-brief.md",
+      "--json"
+    ]);
+    expect(test.exitCodes).toEqual([2]);
+    const payload = JSON.parse(test.stdout.value) as {
+      failure: { code: string };
+    };
+    expect(payload.failure.code).toBe("BRIEF_INVALID");
+    expect(test.start).not.toHaveBeenCalled();
+  });
+
   it("threads workspaceRoot into the generation runtime for observe", async () => {
     const test = harness();
     await run(test, [

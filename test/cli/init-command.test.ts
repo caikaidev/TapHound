@@ -110,6 +110,7 @@ function harness(
     },
     workspaceLayout: fakeWorkspaceLayout(),
     localTargets: defaultLocalTargets(),
+    readFile: vi.fn(() => Promise.resolve(Buffer.alloc(0))),
     readJson: vi.fn(() => Promise.reject(new Error("unused"))),
     cwd: () => "/project",
     stdout,

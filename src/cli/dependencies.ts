@@ -118,6 +118,9 @@ import {
   GenerationRecoveryService
 } from "../application/generation/generation-recovery-service.js";
 import {
+  GenerationReopenService
+} from "../application/generation/generation-reopen-service.js";
+import {
   GenerationConfigService,
   type GenerationIdlePolicyPatch
 } from "../application/generation/generation-config-service.js";
@@ -272,6 +275,7 @@ export interface GenerationCliRuntime {
   observer: Pick<RuntimeObserver, "observe">;
   finalizer: Pick<GenerationFinalizer, "finalize">;
   recovery: Pick<GenerationRecoveryService, "status" | "retry">;
+  reopen: Pick<GenerationReopenService, "reopen">;
   archive: (id: string) => Promise<GenerationSession>;
   list: () => Promise<readonly GenerationSession[]>;
   readSession: (id: string) => Promise<GenerationSession>;
@@ -1172,12 +1176,17 @@ export function createProductionDependencies(
           }
         }
       });
+      const reopen = new GenerationReopenService({
+        store,
+        now: (): Date => new Date()
+      });
       return {
         confirmation,
         executor,
         observer,
         finalizer,
         recovery,
+        reopen,
         archive: async (id): Promise<GenerationSession> => {
           const current = await store.read(id);
           const next: GenerationSession = {

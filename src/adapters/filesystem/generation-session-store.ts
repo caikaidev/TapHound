@@ -472,6 +472,7 @@ function transitionStableState(
     candidateSources: session.candidateSources,
     pendingConfirmation: session.pendingConfirmation,
     verification: session.verification,
+    verificationHistory: session.verificationHistory ?? [],
     publication: session.publication
   };
 }
@@ -690,6 +691,53 @@ function assertVerificationRecoveryTransition(
     throw new GenerationSessionStoreError(
       "INVALID_TRANSITION",
       "Verification recovery may only reset an interrupted running attempt"
+    );
+  }
+}
+
+function assertVerificationReopenTransition(
+  current: GenerationSession,
+  next: GenerationSession
+): void {
+  assertCoreIdentityPreserved(current, next);
+  assertLatestSnapshotPreserved(current, next);
+  const currentHistory = current.verificationHistory ?? [];
+  const nextHistory = next.verificationHistory ?? [];
+  const expectedHistory = current.verification.status === "failed"
+    ? [
+        ...currentHistory,
+        {
+          failedRevision: current.revision,
+          reopenedAt: nextHistory.at(-1)?.reopenedAt,
+          reason: nextHistory.at(-1)?.reason,
+          failure: current.verification.failure
+        }
+      ]
+    : currentHistory;
+  const stable = (session: GenerationSession): Record<string, unknown> => ({
+    ...transitionStableState(session),
+    verification: undefined,
+    verificationHistory: undefined
+  });
+  if (
+    current.state !== "active"
+    || next.state !== "active"
+    || current.inFlight !== null
+    || next.inFlight !== null
+    || current.pendingConfirmation !== null
+    || next.pendingConfirmation !== null
+    || current.verification.status !== "failed"
+    || next.verification.status !== "notRun"
+    || current.publication.status !== "notRun"
+    || next.publication.status !== "notRun"
+    || nextHistory.length !== currentHistory.length + 1
+    || nextHistory.at(-1)?.reason.trim().length === 0
+    || JSON.stringify(nextHistory) !== JSON.stringify(expectedHistory)
+    || JSON.stringify(stable(current)) !== JSON.stringify(stable(next))
+  ) {
+    throw new GenerationSessionStoreError(
+      "INVALID_TRANSITION",
+      "Verification reopen may only preserve one failed attempt in history and reset it to notRun"
     );
   }
 }
@@ -2058,6 +2106,51 @@ implements GenerationSessionStore {
         );
       }
       assertVerificationRecoveryTransition(current, next);
+      await writeStateAtomically(
+        activeDirectory,
+        next,
+        this.syncDirectory,
+        this.hooks.beforeStateRename,
+        activeEvidence
+      );
+    });
+  };
+
+  public readonly reopenVerification = async (
+    id: string,
+    expectedRevision: number,
+    input: GenerationSession
+  ): Promise<void> => {
+    assertId(id);
+    const next = parseSession(input, true);
+    validateNextRevision(id, expectedRevision, next);
+    await this.ensureGenerationRoot();
+    await this.withLock(id, async () => {
+      const activeDirectory = this.activeDirectory(id);
+      if (!await pathExists(activeDirectory)) {
+        throw new GenerationSessionStoreError(
+          await pathExists(this.finalDirectory(id))
+            ? "SESSION_PUBLISHED"
+            : "SESSION_NOT_FOUND",
+          `Generation session cannot reopen verification: ${id}`
+        );
+      }
+      const activeEvidence = await captureStoreDirectory(activeDirectory);
+      const current = await readBoundState(
+        activeDirectory,
+        id,
+        this.hooks.afterStateOpen,
+        activeEvidence
+      );
+      if (current.revision !== expectedRevision) {
+        throw new GenerationSessionStoreError(
+          "REVISION_CONFLICT",
+          `Expected generation revision ${String(expectedRevision)}, found ${
+            String(current.revision)
+          }`
+        );
+      }
+      assertVerificationReopenTransition(current, next);
       await writeStateAtomically(
         activeDirectory,
         next,

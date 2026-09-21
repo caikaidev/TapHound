@@ -71,6 +71,7 @@ interface StableContextDocument {
 }
 
 function inspectionMessage(
+  label: string,
   path: string,
   inspection: Exclude<ProjectFileInspection, { status: "inspected" }>
 ): string {
@@ -81,17 +82,17 @@ function inspectionMessage(
     case "rootNotDirectory":
       return "Project root is not a directory";
     case "notFound":
-      return `Context shard does not exist: ${path}`;
+      return `${label} does not exist: ${path}`;
     case "unreadable":
-      return `Context shard cannot be read: ${path}`;
+      return `${label} cannot be read: ${path}`;
     case "escape":
-      return `Context shard resolves outside the project: ${path}`;
+      return `${label} resolves outside the project: ${path}`;
     case "changedIdentity":
-      return `Context shard changed during inspection: ${path}`;
+      return `${label} changed during inspection: ${path}`;
     case "notFile":
-      return `Context shard path is not a file: ${path}`;
+      return `${label} path is not a file: ${path}`;
     case "tooLarge":
-      return `Context shard exceeds ${String(MAX_CONTEXT_SHARD_BYTES)} bytes: ${path}`;
+      return `${label} exceeds ${String(MAX_CONTEXT_SHARD_BYTES)} bytes: ${path}`;
   }
 }
 
@@ -218,7 +219,7 @@ export class ContextLoader {
     if (before.status !== "inspected") {
       throw new ContextLoadError(
         "CONTEXT_INVALID",
-        inspectionMessage(input.relativePath, before)
+        inspectionMessage(input.label, input.relativePath, before)
       );
     }
     let document: unknown;
@@ -229,7 +230,9 @@ export class ContextLoader {
     } catch (error) {
       throw new ContextLoadError(
         "CONTEXT_INVALID",
-        error instanceof Error ? error.message : `Unable to read ${input.label}`
+        error instanceof Error
+          ? error.message
+          : `Unable to read ${input.label}: ${input.relativePath}`
       );
     }
     const after = await this.dependencies.files.inspectProjectFile({
@@ -243,7 +246,7 @@ export class ContextLoader {
     ) {
       throw new ContextLoadError(
         "CONTEXT_INVALID",
-        `${input.label} changed while loading`
+        `${input.label} changed while loading: ${input.relativePath}`
       );
     }
     return { document, sha256: before.sha256 };
@@ -313,7 +316,7 @@ export class ContextLoader {
           input.workspaceRoot,
           reference.contextPath
         ),
-        label: `Context shard ${reference.contextPath}`
+        label: "Context shard"
       });
       if (loaded.sha256 !== reference.sha256) {
         throw new ContextLoadError(

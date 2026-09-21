@@ -84,6 +84,7 @@ interface Harness {
   assertConfigIdentity: Mock;
   recoveryStatus: Mock;
   retry: Mock;
+  reopen: Mock;
   archive: Mock;
   list: Mock;
   readSession: Mock;
@@ -165,6 +166,43 @@ function harness(signal?: AbortSignal): Harness {
   }));
   const retry = vi.fn(() => Promise.resolve({
     revision: 5
+  }));
+  const reopen = vi.fn(() => Promise.resolve({
+    version: 1 as const,
+    id: "generation-1",
+    revision: 5,
+    state: "active" as const,
+    bindings: {
+      projectHash: "a".repeat(64),
+      configHash: "b".repeat(64),
+      contextHash: "c".repeat(64),
+      snapshotHash: null
+    },
+    target: {
+      packageName: "com.example.app",
+      deviceSerial: "emulator-5554",
+      resetStrategy: "processOnly" as const,
+      interactionPolicy: generationContext.interactionPolicy
+    },
+    contextSelection: generationContext.selection,
+    variables: {
+      runId: "run-1",
+      timestamp: "2026-07-23T00:00:00.000Z",
+      randomHex: "abc123"
+    },
+    externalFlows: [],
+    candidateSteps: [],
+    candidateSources: [],
+    inFlight: null,
+    pendingConfirmation: null,
+    verification: { status: "notRun" as const },
+    verificationHistory: [{
+      failedRevision: 4,
+      reopenedAt: "2026-09-16T00:00:00.000Z",
+      reason: "add late-render guard",
+      failure: { code: "VERIFICATION_FAILED", message: "locator missing" }
+    }],
+    publication: { status: "notRun" as const }
   }));
   const archive = vi.fn(() => Promise.resolve({
     id: "generation-1",
@@ -288,6 +326,7 @@ function harness(signal?: AbortSignal): Harness {
       observer: { observe },
       finalizer: { finalize },
       recovery: { status: recoveryStatus, retry },
+      reopen: { reopen },
       archive,
       list,
       readSession,
@@ -328,6 +367,7 @@ function harness(signal?: AbortSignal): Harness {
     assertConfigIdentity,
     recoveryStatus,
     retry,
+    reopen,
     archive,
     list,
     readSession,
@@ -1507,6 +1547,31 @@ describe("generation JSON process protocol", () => {
     );
   });
 
+  it("canonicalizes a relative project path before finalization", async () => {
+    const test = harness();
+    vi.mocked(test.dependencies.readJson).mockImplementation((path) => (
+      Promise.resolve(path.endsWith("context.json")
+        ? generationContext
+        : runtimeConfig)
+    ));
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "finalize",
+      "--project", ".",
+      "--session", "generation-1",
+      "--context", "context.json",
+      "--output", ".taphound/journeys/generated.json",
+      "--json"
+    ]);
+
+    expect(test.finalize).toHaveBeenCalledWith(expect.objectContaining({
+      projectRoot: "/project"
+    }));
+    expect(test.dependencies.projectDescriber.describe).toHaveBeenCalledWith(
+      expect.objectContaining({ projectRoot: "/project" })
+    );
+  });
+
   it("finalizes from the stored context snapshot without reading live context", async () => {
     const test = harness();
     test.readContextSnapshot.mockResolvedValueOnce(resolvedProjectContext);
@@ -1925,7 +1990,72 @@ describe("generation JSON process protocol", () => {
     expect(test.retry).toHaveBeenCalledWith("generation-1");
     expect(JSON.parse(test.stdout.value)).toMatchObject({
       status: "recovered",
+      recoveryKind: "step",
+      nextAction: "retry the interrupted generation step",
       actionMayHaveExecuted: true
+    });
+  });
+
+  it("tells verification recovery to rerun finalize", async () => {
+    const test = harness();
+    test.recoveryStatus.mockResolvedValueOnce({
+      ...(await test.recoveryStatus()),
+      verification: {
+        status: "running",
+        attemptId: "verification-attempt"
+      },
+      recovery: {
+        available: true,
+        kind: "verification",
+        actionMayHaveExecuted: true,
+        attemptOutcome: null,
+        requiredDecision: "retry",
+        ownerAlive: false
+      }
+    });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "recover",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--decision", "retry",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "recovered",
+      recoveryKind: "verification",
+      nextAction: "generation finalize"
+    });
+  });
+
+  it("reopens a failed verification with an audit reason and next action", async () => {
+    const test = harness();
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "reopen",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--reason", "add late-render guard",
+      "--json"
+    ]);
+
+    expect(test.reopen).toHaveBeenCalledWith({
+      generationId: "generation-1",
+      reason: "add late-render guard"
+    });
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "reopened",
+      exitCode: 0,
+      verification: { status: "notRun" },
+      preservedFailure: {
+        failedRevision: 4,
+        reason: "add late-render guard"
+      },
+      nextAction: {
+        command: "generation step --replace <index>",
+        then: "generation finalize"
+      }
     });
   });
 

@@ -62,6 +62,7 @@ describe("createProgram", () => {
       "bridge",
       "status",
       "recover",
+      "reopen",
       "archive",
       "config",
       "list",

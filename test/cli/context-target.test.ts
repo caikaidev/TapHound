@@ -189,6 +189,7 @@ function baseDependencies(
       observe: vi.fn(() => Promise.reject(new Error("unused")))
     }),
     workspaceLayout: fakeWorkspaceLayout(),
+    readFile: vi.fn(() => Promise.resolve(Buffer.alloc(0))),
     readJson: vi.fn(() => Promise.resolve(undefined)),
     cwd: () => "/project",
     stdout: new BufferOutput(),

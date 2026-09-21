@@ -9,6 +9,7 @@ import type {
 import {
   GenerationSessionSchema,
   GenerationExternalFlowBindingSchema,
+  GenerationSourceBriefSchema,
   type GenerationErrorCode,
   type GenerationSession
 } from "../../domain/generation.js";
@@ -92,6 +93,7 @@ export interface GenerationStartInput {
     verificationReportPath: string;
   } | undefined;
   externalFlows?: readonly GenerationExternalFlowInput[] | undefined;
+  sourceBrief?: { path: string; sha256: string } | undefined;
   planning?: {
     knowledgeHash: string;
     goal: GoalSpec;
@@ -359,6 +361,10 @@ export class GenerationStarter {
         stepCount: entry.stepCount
       }));
 
+    const sourceBrief = input.sourceBrief === undefined
+      ? undefined
+      : GenerationSourceBriefSchema.parse(input.sourceBrief);
+
     const uiSnapshotProvider = await this.dependencies.uiSnapshots.open({
       deviceSerial: input.deviceSerial,
       timeoutMs: config.ui?.snapshotTimeoutMs ?? config.idle.timeoutMs,
@@ -402,12 +408,14 @@ export class GenerationStarter {
         randomHex: randomHex(this.dependencies.randomBytes(16))
       },
       ...(baseFlow === undefined ? {} : { baseFlow: baseFlow.binding }),
+      ...(sourceBrief === undefined ? {} : { sourceBrief }),
       externalFlows: externalFlowBindings,
       candidateSteps: baseFlow?.journey.steps ?? [],
       candidateSources: baseFlow?.journey.steps.map(() => "flow") ?? [],
       inFlight: null,
       pendingConfirmation: null,
       verification: { status: "notRun" },
+      verificationHistory: [],
       publication: { status: "notRun" },
       ...(planning === undefined
         ? {}

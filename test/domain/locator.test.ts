@@ -24,6 +24,31 @@ describe("LocatorSchema", () => {
     expect(LocatorSchema.parse(locator)).toEqual(locator);
   });
 
+  it("accepts explicit all-field matching and field-specific regex", () => {
+    const locator = {
+      resourceId: "message_count",
+      text: "^Messages \\(\\d+\\)$",
+      combine: "all" as const,
+      matchBy: {
+        resourceId: "exact" as const,
+        text: "regex" as const
+      }
+    };
+
+    expect(LocatorSchema.parse(locator)).toEqual(locator);
+  });
+
+  it("rejects invalid or orphaned field-specific regex", () => {
+    expect(() => LocatorSchema.parse({
+      text: "[",
+      match: "regex"
+    })).toThrow(/valid regular expression/i);
+    expect(() => LocatorSchema.parse({
+      resourceId: "message_count",
+      matchBy: { text: "regex" }
+    })).toThrow(/requires text/i);
+  });
+
   it("accepts an ordinal after identity narrowing", () => {
     const locator = { resourceId: "row", text: "Item", index: 2 };
 

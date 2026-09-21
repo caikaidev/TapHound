@@ -117,6 +117,26 @@ function jsonOutput(result: CliProcessResult): Record<string, unknown> {
 }
 
 describe("built taphound doctor --json process contract", () => {
+  it("fails closed when the permission screenshot probe hangs", async () => {
+    const test = await fixture();
+    const result = runDoctor(test, {
+      TAPHOUND_FAKE_SCREEN_CAPTURE: "hang"
+    });
+    expect(result.status).toBe(3);
+    const report = jsonOutput(result);
+    expect(report).toMatchObject({
+      status: "failed",
+      failureCode: "ENVIRONMENT_MISSING_TOOL"
+    });
+    expect(report.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: "permissions",
+        status: "failed",
+        message: "Android screen capture permission probe timed out after 10 seconds"
+      })
+    ]));
+  }, 20000);
+
   it("reports the adb runtime backend by default", async () => {
     const test = await fixture();
     const result = runDoctor(test);

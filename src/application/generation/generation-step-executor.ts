@@ -53,6 +53,7 @@ import type { ExternalStep } from "../../domain/journey.js";
 import type { ExternalFlowResolution } from "../journey/external-flow-resolver.js";
 import {
   ExpectationEvaluator,
+  elementPredicateMismatch,
   type ExpectationObservationInput
 } from "../assertion/expectation-evaluator.js";
 import { LogcatCollector } from "../collector/logcat-collector.js";
@@ -865,16 +866,6 @@ export class GenerationStepExecutor {
     let bridgeExternalSteps: readonly ExternalStep[] | undefined;
     const stepStartedAt = this.dependencies.clock.now();
     try {
-      const logcatStartedAt = this.dependencies.clock.now();
-      await logcat.start({
-        deviceSerial: session.target.deviceSerial,
-        ...(input.signal === undefined ? {} : { signal: input.signal })
-      });
-      timing.logcatStartMs = (
-        this.dependencies.clock.now() - logcatStartedAt
-      );
-      logcatStarted = true;
-      throwIfCancelled(input.signal);
       const preActionStartedAt = this.dependencies.clock.now();
       const preAction = await this.observeLive(
         session,
@@ -886,7 +877,17 @@ export class GenerationStepExecutor {
       timing.preActionObservationMs = (
         this.dependencies.clock.now() - preActionStartedAt
       );
-      logcat.scopeToPids(preAction.pids);
+      throwIfCancelled(input.signal);
+      const logcatStartedAt = this.dependencies.clock.now();
+      await logcat.start({
+        deviceSerial: session.target.deviceSerial,
+        pids: preAction.pids,
+        ...(input.signal === undefined ? {} : { signal: input.signal })
+      });
+      timing.logcatStartMs = (
+        this.dependencies.clock.now() - logcatStartedAt
+      );
+      logcatStarted = true;
       throwIfCancelled(input.signal);
       const proposedFlow = proposal.action === "bridge"
         ? proposal.flow
@@ -1333,7 +1334,7 @@ export class GenerationStepExecutor {
     outcome = { ...outcome, timing };
 
     const log = logcatStarted
-      ? logcat.lines().map((line) => line.raw).join("\n")
+      ? logcat.rawLines().map((line) => line.raw).join("\n")
       : "";
     try {
       await this.dependencies.store.writeTextEvidence(
@@ -2064,10 +2065,32 @@ export class GenerationStepExecutor {
       const resolution = resolveLocator(layout, expect.locator, {
         requireEnabled: false
       });
+      if (expect.absent === true) {
+        if (
+          resolution.status !== "failed"
+          || resolution.code !== "LOCATOR_NOT_FOUND"
+          || resolution.evidenceMismatch === true
+        ) {
+          fail(
+            "EXTERNAL_STEP_FAILED",
+            resolution.status === "found"
+              ? "External expect expected an absent element but it was found"
+              : `External expect expected an absent element: ${resolution.message}`
+          );
+        }
+        return;
+      }
       if (resolution.status !== "found") {
         fail(
           "EXTERNAL_STEP_FAILED",
           `External expect element not found: ${resolution.message}`
+        );
+      }
+      const mismatch = elementPredicateMismatch(resolution.element, expect);
+      if (mismatch !== undefined) {
+        fail(
+          "EXTERNAL_STEP_FAILED",
+          `External expect element predicate mismatch: ${mismatch}`
         );
       }
     } else {

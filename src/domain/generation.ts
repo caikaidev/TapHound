@@ -25,6 +25,7 @@ export const GENERATION_ERROR_CODES = [
   "CONFIG_INVALID",
   "CONTEXT_INVALID",
   "CONTEXT_STALE",
+  "BRIEF_INVALID",
   "KNOWLEDGE_INVALID",
   "KNOWLEDGE_STALE",
   "SCREEN_UNKNOWN",
@@ -83,6 +84,15 @@ export const GenerationBaseFlowSchema = z.strictObject({
   verificationRunId: z.string().min(1),
   stepCount: z.number().int().positive()
 });
+
+export const GenerationSourceBriefSchema = z.strictObject({
+  path: ProjectRelativePathSchema,
+  sha256: Sha256Schema
+});
+
+export type GenerationSourceBrief = z.infer<
+  typeof GenerationSourceBriefSchema
+>;
 
 export const GenerationExternalFlowBindingSchema = z.strictObject({
   name: FlowNameSchema,
@@ -195,6 +205,13 @@ const VerificationSchema = z.discriminatedUnion("status", [
   })
 ]);
 
+const VerificationHistoryEntrySchema = z.strictObject({
+  failedRevision: NonnegativeSafeIntegerSchema,
+  reopenedAt: z.iso.datetime(),
+  reason: z.string().trim().min(1).max(500),
+  failure: GenerationFailureSchema
+});
+
 const PublicationSchema = z.discriminatedUnion("status", [
   z.strictObject({ status: z.literal("notRun") }),
   z.strictObject({
@@ -273,12 +290,14 @@ const GenerationSessionFields = {
   idlePolicy: IdlePolicySchema.optional(),
   variables: GenerationVariablesSchema,
   baseFlow: GenerationBaseFlowSchema.optional(),
+  sourceBrief: GenerationSourceBriefSchema.optional(),
   externalFlows: z.array(GenerationExternalFlowBindingSchema).default([]),
   candidateSteps: z.array(JourneyStepSchema),
   candidateSources: z.array(GenerationStepSourceSchema),
   inFlight: GenerationInFlightSchema.nullable(),
   pendingConfirmation: PendingConfirmationSchema.nullable(),
   verification: VerificationSchema,
+  verificationHistory: z.array(VerificationHistoryEntrySchema).optional(),
   publication: PublicationSchema
 };
 
@@ -492,12 +511,19 @@ export const GenerationMetaSchema = z.strictObject({
   }).optional(),
   generationId: GenerationSessionIdSchema,
   journeyPath: ProjectRelativePathSchema,
+  journeySha256: Sha256Schema.optional(),
   bindings: z.strictObject({
     projectHash: Sha256Schema,
     configHash: Sha256Schema,
     contextHash: Sha256Schema,
+    knowledgeHash: Sha256Schema.optional(),
     uiBackend: UiBackendDescriptorSchema.optional()
   }),
+  replayPolicy: z.strictObject({
+    generatedReplayPolicy: z.boolean(),
+    requireFocusedInput: z.boolean(),
+    idle: IdlePolicySchema
+  }).optional(),
   contextSelection: ContextSelectionSchema.optional(),
   verification: z.strictObject({
     reportPath: BundleRelativePathSchema,
@@ -506,6 +532,7 @@ export const GenerationMetaSchema = z.strictObject({
     runs: z.literal(1)
   }),
   baseFlow: GenerationBaseFlowSchema.optional(),
+  sourceBrief: GenerationSourceBriefSchema.optional(),
   externalFlows: z.array(GenerationExternalFlowBindingSchema).default([]),
   manualOverrideStepIndexes: z.array(z.number().int().nonnegative())
 }).superRefine((meta, context) => {

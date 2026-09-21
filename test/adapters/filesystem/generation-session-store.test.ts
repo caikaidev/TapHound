@@ -811,6 +811,52 @@ describe("FileSystemGenerationSessionStore", () => {
     await expect(store.read("generation-1")).resolves.toEqual(recovered);
   });
 
+  it("reopens failed verification only while preserving an audit entry", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    await store.create(verificationCandidate());
+    const running = await store.beginVerification(
+      "generation-1",
+      0,
+      "verification-attempt"
+    );
+    const failed = {
+      ...running,
+      revision: running.revision + 1,
+      verification: {
+        status: "failed" as const,
+        failure: {
+          code: "VERIFICATION_FAILED" as const,
+          message: "late locator missing"
+        }
+      }
+    };
+    await store.failVerification(
+      "generation-1",
+      running.revision,
+      failed
+    );
+    const reopened = {
+      ...failed,
+      revision: failed.revision + 1,
+      verification: { status: "notRun" as const },
+      verificationHistory: [{
+        failedRevision: failed.revision,
+        reopenedAt: "2026-09-16T08:00:00.000Z",
+        reason: "add late-render guard",
+        failure: failed.verification.failure
+      }]
+    };
+
+    await store.reopenVerification(
+      "generation-1",
+      failed.revision,
+      reopened
+    );
+
+    await expect(store.read("generation-1")).resolves.toEqual(reopened);
+  });
+
   it("rejects verification recovery after immutable evidence exists", async () => {
     const root = await temporaryRoot();
     const store = new FileSystemGenerationSessionStore(root);

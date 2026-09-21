@@ -390,6 +390,19 @@ describe("ContextLoader", () => {
     }));
   });
 
+  it("names the Project Context index when it does not exist", async () => {
+    const test = await fixture();
+    await rm(join(test.root, test.contextPath));
+
+    await expect(loader().load({
+      projectRoot: test.root,
+      contextPath: test.contextPath
+    })).rejects.toEqual(expect.objectContaining<Partial<ContextLoadError>>({
+      code: "CONTEXT_INVALID",
+      message: `Project Context index does not exist: ${test.contextPath}`
+    }));
+  });
+
   it("rejects version 1 single-file Context", async () => {
     const test = await fixture();
     await writeJson(test.root, test.contextPath, {

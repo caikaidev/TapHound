@@ -132,7 +132,8 @@ export class GenerationFinalizationError extends Error {
     public readonly stage: GenerationFinalizationStage,
     public readonly recoverable: boolean,
     message: string,
-    options?: ErrorOptions
+    options?: ErrorOptions,
+    public readonly details?: unknown
   ) {
     super(message, options);
   }
@@ -249,14 +250,16 @@ function failure(
   stage: GenerationFinalizationStage,
   message: string,
   recoverable = false,
-  cause?: unknown
+  cause?: unknown,
+  details?: unknown
 ): GenerationFinalizationError {
   return new GenerationFinalizationError(
     code,
     stage,
     recoverable,
     message,
-    cause === undefined ? undefined : { cause }
+    cause === undefined ? undefined : { cause },
+    details
   );
 }
 
@@ -524,7 +527,7 @@ export class GenerationFinalizer {
       "RECOVERY_REQUIRED"
     );
     this.assertBindings(session, input, config, context, project);
-    const meta = this.buildMeta(session, outputPath, verificationReport);
+    const meta = this.buildMeta(session, outputPath, verificationReport, config);
     const generationReport = GenerationReportSchema.parse({
       version: 1,
       generationId: session.id,
@@ -671,29 +674,85 @@ export class GenerationFinalizer {
     context: ResolvedProjectContext,
     project: ProjectDescription
   ): void {
-    if (
-      input.projectRoot !== project.projectRoot
-      || input.deviceSerial !== session.target.deviceSerial
-      || project.packageName !== session.target.packageName
-      || session.target.packageName !== config.run.packageName
-      || normalizeActivity(
-        project.packageName,
-        project.launchActivity
-      ) !== normalizeActivity(config.run.packageName, config.run.activity)
-      || session.inFlight !== null
-      || session.pendingConfirmation !== null
-      || session.state !== "active"
-      || session.bindings.projectHash !== hashGenerationBinding(project)
-      || session.bindings.configHash !== hashGenerationBinding(config)
-      || session.bindings.contextHash !== hashGenerationBinding(context)
-      || !sameJson(session.contextSelection, context.selection)
-      || JSON.stringify(session.target.interactionPolicy)
-        !== JSON.stringify(context.interactionPolicy)
-    ) {
+    const hashSummary = (value: string): string => value.slice(0, 8);
+    const mismatches: {
+      binding: string;
+      expected: string;
+      actual: string;
+    }[] = [];
+    const compare = (
+      binding: string,
+      expected: string,
+      actual: string
+    ): void => {
+      if (expected !== actual) {
+        mismatches.push({ binding, expected, actual });
+      }
+    };
+    compare("projectRoot", input.projectRoot, project.projectRoot);
+    compare(
+      "deviceSerial",
+      session.target.deviceSerial,
+      input.deviceSerial
+    );
+    compare(
+      "project.packageName",
+      session.target.packageName,
+      project.packageName
+    );
+    compare(
+      "config.packageName",
+      session.target.packageName,
+      config.run.packageName
+    );
+    compare(
+      "launchActivity",
+      normalizeActivity(config.run.packageName, config.run.activity),
+      normalizeActivity(project.packageName, project.launchActivity)
+    );
+    compare("inFlight", "none", session.inFlight === null ? "none" : "present");
+    compare(
+      "pendingConfirmation",
+      "none",
+      session.pendingConfirmation === null ? "none" : "present"
+    );
+    compare("session.state", "active", session.state);
+    compare(
+      "projectHash",
+      hashSummary(session.bindings.projectHash),
+      hashSummary(hashGenerationBinding(project))
+    );
+    compare(
+      "configHash",
+      hashSummary(session.bindings.configHash),
+      hashSummary(hashGenerationBinding(config))
+    );
+    compare(
+      "contextHash",
+      hashSummary(session.bindings.contextHash),
+      hashSummary(hashGenerationBinding(context))
+    );
+    compare(
+      "contextSelection",
+      hashSummary(hashGenerationBinding(session.contextSelection)),
+      hashSummary(hashGenerationBinding(context.selection))
+    );
+    compare(
+      "interactionPolicy",
+      hashSummary(hashGenerationBinding(session.target.interactionPolicy)),
+      hashSummary(hashGenerationBinding(context.interactionPolicy))
+    );
+    if (mismatches.length > 0) {
+      const summary = mismatches.map(
+        (entry) => `${entry.binding} expected=${entry.expected} actual=${entry.actual}`
+      ).join("; ");
       throw failure(
         "CONTEXT_STALE",
         "precondition",
-        "Generation identity, context, configuration, or process-only binding changed"
+        `Generation binding changed: ${summary}`,
+        false,
+        undefined,
+        { mismatches }
       );
     }
   }
@@ -1247,7 +1306,8 @@ export class GenerationFinalizer {
   private buildMeta(
     session: GenerationSession,
     outputPath: string,
-    report: TapHoundReport
+    report: TapHoundReport,
+    config: TapHoundConfig
   ): GenerationMeta {
     if (
       session.verification.status !== "passed"
@@ -1263,13 +1323,22 @@ export class GenerationFinalizer {
       status: "verified",
       generationId: session.id,
       journeyPath: outputPath,
+      journeySha256: report.journey.sha256,
       bindings: {
         projectHash: session.bindings.projectHash,
         configHash: session.bindings.configHash,
         contextHash: session.bindings.contextHash,
+        ...(session.planning === undefined
+          ? {}
+          : { knowledgeHash: session.planning.knowledgeHash }),
         ...(session.bindings.uiBackend === undefined
           ? {}
           : { uiBackend: session.bindings.uiBackend })
+      },
+      replayPolicy: {
+        generatedReplayPolicy: true,
+        requireFocusedInput: true,
+        idle: session.idlePolicy ?? config.idle
       },
       contextSelection: session.contextSelection,
       verification: {
@@ -1281,6 +1350,9 @@ export class GenerationFinalizer {
       ...(session.baseFlow === undefined
         ? {}
         : { baseFlow: session.baseFlow }),
+      ...(session.sourceBrief === undefined
+        ? {}
+        : { sourceBrief: session.sourceBrief }),
       manualOverrideStepIndexes: session.candidateSources.flatMap(
         (source, index) => source === "manualOverride" ? [index] : []
       )

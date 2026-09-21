@@ -22,12 +22,14 @@ export interface LocatedTarget {
   element: LayoutElement;
   point: Point;
   matchedBy: LocatorField;
+  matchedFields?: readonly LocatorField[] | undefined;
 }
 
 export interface LocatedIdentity {
   status: "found";
   element: LayoutElement;
   matchedBy: LocatorField;
+  matchedFields?: readonly LocatorField[] | undefined;
 }
 
 export interface LocatorFailure {
@@ -77,6 +79,9 @@ function fieldValueMatches(
   if (match === "startsWith") {
     return elementValue.startsWith(locatorValue);
   }
+  if (match === "regex") {
+    return new RegExp(locatorValue).test(elementValue);
+  }
   return elementValue === locatorValue;
 }
 
@@ -84,7 +89,15 @@ type EntryResolution = {
   status: "found";
   entry: LayoutEntry;
   matchedBy: LocatorField;
+  matchedFields?: readonly LocatorField[] | undefined;
 } | LocatorFailure;
+
+function matchForField(
+  locator: Locator,
+  field: LocatorField
+): LocatorMatch | undefined {
+  return locator.matchBy?.[field] ?? locator.match;
+}
 
 function resolveEntry(
   allEntries: readonly LayoutEntry[],
@@ -111,9 +124,23 @@ function resolveEntry(
   }
   let candidates: LayoutEntry[] | undefined;
   let matchedBy: LocatorField | undefined;
-  const match = locator.match;
+  let matchedFields: LocatorField[] | undefined;
 
-  for (const field of LOCATOR_FIELDS) {
+  if (locator.combine === "all") {
+    matchedFields = LOCATOR_FIELDS.filter(
+      (field) => locator[field] !== undefined
+    );
+    candidates = entries.filter(({ element }) => matchedFields?.every(
+      (field) => fieldValueMatches(
+        element[field],
+        locator[field] as string,
+        matchForField(locator, field)
+      )
+    ) === true);
+    matchedBy = matchedFields[0];
+  }
+
+  for (const field of locator.combine === "all" ? [] : LOCATOR_FIELDS) {
     const value = locator[field];
     if (value === undefined) {
       continue;
@@ -121,7 +148,11 @@ function resolveEntry(
 
     if (candidates === undefined) {
       const matches = entries.filter(
-        ({ element }) => fieldValueMatches(element[field], value, match)
+        ({ element }) => fieldValueMatches(
+          element[field],
+          value,
+          matchForField(locator, field)
+        )
       );
       if (matches.length === 0) {
         continue;
@@ -130,7 +161,11 @@ function resolveEntry(
       matchedBy = field;
     } else if (candidates.length > 1) {
       const narrowed = candidates.filter(
-        ({ element }) => fieldValueMatches(element[field], value, match)
+        ({ element }) => fieldValueMatches(
+          element[field],
+          value,
+          matchForField(locator, field)
+        )
       );
       if (narrowed.length === 0) {
         return {
@@ -181,7 +216,12 @@ function resolveEntry(
       message: "No Layout element matches the Locator"
     };
   }
-  return { status: "found", entry, matchedBy };
+  return {
+    status: "found",
+    entry,
+    matchedBy,
+    ...(matchedFields === undefined ? {} : { matchedFields })
+  };
 }
 
 export function resolveLocatorIdentity(
@@ -207,7 +247,10 @@ export function resolveLocatorIdentity(
   return {
     status: "found",
     element,
-    matchedBy: resolution.matchedBy
+    matchedBy: resolution.matchedBy,
+    ...(resolution.matchedFields === undefined
+      ? {}
+      : { matchedFields: resolution.matchedFields })
   };
 }
 
@@ -287,6 +330,9 @@ export function resolveLocator(
     status: "found",
     element,
     point,
-    matchedBy
+    matchedBy,
+    ...(resolution.matchedFields === undefined
+      ? {}
+      : { matchedFields: resolution.matchedFields })
   };
 }

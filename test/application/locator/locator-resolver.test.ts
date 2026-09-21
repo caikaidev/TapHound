@@ -38,6 +38,45 @@ describe("resolveLocator", () => {
     });
   });
 
+  it("requires every identity field when combine is all", () => {
+    const target = element({
+      id: "target",
+      resourceId: "search",
+      text: "Actual"
+    });
+
+    expect(resolveLocator([target], {
+      resourceId: "search",
+      text: "Different",
+      combine: "all"
+    })).toMatchObject({
+      status: "failed",
+      code: "LOCATOR_NOT_FOUND"
+    });
+  });
+
+  it("supports field-specific regex in all-field matching", () => {
+    const target = element({
+      id: "target",
+      resourceId: "message_count",
+      text: "Messages (42)"
+    });
+
+    expect(resolveLocator([target], {
+      resourceId: "message_count",
+      text: "^Messages \\(\\d+\\)$",
+      combine: "all",
+      matchBy: {
+        resourceId: "exact",
+        text: "regex"
+      }
+    })).toMatchObject({
+      status: "found",
+      element: { id: "target" },
+      matchedFields: ["resourceId", "text"]
+    });
+  });
+
   it("falls back to text when resourceId has no matches", () => {
     const target = element({ text: "Search" });
 

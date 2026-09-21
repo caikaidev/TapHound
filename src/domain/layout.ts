@@ -29,26 +29,65 @@ export const LocatorEvidenceSchema = z.strictObject({
 
 export type LocatorEvidence = z.infer<typeof LocatorEvidenceSchema>;
 
-export type LocatorMatch = "exact" | "contains" | "startsWith";
+export type LocatorMatch = "exact" | "contains" | "startsWith" | "regex";
+export type LocatorCombine = "priority" | "all";
+export interface LocatorMatchBy {
+  resourceId?: LocatorMatch | undefined;
+  text?: LocatorMatch | undefined;
+  contentDescription?: LocatorMatch | undefined;
+}
 
 export interface Locator {
   resourceId?: string | undefined;
   text?: string | undefined;
   contentDescription?: string | undefined;
   match?: LocatorMatch | undefined;
+  matchBy?: LocatorMatchBy | undefined;
+  combine?: LocatorCombine | undefined;
   index?: number | undefined;
   within?: Locator | undefined;
   evidence?: LocatorEvidence | undefined;
 }
 
-export const LocatorMatchSchema = z.enum(["exact", "contains", "startsWith"]);
+export const LocatorMatchSchema = z.enum([
+  "exact",
+  "contains",
+  "startsWith",
+  "regex"
+]);
+
+export const LocatorCombineSchema = z.enum(["priority", "all"]);
+
+const LocatorPatternSchema = z.string().trim().min(1).max(512);
+
+function validateRegex(
+  pattern: string,
+  context: z.RefinementCtx,
+  path: PropertyKey[]
+): void {
+  try {
+    new RegExp(pattern);
+  } catch {
+    context.addIssue({
+      code: "custom",
+      path,
+      message: "Locator regex must be a valid regular expression"
+    });
+  }
+}
 
 export const LocatorSchema: z.ZodType<Locator> = z.lazy(
   () => z.strictObject({
-    resourceId: z.string().trim().min(1).optional(),
-    text: z.string().trim().min(1).optional(),
-    contentDescription: z.string().trim().min(1).optional(),
+    resourceId: LocatorPatternSchema.optional(),
+    text: LocatorPatternSchema.optional(),
+    contentDescription: LocatorPatternSchema.optional(),
     match: LocatorMatchSchema.optional(),
+    matchBy: z.strictObject({
+      resourceId: LocatorMatchSchema.optional(),
+      text: LocatorMatchSchema.optional(),
+      contentDescription: LocatorMatchSchema.optional()
+    }).optional(),
+    combine: LocatorCombineSchema.optional(),
     index: z.number().int().nonnegative().optional(),
     within: LocatorSchema.optional(),
     evidence: LocatorEvidenceSchema.optional()
@@ -65,7 +104,27 @@ export const LocatorSchema: z.ZodType<Locator> = z.lazy(
       message: "Locator evidence requires index disambiguation",
       path: ["evidence"]
     }
-  )
+  ).superRefine((locator, context) => {
+    const fields = [
+      "resourceId",
+      "text",
+      "contentDescription"
+    ] as const;
+    for (const field of fields) {
+      const value = locator[field];
+      const fieldMatch = locator.matchBy?.[field] ?? locator.match;
+      if (locator.matchBy?.[field] !== undefined && value === undefined) {
+        context.addIssue({
+          code: "custom",
+          path: ["matchBy", field],
+          message: `Locator matchBy.${field} requires ${field}`
+        });
+      }
+      if (value !== undefined && fieldMatch === "regex") {
+        validateRegex(value, context, [field]);
+      }
+    }
+  })
 );
 
 export interface LayoutElement {

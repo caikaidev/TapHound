@@ -22,6 +22,8 @@ interface CaptureOptions {
   id?: string | undefined;
   journeySha256?: string | undefined;
   contractSha256?: string | undefined;
+  verdict?: string | undefined;
+  screenFacts?: boolean | undefined;
   out: string;
   json?: boolean | undefined;
 }
@@ -31,6 +33,7 @@ interface CompareOptions {
   baseline: string;
   report: string;
   journeySha256?: string | undefined;
+  verdict?: string | undefined;
   json?: boolean | undefined;
 }
 
@@ -66,8 +69,10 @@ function createCaptureCommand(dependencies: CliDependencies): Command {
     .option("--project <path>", "Android project root", dependencies.cwd())
     .requiredOption("--report <path>", "Verification report.json path")
     .option("--id <name>", "Baseline id (defaults to the report runId)")
-    .option("--journey-sha256 <sha256>", "Journey sha256 binding")
-    .option("--contract-sha256 <sha256>", "Contract sha256 binding")
+    .option("--journey-sha256 <sha256>", "Assert the source report's Journey sha256")
+    .option("--contract-sha256 <sha256>", "Assert the passing Verdict's Contract sha256")
+    .option("--verdict <path>", "Passing Contract verdict.json for the source report")
+    .option("--no-screen-facts", "Exclude Screen facts from this Baseline")
     .requiredOption("--out <path>", "Baseline JSON output path")
     .option("--json", "Emit one machine-readable JSON value")
     .action(async (options: CaptureOptions): Promise<void> => {
@@ -98,7 +103,11 @@ function createCaptureCommand(dependencies: CliDependencies): Command {
           {
             id: options.id,
             journeySha256: options.journeySha256,
-            contractSha256: options.contractSha256
+            contractSha256: options.contractSha256,
+            verdictPath: options.verdict === undefined
+              ? undefined
+              : resolve(options.project, options.verdict),
+            includeScreenFacts: options.screenFacts
           }
         );
         await dependencies.baselineService.write({
@@ -110,7 +119,7 @@ function createCaptureCommand(dependencies: CliDependencies): Command {
         } else {
           writeLine(
             dependencies.stdout,
-            `Baseline ${baseline.id} captured (${String(baseline.activities.length)} activity facts, ${String(baseline.elements.length)} element facts)`
+            `Baseline ${baseline.id} captured (${String(baseline.activities.length)} activity facts, ${String(baseline.elements.length)} element facts, ${String(baseline.checkpoints?.length ?? 0)} Checkpoint facts)`
           );
         }
         dependencies.setExitCode(0);
@@ -131,7 +140,8 @@ function createCompareCommand(dependencies: CliDependencies): Command {
     .option("--project <path>", "Android project root", dependencies.cwd())
     .requiredOption("--baseline <path>", "Baseline JSON path")
     .requiredOption("--report <path>", "Verification report.json path")
-    .option("--journey-sha256 <sha256>", "Journey sha256 binding (defaults to the Baseline binding)")
+    .option("--journey-sha256 <sha256>", "Assert the current report's Journey sha256")
+    .option("--verdict <path>", "Contract verdict.json for this report (defaults beside report.json)")
     .option("--json", "Emit one machine-readable JSON value")
     .action(async (options: CompareOptions): Promise<void> => {
       const json = options.json === true;
@@ -159,7 +169,10 @@ function createCompareCommand(dependencies: CliDependencies): Command {
         const result = await dependencies.baselineService.compare({
           baselinePath: resolve(options.project, options.baseline),
           reportPath: resolve(options.project, options.report),
-          journeySha256: options.journeySha256
+          journeySha256: options.journeySha256,
+          verdictPath: options.verdict === undefined
+            ? undefined
+            : resolve(options.project, options.verdict)
         });
         if (json) {
           writeJson(dependencies.stdout, result);
@@ -173,7 +186,7 @@ function createCompareCommand(dependencies: CliDependencies): Command {
           for (const diff of result.regressions) {
             writeLine(
               dependencies.stdout,
-              `- ${diff.kind}${diff.stepIndex === undefined ? "" : ` step=${String(diff.stepIndex)}`}: expected ${diff.expected}, actual ${diff.actual}`
+              `- ${diff.kind}${diff.checkpointId === undefined ? "" : ` checkpoint=${diff.checkpointId}`}${diff.stepIndex === undefined ? "" : ` step=${String(diff.stepIndex)}`}: expected ${diff.expected}, actual ${diff.actual}`
             );
           }
         }

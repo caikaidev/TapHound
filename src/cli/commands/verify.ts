@@ -4,6 +4,10 @@ import { Command } from "commander";
 
 import { readCliVersion } from "../version.js";
 import { runDiffVerification } from "../diff-verification.js";
+import {
+  loadPublishedReplayPolicy,
+  type PublishedReplayPolicy
+} from "../../application/generation/replay-policy-loader.js";
 import { TapHoundConfigSchema } from "../../domain/config.js";
 import {
   DEFAULT_DEVICE_ROLE,
@@ -42,6 +46,7 @@ interface VerifyOptions {
   reports?: string | undefined;
   target?: string | undefined;
   targets?: string | undefined;
+  policyFromMeta?: boolean | undefined;
   json?: boolean | undefined;
 }
 
@@ -89,6 +94,21 @@ async function runDoctorAndVerify(
   workspaceRoot: string | undefined
 ): Promise<void> {
   const json = options.json === true;
+  let replayPolicy: PublishedReplayPolicy | undefined;
+  if (options.policyFromMeta === true) {
+    try {
+      const journeyPath = resolve(projectRoot, options.journey as string);
+      replayPolicy = await loadPublishedReplayPolicy({
+        readJson: dependencies.readJson,
+        projectRoot,
+        journeyPath,
+        journey
+      });
+    } catch (error) {
+      writeFailure(dependencies, json, "REPLAY_POLICY_UNAVAILABLE", errorMessage(error));
+      return;
+    }
+  }
   try {
     const doctor = await dependencies.doctor.run({
       packageName: config.run.packageName,
@@ -137,7 +157,7 @@ async function runDoctorAndVerify(
     }
     writeLine(dependencies.stderr, `TapHound: verifying ${journey.name}`);
     const result = await dependencies.verifier.verify({
-      config,
+      config: replayPolicy === undefined ? config : { ...config, idle: replayPolicy.idle },
       journey,
       projectRoot,
       ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
@@ -147,6 +167,10 @@ async function runDoctorAndVerify(
       }],
       toolVersions: toolVersions(doctor.checks),
       manualReplay: process.stdin.isTTY,
+      ...(replayPolicy === undefined ? {} : {
+        generatedReplayPolicy: replayPolicy.generatedReplayPolicy,
+        requireFocusedInput: replayPolicy.requireFocusedInput
+      }),
       ...(dependencies.signal === undefined
         ? {}
         : { signal: dependencies.signal })
@@ -188,6 +212,28 @@ async function runContractVerify(
     );
     return;
   }
+  let replayPolicy: PublishedReplayPolicy | undefined;
+  if (options.policyFromMeta === true) {
+    try {
+      if (dependencies.contractLoader === undefined) {
+        throw new Error("Contract loader is not configured");
+      }
+      const loaded = await dependencies.contractLoader.load({
+        projectRoot,
+        ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
+        contractPath: resolve(projectRoot, options.contract as string)
+      });
+      replayPolicy = await loadPublishedReplayPolicy({
+        readJson: dependencies.readJson,
+        projectRoot,
+        journeyPath: loaded.journeyPath,
+        journey: loaded.journey
+      });
+    } catch (error) {
+      writeFailure(dependencies, json, "REPLAY_POLICY_UNAVAILABLE", errorMessage(error));
+      return;
+    }
+  }
   try {
     const doctor = await dependencies.doctor.run({
       packageName: config.run.packageName,
@@ -222,7 +268,7 @@ async function runContractVerify(
     const result = await dependencies.contractVerifier.verify({
       projectRoot,
       ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
-      config,
+      config: replayPolicy === undefined ? config : { ...config, idle: replayPolicy.idle },
       devices: [{
         role: DEFAULT_DEVICE_ROLE,
         deviceSerial
@@ -231,6 +277,10 @@ async function runContractVerify(
       taphoundVersion: readCliVersion(),
       contractPath: resolve(projectRoot, options.contract as string),
       manualReplay: process.stdin.isTTY,
+      ...(replayPolicy === undefined ? {} : {
+        generatedReplayPolicy: replayPolicy.generatedReplayPolicy,
+        requireFocusedInput: replayPolicy.requireFocusedInput
+      }),
       ...(dependencies.signal === undefined
         ? {}
         : { signal: dependencies.signal })
@@ -386,8 +436,18 @@ export function createVerifyCommand(dependencies: CliDependencies): Command {
     .option("--reports <path>", "Override report output directory (resolved against the workspace in --target mode)")
     .option("--target <id>", "Registered local target id")
     .option("--targets <path>", "Targets workspace base path")
+    .option("--policy-from-meta", "Require the bound strict Generation Replay policy")
     .option("--json", "Emit one machine-readable JSON value")
     .action(async (options: VerifyOptions): Promise<void> => {
+      if (options.policyFromMeta === true && (options.diff !== undefined || options.target !== undefined)) {
+        writeFailure(
+          dependencies,
+          options.json === true,
+          "CONFIG_INVALID",
+          "--policy-from-meta supports --journey or --contract in a project workspace, not --diff or --target"
+        );
+        return;
+      }
       if (options.diff !== undefined) {
         await runDiffVerification(dependencies, {
           project: options.project,

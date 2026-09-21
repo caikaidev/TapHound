@@ -97,6 +97,7 @@ function baseDependencies(exitCodes: number[]): DiffDependencies {
       listJourneyPaths: vi.fn(() => Promise.resolve([])),
       readJourneyMeta: vi.fn(() => Promise.resolve(null))
     },
+    readFile: vi.fn(() => Promise.resolve(Buffer.alloc(0))),
     readJson: vi.fn(() => Promise.resolve({
       version: 1,
       run: { packageName: "com.example.app", activity: ".MainActivity" },

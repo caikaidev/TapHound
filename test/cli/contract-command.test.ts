@@ -50,6 +50,7 @@ function baseDependencies(exitCodes: number[]): CliDependencies {
     runtimeObserver: { observe: vi.fn() },
     workspaceLayout: fakeWorkspaceLayout(),
     localTargets: defaultLocalTargets(),
+    readFile: vi.fn(() => Promise.resolve(Buffer.alloc(0))),
     readJson: vi.fn((path: string) => Promise.resolve(
       path.includes("journey") ? runtimeJourney : runtimeConfig
     )),
@@ -92,6 +93,87 @@ function verdictView(): ContractVerdictView {
 }
 
 describe("verify --contract", () => {
+  it("replays a Contract under the strict policy bound to its Journey", async () => {
+    const exitCodes: number[] = [];
+    const dependencies = baseDependencies(exitCodes);
+    const journeyPath = "/project/.taphound/journeys/search.json";
+    const idle = {
+      strategy: "structural" as const,
+      pollIntervalMs: 250,
+      stablePolls: 4,
+      timeoutMs: 45000
+    };
+    dependencies.contractLoader = {
+      load: vi.fn(() => Promise.resolve({
+        contract: {
+          version: 1 as const,
+          id: "search-opens",
+          goal: "Search",
+          journey: {
+            path: ".taphound/journeys/search.json",
+            sha256: hashJourney(runtimeJourney)
+          },
+          preconditions: [],
+          assertions: [],
+          requiredCheckpoints: [],
+          evidenceRequirements: []
+        },
+        contractSha256: "a".repeat(64),
+        journey: runtimeJourney,
+        journeyPath
+      }))
+    };
+    dependencies.contractVerifier = {
+      verify: vi.fn(() => Promise.resolve({ view: verdictView(), exitCode: 0 as const }))
+    };
+    vi.mocked(dependencies.readJson).mockImplementation((path) => Promise.resolve(
+      path.endsWith(".meta.json")
+        ? {
+          version: 1,
+          status: "verified",
+          generationId: "generation-1",
+          journeyPath: ".taphound/journeys/search.json",
+          journeySha256: hashJourney(runtimeJourney),
+          bindings: {
+            projectHash: "a".repeat(64),
+            configHash: "b".repeat(64),
+            contextHash: "c".repeat(64)
+          },
+          replayPolicy: {
+            generatedReplayPolicy: true,
+            requireFocusedInput: true,
+            idle
+          },
+          verification: {
+            reportPath: "verification/report.json",
+            reportSha256: "d".repeat(64),
+            runId: "verify-run",
+            runs: 1
+          },
+          manualOverrideStepIndexes: []
+        }
+        : runtimeConfig
+    ));
+
+    await createProgram(dependencies).parseAsync([
+      "node", "taphound", "verify",
+      "--contract", "contracts/search.json",
+      "--policy-from-meta", "--json"
+    ]);
+
+    expect(dependencies.readJson).toHaveBeenCalledWith(
+      "/project/.taphound/journeys/search.meta.json"
+    );
+    expect(dependencies.contractVerifier.verify).toHaveBeenCalledWith(expect.objectContaining({
+      generatedReplayPolicy: true,
+      requireFocusedInput: true,
+      config: expect.objectContaining({ idle }) as unknown
+    }));
+    expect(JSON.parse((dependencies.stdout as BufferOutput).value)).toMatchObject({
+      verdict: "pass"
+    });
+    expect(exitCodes).toEqual([0]);
+  });
   it("requires exactly one of --journey or --contract", async () => {
     const exitCodes: number[] = [];
     const dependencies = baseDependencies(exitCodes);
@@ -170,7 +252,7 @@ describe("verify --contract", () => {
   });
 });
 
-describe("contract validate", () => {
+describe("contract validation", () => {
   it("validates a contract and emits one JSON value", async () => {
     const exitCodes: number[] = [];
     const dependencies = baseDependencies(exitCodes);
@@ -191,6 +273,7 @@ describe("contract validate", () => {
           visibility: "visible" as const,
           timeoutMs: 2000
         }],
+        requiredCheckpoints: [],
         evidenceRequirements: []
       },
       contractSha256: "a".repeat(64),
@@ -202,9 +285,14 @@ describe("contract validate", () => {
     };
     await createProgram(dependencies).parseAsync([
       "node", "taphound", "contract",
+      "--project", "/project",
       "--contract", "contracts/search.json",
       "--json"
     ]);
+    expect(dependencies.contractLoader.load).toHaveBeenCalledWith({
+      projectRoot: "/project",
+      contractPath: "/project/contracts/search.json"
+    });
     expect(exitCodes).toEqual([0]);
     const output = JSON.parse((dependencies.stdout as BufferOutput).value) as {
       status: string;

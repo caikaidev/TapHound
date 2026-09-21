@@ -5,12 +5,15 @@ import {
   type AcceptanceContract,
   type ContractAssertion,
   type ContractAssertionOutcome,
+  type ContractCheckpointOutcome,
   type ContractPrecondition,
   type ContractPreconditionOutcome,
   type ContractVerdict,
   type ContractVerdictReason,
   type ContractVerdictView
 } from "../../domain/contract.js";
+import type { CheckpointDefinition } from "../../domain/checkpoint.js";
+import type { CheckpointReport, TapHoundReport } from "../../domain/report.js";
 import type { FailureCode } from "../../domain/failure.js";
 import type { RuntimeSnapshotV1 } from "../../domain/runtime-snapshot.js";
 import type { DeviceAssignment } from "../devices/resolve-device-assignments.js";
@@ -35,6 +38,8 @@ export interface ContractVerifyInput {
   taphoundVersion?: string | undefined;
   contractPath: string;
   manualReplay?: boolean | undefined;
+  generatedReplayPolicy?: boolean | undefined;
+  requireFocusedInput?: boolean | undefined;
   signal?: AbortSignal | undefined;
 }
 
@@ -98,6 +103,83 @@ function reasonForFailureCode(code: FailureCode): ContractVerdictReason {
   default:
     return "CONTRACT_INVALID";
   }
+}
+
+function matchesCheckpoint(
+  definition: CheckpointDefinition,
+  result: CheckpointReport,
+  logcatEvidence: TapHoundReport["logcatEvidence"]
+): boolean {
+  if (definition.stepIndex !== result.stepIndex) {
+    return false;
+  }
+  const expected = definition.expect.allOf?.map((condition) => [
+    condition.kind,
+    "locator" in condition ? condition.locator
+      : "expect" in condition ? condition.expect : condition.expected
+  ]) ?? [
+    ...(definition.expect.activity === undefined ? [] : [
+      ["activity", definition.expect.activity]
+    ]),
+    ...(definition.expect.screen === undefined ? [] : [
+      ["screen", definition.expect.screen]
+    ]),
+    ...definition.expect.visibleElements.map((locator) => [
+      "visibleElement", locator
+    ]),
+    ...definition.expect.absentElements.map((locator) => [
+      "absentElement", locator
+    ])
+  ];
+  return expected.length === result.conditions.length
+    && result.conditions.every((condition, index) => {
+      if (condition.kind === "logcatEvent" && condition.status === "passed"
+        && (logcatEvidence?.some((entry) => (
+          entry.lastDroppedAtMs === undefined
+            || entry.lastDroppedAtMs >= condition.startedAtMs
+        )) === true || condition.matchedCount !== 1
+          || condition.matchedLineSha256 === undefined
+          || condition.matchedAtMs === undefined
+          || condition.evidenceRef === undefined)) {
+        return false;
+      }
+      const identity = "locator" in condition ? condition.locator
+        : "expect" in condition ? condition.expect : condition.expected;
+      return JSON.stringify([condition.kind, identity])
+        === JSON.stringify(expected[index]);
+    });
+}
+
+function checkpointOutcomes(
+  definitions: readonly CheckpointDefinition[],
+  required: readonly string[],
+  results: readonly CheckpointReport[],
+  logcatEvidence: TapHoundReport["logcatEvidence"]
+): ContractCheckpointOutcome[] {
+  return required.map((id) => {
+    const definition = definitions.find((entry) => entry.id === id);
+    const matches = results.filter((result) => result.id === id);
+    if (
+      definition === undefined || matches.length !== 1
+      || matches[0] === undefined
+    ) {
+      return {
+        id,
+        status: "notRun",
+        message: matches.length > 1
+          ? "Duplicate Checkpoint results are not trustworthy"
+          : "Required Checkpoint was not evaluated"
+      };
+    }
+    if (!matchesCheckpoint(definition, matches[0], logcatEvidence)) {
+      return {
+        id,
+        status: "unresolved",
+        message: "Checkpoint conditions or evaluation point differ from the bound Journey"
+      };
+    }
+    return { id, status: matches[0].status };
+  });
 }
 
 export class ContractVerifier {
@@ -264,6 +346,12 @@ export class ContractVerifier {
           : { workspaceRoot: input.workspaceRoot }),
         devices: input.devices,
         toolVersions: input.toolVersions,
+        ...(input.generatedReplayPolicy === undefined
+          ? {}
+          : { generatedReplayPolicy: input.generatedReplayPolicy }),
+        ...(input.requireFocusedInput === undefined
+          ? {}
+          : { requireFocusedInput: input.requireFocusedInput }),
         ...(input.manualReplay === undefined
           ? {}
           : { manualReplay: input.manualReplay }),
@@ -300,6 +388,16 @@ export class ContractVerifier {
       preconditionOutcomes,
       assertionOutcomes
     );
+    const checkpoints = checkpointOutcomes(
+      loaded.journey.checkpoints ?? [],
+      contract.requiredCheckpoints,
+      report.checkpoints ?? [],
+      report.logcatEvidence
+    );
+    const failedCheckpoint = checkpoints.some((entry) => entry.status === "failed");
+    const unresolvedCheckpoint = checkpoints.some((entry) => (
+      entry.status === "unresolved" || entry.status === "notRun"
+    ));
 
     let verdict: ContractVerdict;
     let reason: ContractVerdictReason;
@@ -320,12 +418,51 @@ export class ContractVerifier {
       exitCode = 1;
       break;
     case "failed":
-      verdict = "fail";
-      reason = "RUN_FAILED";
-      message = report.primaryFailure?.message ?? "Journey replay failed";
-      exitCode = runResult.exitCode === 0 ? 1 : runResult.exitCode;
+      if (report.primaryFailure?.code === "CHECKPOINT_FAILED" && failedCheckpoint) {
+        verdict = "fail";
+        reason = "CHECKPOINT_FAILED";
+        message = report.primaryFailure.message;
+        exitCode = runResult.exitCode === 0 ? 1 : runResult.exitCode;
+      } else if (
+        report.primaryFailure?.code === "CHECKPOINT_UNRESOLVED"
+        && unresolvedCheckpoint
+      ) {
+        verdict = "inconclusive";
+        reason = "CHECKPOINT_UNRESOLVED";
+        message = report.primaryFailure.message;
+        exitCode = 1;
+      } else {
+        verdict = "fail";
+        reason = "RUN_FAILED";
+        message = report.primaryFailure?.message ?? "Journey replay failed";
+        exitCode = runResult.exitCode === 0 ? 1 : runResult.exitCode;
+      }
       break;
     case "passed":
+      if (
+        report.status !== "passed"
+        || report.journey.sha256 !== contract.journey.sha256
+      ) {
+        verdict = "inconclusive";
+        reason = "RUN_ERROR";
+        message = "Replay report status or Journey identity does not match this Contract";
+        exitCode = 1;
+        break;
+      }
+      if (failedCheckpoint) {
+        verdict = "fail";
+        reason = "CHECKPOINT_FAILED";
+        message = "A required Checkpoint failed";
+        exitCode = 1;
+        break;
+      }
+      if (unresolvedCheckpoint) {
+        verdict = "inconclusive";
+        reason = "CHECKPOINT_UNRESOLVED";
+        message = "Required Checkpoint evidence is missing or unresolved";
+        exitCode = 1;
+        break;
+      }
       if (beforeOutcome?.status === "failed") {
         verdict = "fail";
         reason = "PRECONDITION_FAILED";
@@ -378,6 +515,7 @@ export class ContractVerifier {
       message,
       preconditions,
       assertions,
+      ...(contract.requiredCheckpoints.length === 0 ? {} : { checkpoints }),
       evidence,
       reportPath: runResult.reportPath,
       reportStatus: runResult.status,
@@ -758,7 +896,8 @@ export class ContractVerifier {
       case "uiHierarchy":
         return uiHierarchyFinal;
       case "logcat":
-        return requirement.scope === "anyStep" ? logcatAnyStep : logcatFinal;
+        return (report.logcatEvidence?.length ?? 0) === 0
+          && (requirement.scope === "anyStep" ? logcatAnyStep : logcatFinal);
       }
     };
     return contract.evidenceRequirements.map((requirement) => {
@@ -770,7 +909,10 @@ export class ContractVerifier {
         ...(satisfied
           ? {}
           : {
-              detail: `Run ${report.runId} has no ${requirement.kind} evidence for scope ${requirement.scope}`
+              detail: requirement.kind === "logcat"
+                && (report.logcatEvidence?.length ?? 0) > 0
+                ? "Logcat evidence is incomplete (buffer overflow)"
+                : `Run ${report.runId} has no ${requirement.kind} evidence for scope ${requirement.scope}`
             })
       };
     });

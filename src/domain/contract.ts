@@ -75,8 +75,20 @@ export const AcceptanceContractSchema = z.strictObject({
   journey: ContractJourneyBindingSchema,
   preconditions: z.array(ContractPreconditionSchema).default([]),
   assertions: z.array(ContractAssertionSchema).min(1),
+  requiredCheckpoints: z.array(KnowledgeIdSchema).default([]),
   evidenceRequirements: z.array(EvidenceRequirementSchema).default([])
 }).superRefine((contract, context) => {
+  const checkpointIds = new Set<string>();
+  for (const [index, id] of contract.requiredCheckpoints.entries()) {
+    if (checkpointIds.has(id)) {
+      context.addIssue({
+        code: "custom",
+        path: ["requiredCheckpoints", index],
+        message: `Required Checkpoint "${id}" appears more than once`
+      });
+    }
+    checkpointIds.add(id);
+  }
   const preconditionKinds = new Set<string>();
   for (const [index, precondition] of contract.preconditions.entries()) {
     if (preconditionKinds.has(precondition.kind)) {
@@ -179,6 +191,12 @@ export const ContractEvidenceOutcomeSchema = z.strictObject({
   detail: z.string().trim().min(1).optional()
 });
 
+export const ContractCheckpointOutcomeSchema = z.strictObject({
+  id: KnowledgeIdSchema,
+  status: z.enum(["passed", "failed", "unresolved", "notRun"]),
+  message: z.string().trim().min(1).optional()
+});
+
 export const ContractVerdictViewSchema = z.strictObject({
   version: z.literal(1),
   contractId: z.string().trim().min(1),
@@ -189,6 +207,7 @@ export const ContractVerdictViewSchema = z.strictObject({
   message: z.string().trim().min(1),
   preconditions: z.array(ContractPreconditionOutcomeSchema),
   assertions: z.array(ContractAssertionOutcomeSchema),
+  checkpoints: z.array(ContractCheckpointOutcomeSchema).optional(),
   evidence: z.array(ContractEvidenceOutcomeSchema),
   reportPath: z.string().trim().min(1).optional(),
   reportStatus: z.enum(["passed", "failed", "error", "manualRequired"]).optional(),
@@ -223,5 +242,8 @@ export type ContractAssertionOutcome = z.infer<
 >;
 export type ContractEvidenceOutcome = z.infer<
   typeof ContractEvidenceOutcomeSchema
+>;
+export type ContractCheckpointOutcome = z.infer<
+  typeof ContractCheckpointOutcomeSchema
 >;
 export type ContractVerdictView = z.infer<typeof ContractVerdictViewSchema>;

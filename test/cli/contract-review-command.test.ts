@@ -136,6 +136,7 @@ function baseDependencies(
     runtimeObserver: { observe: vi.fn() },
     workspaceLayout: fakeWorkspaceLayout(),
     localTargets: defaultLocalTargets(),
+    readFile: vi.fn(() => Promise.resolve(Buffer.alloc(0))),
     readJson: vi.fn((path: string): Promise<unknown> => {
       if (path.endsWith("verdict.json")) {
         return Promise.resolve(stored.view);

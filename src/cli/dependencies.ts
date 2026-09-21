@@ -447,6 +447,7 @@ export interface CliDependencies {
     ) => Promise<FalseDoneRunResult>;
   } | undefined;
   readJson: (path: string) => Promise<unknown>;
+  readFile: (path: string) => Promise<Buffer>;
   cwd: () => string;
   stdout: TextOutput;
   stderr: TextOutput;
@@ -515,6 +516,7 @@ export function createProductionDependencies(
     options.runtimeBackendChoice ?? readRuntimeBackendChoice(process.env)
   );
   const runner = new NodeProcessRunner();
+  const permissionCaptureTimeoutMs = 10_000;
   let adb: AdbPort;
   let sessions: RuntimeSessionOpener;
   let screenshots: ScreenshotPort;
@@ -742,6 +744,9 @@ export function createProductionDependencies(
       workspaceRoot?: string
     ): AnchorResolverPort => (
       new KnowledgeAnchorResolver(knowledgeRegistry, projectRoot, workspaceRoot)
+    ),
+    loadKnowledge: (input): Promise<LoadedKnowledgeBundle> => (
+      knowledgeRegistry.load(input.projectRoot, input.workspaceRoot)
     )
   });
   const gitDiff = new NodeGitDiff(runner);
@@ -829,6 +834,7 @@ export function createProductionDependencies(
           const result = await screenshots.capture({
             outputPath: join(directory, "screen.png"),
             deviceSerial,
+            timeoutMs: permissionCaptureTimeoutMs,
             ...(signal === undefined ? {} : { signal })
           });
           if (
@@ -839,7 +845,9 @@ export function createProductionDependencies(
           ) {
             return {
               status: "failed" as const,
-              message: result.stderr.trim()
+              message: result.timedOut
+                ? "Android screen capture permission probe timed out after 10 seconds"
+                : result.stderr.trim()
                 || result.spawnError
                 || "Android screen capture permission probe failed"
             };
@@ -1238,6 +1246,7 @@ export function createProductionDependencies(
     readJson: async (path): Promise<unknown> => JSON.parse(
       await readFile(path, "utf8")
     ) as unknown,
+    readFile: async (path): Promise<Buffer> => readFile(path),
     cwd: () => process.cwd(),
     stdout: {
       write: (content): void => {

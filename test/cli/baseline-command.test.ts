@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createProgram } from "../../src/cli/program.js";
+import { BaselineError } from "../../src/application/checkpoint/baseline-error.js";
 import type { CliDependencies, TextOutput } from "../../src/cli/dependencies.js";
 import type { Baseline } from "../../src/domain/checkpoint.js";
 import type { RegressionCompareResult } from "../../src/domain/checkpoint.js";
@@ -39,6 +40,7 @@ const equivalentResult: RegressionCompareResult = {
   journeySha256: "a".repeat(64),
   comparedAt: "2026-07-19T10:00:10.000Z",
   equivalent: true,
+  coverage: { activities: 1, elements: 1, screens: 1 },
   regressions: []
 };
 
@@ -73,6 +75,7 @@ function baseDependencies(exitCodes: number[]): CliDependencies {
     runtimeObserver: { observe: vi.fn() },
     workspaceLayout: fakeWorkspaceLayout(),
     localTargets: defaultLocalTargets(),
+    readFile: vi.fn(() => Promise.resolve(Buffer.alloc(0))),
     readJson: vi.fn((path: string) => Promise.resolve(
       path.includes("journey") ? runtimeJourney : runtimeConfig
     )),
@@ -107,7 +110,9 @@ describe("baseline capture", () => {
       {
         id: undefined,
         journeySha256: undefined,
-        contractSha256: undefined
+        contractSha256: undefined,
+        verdictPath: undefined,
+        includeScreenFacts: true
       }
     );
   });
@@ -129,6 +134,28 @@ describe("baseline capture", () => {
     ) as { failure: { code: string } };
     expect(output.failure.code).toBe("CONFIG_INVALID");
   });
+
+  it("forwards an explicit Verdict and Screen exclusion", async () => {
+    const exitCodes: number[] = [];
+    const dependencies = baseDependencies(exitCodes);
+    await createProgram(dependencies).parseAsync([
+      "node", "taphound", "baseline", "capture",
+      "--project", "/project",
+      "--report", "runs/run-1/report.json",
+      "--verdict", "runs/run-1/verdict.json",
+      "--no-screen-facts",
+      "--out", ".taphound/baselines/search.json",
+      "--json"
+    ]);
+    expect(dependencies.baselineService?.captureFromReport).toHaveBeenCalledWith(
+      "/project/runs/run-1/report.json",
+      expect.objectContaining({
+        verdictPath: "/project/runs/run-1/verdict.json",
+        includeScreenFacts: false
+      })
+    );
+    expect(exitCodes).toEqual([0]);
+  });
 });
 
 describe("baseline compare", () => {
@@ -147,6 +174,51 @@ describe("baseline compare", () => {
       (dependencies.stdout as BufferOutput).value
     ) as RegressionCompareResult;
     expect(output.equivalent).toBe(true);
+  });
+
+  it("forwards the comparison Verdict path", async () => {
+    const exitCodes: number[] = [];
+    const dependencies = baseDependencies(exitCodes);
+    await createProgram(dependencies).parseAsync([
+      "node", "taphound", "baseline", "compare",
+      "--project", "/project",
+      "--baseline", ".taphound/baselines/search.json",
+      "--report", "runs/run-2/report.json",
+      "--verdict", "runs/run-2/verdict.json",
+      "--json"
+    ]);
+    expect(dependencies.baselineService?.compare).toHaveBeenCalledWith({
+      baselinePath: "/project/.taphound/baselines/search.json",
+      reportPath: "/project/runs/run-2/report.json",
+      journeySha256: undefined,
+      verdictPath: "/project/runs/run-2/verdict.json"
+    });
+    expect(exitCodes).toEqual([0]);
+  });
+
+  it("reports a coded gate failure with one JSON value and exit 2", async () => {
+    const exitCodes: number[] = [];
+    const dependencies = baseDependencies(exitCodes);
+    dependencies.baselineService = {
+      captureFromReport: vi.fn(),
+      write: vi.fn(),
+      compare: vi.fn(() => Promise.reject(new BaselineError(
+        "BASELINE_INCOMPARABLE",
+        "Current report has no Screen evidence"
+      )))
+    };
+    await createProgram(dependencies).parseAsync([
+      "node", "taphound", "baseline", "compare",
+      "--project", "/project",
+      "--baseline", ".taphound/baselines/search.json",
+      "--report", "runs/run-2/report.json",
+      "--json"
+    ]);
+    expect(exitCodes).toEqual([2]);
+    expect(JSON.parse((dependencies.stdout as BufferOutput).value)).toMatchObject({
+      exitCode: 2,
+      failure: { code: "BASELINE_INCOMPARABLE" }
+    });
   });
 
   it("reports regressions with exit 1", async () => {

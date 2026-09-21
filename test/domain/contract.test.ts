@@ -47,6 +47,18 @@ describe("AcceptanceContractSchema", () => {
     expect(parsed.assertions).toHaveLength(1);
     expect(parsed.evidenceRequirements[0]?.required).toBe(true);
     expect(parsed.evidenceRequirements[0]?.scope).toBe("final");
+    expect(parsed.requiredCheckpoints).toEqual([]);
+  });
+
+  it("accepts unique required Checkpoints and rejects duplicates", () => {
+    expect(AcceptanceContractSchema.parse({
+      ...validContract,
+      requiredCheckpoints: ["search-ready"]
+    }).requiredCheckpoints).toEqual(["search-ready"]);
+    expect(AcceptanceContractSchema.safeParse({
+      ...validContract,
+      requiredCheckpoints: ["search-ready", "search-ready"]
+    }).success).toBe(false);
   });
 
   it("rejects duplicate precondition kinds", () => {

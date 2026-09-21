@@ -101,6 +101,14 @@ export class ContractLoader {
         `Bound Journey ${contract.journey.path} drifted: binding ${contract.journey.sha256}, found ${journeySha256}. Re-bind the contract to the current Journey or restore the bound content.`
       );
     }
+    for (const id of contract.requiredCheckpoints) {
+      if (!journey.checkpoints?.some((checkpoint) => checkpoint.id === id)) {
+        throw new ContractError(
+          "CONTRACT_INVALID",
+          `Required Checkpoint ${id} is not defined by the bound Journey`
+        );
+      }
+    }
     return {
       contract,
       contractSha256: hashContractText(contractText),

@@ -44,6 +44,7 @@ function baseDependencies(
     runtimeObserver: { observe: vi.fn() },
     workspaceLayout: fakeWorkspaceLayout(),
     localTargets: defaultLocalTargets(),
+    readFile: vi.fn(() => Promise.resolve(Buffer.alloc(0))),
     readJson: vi.fn((path: string) => Promise.resolve(
       path.includes("journey") ? runtimeJourney : runtimeConfig
     )),

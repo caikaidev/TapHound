@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ContractVerifier, type ContractVerifyInput } from "../../src/application/contract/contract-verifier.js";
 import type { TapHoundReport } from "../../src/domain/report.js";
 import { hashJourney } from "../../src/domain/report.js";
+import { JourneySchema } from "../../src/domain/journey.js";
 import type {
   VerifyHookContext,
   VerifyHookOutcome,
@@ -311,6 +312,266 @@ const verifyInput: ContractVerifyInput = {
 };
 
 describe("ContractVerifier", () => {
+  it("requires complete, bound allOf event evidence for a required Checkpoint", async () => {
+    const expectEvent = {
+      type: "logcatEvent", tag: "Search", event: "results",
+      window: { from: "runStart" }
+    };
+    const journey = JourneySchema.parse({
+      ...JSON.parse(JOURNEY_TEXT) as Record<string, unknown>,
+      checkpoints: [{
+        version: 1, id: "search-event", name: "Search event", stepIndex: 0,
+        expect: { timeoutMs: 200, allOf: [
+          { kind: "absentElement", locator: { resourceId: "spinner" } },
+          { kind: "logcatEvent", expect: expectEvent }
+        ] }
+      }]
+    });
+    const sha256 = hashJourney(journey);
+    const contract = {
+      ...parseContract(CONTRACT_TEXT),
+      journey: { path: ".taphound/journeys/search.json", sha256 },
+      requiredCheckpoints: ["search-event"]
+    };
+    const eventCondition = journey.checkpoints?.[0]?.expect.allOf?.[1];
+    if (eventCondition?.kind !== "logcatEvent") {
+      throw new Error("Missing event Checkpoint fixture");
+    }
+    const valid: NonNullable<TapHoundReport["checkpoints"]>[number] = {
+      id: "search-event", stepIndex: 0, status: "passed",
+      conditions: [
+        { kind: "absentElement", status: "passed",
+          locator: { resourceId: "spinner" } },
+        { kind: "logcatEvent", status: "passed",
+          expect: eventCondition.expect,
+          matchedCount: 1, matchedLineSha256: "a".repeat(64),
+          startedAtMs: 10, matchedAtMs: 20,
+          evidenceRef: "logcat-default.txt" }
+      ]
+    };
+    const verifyWith = (overrides: Partial<TapHoundReport>): ReturnType<
+      ContractVerifier["verify"]
+    > => makeVerifier({
+      verify: verifyStub({ reportOverrides: {
+        journey: { name: "Search", sha256 }, checkpoints: [valid], ...overrides
+      } }).verify,
+      readText: readTextStub({
+        [JOURNEY_PATH]: JSON.stringify(journey),
+        "/project/contracts/search.json": JSON.stringify(contract)
+      })
+    }).verify(verifyInput);
+    const passed = await verifyWith({});
+    expect(passed.view).toMatchObject({
+      verdict: "pass", checkpoints: [{ id: "search-event", status: "passed" }]
+    });
+    const beforeWindow = await verifyWith({ logcatEvidence: [{
+      role: "default", status: "incomplete",
+      droppedLines: 1, droppedBytes: 20, lastDroppedAtMs: 5
+    }] });
+    expect(beforeWindow.view.checkpoints).toMatchObject([{ status: "passed" }]);
+    const overflow = await verifyWith({ logcatEvidence: [{
+      role: "default", status: "incomplete", droppedLines: 1, droppedBytes: 20
+    }] });
+    expect(overflow.view.checkpoints).toMatchObject([{ status: "unresolved" }]);
+    const withoutHash = await verifyWith({
+      checkpoints: [{
+        ...valid,
+        conditions: [{
+          kind: "absentElement", status: "passed",
+          locator: { resourceId: "spinner" }
+        }, {
+          kind: "logcatEvent", status: "passed",
+          expect: eventCondition.expect,
+          matchedCount: 1, startedAtMs: 10
+        }]
+      }]
+    });
+    expect(withoutHash.view.checkpoints).toMatchObject([{ status: "unresolved" }]);
+  });
+
+  function requiredCheckpointHarness(options: StubOptions = {}): ContractVerifier {
+    const journey = {
+      ...JSON.parse(JOURNEY_TEXT) as Record<string, unknown>,
+      checkpoints: [{
+        version: 1,
+        id: "search-ready",
+        name: "Search ready",
+        stepIndex: 0,
+        expect: { absentElements: [{ resourceId: "loading" }] }
+      }]
+    };
+    const contract = {
+      ...parseContract(CONTRACT_TEXT),
+      journey: {
+        path: ".taphound/journeys/search.json",
+        sha256: hashJourney(JourneySchema.parse(journey))
+      },
+      requiredCheckpoints: ["search-ready"]
+    };
+    const reportOverrides: Partial<TapHoundReport> = {
+      journey: { name: "Search", sha256: contract.journey.sha256 },
+      ...options.reportOverrides
+    };
+    return makeVerifier({
+      verify: verifyStub({ ...options, reportOverrides }).verify,
+      readText: readTextStub({
+        [JOURNEY_PATH]: JSON.stringify(journey),
+        "/project/contracts/search.json": JSON.stringify(contract)
+      })
+    });
+  }
+
+  it("requires a bound Checkpoint result before passing", async () => {
+    const missing = await requiredCheckpointHarness().verify(verifyInput);
+    expect(missing.view).toMatchObject({
+      verdict: "inconclusive",
+      reason: "CHECKPOINT_UNRESOLVED",
+      checkpoints: [{ id: "search-ready", status: "notRun" }]
+    });
+    const passed = await requiredCheckpointHarness({
+      reportOverrides: {
+        checkpoints: [{
+          id: "search-ready",
+          stepIndex: 0,
+          status: "passed",
+          conditions: [{
+            kind: "absentElement",
+            status: "passed",
+            locator: { resourceId: "loading" }
+          }]
+        }]
+      }
+    }).verify(verifyInput);
+    expect(passed.view).toMatchObject({
+      verdict: "pass",
+      checkpoints: [{ id: "search-ready", status: "passed" }]
+    });
+  });
+
+  it("rejects mismatched or duplicate required evidence", async () => {
+    const mismatch = await requiredCheckpointHarness({
+      reportOverrides: {
+        checkpoints: [{
+          id: "search-ready",
+          status: "passed",
+          conditions: [{
+            kind: "absentElement",
+            status: "passed",
+            locator: { resourceId: "different" }
+          }]
+        }]
+      }
+    }).verify(verifyInput);
+    expect(mismatch.view).toMatchObject({
+      verdict: "inconclusive",
+      checkpoints: [{ status: "unresolved" }]
+    });
+    const valid = {
+      id: "search-ready",
+      stepIndex: 0,
+      status: "passed" as const,
+      conditions: [{
+        kind: "absentElement" as const,
+        status: "passed" as const,
+        locator: { resourceId: "loading" }
+      }]
+    };
+    const duplicate = await requiredCheckpointHarness({
+      reportOverrides: { checkpoints: [valid, valid] }
+    }).verify(verifyInput);
+    expect(duplicate.view.checkpoints?.[0]?.status).toBe("notRun");
+  });
+
+  it("does not pass required evidence from a report bound to another Journey", async () => {
+    const result = await requiredCheckpointHarness({
+      reportOverrides: {
+        journey: { name: "Search", sha256: "b".repeat(64) },
+        checkpoints: [{
+          id: "search-ready", stepIndex: 0, status: "passed",
+          conditions: [{
+            kind: "absentElement", status: "passed",
+            locator: { resourceId: "loading" }
+          }]
+        }]
+      }
+    }).verify(verifyInput);
+    expect(result.view).toMatchObject({
+      verdict: "inconclusive",
+      reason: "RUN_ERROR"
+    });
+  });
+
+  it("uses a Checkpoint-specific reason for failed or unresolved replay", async () => {
+    for (const [code, conditionStatus, verdict] of [
+      ["CHECKPOINT_FAILED", "failed", "fail"],
+      ["CHECKPOINT_UNRESOLVED", "unresolved", "inconclusive"]
+    ] as const) {
+      const result = await requiredCheckpointHarness({
+        status: "failed",
+        reportOverrides: {
+          status: "failed",
+          primaryFailure: { code, message: "Checkpoint not satisfied", phase: "replay" },
+          checkpoints: [{
+            id: "search-ready",
+            stepIndex: 0,
+            status: conditionStatus,
+            conditions: [{
+              kind: "absentElement",
+              status: conditionStatus,
+              locator: { resourceId: "loading" }
+            }]
+          }]
+        }
+      }).verify(verifyInput);
+      expect(result.view).toMatchObject({
+        verdict,
+        reason: code,
+        checkpoints: [{ status: conditionStatus }]
+      });
+    }
+  });
+
+  it("rejects a required Checkpoint absent from the bound Journey", async () => {
+    const contract = {
+      ...parseContract(CONTRACT_TEXT),
+      requiredCheckpoints: ["not-in-journey"]
+    };
+    const result = await makeVerifier({
+      readText: readTextStub({
+        [JOURNEY_PATH]: JOURNEY_TEXT,
+        "/project/contracts/search.json": JSON.stringify(contract)
+      })
+    }).verify(verifyInput);
+    expect(result.view).toMatchObject({
+      verdict: "invalid",
+      reason: "CONTRACT_INVALID"
+    });
+  });
+
+  it("forwards strict Replay flags without changing the Contract verdict", async () => {
+    const stub = verifyStub();
+    const verifier = makeVerifier({ verify: stub.verify });
+    const result = await verifier.verify({
+      ...verifyInput,
+      generatedReplayPolicy: true,
+      requireFocusedInput: true,
+      config: {
+        ...verifyInput.config,
+        idle: {
+          strategy: "structural",
+          pollIntervalMs: 250,
+          stablePolls: 4,
+          timeoutMs: 45000
+        }
+      }
+    });
+    expect(result.view.verdict).toBe("pass");
+    expect(stub.calls[0]).toMatchObject({
+      generatedReplayPolicy: true,
+      requireFocusedInput: true,
+      config: { idle: { strategy: "structural" } }
+    });
+  });
   it("returns pass when the run, hooks, and evidence all succeed", async () => {
     const verifier = makeVerifier({});
     const result = await verifier.verify(verifyInput);

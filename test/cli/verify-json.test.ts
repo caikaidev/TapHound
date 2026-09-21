@@ -10,6 +10,7 @@ import { runtimeConfig, runtimeJourney } from "../fakes/runtime-fixture.js";
 import { fakeWorkspaceLayout } from "../fakes/workspace-layout.js";
 import { defaultLocalTargets } from "../fakes/local-targets.js";
 import { validReport } from "../fixtures/report.js";
+import { hashJourney } from "../../src/domain/report.js";
 
 class BufferOutput implements TextOutput {
   public value = "";
@@ -81,6 +82,7 @@ function baseDependencies(exitCodes: number[]): CliDependencies {
     },
     workspaceLayout: fakeWorkspaceLayout(),
     localTargets: defaultLocalTargets(),
+    readFile: vi.fn(() => Promise.resolve(Buffer.alloc(0))),
     readJson: vi.fn((path: string) => Promise.resolve(
       path.includes("journey") ? runtimeJourney : runtimeConfig
     )),
@@ -93,16 +95,119 @@ function baseDependencies(exitCodes: number[]): CliDependencies {
   };
 }
 
-async function runVerify(dependencies: CliDependencies): Promise<void> {
+async function runVerify(
+  dependencies: CliDependencies,
+  extra: string[] = []
+): Promise<void> {
   await createProgram(dependencies).parseAsync([
     "node", "taphound", "verify",
     "--config", "/project/.taphound/config.json",
     "--journey", "/project/search.journey.json",
-    "--json"
+    "--json",
+    ...extra
   ]);
 }
 
 describe("verify --json", () => {
+  const policy = {
+    generatedReplayPolicy: true,
+    requireFocusedInput: true,
+    idle: {
+      strategy: "structural" as const,
+      pollIntervalMs: 250,
+      stablePolls: 4,
+      timeoutMs: 45000
+    }
+  };
+  const meta = {
+    version: 1,
+    status: "verified",
+    generationId: "generation-1",
+    journeyPath: "search.journey.json",
+    journeySha256: hashJourney(runtimeJourney),
+    bindings: {
+      projectHash: "a".repeat(64),
+      configHash: "b".repeat(64),
+      contextHash: "c".repeat(64)
+    },
+    replayPolicy: policy,
+    verification: {
+      reportPath: "verification/report.json",
+      reportSha256: "d".repeat(64),
+      runId: "verify-run",
+      runs: 1
+    },
+    manualOverrideStepIndexes: []
+  };
+
+  it("applies the bound strict policy and idle settings before device preflight", async () => {
+    const exitCodes: number[] = [];
+    const dependencies = baseDependencies(exitCodes);
+    vi.mocked(dependencies.readJson).mockImplementation((path) => Promise.resolve(
+      path.endsWith(".meta.json") ? meta
+        : path.includes("journey") ? runtimeJourney : runtimeConfig
+    ));
+
+    await runVerify(dependencies, ["--policy-from-meta"]);
+
+    expect(dependencies.readJson).toHaveBeenCalledWith("/project/search.journey.meta.json");
+    expect(dependencies.verifier.verify).toHaveBeenCalledWith(expect.objectContaining({
+      generatedReplayPolicy: true,
+      requireFocusedInput: true,
+      config: expect.objectContaining({ idle: policy.idle }) as unknown
+    }));
+    expect(JSON.parse((dependencies.stdout as BufferOutput).value)).toMatchObject({
+      status: "passed",
+      exitCode: 0
+    });
+    expect(exitCodes).toEqual([0]);
+  });
+
+  it.each([
+    ["missing sidecar", undefined],
+    ["old sidecar", { ...meta, replayPolicy: undefined }],
+    ["changed Journey", { ...meta, journeySha256: "f".repeat(64) }],
+    ["different path", { ...meta, journeyPath: "another.json" }],
+    ["non-strict sidecar", {
+      ...meta,
+      replayPolicy: { ...policy, requireFocusedInput: false }
+    }]
+  ])("fails closed for %s with one JSON value", async (_label, sidecar) => {
+    const exitCodes: number[] = [];
+    const dependencies = baseDependencies(exitCodes);
+    vi.mocked(dependencies.readJson).mockImplementation((path) => (
+      path.endsWith(".meta.json")
+        ? sidecar === undefined
+          ? Promise.reject(new Error("missing"))
+          : Promise.resolve(sidecar)
+        : Promise.resolve(path.includes("journey") ? runtimeJourney : runtimeConfig)
+    ));
+
+    await runVerify(dependencies, ["--policy-from-meta"]);
+
+    expect(JSON.parse((dependencies.stdout as BufferOutput).value)).toMatchObject({
+      exitCode: 2,
+      failure: { code: "REPLAY_POLICY_UNAVAILABLE" }
+    });
+    expect((dependencies.stdout as BufferOutput).value.trim().split("\n")).toHaveLength(1);
+    expect(dependencies.doctor.run).not.toHaveBeenCalled();
+    expect(dependencies.verifier.verify).not.toHaveBeenCalled();
+    expect(exitCodes).toEqual([2]);
+  });
+
+  it("rejects strict-policy diff mode rather than silently weakening it", async () => {
+    const exitCodes: number[] = [];
+    const dependencies = baseDependencies(exitCodes);
+    await createProgram(dependencies).parseAsync([
+      "node", "taphound", "verify", "--diff", "HEAD^",
+      "--policy-from-meta", "--json"
+    ]);
+    expect(JSON.parse((dependencies.stdout as BufferOutput).value)).toMatchObject({
+      exitCode: 2,
+      failure: { code: "CONFIG_INVALID" }
+    });
+    expect(dependencies.doctor.run).not.toHaveBeenCalled();
+  });
   it("writes exactly one JSON value to stdout and diagnostics to stderr", async () => {
     const exitCodes: number[] = [];
     const dependencies = baseDependencies(exitCodes);

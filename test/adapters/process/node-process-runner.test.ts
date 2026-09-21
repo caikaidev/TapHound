@@ -133,6 +133,39 @@ describe("NodeProcessRunner", () => {
     expect(lines).toEqual(["first", "second"]);
   });
 
+  it("streams high-volume output without retaining aggregate buffers", async () => {
+    const runner = new NodeProcessRunner();
+    let stdoutLines = 0;
+    let stderrLines = 0;
+    const script = [
+      "const line = 'x'.repeat(1023) + '\\n';",
+      "for (let index = 0; index < 8192; index += 1) process.stdout.write(line);",
+      "for (let index = 0; index < 1024; index += 1) process.stderr.write(line);"
+    ].join("");
+
+    const running = runner.start({
+      executable: process.execPath,
+      args: ["-e", script]
+    }, {
+      captureStdout: false,
+      captureStderr: false,
+      onStdoutLine: () => {
+        stdoutLines += 1;
+      },
+      onStderrLine: () => {
+        stderrLines += 1;
+      }
+    });
+
+    await expect(running.completion).resolves.toMatchObject({
+      exitCode: 0,
+      stdout: "",
+      stderr: ""
+    });
+    expect(stdoutLines).toBe(8192);
+    expect(stderrLines).toBe(1024);
+  });
+
   it("does not mark termination requested after a stream already exited", async () => {
     const runner = new NodeProcessRunner(15 * 60 * 1000, 500);
     const running = runner.start({

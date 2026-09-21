@@ -22,6 +22,12 @@ export interface CommandResult {
 export interface StreamHandlers {
   onStdoutLine?(line: string): void;
   onStderrLine?(line: string): void;
+  /**
+   * Long-lived streams may disable aggregate capture while still consuming
+   * complete lines through the callbacks above.
+   */
+  captureStdout?: boolean | undefined;
+  captureStderr?: boolean | undefined;
 }
 
 export interface RunningCommand {

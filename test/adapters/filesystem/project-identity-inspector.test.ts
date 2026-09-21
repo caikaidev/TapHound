@@ -111,13 +111,13 @@ describe("AndroidProjectIdentityInspector", () => {
     const root = await temporaryRoot();
     await writeFile(
       join(root, "gradle.properties"),
-      "tChatSupplierApplicationId=com.sample.tchat\n",
+      "sampleApplicationId=com.sample.client\n",
       "utf8"
     );
     await writeAppModule(
       root,
       [
-        'val buildApplicationId = providers.gradleProperty("tChatSupplierApplicationId").get()',
+        'val buildApplicationId = providers.gradleProperty("sampleApplicationId").get()',
         "android {",
         '    namespace = "com.sample.im"',
         "    defaultConfig {",
@@ -134,7 +134,7 @@ describe("AndroidProjectIdentityInspector", () => {
 
     expect(result.status).toBe("inspected");
     if (result.status !== "inspected") return;
-    expect(result.packageName).toBe("com.sample.tchat");
+    expect(result.packageName).toBe("com.sample.client");
     expect(result.launchActivity).toBe("com.sample.im.ui.SplashActivity");
   });
 

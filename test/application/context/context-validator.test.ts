@@ -590,7 +590,7 @@ describe("ContextValidator", () => {
       config: {
         ...config,
         run: {
-          packageName: "com.example.tchat",
+          packageName: "com.example.client",
           activity: ".ui.SplashActivity"
         }
       },
@@ -599,7 +599,7 @@ describe("ContextValidator", () => {
       status: "valid",
       divergence: {
         evidencePackageName: "com.example.im",
-        configuredPackageName: "com.example.tchat",
+        configuredPackageName: "com.example.client",
         launchActivity: "com.example.im.ui.SplashActivity"
       }
     });
@@ -645,7 +645,7 @@ describe("ContextValidator", () => {
       config: {
         ...config,
         run: {
-          packageName: "com.example.tchat",
+          packageName: "com.example.client",
           activity: ".MainActivity"
         }
       },
@@ -654,7 +654,7 @@ describe("ContextValidator", () => {
       status: "invalid",
       reason: {
         code: "CONTEXT_IDENTITY_MISMATCH",
-        message: "Project Context identity does not match the configured project (evidence launchActivity com.example.im.ui.SplashActivity, configured com.example.tchat.MainActivity; declare the activity with: taphound local add <id> --path <path> --package <pkg> --activity <relative-or-fq>)"
+        message: "Project Context identity does not match the configured project (evidence launchActivity com.example.im.ui.SplashActivity, configured com.example.client.MainActivity; declare the activity with: taphound local add <id> --path <path> --package <pkg> --activity <relative-or-fq>)"
       }
     });
   });
@@ -675,7 +675,7 @@ describe("ContextValidator", () => {
       config: {
         ...config,
         run: {
-          packageName: "com.example.tchat",
+          packageName: "com.example.client",
           activity: ".ui.SplashActivity"
         }
       }

@@ -64,6 +64,7 @@ describe("bound UI snapshot providers", () => {
       .mockResolvedValueOnce(environmentResults()[1])
       .mockResolvedValueOnce(environmentResults()[2])
       .mockResolvedValueOnce(commandResult())
+      .mockResolvedValueOnce(commandResult())
       .mockResolvedValueOnce(commandResult({ stdout: systemXml }))
       .mockResolvedValueOnce(commandResult())
       .mockResolvedValueOnce(commandResult())
@@ -290,6 +291,7 @@ describe("bound UI snapshot providers", () => {
       .mockResolvedValueOnce(environmentResults()[0])
       .mockResolvedValueOnce(environmentResults()[1])
       .mockResolvedValueOnce(environmentResults()[2])
+      .mockResolvedValueOnce(commandResult())
       .mockResolvedValueOnce(commandResult({
         exitCode: null,
         timedOut: true
@@ -334,5 +336,74 @@ describe("bound UI snapshot providers", () => {
       reason: "observe",
       timeoutMs: 1000
     })).rejects.toMatchObject({ code: "UI_SNAPSHOT_FAILED" });
+  });
+
+  it("sweeps stale device layout temp files when opening and closing", async () => {
+    const runner = processRunner();
+    vi.mocked(runner.run).mockResolvedValue(commandResult());
+    vi.mocked(runner.run)
+      .mockResolvedValueOnce(environmentResults()[0])
+      .mockResolvedValueOnce(environmentResults()[1])
+      .mockResolvedValueOnce(environmentResults()[2])
+      .mockResolvedValueOnce(commandResult())
+      .mockResolvedValueOnce(commandResult())
+      .mockResolvedValueOnce(commandResult({ stdout: systemXml }))
+      .mockResolvedValueOnce(commandResult());
+    const provider = await new SystemUiAutomatorSnapshotProviderFactory(
+      runner,
+      { createLayoutPath: (): string => "/data/local/tmp/taphound.xml" }
+    ).open({
+      deviceSerial: "emulator-5554",
+      timeoutMs: 5000
+    });
+
+    await provider.close();
+
+    const sweepCalls = vi.mocked(runner.run).mock.calls.filter(([spec]) => (
+      spec.executable === "adb"
+      && spec.args.includes("rm")
+      && spec.args.includes("/data/local/tmp/taphound-uiautomator-*.xml")
+    ));
+    expect(sweepCalls).toHaveLength(2);
+    for (const [spec] of sweepCalls) {
+      expect(spec.args).toEqual([
+        "-s",
+        "emulator-5554",
+        "shell",
+        "rm",
+        "-f",
+        "/data/local/tmp/taphound-uiautomator-*.xml"
+      ]);
+    }
+  });
+
+  it("swallows device layout temp sweep failures when opening", async () => {
+    const runner = processRunner();
+    vi.mocked(runner.run).mockResolvedValue(commandResult());
+    vi.mocked(runner.run)
+      .mockResolvedValueOnce(environmentResults()[0])
+      .mockResolvedValueOnce(environmentResults()[1])
+      .mockResolvedValueOnce(environmentResults()[2])
+      .mockRejectedValueOnce(new Error("sweep failed"))
+      .mockResolvedValueOnce(commandResult())
+      .mockResolvedValueOnce(commandResult({ stdout: systemXml }))
+      .mockResolvedValueOnce(commandResult())
+      .mockResolvedValueOnce(commandResult())
+      .mockResolvedValueOnce(commandResult({ stdout: systemXml }))
+      .mockResolvedValueOnce(commandResult());
+
+    const provider = await new SystemUiAutomatorSnapshotProviderFactory(
+      runner,
+      { createLayoutPath: (): string => "/data/local/tmp/taphound.xml" }
+    ).open({
+      deviceSerial: "emulator-5554",
+      timeoutMs: 5000
+    });
+
+    const snapshot = await provider.capture({
+      reason: "locate",
+      timeoutMs: 1000
+    });
+    expect(snapshot.roots).toHaveLength(1);
   });
 });

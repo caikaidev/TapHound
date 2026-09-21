@@ -64,6 +64,7 @@ describe("AndroidCliAdapter", () => {
     vi.mocked(runner.run).mockResolvedValue(commandResult());
     vi.mocked(runner.run)
       .mockResolvedValueOnce(commandResult())
+      .mockResolvedValueOnce(commandResult())
       .mockResolvedValueOnce(commandResult({
         stdout: "<hierarchy><node text='Home' bounds='[0,0][100,100]' " +
           "enabled='true' /></hierarchy>"
@@ -117,6 +118,7 @@ describe("AndroidCliAdapter", () => {
   it("falls back to Android CLI structural diff when UIAutomator is unavailable", async () => {
     const runner = processRunner();
     vi.mocked(runner.run)
+      .mockResolvedValueOnce(commandResult())
       .mockResolvedValueOnce(commandResult({ exitCode: 1 }))
       .mockResolvedValueOnce(commandResult())
       .mockResolvedValueOnce(commandResult({ stdout: "[]" }));
@@ -130,10 +132,51 @@ describe("AndroidCliAdapter", () => {
       changes: [],
       backend: "androidCli"
     });
-    expect(vi.mocked(runner.run)).toHaveBeenNthCalledWith(3, {
+    expect(vi.mocked(runner.run)).toHaveBeenNthCalledWith(4, {
       executable: "android",
       args: ["layout", "--diff", "--device=emulator-5554"]
     });
+  });
+
+  it("sweeps stale device layout temp files once per adapter instance", async () => {
+    const runner = processRunner();
+    const layoutXml = "<hierarchy><node text='Home' bounds='[0,0][100,100]' " +
+      "enabled='true' /></hierarchy>";
+    vi.mocked(runner.run).mockResolvedValue(commandResult());
+    vi.mocked(runner.run)
+      .mockResolvedValueOnce(commandResult())
+      .mockResolvedValueOnce(commandResult())
+      .mockResolvedValueOnce(commandResult({ stdout: layoutXml }))
+      .mockResolvedValueOnce(commandResult())
+      .mockResolvedValueOnce(commandResult())
+      .mockResolvedValueOnce(commandResult({ stdout: layoutXml }));
+    const adapter = new AndroidCliAdapter(
+      runner,
+      () => "/sdcard/taphound-uiautomator.xml"
+    );
+    const options = {
+      deviceSerial: "emulator-5554",
+      packageName: "com.example.app",
+      stabilityBackend: "uiautomator" as const
+    };
+
+    await adapter.sample(options);
+    await adapter.sample(options);
+
+    const sweepCalls = vi.mocked(runner.run).mock.calls.filter(([spec]) => (
+      spec.executable === "adb"
+      && spec.args.includes("rm")
+      && spec.args.includes("/data/local/tmp/taphound-uiautomator-*.xml")
+    ));
+    expect(sweepCalls).toHaveLength(1);
+    expect(sweepCalls[0]?.[0].args).toEqual([
+      "-s",
+      "emulator-5554",
+      "shell",
+      "rm",
+      "-f",
+      "/data/local/tmp/taphound-uiautomator-*.xml"
+    ]);
   });
 
   it("captures normal and annotated screenshots", async () => {

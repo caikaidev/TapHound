@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { performance } from "node:perf_hooks";
 
 import { parseUiAutomatorLayout } from "./ui-automator-parser.js";
@@ -16,6 +16,10 @@ import {
   readDeviceUiEnvironment,
   type DeviceUiEnvironment
 } from "../ui/device-ui-environment.js";
+import {
+  createDeviceLayoutPath,
+  sweepDeviceLayoutTemp
+} from "../ui/device-layout-temp.js";
 import { UiSnapshotError } from "../ui/ui-snapshot-error.js";
 import {
   snapshotFromCapture,
@@ -137,14 +141,14 @@ class SystemUiAutomatorSnapshotProvider implements UiSnapshotProvider {
       await this.runner.run({
         executable: "adb",
         args: ["-s", this.deviceSerial, "shell", "rm", "-f", path],
-        timeoutMs: 1000
+        timeoutMs: 5000
       }).catch((): undefined => undefined);
     }
   }
 
   public close(): Promise<void> {
     this.closed = true;
-    return Promise.resolve();
+    return sweepDeviceLayoutTemp(this.runner, this.deviceSerial);
   }
 }
 
@@ -163,14 +167,17 @@ export class SystemUiAutomatorSnapshotProviderFactory implements
       "system-uiautomator",
       options
     );
+    await sweepDeviceLayoutTemp(
+      this.runner,
+      options.deviceSerial,
+      options.signal
+    );
     const provider = new SystemUiAutomatorSnapshotProvider(
       this.runner,
       options.deviceSerial,
       environment,
       descriptor(environment.sdkLevel),
-      this.options.createLayoutPath ?? ((): string => (
-        `/data/local/tmp/taphound-uiautomator-${randomUUID()}.xml`
-      )),
+      this.options.createLayoutPath ?? createDeviceLayoutPath,
       this.options
     );
     try {

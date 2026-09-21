@@ -70,4 +70,29 @@ describe("NodeDetachedProcessLauncher", () => {
       code: "EEXIST"
     });
   });
+
+  it("writes a structured result when the detached child crashes before output", async () => {
+    const root = await mkdtemp(join(tmpdir(), "taphound-detached-"));
+    roots.push(root);
+    const stdoutPath = join(root, "job", "stdout.json");
+    const stderrPath = join(root, "job", "stderr.log");
+
+    await new NodeDetachedProcessLauncher().launch({
+      executable: process.execPath,
+      args: ["-e", "process.exit(9)"],
+      cwd: root,
+      stdoutPath,
+      stderrPath
+    });
+
+    await expect(waitFor(stdoutPath)).resolves.toSatisfy((content: string) => {
+      const output = JSON.parse(content) as {
+        status: string;
+        failure: { code: string; details: { exitCode: number } };
+      };
+      return output.status === "error"
+        && output.failure.code === "DETACHED_PROCESS_CRASHED"
+        && output.failure.details.exitCode === 9;
+    });
+  });
 });

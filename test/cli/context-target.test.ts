@@ -280,7 +280,7 @@ describe("taphound context --target", () => {
       status: "valid" as const,
       divergence: {
         evidencePackageName: "com.example.im",
-        configuredPackageName: "com.example.tchat",
+        configuredPackageName: "com.example.client",
         launchActivity: "com.example.im.ui.SplashActivity"
       }
     });
@@ -298,7 +298,7 @@ describe("taphound context --target", () => {
       status: "valid",
       divergence: {
         evidencePackageName: "com.example.im",
-        configuredPackageName: "com.example.tchat",
+        configuredPackageName: "com.example.client",
         launchActivity: "com.example.im.ui.SplashActivity"
       },
       exitCode: 0

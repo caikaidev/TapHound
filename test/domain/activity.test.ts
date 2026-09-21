@@ -18,7 +18,7 @@ describe("normalizeActivity", () => {
 
   it("accepts an Activity class outside the application ID package", () => {
     expect(normalizeActivity(
-      "com.sample.tchat",
+      "com.sample.client",
       "com.sample.im.ui.SplashActivity"
     )).toBe("com.sample.im.ui.SplashActivity");
   });
@@ -30,8 +30,8 @@ describe("normalizeActivity", () => {
 
   it("normalizes a component whose Activity class has another package", () => {
     expect(normalizeActivity(
-      "com.sample.tchat",
-      "com.sample.tchat/com.sample.im.ui.SplashActivity"
+      "com.sample.client",
+      "com.sample.client/com.sample.im.ui.SplashActivity"
     )).toBe("com.sample.im.ui.SplashActivity");
   });
 

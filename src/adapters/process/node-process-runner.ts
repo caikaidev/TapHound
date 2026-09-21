@@ -104,11 +104,15 @@ export class NodeProcessRunner implements ProcessRunner {
     child.stderr.setEncoding("utf8");
 
     child.stdout.on("data", (chunk: string) => {
-      stdout += chunk;
+      if (handlers.captureStdout !== false) {
+        stdout += chunk;
+      }
       consumeLines(stdoutLines, chunk);
     });
     child.stderr.on("data", (chunk: string) => {
-      stderr += chunk;
+      if (handlers.captureStderr !== false) {
+        stderr += chunk;
+      }
       consumeLines(stderrLines, chunk);
     });
     child.on("spawn", () => {

@@ -306,7 +306,7 @@ describe("taphound local", () => {
       await runLocal(dependencies, [
         "local", "add", "work-app",
         "--path", "/tmp/work-app",
-        "--package", "com.example.tchat",
+        "--package", "com.example.client",
         "--activity", ".ui.SplashActivity",
         "--targets", home,
         "--json"
@@ -326,7 +326,7 @@ describe("taphound local", () => {
         }>;
       };
       expect(written.targets["work-app"]?.run).toEqual({
-        packageName: "com.example.tchat",
+        packageName: "com.example.client",
         activity: ".ui.SplashActivity"
       });
     } finally {

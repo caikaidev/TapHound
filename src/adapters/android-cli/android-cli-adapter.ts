@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { performance } from "node:perf_hooks";
 
 import type { Point } from "../../domain/geometry.js";
@@ -18,10 +18,12 @@ import type {
   UiStabilityProbe,
   UiStabilitySampleOptions
 } from "../../ports/ui-stability.js";
-import {
-  parseLayoutDiff
-} from "./layout-parser.js";
+import { parseLayoutDiff } from "./layout-parser.js";
 import { parseUiAutomatorLayout } from "../adb/ui-automator-parser.js";
+import {
+  createDeviceLayoutPath,
+  sweepDeviceLayoutTemp
+} from "../ui/device-layout-temp.js";
 
 function commandSpec(
   args: readonly string[],
@@ -111,13 +113,22 @@ export class AndroidCliAdapter implements
   UiStabilityProbe {
   private readonly frameSignatures = new Map<string, string>();
   private readonly layoutSignatures = new Map<string, string>();
+  private deviceLayoutTempSwept = false;
 
   public constructor(
     private readonly runner: ProcessRunner,
-    private readonly createLayoutPath: () => string = () => (
-      `/data/local/tmp/taphound-uiautomator-${randomUUID()}.xml`
-    )
+    private readonly createLayoutPath: () => string = createDeviceLayoutPath
   ) {}
+
+  private async sweepDeviceLayoutTempOnce(
+    deviceSerial: string
+  ): Promise<void> {
+    if (this.deviceLayoutTempSwept) {
+      return;
+    }
+    this.deviceLayoutTempSwept = true;
+    await sweepDeviceLayoutTemp(this.runner, deviceSerial);
+  }
 
   private async readUiAutomator(
     options: {
@@ -129,6 +140,7 @@ export class AndroidCliAdapter implements
     layout: ReturnType<typeof parseUiAutomatorLayout>;
   }> {
     const path = this.createLayoutPath();
+    await this.sweepDeviceLayoutTempOnce(options.deviceSerial);
     const deadline = options.timeoutMs === undefined
       ? undefined
       : performance.now() + options.timeoutMs;
@@ -160,7 +172,7 @@ export class AndroidCliAdapter implements
         options.deviceSerial,
         ["shell", "rm", "-f", path],
         undefined,
-        1000
+        5000
       )).catch(() => {});
     }
   }

@@ -474,6 +474,30 @@ describe("IdleWaiter", () => {
     expect(result.status).toBe("stable");
   });
 
+  it("never converges on opaque structural changes with ignoreLayoutDrift", async () => {
+    const cli = stabilityProbe();
+    let hash = 0;
+    vi.mocked(cli.sample).mockImplementation(() => {
+      hash += 1;
+      return Promise.resolve([{ layoutSha256: String(hash).repeat(64) }]);
+    });
+    const clock = new FakeClock();
+
+    const result = await new IdleWaiter(
+      cli,
+      clock,
+      "emulator-5554"
+    ).waitUntilIdle({
+      strategy: "structural",
+      pollIntervalMs: 100,
+      stablePolls: 2,
+      timeoutMs: 500,
+      ignoreLayoutDrift: true
+    });
+
+    expect(result.status).toBe("timeout");
+  });
+
   it("keeps a constant change set visible when ignoreLayoutDrift is off", async () => {
     const cli = stabilityProbe();
     const drifted = [

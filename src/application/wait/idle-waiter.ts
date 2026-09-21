@@ -49,6 +49,8 @@ function meaningfulChanges(
   return changes.filter((change) => !isEditableWidgetChange(change));
 }
 
+const EMPTY_SEMANTIC_KEY = "||";
+
 function semanticKeys(change: unknown): string {
   if (typeof change !== "object" || change === null) {
     return JSON.stringify(change);
@@ -60,6 +62,16 @@ function semanticKeys(change: unknown): string {
     : "";
   const text = typeof record.text === "string" ? record.text : "";
   return `${cls}|${resourceId}|${text}`;
+}
+
+/**
+ * A structural sample from an opaque backend is one `{layoutSha256}` change
+ * that names no element, so every such change collapses to the same empty
+ * key. Suppressing a repeated empty key set would report a screen that keeps
+ * changing as idle, so drift suppression only applies to identified changes.
+ */
+function identifiesElements(keys: readonly string[]): boolean {
+  return keys.every((key) => key !== EMPTY_SEMANTIC_KEY);
 }
 
 function sameKeySet(left: readonly string[], right: readonly string[]): boolean {
@@ -244,13 +256,15 @@ export class IdleWaiter {
         );
         if (config.ignoreLayoutDrift === true && visibleChanges.length > 0) {
           const keys = visibleChanges.map(semanticKeys);
+          const identified = identifiesElements(keys);
           if (
-            this.transientKeys !== undefined
+            identified
+            && this.transientKeys !== undefined
             && sameKeySet(this.transientKeys, keys)
           ) {
             visibleChanges = [];
           } else {
-            this.transientKeys = keys;
+            this.transientKeys = identified ? keys : undefined;
           }
         } else if (config.ignoreLayoutDrift === true) {
           this.transientKeys = undefined;

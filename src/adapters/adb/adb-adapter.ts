@@ -68,6 +68,33 @@ function inputTextChunks(text: string): string[] {
   return chunks;
 }
 
+const DEVICEKIT_PACKAGE_NAME = "com.mobilenext.devicekit";
+const DEVICEKIT_CLIPBOARD_RECEIVER = `${DEVICEKIT_PACKAGE_NAME}/.ClipboardBroadcastReceiver`;
+
+function isAsciiText(text: string): boolean {
+  for (let index = 0; index < text.length; index += 1) {
+    if (text.charCodeAt(index) > 0x7f) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function inputTextUnsupportedResult(): CommandResult {
+  return {
+    exitCode: 1,
+    signal: null,
+    stdout: "",
+    stderr: "ADB input text cannot type non-ASCII characters; install the"
+      + " mobilenext devicekit app"
+      + " (https://github.com/mobile-next/devicekit-android) to deliver"
+      + " non-ASCII text through the clipboard",
+    durationMs: 0,
+    timedOut: false,
+    cancelled: false
+  };
+}
+
 export class AdbAdapter implements AdbPort {
   public constructor(private readonly runner: ProcessRunner) {}
 
@@ -383,6 +410,9 @@ export class AdbAdapter implements AdbPort {
     deviceSerial: string,
     signal?: AbortSignal
   ): Promise<CommandResult> {
+    if (!isAsciiText(text)) {
+      return this.inputNonAsciiText(text, deviceSerial, signal);
+    }
     let result: CommandResult | undefined;
     for (const chunk of inputTextChunks(text)) {
       result = await this.run([
@@ -407,18 +437,90 @@ export class AdbAdapter implements AdbPort {
     return result;
   }
 
+  /**
+   * `adb shell input text` cannot type non-ASCII characters (KeyCharacterMap
+   * resolves them to no events and the input command fails), so non-ASCII text
+   * is delivered through the mobilenext devicekit clipboard: set the clipboard
+   * by broadcast, paste it into the focused element with KEYCODE_PASTE, then
+   * clear the clipboard again.
+   */
+  private async inputNonAsciiText(
+    text: string,
+    deviceSerial: string,
+    signal?: AbortSignal
+  ): Promise<CommandResult> {
+    const installed = await this.isInstalled({
+      packageName: DEVICEKIT_PACKAGE_NAME,
+      deviceSerial,
+      signal
+    });
+    if (!installed) {
+      return inputTextUnsupportedResult();
+    }
+    const encoded = Buffer.from(text, "utf8").toString("base64");
+    const commands: readonly (readonly string[])[] = [
+      [
+        "am",
+        "broadcast",
+        "-a",
+        "devicekit.clipboard.set",
+        "-e",
+        "encoding",
+        "base64",
+        "-e",
+        "text",
+        quoteRemoteShellArgument(encoded),
+        "-n",
+        DEVICEKIT_CLIPBOARD_RECEIVER
+      ],
+      ["input", "keyevent", "KEYCODE_PASTE"],
+      [
+        "am",
+        "broadcast",
+        "-a",
+        "devicekit.clipboard.clear",
+        "-n",
+        DEVICEKIT_CLIPBOARD_RECEIVER
+      ]
+    ];
+    let result: CommandResult | undefined;
+    for (const command of commands) {
+      result = await this.run([
+        ...deviceArgs(deviceSerial),
+        "shell",
+        ...command
+      ], signal);
+      if (
+        result.exitCode !== 0
+        || result.timedOut
+        || result.cancelled
+        || result.spawnError !== undefined
+      ) {
+        return result;
+      }
+    }
+    if (result === undefined) {
+      throw new Error("ADB input text produced no command");
+    }
+    return result;
+  }
+
   public startLogcat(options: LogcatOptions): RunningCommand {
     return this.runner.start({
       executable: "adb",
       args: [
         ...deviceArgs(options.deviceSerial),
         "logcat",
+        "-T",
+        "1",
         "-v",
         "threadtime"
       ],
       ...(options.signal === undefined ? {} : { signal: options.signal })
     }, {
       onStdoutLine: options.onStdoutLine,
+      captureStdout: false,
+      captureStderr: false,
       ...(options.onStderrLine === undefined
         ? {}
         : { onStderrLine: options.onStderrLine })

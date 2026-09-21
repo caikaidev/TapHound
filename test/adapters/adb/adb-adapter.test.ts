@@ -351,7 +351,7 @@ describe("AdbAdapter", () => {
     await adapter.swipe({ x: 10, y: 20 }, { x: 10, y: 100 }, 300, deviceSerial);
     await adapter.back(deviceSerial);
     await adapter.inputText("hello world", deviceSerial);
-    await adapter.inputText("a;$(id)&'中%s", deviceSerial);
+    await adapter.inputText("a;$(id)&'%s", deviceSerial);
 
     expect(vi.mocked(runner.run).mock.calls.map(([spec]) => spec.args)).toEqual([
       ["-s", deviceSerial, "shell", "input", "tap", "10", "20"],
@@ -359,8 +359,70 @@ describe("AdbAdapter", () => {
       ["-s", deviceSerial, "shell", "input", "swipe", "10", "20", "10", "100", "300"],
       ["-s", deviceSerial, "shell", "input", "keyevent", "BACK"],
       ["-s", deviceSerial, "shell", "input", "text", "'hello world'"],
-      ["-s", deviceSerial, "shell", "input", "text", "'a;$(id)&'\\''中%'"],
+      ["-s", deviceSerial, "shell", "input", "text", "'a;$(id)&'\\''%'"],
       ["-s", deviceSerial, "shell", "input", "text", "'s'"]
+    ]);
+  });
+
+  it("delivers non-ASCII text through the devicekit clipboard", async () => {
+    const runner = processRunner();
+    vi.mocked(runner.run)
+      .mockResolvedValueOnce(commandResult({
+        stdout: "package:/data/app/com.mobilenext.devicekit/base.apk"
+      }))
+      .mockResolvedValueOnce(commandResult())
+      .mockResolvedValueOnce(commandResult())
+      .mockResolvedValueOnce(commandResult());
+    const deviceSerial = "emulator-5554";
+
+    await new AdbAdapter(runner).inputText("a;$(id)&'中%s", deviceSerial);
+
+    expect(vi.mocked(runner.run).mock.calls.map(([spec]) => spec.args)).toEqual([
+      ["-s", deviceSerial, "shell", "pm", "path", "com.mobilenext.devicekit"],
+      [
+        "-s",
+        deviceSerial,
+        "shell",
+        "am",
+        "broadcast",
+        "-a",
+        "devicekit.clipboard.set",
+        "-e",
+        "encoding",
+        "base64",
+        "-e",
+        "text",
+        "'YTskKGlkKSYn5LitJXM='",
+        "-n",
+        "com.mobilenext.devicekit/.ClipboardBroadcastReceiver"
+      ],
+      ["-s", deviceSerial, "shell", "input", "keyevent", "KEYCODE_PASTE"],
+      [
+        "-s",
+        deviceSerial,
+        "shell",
+        "am",
+        "broadcast",
+        "-a",
+        "devicekit.clipboard.clear",
+        "-n",
+        "com.mobilenext.devicekit/.ClipboardBroadcastReceiver"
+      ]
+    ]);
+  });
+
+  it("rejects non-ASCII text without the devicekit app", async () => {
+    const runner = processRunner(commandResult({ exitCode: 1, stderr: "Failure" }));
+
+    const result = await new AdbAdapter(runner).inputText(
+      "群名称备",
+      "emulator-5554"
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("mobilenext devicekit");
+    expect(vi.mocked(runner.run).mock.calls.map(([spec]) => spec.args)).toEqual([
+      ["-s", "emulator-5554", "shell", "pm", "path", "com.mobilenext.devicekit"]
     ]);
   });
 
@@ -381,9 +443,15 @@ describe("AdbAdapter", () => {
         "-s",
         "emulator-5554",
         "logcat",
+        "-T",
+        "1",
         "-v",
         "threadtime"
       ]
-    }, { onStdoutLine });
+    }, {
+      onStdoutLine,
+      captureStdout: false,
+      captureStderr: false
+    });
   });
 });

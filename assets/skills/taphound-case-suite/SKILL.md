@@ -215,7 +215,9 @@ briefing → briefReady
 ```
 
 The transition must carry `brief: {path, sha256}`. Paths stored in the Ledger
-are project-relative.
+are project-relative. Set `sha256` to the literal string `compute` to make the
+helper hash the exact file bytes at `path` and store the result; omitting the
+field is still invalid.
 
 ### 3.3 Generation
 
@@ -263,6 +265,11 @@ The transition must provide:
 - generation meta path/hash (`status: verified`);
 - finalization report path/hash (`status: passed`);
 - independent report path/hash (`status: passed`, different `runId`).
+
+Each of the four entries accepts `sha256: "compute"`, so the transition input
+can name the paths and let the helper compute the exact file hashes. The stored
+Ledger always holds the resolved hex digests, and every later `validate` still
+fails with `CASE_SUITE_STALE` when a recorded artifact changes.
 
 The helper reads and hashes all four artifacts. Agent prose, screenshots, a
 successful last step, or a finalization report without independent Replay can

@@ -363,10 +363,20 @@ describe("packaged Case Suite Ledger", () => {
       from: "verificationPending",
       to: "verified",
       reason: "Independent Replay passed",
-      completion
+      completion: {
+        journey: { path: journeyPath, sha256: "compute" },
+        meta: { path: metaPath, sha256: "compute" },
+        finalReport: { path: finalPath, sha256: "compute" },
+        independentReport: { path: independentPath, sha256: "compute" }
+      }
     })).toMatchObject({
       code: 0,
       output: { status: "transitioned", revision: 5 }
+    });
+    expect(JSON.parse(await readFile(
+      join(fixture.suite, "case-ledger.json"), "utf8"
+    ))).toMatchObject({
+      cases: [{ id: "CASE-001", completion }]
     });
     expect(command("validate", "--suite", fixture.suite)).toMatchObject({
       code: 0,

@@ -13,6 +13,7 @@ const LEDGER = "case-ledger.json";
 const STATUS = "STATUS.md";
 const LOCK = ".case-ledger.lock";
 const shaPattern = /^[a-f0-9]{64}$/;
+const COMPUTE_SHA = "compute";
 const caseIdPattern = /^[A-Z][A-Z0-9_-]{0,63}$/;
 const suiteIdPattern = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 const flowNamePattern = /^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,199}$/;
@@ -136,10 +137,8 @@ async function exactHash(path) {
   return digest(await readFile(path));
 }
 
-async function regularProjectFile(projectRoot, artifact, label) {
-  exactKeys(artifact, ["path", "sha256"]);
-  const relativePath = projectPath(artifact.path, `${label}.path`);
-  assertSha(artifact.sha256, `${label}.sha256`);
+async function resolveProjectFile(projectRoot, path, label) {
+  const relativePath = projectPath(path, `${label}.path`);
   const absolute = resolve(projectRoot, relativePath);
   if (!inside(projectRoot, absolute)) {
     fail("CASE_SUITE_INVALID", `${label} escapes the project`);
@@ -157,18 +156,37 @@ async function regularProjectFile(projectRoot, artifact, label) {
   if (!inside(projectRoot, resolved)) {
     fail("CASE_SUITE_INVALID", `${label} resolves outside the project`);
   }
-  const actual = await exactHash(resolved);
-  if (actual !== artifact.sha256) {
-    fail("CASE_SUITE_STALE", `${label} hash changed`);
-  }
   return { absolute: resolved, relativePath };
 }
 
-function parseArtifact(value, label) {
+async function regularProjectFile(projectRoot, artifact, label) {
+  exactKeys(artifact, ["path", "sha256"]);
+  assertSha(artifact.sha256, `${label}.sha256`);
+  const file = await resolveProjectFile(projectRoot, artifact.path, label);
+  const actual = await exactHash(file.absolute);
+  if (actual !== artifact.sha256) {
+    fail("CASE_SUITE_STALE", `${label} hash changed`);
+  }
+  return file;
+}
+
+function parseArtifact(value, label, { allowCompute = false } = {}) {
   exactKeys(value, ["path", "sha256"]);
   projectPath(value.path, `${label}.path`);
-  assertSha(value.sha256, `${label}.sha256`);
+  if (!(allowCompute && value.sha256 === COMPUTE_SHA)) {
+    assertSha(value.sha256, `${label}.sha256`);
+  }
   return { path: value.path, sha256: value.sha256 };
+}
+
+// The recorded hash is the exact file bytes, not the canonical JSON hash that
+// meta.journeySha256 and report.journey.sha256 use.
+async function computeArtifactHash(projectRoot, artifact, label) {
+  if (artifact.sha256 !== COMPUTE_SHA) {
+    return artifact;
+  }
+  const file = await resolveProjectFile(projectRoot, artifact.path, label);
+  return { path: artifact.path, sha256: await exactHash(file.absolute) };
 }
 
 function parseFailure(value) {
@@ -371,16 +389,28 @@ function parseLedger(value, catalog) {
   return value;
 }
 
-function parseCompletion(value) {
+function parseCompletion(value, options = {}) {
   exactKeys(value, ["journey", "meta", "finalReport", "independentReport"]);
   return {
-    journey: parseArtifact(value.journey, "completion.journey"),
-    meta: parseArtifact(value.meta, "completion.meta"),
-    finalReport: parseArtifact(value.finalReport, "completion.finalReport"),
+    journey: parseArtifact(value.journey, "completion.journey", options),
+    meta: parseArtifact(value.meta, "completion.meta", options),
+    finalReport: parseArtifact(
+      value.finalReport, "completion.finalReport", options
+    ),
     independentReport: parseArtifact(
-      value.independentReport, "completion.independentReport"
+      value.independentReport, "completion.independentReport", options
     )
   };
+}
+
+async function computeCompletionHashes(projectRoot, completion) {
+  const entries = await Promise.all(
+    Object.entries(completion).map(async ([key, artifact]) => [
+      key,
+      await computeArtifactHash(projectRoot, artifact, `completion.${key}`)
+    ])
+  );
+  return Object.fromEntries(entries);
 }
 
 async function loadSuite(suitePath) {
@@ -666,7 +696,9 @@ function parseTransition(value) {
     from: value.from,
     to: value.to,
     reason: nonempty(value.reason, "reason", 500),
-    ...(value.brief === undefined ? {} : { brief: parseArtifact(value.brief, "brief") }),
+    ...(value.brief === undefined
+      ? {}
+      : { brief: parseArtifact(value.brief, "brief", { allowCompute: true }) }),
     ...(value.generation === undefined
       ? {}
       : { generation: parseGeneration(value.generation) }),
@@ -678,7 +710,7 @@ function parseTransition(value) {
       : { nextAction: nonempty(value.nextAction, "nextAction", 1000) }),
     ...(value.completion === undefined
       ? {}
-      : { completion: parseCompletion(value.completion) })
+      : { completion: parseCompletion(value.completion, { allowCompute: true }) })
   };
 }
 
@@ -774,6 +806,16 @@ async function transition(suitePath, inputPath) {
       if (active !== undefined) {
         fail("CASE_SUITE_CONFLICT", `Case ${active.id} is already active`);
       }
+    }
+    if (request.brief !== undefined) {
+      request.brief = await computeArtifactHash(
+        suite.projectRoot, request.brief, `${entry.id}.brief`
+      );
+    }
+    if (request.completion !== undefined) {
+      request.completion = await computeCompletionHashes(
+        suite.projectRoot, request.completion
+      );
     }
     const brief = request.brief ?? entry.brief;
     const generation = request.generation ?? entry.generation;

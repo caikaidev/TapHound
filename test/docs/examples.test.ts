@@ -437,10 +437,16 @@ describe("TapHound documentation examples", () => {
     expect(testing).toContain("npm test");
     expect(testing).toContain("npm run acceptance:device");
     expect(testing).toContain("npm run acceptance:generation");
-    const { version } = JSON.parse(await text("package.json")) as {
-      version: string;
-    };
-    expect(testing).toContain(`taphound-${version}.tgz`);
+    expect(testing).toContain(
+      `VERSION="$(node -p "require('./package.json').version")"`
+    );
+    expect(testing).toContain(
+      `TARBALL="/private/tmp/taphound-pack-smoke/taphound-\${VERSION}.tgz"`
+    );
+    expect(testing).toContain(`shasum -a 256 "$TARBALL"`);
+    expect(testing).not.toMatch(
+      /taphound-\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\.tgz/
+    );
     expect(testing).toContain("examples/taphound-android-demo");
     for (const command of [
       "doctor",

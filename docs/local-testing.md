@@ -70,11 +70,13 @@ The first line should be `Usage: taphound`, and it should list `doctor`, `record
 First run the full source quality gate above, then generate the tarball that will be verified on this machine:
 
 ```bash
+VERSION="$(node -p "require('./package.json').version")"
+TARBALL="/private/tmp/taphound-pack-smoke/taphound-${VERSION}.tgz"
 mkdir -p /private/tmp/taphound-pack-smoke
 npm pack --json \
   --pack-destination /private/tmp/taphound-pack-smoke \
   --cache /private/tmp/taphound-npm-cache
-shasum -a 256 /private/tmp/taphound-pack-smoke/taphound-0.2.0-dev.7.tgz
+shasum -a 256 "$TARBALL"
 ```
 
 Record the digest, size, shasum, integrity, and entryCount from `npm pack --json`
@@ -89,7 +91,7 @@ mkdir -p /private/tmp/taphound-install-smoke
 npm install \
   --prefix /private/tmp/taphound-install-smoke \
   --cache /private/tmp/taphound-npm-cache \
-  /private/tmp/taphound-pack-smoke/taphound-0.2.0-dev.7.tgz
+  "$TARBALL"
 /private/tmp/taphound-install-smoke/node_modules/.bin/taphound --help
 test ! -e "/private/tmp/taphound-install-smoke/node_modules/.bin/$(printf 'a\160r')"
 ```

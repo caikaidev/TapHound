@@ -75,10 +75,16 @@
             "enum": [
               "pending", "briefing", "briefReady", "generating",
               "recoveryRequired", "verificationPending",
-              "verificationFailed", "blocked", "verified", "archived"
+              "verificationFailed", "blocked", "deferred", "verified", "archived"
             ]
           },
-          "resumeStatus": { "type": "string", "minLength": 1 },
+          "resumeStatus": {
+            "enum": [
+              "pending", "briefing", "briefReady", "generating",
+              "recoveryRequired", "verificationPending",
+              "verificationFailed", "blocked", "deferred", "verified", "archived"
+            ]
+          },
           "brief": { "$ref": "#/$defs/artifact" },
           "generation": {
             "type": "object",
@@ -124,7 +130,16 @@
               }
             }
           }
-        }
+        },
+        "allOf": [{
+          "if": {
+            "properties": { "status": { "const": "deferred" } },
+            "required": ["status"]
+          },
+          "then": {
+            "required": ["resumeStatus", "failure", "nextAction"]
+          }
+        }]
       }
     },
     "updatedAt": { "type": "string", "format": "date-time" }

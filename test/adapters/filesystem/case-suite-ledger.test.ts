@@ -26,9 +26,11 @@ afterEach(async () => {
 interface HelperOutput {
   status: string;
   code?: string;
+  message?: string;
   revision?: number;
   currentCase?: { id: string; status: string };
   nextCase?: { id: string; status: string };
+  case?: Record<string, unknown>;
   complete?: boolean;
 }
 
@@ -73,6 +75,7 @@ async function text(path: string, value: string): Promise<string> {
 
 async function setup(options: {
   dependency?: boolean;
+  secondCase?: boolean;
   plannedBaseFlow?: string;
 } = {}): Promise<{
   root: string;
@@ -102,14 +105,14 @@ async function setup(options: {
           ? {}
           : { plannedBaseFlow: options.plannedBaseFlow })
       },
-      ...(options.dependency === true
+      ...(options.dependency === true || options.secondCase === true
         ? [{
             id: "CASE-002",
             order: 2,
             title: "Expand detail",
             sourceText: "Expand the first fixture item.",
             risk: "readOnly",
-            dependsOn: ["CASE-001"]
+            dependsOn: options.dependency === true ? ["CASE-001"] : []
           }]
         : [])
     ]
@@ -258,6 +261,174 @@ describe("packaged Case Suite Ledger", () => {
       output: { code: "CASE_SUITE_LOCKED" }
     });
     await rm(join(fixture.suite, ".case-ledger.lock"));
+  });
+
+  it("defers multiple Cases without occupying the active slot and resumes exactly", async () => {
+    const fixture = await setup({ secondCase: true });
+    expect(await transition(fixture.suite, fixture.root, {
+      expectedRevision: 0,
+      caseId: "CASE-001",
+      from: "pending",
+      to: "briefing",
+      reason: "Claim first Case"
+    })).toMatchObject({ code: 0, output: { revision: 1 } });
+    expect(await transition(fixture.suite, fixture.root, {
+      expectedRevision: 1,
+      caseId: "CASE-001",
+      from: "briefing",
+      to: "blocked",
+      reason: "Tool unavailable",
+      failure: { code: "TOOL_MISSING", message: "Required tool is unavailable" },
+      nextAction: "Install the required tool"
+    })).toMatchObject({ code: 0, output: { revision: 2 } });
+    expect(await transition(fixture.suite, fixture.root, {
+      expectedRevision: 2,
+      caseId: "CASE-001",
+      from: "blocked",
+      to: "deferred",
+      reason: "Postpone until the tool is available"
+    })).toMatchObject({ code: 0, output: { revision: 3 } });
+    expect(await transition(fixture.suite, fixture.root, {
+      expectedRevision: 3,
+      caseId: "CASE-002",
+      from: "pending",
+      to: "briefing",
+      reason: "Claim second Case"
+    })).toMatchObject({ code: 0, output: { revision: 4 } });
+    expect(await transition(fixture.suite, fixture.root, {
+      expectedRevision: 4,
+      caseId: "CASE-002",
+      from: "briefing",
+      to: "deferred",
+      reason: "Postpone second Case",
+      failure: { code: "DEFERRED", message: "Waiting for test data" },
+      nextAction: "Prepare test data"
+    })).toMatchObject({ code: 0, output: { revision: 5 } });
+
+    const caseStatus = command(
+      "status", "--suite", fixture.suite, "--case", "CASE-001"
+    );
+    expect(caseStatus).toMatchObject({
+      code: 0,
+      output: {
+        status: "valid",
+        revision: 5,
+        case: {
+          id: "CASE-001",
+          status: "deferred",
+          resumeStatus: "briefing",
+          failure: { code: "TOOL_MISSING" },
+          nextAction: "Install the required tool"
+        }
+      }
+    });
+    expect(Array.isArray(caseStatus.output.case?.history)).toBe(true);
+    expect(command("status", "--suite", fixture.suite)).toMatchObject({
+      code: 0,
+      output: { status: "valid", revision: 5, complete: false }
+    });
+    expect(await readFile(join(fixture.suite, "STATUS.md"), "utf8"))
+      .toContain("| deferred |");
+
+    expect(await transition(fixture.suite, fixture.root, {
+      expectedRevision: 5,
+      caseId: "CASE-001",
+      from: "deferred",
+      to: "blocked",
+      reason: "Cannot resume to a wrapper state"
+    })).toMatchObject({
+      code: 2,
+      output: { code: "CASE_SUITE_TRANSITION_INVALID" }
+    });
+    expect(await transition(fixture.suite, fixture.root, {
+      expectedRevision: 5,
+      caseId: "CASE-001",
+      from: "deferred",
+      to: "briefing",
+      reason: "Tool installed"
+    })).toMatchObject({ code: 0, output: { revision: 6 } });
+    expect(command(
+      "status", "--suite", fixture.suite, "--case", "CASE-001"
+    ).output.case).toMatchObject({
+      status: "briefing"
+    });
+    expect(command(
+      "status", "--suite", fixture.suite, "--case", "CASE-001"
+    ).output.case).not.toHaveProperty("resumeStatus");
+    expect(command(
+      "status", "--suite", fixture.suite, "--case", "CASE-001"
+    ).output.case).not.toHaveProperty("failure");
+    expect(await transition(fixture.suite, fixture.root, {
+      expectedRevision: 6,
+      caseId: "CASE-002",
+      from: "deferred",
+      to: "briefing",
+      reason: "Competing resume"
+    })).toMatchObject({
+      code: 2,
+      output: { code: "CASE_SUITE_CONFLICT" }
+    });
+  });
+
+  it("returns a coded error when status requests an unknown Case", async () => {
+    const fixture = await setup();
+    expect(command(
+      "status", "--suite", fixture.suite, "--case", "CASE-999"
+    )).toMatchObject({
+      code: 2,
+      output: {
+        status: "error",
+        code: "CASE_SUITE_CASE_NOT_FOUND",
+        message: "Case CASE-999 does not exist"
+      }
+    });
+  });
+
+  it("accepts reason and nextAction limits and reports over-limit fields", async () => {
+    const reasonLimit = await setup();
+    expect(await transition(reasonLimit.suite, reasonLimit.root, {
+      expectedRevision: 0,
+      caseId: "CASE-001",
+      from: "pending",
+      to: "deferred",
+      reason: "r".repeat(500),
+      failure: { code: "DEFERRED", message: "Postponed" },
+      nextAction: "n".repeat(1000)
+    })).toMatchObject({ code: 0, output: { revision: 1 } });
+
+    const reasonOver = await setup();
+    expect(await transition(reasonOver.suite, reasonOver.root, {
+      expectedRevision: 0,
+      caseId: "CASE-001",
+      from: "pending",
+      to: "deferred",
+      reason: "r".repeat(501),
+      failure: { code: "DEFERRED", message: "Postponed" },
+      nextAction: "Resume later"
+    })).toMatchObject({
+      code: 2,
+      output: {
+        code: "CASE_SUITE_INVALID",
+        message: "reason exceeds 500 characters"
+      }
+    });
+
+    const nextActionOver = await setup();
+    expect(await transition(nextActionOver.suite, nextActionOver.root, {
+      expectedRevision: 0,
+      caseId: "CASE-001",
+      from: "pending",
+      to: "deferred",
+      reason: "Postpone",
+      failure: { code: "DEFERRED", message: "Postponed" },
+      nextAction: "n".repeat(1001)
+    })).toMatchObject({
+      code: 2,
+      output: {
+        code: "CASE_SUITE_INVALID",
+        message: "nextAction exceeds 1000 characters"
+      }
+    });
   });
 
   it("marks verified only with hash-bound finalization and independent Replay", async () => {

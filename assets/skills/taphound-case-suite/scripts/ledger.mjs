@@ -18,28 +18,38 @@ const caseIdPattern = /^[A-Z][A-Z0-9_-]{0,63}$/;
 const suiteIdPattern = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 const flowNamePattern = /^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,199}$/;
 const terminalStates = new Set(["verified", "archived"]);
-const inactiveStates = new Set(["pending", ...terminalStates]);
+const inactiveStates = new Set(["pending", "deferred", ...terminalStates]);
 const statuses = new Set([
   "pending", "briefing", "briefReady", "generating", "recoveryRequired",
-  "verificationPending", "verificationFailed", "blocked", "verified", "archived"
+  "verificationPending", "verificationFailed", "blocked", "deferred",
+  "verified", "archived"
 ]);
 const transitions = new Map([
-  ["pending", new Set(["briefing", "blocked", "archived"])],
-  ["briefing", new Set(["briefReady", "blocked", "archived"])],
-  ["briefReady", new Set(["briefing", "generating", "blocked", "archived"])],
+  ["pending", new Set(["briefing", "blocked", "deferred", "archived"])],
+  ["briefing", new Set(["briefReady", "blocked", "deferred", "archived"])],
+  ["briefReady", new Set([
+    "briefing", "generating", "blocked", "deferred", "archived"
+  ])],
   ["generating", new Set([
-    "recoveryRequired", "verificationPending", "blocked", "archived"
+    "recoveryRequired", "verificationPending", "blocked", "deferred", "archived"
   ])],
   ["recoveryRequired", new Set([
-    "generating", "verificationPending", "blocked", "archived"
+    "generating", "verificationPending", "blocked", "deferred", "archived"
   ])],
   ["verificationPending", new Set([
-    "recoveryRequired", "verificationFailed", "verified", "blocked", "archived"
+    "recoveryRequired", "verificationFailed", "verified", "blocked", "deferred",
+    "archived"
   ])],
-  ["verificationFailed", new Set(["generating", "blocked", "archived"])],
+  ["verificationFailed", new Set([
+    "generating", "blocked", "deferred", "archived"
+  ])],
   ["blocked", new Set([
     "pending", "briefing", "briefReady", "generating", "recoveryRequired",
-    "verificationPending", "verificationFailed", "archived"
+    "verificationPending", "verificationFailed", "deferred", "archived"
+  ])],
+  ["deferred", new Set([
+    "pending", "briefing", "briefReady", "generating", "recoveryRequired",
+    "verificationPending", "verificationFailed", "blocked", "archived"
   ])],
   ["verified", new Set()],
   ["archived", new Set()]
@@ -90,8 +100,14 @@ function exactKeys(value, required, optional = []) {
 }
 
 function nonempty(value, label, max = 1000) {
-  if (typeof value !== "string" || !value.trim() || value.length > max) {
+  if (typeof value !== "string") {
+    fail("CASE_SUITE_INVALID", `${label} must be a string`);
+  }
+  if (!value.trim()) {
     fail("CASE_SUITE_INVALID", `${label} must be a non-empty string`);
+  }
+  if (value.length > max) {
+    fail("CASE_SUITE_INVALID", `${label} exceeds ${String(max)} characters`);
   }
   return value;
 }
@@ -340,6 +356,9 @@ function parseLedger(value, catalog) {
     if (entry.brief !== undefined) parseArtifact(entry.brief, `${entry.id}.brief`);
     if (entry.generation !== undefined) parseGeneration(entry.generation);
     if (entry.failure !== undefined) parseFailure(entry.failure);
+    if (entry.nextAction !== undefined) {
+      nonempty(entry.nextAction, `${entry.id}.nextAction`, 1000);
+    }
     if (entry.completion !== undefined) parseCompletion(entry.completion);
     if (entry.resumeStatus !== undefined && !statuses.has(entry.resumeStatus)) {
       fail("CASE_SUITE_INVALID", `Invalid resumeStatus for ${entry.id}`);
@@ -356,9 +375,14 @@ function parseLedger(value, catalog) {
     if (entry.status === "verified" && entry.completion === undefined) {
       fail("CASE_SUITE_INVALID", `Verified Case ${entry.id} lacks completion evidence`);
     }
-    if (["recoveryRequired", "verificationFailed", "blocked"].includes(entry.status)
+    if (["recoveryRequired", "verificationFailed", "blocked", "deferred"].includes(
+      entry.status
+    )
       && (entry.failure === undefined || entry.nextAction === undefined)) {
       fail("CASE_SUITE_INVALID", `${entry.status} Case ${entry.id} lacks recovery details`);
+    }
+    if (entry.status === "deferred" && entry.resumeStatus === undefined) {
+      fail("CASE_SUITE_INVALID", `Deferred Case ${entry.id} lacks resumeStatus`);
     }
   }
   const active = value.cases.filter((entry) => !inactiveStates.has(entry.status));
@@ -779,18 +803,29 @@ async function transition(suitePath, inputPath) {
         `Transition ${request.from} -> ${request.to} is not allowed`
       );
     }
-    if (request.from === "blocked" && request.to !== "archived"
+    if (request.from === "blocked"
+      && !["archived", "deferred"].includes(request.to)
       && request.to !== entry.resumeStatus) {
       fail("CASE_SUITE_TRANSITION_INVALID", "Blocked Case must resume its prior state");
     }
-    if (request.from === "recoveryRequired" && request.to !== "archived"
+    if (request.from === "recoveryRequired"
+      && !["archived", "blocked", "deferred"].includes(request.to)
       && request.to !== entry.resumeStatus) {
       fail(
         "CASE_SUITE_TRANSITION_INVALID",
         "Recovery must return to the interrupted Case state"
       );
     }
-    if (request.to === "briefing") {
+    if (request.from === "deferred" && request.to !== "archived"
+      && request.to !== entry.resumeStatus) {
+      fail(
+        "CASE_SUITE_TRANSITION_INVALID",
+        "Deferred Case must resume its prior state"
+      );
+    }
+    const resumingDeferredActive = request.from === "deferred"
+      && !inactiveStates.has(request.to);
+    if (request.to === "briefing" || resumingDeferredActive) {
       const incomplete = entry.dependsOn.filter((id) => (
         suite.ledger.cases.find((item) => item.id === id)?.status !== "verified"
       ));
@@ -854,8 +889,12 @@ async function transition(suitePath, inputPath) {
         fail("CASE_SUITE_FLOW_UNVERIFIED", "Generation Base Flow is not verified");
       }
     }
-    if (["recoveryRequired", "verificationFailed", "blocked"].includes(request.to)
-      && (request.failure === undefined || request.nextAction === undefined)) {
+    const failure = request.failure ?? entry.failure;
+    const nextAction = request.nextAction ?? entry.nextAction;
+    if ([
+      "recoveryRequired", "verificationFailed", "blocked", "deferred"
+    ].includes(request.to)
+      && (failure === undefined || nextAction === undefined)) {
       fail("CASE_SUITE_INVALID", `${request.to} requires failure and nextAction`);
     }
     if (["verificationPending", "verificationFailed", "recoveryRequired"].includes(
@@ -875,8 +914,8 @@ async function transition(suitePath, inputPath) {
       status: request.to,
       ...(brief === undefined ? {} : { brief }),
       ...(generation === undefined ? {} : { generation }),
-      ...(request.failure === undefined ? {} : { failure: request.failure }),
-      ...(request.nextAction === undefined ? {} : { nextAction: request.nextAction }),
+      ...(failure === undefined ? {} : { failure }),
+      ...(nextAction === undefined ? {} : { nextAction }),
       ...(request.completion === undefined
         ? {}
         : { completion: request.completion }),
@@ -887,12 +926,16 @@ async function transition(suitePath, inputPath) {
         reason: request.reason
       }]
     };
-    if (["blocked", "recoveryRequired"].includes(request.to)) {
-      next.resumeStatus = request.from;
+    if (["blocked", "recoveryRequired", "deferred"].includes(request.to)) {
+      next.resumeStatus = ["blocked", "recoveryRequired"].includes(request.from)
+        ? entry.resumeStatus
+        : request.from;
     } else {
       delete next.resumeStatus;
     }
-    if (!["blocked", "recoveryRequired", "verificationFailed"].includes(request.to)) {
+    if (![
+      "blocked", "recoveryRequired", "verificationFailed", "deferred"
+    ].includes(request.to)) {
       if (request.failure === undefined) delete next.failure;
       if (request.nextAction === undefined) delete next.nextAction;
     }
@@ -1080,6 +1123,19 @@ function summary(suite) {
   };
 }
 
+function caseDetail(suite, caseId) {
+  const entry = suite.ledger.cases.find((item) => item.id === caseId);
+  if (entry === undefined) {
+    fail("CASE_SUITE_CASE_NOT_FOUND", `Case ${caseId} does not exist`);
+  }
+  return {
+    status: "valid",
+    suiteId: suite.ledger.suiteId,
+    revision: suite.ledger.revision,
+    case: entry
+  };
+}
+
 function options(argv, names) {
   const result = {};
   for (let index = 0; index < argv.length; index += 2) {
@@ -1100,7 +1156,7 @@ function help() {
     "Commands:",
     "  init --input <json> --out <suite-directory>",
     "  validate --suite <suite-directory>",
-    "  status --suite <suite-directory>",
+    "  status --suite <suite-directory> [--case <case-id>]",
     "  transition --suite <suite-directory> --input <json>",
     "  record-flow --suite <suite-directory> --input <json>",
     "  recover-lock --suite <suite-directory>"
@@ -1117,9 +1173,15 @@ async function main() {
   if (command === "init") {
     const input = options(argv, ["--input", "--out"]);
     output = await init(input.input, input.out);
-  } else if (command === "validate" || command === "status") {
+  } else if (command === "validate") {
     const input = options(argv, ["--suite"]);
     output = summary(await loadSuite(input.suite));
+  } else if (command === "status") {
+    const input = options(argv, ["--suite", "--case"]);
+    const suite = await loadSuite(input.suite);
+    output = input.case === undefined
+      ? summary(suite)
+      : caseDetail(suite, input.case);
   } else if (command === "transition") {
     const input = options(argv, ["--suite", "--input"]);
     output = await transition(input.suite, input.input);

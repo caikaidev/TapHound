@@ -112,6 +112,15 @@ node <skill>/scripts/ledger.mjs validate --suite <suite-directory>
 node <skill>/scripts/ledger.mjs status --suite <suite-directory>
 ```
 
+For machine-readable details about one Case only:
+
+```bash
+node <skill>/scripts/ledger.mjs status \
+  --suite <suite-directory> --case <case-id>
+```
+
+Without `--case`, the summary JSON remains the stable suite-level contract.
+
 Then:
 
 1. Read `cases.json` and `case-ledger.json`.
@@ -288,6 +297,7 @@ recoveryRequired
 verificationPending
 verificationFailed
 blocked
+deferred
 verified
 archived
 ```
@@ -300,6 +310,8 @@ Important paths:
   `verificationPending → verificationFailed`;
 - tool/environment/context blocker:
   current state → `blocked`;
+- intentionally postponed work:
+  any nonterminal state → `deferred`;
 - user abandonment:
   nonterminal state → `archived`.
 
@@ -307,10 +319,18 @@ Important paths:
 approval before Core `generation recover --decision retry`.
 `verificationFailed` resumes only after audited `generation reopen`.
 When entering `blocked`, the helper records the exact prior state; it may
-resume only to that state. `verified` and `archived` are terminal.
+resume only to that state. `blocked` remains the current Case and continues to
+occupy the active slot. A `deferred` Case records `failure`, `nextAction`, and
+the state it must resume; it does not occupy the active slot, so multiple Cases
+may be deferred. Deferring an already blocked or recovery-required Case
+preserves the original interrupted state rather than replacing it with the
+wrapper state. A deferred Case may resume only to its recorded state (or be
+archived); resuming an active state rechecks dependencies and the single-active
+Case rule. `verified` and `archived` are terminal.
 
-One unresolved Case remains the Suite's current Case. Do not skip ahead merely
-to make the completion count increase. Archive or resolve it explicitly.
+One blocked or otherwise active Case remains the Suite's current Case. Do not
+skip it merely to make the completion count increase; explicitly defer,
+archive, or resolve it.
 
 ## Completion and handoff
 

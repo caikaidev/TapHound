@@ -93,6 +93,7 @@ interface Harness {
   listJourneyPaths: ReturnType<typeof vi.fn>;
   readJourneyMeta: ReturnType<typeof vi.fn>;
   writeText: ReturnType<typeof vi.fn>;
+  describeProject: ReturnType<typeof vi.fn>;
 }
 
 function harness(): Harness {
@@ -113,6 +114,11 @@ function harness(): Harness {
     bundle: projectContextIndex,
     indexHash: contextSelection.indexHash
   }));
+  const describeProject = vi.fn((input: { projectRoot: string }) => Promise.resolve({
+    projectRoot: input.projectRoot,
+    packageName: "com.example.app",
+    launchActivity: "com.example.app.MainActivity"
+  }));
   const dependencies = {
     cwd: (): string => "/project",
     signal: undefined,
@@ -123,11 +129,7 @@ function harness(): Harness {
       exitCodes.push(code);
     },
     projectDescriber: {
-      describe: vi.fn(() => Promise.resolve({
-        projectRoot: "/real/app",
-        packageName: "com.example.app",
-        launchActivity: "com.example.app.MainActivity"
-      }))
+      describe: describeProject
     },
     contextLoader: {
       load: vi.fn(() => Promise.resolve({
@@ -135,6 +137,10 @@ function harness(): Harness {
         modules: resolvedProjectContext.selection.modules
       })),
       readIndex
+    },
+    workspaceLayout: {
+      findLegacyDirectories: vi.fn(() => Promise.resolve([])),
+      ensureBuildLayout: vi.fn(() => Promise.resolve())
     },
     journeyResolver: { resolve: vi.fn(), resolveFlow: vi.fn(), listFlows: vi.fn() },
     journeyCompositionStore: {
@@ -187,7 +193,8 @@ function harness(): Harness {
     read,
     listJourneyPaths,
     readJourneyMeta,
-    writeText
+    writeText,
+    describeProject
   };
 }
 
@@ -279,5 +286,49 @@ describe("journey lifecycle --target", () => {
       failure: { code: string };
     };
     expect(payload.failure.code).toBe("LOCAL_TARGET_NOT_FOUND");
+  });
+});
+
+describe("journey lifecycle project root", () => {
+  it("uses the same project binding for relative and absolute roots", async () => {
+    const expectedMeta = {
+      ...metaJson,
+      bindings: {
+        ...metaJson.bindings,
+        projectHash: hashGenerationBinding({
+          projectRoot: "/project",
+          packageName: "com.example.app",
+          launchActivity: "com.example.app.MainActivity"
+        }),
+        configHash: hashGenerationBinding(runtimeConfig)
+      }
+    };
+    for (const project of [".", "/project"]) {
+      const test = harness();
+      test.readJourneyMeta.mockResolvedValue(
+        Buffer.from(`${JSON.stringify(expectedMeta)}\n`, "utf8")
+      );
+      await run(test, [
+        "journey", "check",
+        "--project", project,
+        "--json"
+      ]);
+      const payload = JSON.parse(test.stdout.value) as {
+        summary: { fresh: number; stale: number };
+        journeys: { lifecycle?: string }[];
+      };
+      expect(test.exitCodes).toEqual([0]);
+      expect(payload.summary).toEqual({
+        total: 1,
+        fresh: 1,
+        stale: 0,
+        noMeta: 0,
+        invalid: 0
+      });
+      expect(payload.journeys[0]?.lifecycle).toBe("verified");
+      expect(test.describeProject).toHaveBeenCalledWith(expect.objectContaining({
+        projectRoot: "/project"
+      }));
+    }
   });
 });

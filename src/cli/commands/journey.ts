@@ -47,6 +47,7 @@ import {
   writeLine
 } from "../output.js";
 import { assertNoLegacyWorkspace } from "../workspace-guard.js";
+import { canonicalProjectRoot } from "../project-root.js";
 
 interface JourneyResolveOptions {
   project: string;
@@ -394,16 +395,17 @@ function createCheckCommand(dependencies: CliDependencies): Command {
         const targetContext = options.target === undefined
           ? undefined
           : await resolveJourneyTarget(dependencies, options.target, options);
-        const projectRoot: string = targetContext?.projectRoot ?? options.project;
+        const projectRoot = targetContext?.projectRoot
+          ?? await canonicalProjectRoot(dependencies.cwd(), options.project);
         const workspaceRoot: string | undefined = targetContext?.workspaceRoot;
         if (targetContext === undefined) {
-          await assertNoLegacyWorkspace(dependencies, options.project);
+          await assertNoLegacyWorkspace(dependencies, projectRoot);
         }
         const composition = requireComposition(dependencies);
         let config: TapHoundConfig;
         try {
           config = targetContext?.config ?? TapHoundConfigSchema.parse(
-            await dependencies.readJson(resolve(options.project, options.config))
+            await dependencies.readJson(resolve(projectRoot, options.config))
           );
           assertArtifactDirectory(
             workspaceRoot ?? projectRoot,

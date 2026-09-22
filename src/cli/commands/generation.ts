@@ -1,4 +1,3 @@
-import { realpath } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createHash } from "node:crypto";
 
@@ -73,6 +72,7 @@ import {
   writeLine
 } from "../output.js";
 import { assertNoLegacyWorkspace } from "../workspace-guard.js";
+import { canonicalProjectRoot } from "../project-root.js";
 
 interface GenerationStartOptions {
   project: string;
@@ -267,14 +267,6 @@ async function loadConfig(
   }
 }
 
-async function canonicalProjectRoot(
-  dependencies: CliDependencies,
-  projectRoot: string
-): Promise<string> {
-  const absolute = resolve(dependencies.cwd(), projectRoot);
-  return realpath(absolute).catch(() => absolute);
-}
-
 interface GenerationTargetContext {
   target: ResolvedTarget;
   entry: TargetEntry;
@@ -339,7 +331,7 @@ async function generationConfig(
     };
   }
   const projectRoot = await canonicalProjectRoot(
-    dependencies,
+    dependencies.cwd(),
     options.project
   );
   return {
@@ -709,7 +701,7 @@ function createStartCommand(dependencies: CliDependencies): Command {
                 config: TapHoundConfig;
               }> => {
                 const canonical = await canonicalProjectRoot(
-                  dependencies,
+                  dependencies.cwd(),
                   options.project
                 );
                 return {

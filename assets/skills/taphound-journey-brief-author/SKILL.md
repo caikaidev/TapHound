@@ -423,7 +423,7 @@ All edges retain their Phase 1 confidence.
 
 - Use ONLY read-only commands: `observe`, `context generate`, `context
   refresh`, `context rehash`, `context validate`, `context status`,
-  `context list`, `knowledge feature-map`, `journey check`, `doctor`,
+  `context list`, `knowledge status`, `journey check`, `doctor`,
   `project describe`. NEVER use
   `generation`, `verify`, `record`, `align`.
 - Do NOT modify device state (no clicks, no input, no swipes).
@@ -490,7 +490,5 @@ All edges retain their Phase 1 confidence.
 - Conditionally rendered elements (a clear button that only appears once a
   search field has text, collapsed containers) are still valid Context
   evidence — record them — but flag them in the shard `summary` as
-  conditional. Knowledge bootstrap promotes static evidence to required
-  Screen anchors, so unflagged conditional elements cause runtime
-  `SCREEN_UNKNOWN`; the generator fixes this through a receipt-backed
-  `knowledge promote`, and your flags tell it which anchors to expect.
+  conditional, so Screen authors list them as optional rather than required
+  anchors.

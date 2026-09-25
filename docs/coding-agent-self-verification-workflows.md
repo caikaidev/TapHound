@@ -171,7 +171,7 @@ compare 的实际门禁比“只校验 Journey 哈希”更弱，等价语义也
 
 **已完成**
 
-- `taphound impact` 和 `verify --diff` 将 Git ChangeSet 映射为受影响模块、Feature、Screen、Anchor、Transition 和 P0/P1/P2 Journey 集合。
+- `taphound impact` 和 `verify --diff` 将 Git ChangeSet 映射为受影响模块、Feature、Screen、Anchor 和 P0/P1/P2 Journey 集合。
 - ImpactSet 绑定 Context 和 Knowledge 哈希，适合在大型项目中选择最小验证集。
 
 **缺口**
@@ -287,7 +287,7 @@ taphound generation finalize \
 - **独立重放必须与 finalize 的 Replay 策略等价**：使用 meta 中持久化的 replay 策略
   （`generatedReplayPolicy`、`requireFocusedInput`）和 idle 策略，而不是默认的宽松策略。
   策略不可复现时结果为 `inconclusive`，不得记为 `pass`（见 §5.3）。
-- 绑定记录必须包含 `knowledgeHash`。`knowledge evolve` 会在生成期改写 Registry，
+- 绑定记录必须包含 `knowledgeHash`。Knowledge 被编辑并 `knowledge rehash` 后哈希会变化，
   Contract 的 `screen` / `anchor` 断言依赖它，缺少该绑定则断言不可复现。
 - 通过 `VerifyRuntime` 再次 force-stop、冷启动并执行：
 
@@ -602,7 +602,7 @@ Checkpoint 的 `screen` 条件依赖 Knowledge 解析能力，失败关闭行为
 Workflow 在任务开始和结束时分别记录两类 diff：
 
 - **实现变化**：App 源码、资源、Manifest、构建配置和会影响运行行为的依赖。
-- **验证资产变化**：`.taphound/context`、`journeys`、`contracts`、`baselines`、`knowledge`、`flows` 和 `playbooks`。
+- **验证资产变化**：`.taphound/context`、`journeys`、`contracts`、`baselines`、`knowledge` 和 `flows`。
 
 处理规则：
 

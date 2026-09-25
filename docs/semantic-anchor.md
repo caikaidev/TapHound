@@ -37,8 +37,8 @@ resource-id renames, and layout moves as long as one candidate still matches.
 4. **`visualMatch` is never resolved by Core.** If nothing before it matches,
    resolution is `visualOnly` and fails closed with
    `RUNTIME_CAPABILITY_MISSING` (exit code 3) — visual matching stays an
-   external multimodal layer driven by the Playbook Escalation Policy, never
-   a Core default (`docs/playbook.md`, `docs/source-of-truth.md`).
+   external multimodal layer owned by the Workflow, never a Core default
+   (`docs/source-of-truth.md`).
 5. Ambiguity at any candidate fails closed — Core never picks heuristically
    (matches the fixed locator-priority rule).
 
@@ -59,8 +59,8 @@ Step reports carry the resolution itself:
 ```
 
 A `fallback` resolution is the signal V0.5 measures: the anchor still works,
-but its primary signal degraded. Feature Map and Benchmark runs can use this
-to prioritize anchor hardening (add a higher-priority candidate) without
+but its primary signal degraded. Reports can use this to prioritize anchor
+hardening (add a higher-priority candidate) without
 breaking Journeys.
 
 ## Failure semantics

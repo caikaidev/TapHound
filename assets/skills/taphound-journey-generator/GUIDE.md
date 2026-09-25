@@ -908,7 +908,7 @@ Journey if the Brief's Goal no longer applies.
 ### 3.12 Promote a Verified Journey
 
 A finalized Journey starts at sidecar `status: "verified"`. When it should
-become a durable, protected baseline (regression asset, benchmark baseline),
+become a durable, protected baseline (regression asset, behavior baseline),
 complete the lifecycle:
 
 ```bash

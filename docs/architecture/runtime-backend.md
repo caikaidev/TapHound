@@ -45,7 +45,7 @@ Implementations:
 |---|---|---|
 | `AdbRuntimeBackend` | `src/adapters/runtime/adb-runtime-backend.ts` | ADB + Android CLI backend. Composes the existing `AdbAdapter`, `AndroidCliAdapter`, stability probe, and snapshot factory; no reimplementation. Selected by `runtime.backend: "auto"` or `"adb"`. |
 | `MobileMcpRuntimeBackend` | `src/adapters/runtime/mobile-mcp/mobile-mcp-runtime-backend.ts` | Explicit alternative over the [Mobile MCP](https://www.npmjs.com/package/@mobilenext/mobile-mcp) server (`mcp-server-mobile`) using MCP stdio tools. |
-| `FakeRuntimeBackend` | `src/adapters/runtime/fake-runtime-backend.ts` | Benchmarks and unit tests. |
+| `FakeRuntimeBackend` | `src/adapters/runtime/fake-runtime-backend.ts` | Unit tests. |
 
 ## Design rules
 

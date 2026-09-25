@@ -29,8 +29,8 @@ TapHound 只负责验证。编译和安装 APK 是开发者/Agent 循环中独�
 - **录制** —— 在真机上交互式录制 Journey（`taphound record`）。
 - **验证** —— 确定性回放 Journey 并发布报告（`taphound verify`）；`verify --diff <ref>` 只回放某次 Git 变更影响的 Journey。
 - **生成** —— AI Agent 驱动的 Journey 生成：步骤绑定证据、敏感操作需风险确认，发布前必须通过一次精确回放（`taphound generation ...`）。
-- **信任链** —— Acceptance Contract、Verification Playbook、行为 Baseline 与 Failure Classification，把一次回放转化为可审计的判定结论。
-- **知识体系** —— 语义化的 Anchor、Screen 与 Transition，让 Journey 在 UI 重构和 resource-id 改名后仍然可用。
+- **信任链** —— Acceptance Contract、行为 Baseline 与 Failure Classification，把一次回放转化为可审计的判定结论。
+- **知识体系** —— 语义化的 Anchor 与 Screen，让 Journey 在 UI 重构和 resource-id 改名后仍然可用。
 - **Agent Skill** —— 五个可安装的 Skill（`taphound init`），覆盖 Brief 编写、Journey 生成、多 Case 套件、行为变更验收与行为保持验证。
 
 ## 环境要求
@@ -83,9 +83,9 @@ taphound init --agent claude,codex,cursor,droid
 
 - [Journey 协议](https://github.com/caikaidev/TapHound/blob/main/docs/journey-schema.md) · [配置参考](https://github.com/caikaidev/TapHound/blob/main/docs/config-schema.md) · [报告协议](https://github.com/caikaidev/TapHound/blob/main/docs/report-schema.md)
 - [Agent 集成](https://github.com/caikaidev/TapHound/blob/main/docs/agent-integration.md) · [Journey Generator 指南](https://github.com/caikaidev/TapHound/blob/main/assets/skills/taphound-journey-generator/GUIDE.md)
-- [Acceptance Contract](https://github.com/caikaidev/TapHound/blob/main/docs/contract-schema.md) · [Verification Playbook](https://github.com/caikaidev/TapHound/blob/main/docs/playbook.md) · [Baseline 与回归对比](https://github.com/caikaidev/TapHound/blob/main/docs/checkpoint-regression.md) · [失败分类](https://github.com/caikaidev/TapHound/blob/main/docs/failure-classification.md)
-- [Semantic Anchor](https://github.com/caikaidev/TapHound/blob/main/docs/semantic-anchor.md) · [知识与路径规划](https://github.com/caikaidev/TapHound/blob/main/docs/knowledge-planning.md)
-- [运行时后端](https://github.com/caikaidev/TapHound/blob/main/docs/architecture/runtime-backend.md) · [Local Target](https://github.com/caikaidev/TapHound/blob/main/docs/local-target.md) · [本地开发与测试](https://github.com/caikaidev/TapHound/blob/main/docs/local-testing.md)
+- [Acceptance Contract](https://github.com/caikaidev/TapHound/blob/main/docs/contract-schema.md) · [Baseline 与回归对比](https://github.com/caikaidev/TapHound/blob/main/docs/checkpoint-regression.md) · [失败分类](https://github.com/caikaidev/TapHound/blob/main/docs/failure-classification.md)
+- [Semantic Anchor](https://github.com/caikaidev/TapHound/blob/main/docs/semantic-anchor.md)
+- [运行时后端](https://github.com/caikaidev/TapHound/blob/main/docs/architecture/runtime-backend.md) · [本地开发与测试](https://github.com/caikaidev/TapHound/blob/main/docs/local-testing.md)
 
 ## 当前限制
 

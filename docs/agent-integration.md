@@ -23,7 +23,7 @@ JSON exitCode == process exit code
   `exitCode`) as the only **stdout** value.
 - `taphound verify --diff <ref> --json` emits `{overall, exitCode, results, impact}`.
 - `taphound failure classify --report <path> --json` emits the classification.
-- `taphound knowledge feature-map --json` emits the projection.
+- `taphound knowledge status --json` emits the Registry hash and counts.
 - Error outputs may carry an optional `failure.hint` naming the next
   remediation command (for example when the Project Context index is
   missing at the resolved path).
@@ -32,11 +32,11 @@ JSON exitCode == process exit code
 
 `taphound init` installs the two bundled Skills
 (`taphound-journey-brief-author`, `taphound-journey-generator`) into
-`assets/skills/`; `generation observe`/`next`/`step` drive one deterministic
+`assets/skills/`; `generation observe`/`step` drive one deterministic
 generation session. bridge steps use External Flows; an escaped package that
 never returns fails with `PACKAGE_ESCAPE` equivalent codes
 (`BRIDGE_NOT_RETURNED`). The whole surface is exercised by
-`verify-changes`/`verify --diff` against registered targets or worktrees, and
+`verify --diff` against the project or a worktree, and
 `taphound init` is the recommended first install step for agents.
 
 ## The single entry point
@@ -60,9 +60,9 @@ Journey path and content hash and contain `replayPolicy` (focused input,
 generated Replay checks, and the generation idle settings). Missing, old,
 invalid, or mismatched sidecars fail before device work with
 `REPLAY_POLICY_UNAVAILABLE` (exit 2). Without the option, verification keeps
-its existing behavior. `--policy-from-meta` is not supported with `--diff`
-or `--target`; those paths reject the option rather than claiming an
-equivalent strict policy.
+its existing behavior. `--policy-from-meta` is not supported with `--diff`;
+that path rejects the option rather than claiming an equivalent strict
+policy.
 
 `verify --diff <ref>` is the diff-aware entry (V1.0): it computes
 `git diff <ref>...HEAD`, maps the change through Project Context + Knowledge
@@ -100,25 +100,21 @@ contract) — never raw logcat:
 taphound failure classify --report <run>/report.json --json
 ```
 
-## Local targets (`--target`)
+## Worktrees and uncommitted changes
 
-Register a repo once, then let the agent target it by id:
+Pass `--head WORKTREE` to compute the change set from uncommitted working-tree
+changes instead of `HEAD`:
 
 ```bash
-taphound local add my-app --path /path/to/repo
-taphound verify --diff main --target my-app --json
+taphound verify --diff main --head WORKTREE --project /path/to/repo --json
 ```
-
-This works in a **worktree** (head = `WORKTREE`): the change set is computed
-against the target's Git root while the app builds in the worktree.
 
 ## Verdicts and Source of Truth
 
 `overall` is deterministic: every selected Journey must `pass`. A `failed`
 Journey is never rewritten to `pass` by a reviewer, semantic comparator, or
 multimodal layer (see `docs/source-of-truth.md`). Only `contract review`
-can escalate `pass`/`inconclusive` to `needsReview`, and the Escalation
-Policy decides deterministic escalation triggers (`docs/playbook.md`).
+can escalate `pass`/`inconclusive` to `needsReview`.
 
 ## Suggested Skill surface
 
@@ -129,7 +125,6 @@ A TapHound Agent Skill ships the following public commands (external to Core):
 | `taphound verify --diff <ref>` | verify the minimal set a change affects |
 | `taphound verify --contract <path>` | verify one task against its Acceptance Contract |
 | `taphound failure classify --report <path>` | structured failure contract |
-| `taphound knowledge feature-map --markdown` | low-token app map for orientation |
 | `taphound baseline compare --baseline <path> --report <path>` | behavior regression check |
 
 The Skill never mutates device state or Knowledge; it reads CLI JSON output
@@ -226,8 +221,7 @@ reads the project-relative Brief file itself, computes its SHA-256 content
 hash (agents never supply the hash), and binds `sourceBrief: {path, sha256}`
 into the session and the exported Journey meta sidecar. An unreadable Brief or
 a path that escapes the project fails closed with `BRIEF_INVALID` (exit code
-2); `--brief` is rejected for registered local targets. `journey check`
+2). `journey check`
 re-reads the bound Brief file on every run in the project workspace: changed
 content reports the `brief-drift` reason and a missing file reports
-`brief-missing`; both classify the Journey lifecycle as `stale`. Local target
-workspaces skip the check because `local sync` does not copy Briefs.
+`brief-missing`; both classify the Journey lifecycle as `stale`.

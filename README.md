@@ -29,8 +29,8 @@ edit code → build APK → install to device → taphound verify → loop until
 - **Record** — interactively record a Journey on a real device (`taphound record`).
 - **Verify** — deterministically replay a Journey and publish a report (`taphound verify`); `verify --diff <ref>` replays only the Journeys a Git change affects.
 - **Generate** — AI-agent-driven Journey generation: evidence-bound steps, risk confirmation for sensitive actions, and a final exact replay before a Journey is published (`taphound generation ...`).
-- **Trust chain** — Acceptance Contracts, Verification Playbooks, behavior Baselines, and Failure Classification turn a replay into an auditable verdict.
-- **Knowledge** — semantic Anchors, Screens, and Transitions let Journeys survive UI refactors and resource-id renames.
+- **Trust chain** — Acceptance Contracts, behavior Baselines, and Failure Classification turn a replay into an auditable verdict.
+- **Knowledge** — semantic Anchors and Screens let Journeys survive UI refactors and resource-id renames.
 - **Agent Skills** — five installable Skills (`taphound init`) cover brief authoring, journey generation, multi-Case suites, behavior-change acceptance, and behavior preservation.
 
 ## Requirements
@@ -83,9 +83,9 @@ taphound init --agent claude,codex,cursor,droid
 
 - [Journey protocol](https://github.com/caikaidev/TapHound/blob/main/docs/journey-schema.md) · [Configuration reference](https://github.com/caikaidev/TapHound/blob/main/docs/config-schema.md) · [Report schema](https://github.com/caikaidev/TapHound/blob/main/docs/report-schema.md)
 - [Agent integration](https://github.com/caikaidev/TapHound/blob/main/docs/agent-integration.md) · [Journey Generator guide](https://github.com/caikaidev/TapHound/blob/main/assets/skills/taphound-journey-generator/GUIDE.md)
-- [Acceptance Contracts](https://github.com/caikaidev/TapHound/blob/main/docs/contract-schema.md) · [Verification Playbooks](https://github.com/caikaidev/TapHound/blob/main/docs/playbook.md) · [Baselines & regression](https://github.com/caikaidev/TapHound/blob/main/docs/checkpoint-regression.md) · [Failure classification](https://github.com/caikaidev/TapHound/blob/main/docs/failure-classification.md)
-- [Semantic Anchors](https://github.com/caikaidev/TapHound/blob/main/docs/semantic-anchor.md) · [Knowledge & route planning](https://github.com/caikaidev/TapHound/blob/main/docs/knowledge-planning.md)
-- [Runtime backends](https://github.com/caikaidev/TapHound/blob/main/docs/architecture/runtime-backend.md) · [Local Targets](https://github.com/caikaidev/TapHound/blob/main/docs/local-target.md) · [Local development & testing](https://github.com/caikaidev/TapHound/blob/main/docs/local-testing.md)
+- [Acceptance Contracts](https://github.com/caikaidev/TapHound/blob/main/docs/contract-schema.md) · [Baselines & regression](https://github.com/caikaidev/TapHound/blob/main/docs/checkpoint-regression.md) · [Failure classification](https://github.com/caikaidev/TapHound/blob/main/docs/failure-classification.md)
+- [Semantic Anchors](https://github.com/caikaidev/TapHound/blob/main/docs/semantic-anchor.md)
+- [Runtime backends](https://github.com/caikaidev/TapHound/blob/main/docs/architecture/runtime-backend.md) · [Local development & testing](https://github.com/caikaidev/TapHound/blob/main/docs/local-testing.md)
 
 ## Current Limitations
 

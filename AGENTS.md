@@ -117,10 +117,15 @@ The code follows ports and adapters:
   `src/cli/main.ts` is the executable entry point.
 
 The CLI exposes `doctor`, `record`, `verify`, `contract`, `observe`,
-`project`, `context`, `journey`, `generation`, `knowledge`, `benchmark`,
-`playbook`, `baseline`, `failure`, `impact`, `verify-changes`, `local`,
-`init`, `align`, and `ui-cache`. Keep external tools and filesystem effects
-behind ports so application tests can inject fakes.
+`project`, `context`, `journey`, `generation`, `knowledge`, `baseline`,
+`failure`, `init`, `align`, and `impact`. Keep external tools and filesystem
+effects behind ports so application tests can inject fakes.
+
+Repository-only developer tools live under `tools/` (type-checked, linted,
+and tested, but not built into `dist/` or published). The False-Done
+Benchmark (`npm run bench:false-done -- <validate|run|compare>`) measures
+whether `verify --contract` catches agent false completions; see
+`docs/false-done-benchmark.md`.
 
 ### Runtime Backend SPI
 
@@ -128,8 +133,7 @@ Device work flows through the Runtime Backend SPI
 (`src/ports/runtime-backend.ts`): a `RuntimeBackend` lists devices and opens
 serial-bound `RuntimeSession`s. `AdbRuntimeBackend`
 (`src/adapters/runtime/`) composes the existing ADB/Android CLI adapters
-without reimplementation; `FakeRuntimeBackend` serves benchmarks and unit
-tests; `MobileMcpRuntimeBackend` (`src/adapters/runtime/mobile-mcp/`) runs
+without reimplementation; `FakeRuntimeBackend` serves unit tests; `MobileMcpRuntimeBackend` (`src/adapters/runtime/mobile-mcp/`) runs
 device work through the Mobile MCP server over stdio. Application
 services still accept the `AdbPort` interface: the composition root bridges it
 over the SPI via `RuntimeBackendAdbBridge`, so backend selection is a wiring
@@ -173,7 +177,7 @@ layout; derive every path from it instead of writing `.taphound` literals:
     sources/              # committed composed leaf Journey sources
     journeys/             # committed Journeys and <name>.meta.json sidecars
     contracts/            # committed Acceptance Contracts
-    playbooks/            # committed Verification Playbooks
+    knowledge/            # committed semantic Anchors and Screens (+ index.json)
     baselines/            # committed behavior Baselines
     build/                # ephemeral and Git-ignored
       generations/<id>/   # authoritative generation bundles (+ .locks)
@@ -184,8 +188,7 @@ layout; derive every path from it instead of writing `.taphound` literals:
 
 `artifactsDir` is optional and defaults to `.taphound/build/runs`. Core
 artifacts must stay under `.taphound/build`; the same boundary applies to
-`verify --reports`. Local Target workspaces are already rooted under
-`.taphound/local/<id>/`.
+`verify --reports`.
 `record`, `verify`, and every `generation` subcommand refuse to run with
 `CONFIG_INVALID` (exit code 2) when the legacy `.taphound/generations`,
 `.taphound/jobs`, or `.taphound/runs` directories, or root-level timestamped
@@ -216,18 +219,12 @@ is one JSON value on stdout and is written as `verdict.json` beside
 `anchor`) require a loadable Knowledge registry and fail closed with
 `CONTRACT_KNOWLEDGE_UNAVAILABLE`. `verify --diff <ref>` is the Agent-facing
 diff mode (see `docs/agent-integration.md`): it routes through the shared
-`runDiffVerification` (`src/cli/diff-verification.ts`) that `verify-changes`
-also uses — git diff → ImpactSet → P0/P1/P2 Journey selection → per-Journey
+`runDiffVerification` (`src/cli/diff-verification.ts`) — git diff → ImpactSet → P0/P1/P2 Journey selection → per-Journey
 verify → one `overall` verdict; `--base` defaults to the `--diff` ref when
-`--base` is omitted, `--head` defaults to HEAD (or WORKTREE with `--target`). `contract review` merges externally produced
+`--base` is omitted, `--head` defaults to HEAD (use `WORKTREE` for uncommitted changes). `contract review` merges externally produced
 reviewer findings into a stored Verdict: `pass`/`inconclusive` may escalate to
 `needsReview`, but a deterministic `fail`/`invalid` is never rewritten; the
 Source-of-Truth hierarchy is documented in `docs/source-of-truth.md`.
-`playbook validate` checks a Verification Playbook (`src/domain/playbook.ts`):
-schema, hash-bound Contract, and Escalation Policy rules — ordered
-first-match rules that map deterministic verdict/reason facts to a
-`verdict` action or an `escalate` target (`semantic`/`multimodal`); the
-evaluator is pure and never calls a model (see `docs/playbook.md`).
 `baseline capture`/`baseline compare` implement the deterministic behavior
 Baseline and Regression Comparator (`src/application/checkpoint/`): a
 Baseline freezes activity sequence + element presence/screen facts from a
@@ -391,22 +388,17 @@ revision checks, locking, atomic renames, path validation, recovery state, and
 core-identity invariants are part of the protocol; do not bypass them with
 direct filesystem writes.
 
-### Knowledge Evolution and Journey Promotion
+### Knowledge and Journey Lifecycle
 
-`knowledge evolve` folds the immutable receipts bound to the current Knowledge
-hash back into a new Registry revision: `transitionVerification` receipts
-accumulate Transition observation attempts/successes/recovery cost, and
-matched `screenDetection`/`anchorResolution` evidence upgrades `inferred`
-Anchors, Screens, and Transitions to `observed`. Statuses never downgrade and
-`verified` stays promotion-gated. Receipts are hash-bound, so a folded batch
-can never be double-counted, and a no-op fold reports `unchanged` without a
-write. `knowledge goal` drafts a strict Goal Spec for a known target Screen
-(`--target`, `--parameter key=value`, `--max-steps`, `--max-replans`); natural
-language stays with external Skills. `knowledge feature-map` derives a
-read-only, deterministic, agent-friendly projection of the Registry
-(`--json` structured, `--markdown` low-token; see `docs/feature-map.md`);
-Features are reachability clusters rooted at entry Screens, ordered by id, and
-the projection is never a second Source of Truth.
+Knowledge (`.taphound/knowledge/`) is a committed library of semantic Anchors
+and Screens authored by humans or agents. `index.json` binds every document by
+content hash; `knowledge rehash` is its only writer and rebuilds the index from
+`anchors/*.json` and `screens/*.json` (file names must equal document ids,
+Screen references must resolve, and the revision only increases when content
+changes). `knowledge status` validates and hashes the Registry. Loading a
+document whose bytes no longer match the index fails closed as stale. Core
+never plans routes or infers Knowledge; Anchors and Screens are consumed by
+Replay, Contracts, Checkpoints, and `impact`.
 
 `journey promote --journey <path> --reason <text>` completes the Journey
 lifecycle `verified → promoted`. It re-hashes the generation bundle's
@@ -423,17 +415,7 @@ or module evidence drifted), `suspect` (config-only drift), and `retired`
 state. `journey retire --journey <path> --reason <text>` records
 `retired: {retiredAt, reason}` in the meta sidecar; retiring a Journey
 without meta fails with `META_MISSING` and a second retire fails with
-`JOURNEY_ALREADY_RETIRED` (both exit code 2). `journey check`, `retire`, and
-`promote` all accept `--target <id>` for registered local targets, reading
-Journeys from the target workspace. `local sync <id>` copies the committed
-asset directories (context/journeys/knowledge/contracts/playbooks) from the
-project into a target's workspace so `--target` commands can load them;
-without it `--target` analysis fails closed with `CONTEXT_INVALID`. Local
-targets are local ADB projects: the synthesized target config defaults
-`runtime.backend` to `adb` (`src/application/target/local-target-service.ts`),
-and a local-target invocation with no readable project config also resolves to
-the `adb` backend instead of `auto`/mobile-mcp
-(`src/cli/runtime-selection.ts`).
+`JOURNEY_ALREADY_RETIRED` (both exit code 2).
 
 ## Protocol and Implementation Constraints
 
@@ -501,7 +483,7 @@ crosses `ExternalFlowSchema`, `ExternalFlowRegistry`, `ExternalFlowResolver`,
 ## Tests
 
 Tests mirror source layers under `test/domain`, `test/application`,
-`test/adapters`, and `test/cli`. Shared injected doubles live in `test/fakes`;
+`test/adapters`, `test/cli`, and `test/tools`. Shared injected doubles live in `test/fakes`;
 protocol samples live in `test/fixtures`. CLI process-contract tests exercise
 the built CLI and fake external binaries, including the one-JSON stdout
 contract. Checked-in Android demo contracts run without a device; actual Replay

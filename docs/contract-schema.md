@@ -181,7 +181,6 @@ record (reviewer `source`, `model`, `promptVersion`, `findings`, `applied`,
 taphound contract --contract .taphound/contracts/mail-search-return.json --json
 taphound verify --contract .taphound/contracts/mail-search-return.json --json
 taphound contract review --verdict <run>/verdict.json --findings <run>/findings.json --json
-taphound playbook validate --playbook .taphound/playbooks/behavior-regression.json --json
 ```
 
 `contract --contract` is read-only: schema + hash binding, no device, no
@@ -189,10 +188,7 @@ mutation. `verify --contract` runs the full flow (doctor, install, launch,
 replay, hooks, evidence, verdict). `contract review` merges external reviewer
 findings into a stored `verdict.json`: a lower-trust layer may escalate
 `pass` / `inconclusive` to `needsReview`, but never rewrites a deterministic
-`fail` / `invalid` (see `docs/source-of-truth.md`). `playbook validate`
-checks a Verification Playbook schema, its hash-bound Contract, and its
-Escalation Policy rules (see `docs/playbook.md`). Passing a path outside
-`.taphound/` is allowed; `--target` is not supported yet.
+`fail` / `invalid` (see `docs/source-of-truth.md`).
 
 ## Runtime hooks
 

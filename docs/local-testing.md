@@ -63,7 +63,7 @@ After building, you can inspect the CLI directly:
 node dist/cli/main.js --help
 ```
 
-The first line should be `Usage: taphound`, and it should list `doctor`, `record`, `verify`, `contract`, `observe`, `project`, `context`, `journey`, `generation`, `knowledge`, `benchmark`, `init`, `align`, `impact`, `verify-changes`, and `ui-cache`.
+The first line should be `Usage: taphound`, and it should list `doctor`, `record`, `verify`, `contract`, `observe`, `project`, `context`, `journey`, `generation`, `knowledge`, `baseline`, `failure`, `init`, `align`, and `impact`.
 
 ## 3. Test the npm Tarball
 
@@ -219,17 +219,6 @@ closed if the provider is unavailable:
 
 Set `cacheEnabled` to `false` for cache-equivalence tests. Authoritative
 evidence and post-mutation reads remain fresh in both modes.
-
-The optional persistent screen/flow index is non-authoritative and lives at
-`.taphound/build/cache/ui/`. It stores only resource-ID contracts, semantic
-hashes, and Flow verification receipts; it never stores page source, page
-text, screenshots, or reusable tap coordinates. Inspect or remove it without
-affecting Journeys, reports, or generation evidence:
-
-```bash
-node dist/cli/main.js ui-cache status --project examples/taphound-android-demo --json
-node dist/cli/main.js ui-cache clear --project examples/taphound-android-demo --yes --json
-```
 
 When Appium is explicitly configured, start its local loopback server before
 running `doctor`; doctor reports the detected Appium server/UiAutomator2 driver

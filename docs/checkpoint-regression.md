@@ -8,8 +8,8 @@ behavior vs baseline). They answer:
 > Did a change keep observable behavior intact?
 
 without any model call — the comparison is pure and deterministic. Ambiguity
-left over after a deterministic compare is the job of the Playbook Escalation
-Policy (`docs/playbook.md`).
+left over after a deterministic compare belongs to the external Workflow's
+review step (`docs/source-of-truth.md`).
 
 ## Checkpoint (`src/domain/checkpoint.ts`)
 
@@ -248,8 +248,8 @@ change applied  →  new run  →  report  →  baseline compare  →  REGRESSIO
                                                    │
                                       no → equivalent (behavior preserved)
                                                    │
-                                      yes → diffs feed the Playbook's
-                                            behavior-regression phases
+                                      yes → diffs feed the Workflow's
+                                            regression review
 ```
 
 Baselines live under `.taphound/baselines/` and are committed; they are

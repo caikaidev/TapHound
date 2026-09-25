@@ -2,8 +2,11 @@
 
 The False-Done Benchmark measures the value of TapHound as a **verification**
 tool: when a coding agent claims "done", can TapHound catch the completed
-work that is actually wrong? It complements the engine Benchmark
-(`docs/benchmark.md`), which measures Journey/Knowledge engine performance.
+work that is actually wrong?
+
+It is a **repository-only developer tool** (`tools/false-done/`): it is
+type-checked, linted, and tested with the rest of the repository but is not
+part of the published `taphound` CLI. Run it from a TapHound checkout.
 
 ```text
 Agent claims done
@@ -61,7 +64,7 @@ Case schema (`false-done/<id>.json`, file name must equal the case id):
 | `contractPath` | Acceptance Contract the agent claims to satisfy |
 | `expectedVerdict` | ground truth: `pass` for truly-done cases; `fail` / `inconclusive` for false-done cases |
 
-`benchmark false-done validate` checks the file name / variant APK readability
+`validate` checks the file name / variant APK readability
 and that the bound Contract loads (schema + Journey hash binding).
 
 ## Detection Scoring
@@ -90,12 +93,12 @@ and that the bound Contract loads (schema + Journey hash binding).
 ## Commands
 
 ```bash
-taphound benchmark false-done validate --project <android-project> --json
-taphound benchmark false-done run --project <android-project> \
+npm run bench:false-done -- validate --project <android-project>
+npm run bench:false-done -- run --project <android-project> \
   --config .taphound/config.json --device <serial> \
-  [--case behavior-01 ...] [--repeats 2] --json
-taphound benchmark false-done compare --project <android-project> \
-  --baseline <runId> --candidate <runId> --json
+  [--case behavior-01 ...] [--repeats 2]
+npm run bench:false-done -- compare --project <android-project> \
+  --baseline <runId> --candidate <runId>
 ```
 
 `run` writes one JSON value to stdout (run id + metrics) and the full
@@ -125,7 +128,7 @@ revision; the metrics are case-family dependent.
 ## Baseline Procedure
 
 1. Author the pack + contracts + variants.
-2. `benchmark false-done run` → record the baseline result file.
+2. `npm run bench:false-done -- run` → record the baseline result file.
 3. Any later change (Independent Verification Agent, new resolvers, new
    `ignoreCursorBlink`-style adaptations) → re-run → `falseDoneRecall` /
    `falseRejectRate` must improve or hold; a recall improvement with a

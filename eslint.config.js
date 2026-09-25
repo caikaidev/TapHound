@@ -6,6 +6,7 @@ export default tseslint.config(
     ignores: [
       "coverage/**",
       "dist/**",
+      ".build-tools/**",
       "eslint.config.js",
       "node_modules/**",
       "test/fixtures/bin/**"

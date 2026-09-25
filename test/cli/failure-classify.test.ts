@@ -4,7 +4,6 @@ import { createProgram } from "../../src/cli/program.js";
 import type { CliDependencies, TextOutput } from "../../src/cli/dependencies.js";
 import type { FailureClassification } from "../../src/domain/failure-classification.js";
 import { fakeWorkspaceLayout } from "../fakes/workspace-layout.js";
-import { defaultLocalTargets } from "../fakes/local-targets.js";
 import { runtimeConfig, runtimeJourney } from "../fakes/runtime-fixture.js";
 
 class BufferOutput implements TextOutput {
@@ -56,7 +55,6 @@ function baseDependencies(exitCodes: number[]): CliDependencies {
     generationStarter: { start: vi.fn() },
     runtimeObserver: { observe: vi.fn() },
     workspaceLayout: fakeWorkspaceLayout(),
-    localTargets: defaultLocalTargets(),
     readFile: vi.fn(() => Promise.resolve(Buffer.alloc(0))),
     readJson: vi.fn((path: string) => Promise.resolve(
       path.includes("journey") ? runtimeJourney : runtimeConfig

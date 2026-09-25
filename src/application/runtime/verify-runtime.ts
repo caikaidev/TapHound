@@ -92,7 +92,6 @@ export interface VerifyInput {
   config: TapHoundConfig;
   journey: Journey;
   projectRoot: string;
-  workspaceRoot?: string | undefined;
   devices: DeviceAssignment[];
   toolVersions: Record<string, string>;
   requireFocusedInput?: boolean | undefined;
@@ -120,10 +119,9 @@ export interface VerifyRuntimeDependencies {
   now: () => Date;
   createRunId: () => string;
   createStepRunner?: ((options: StepRunnerOptions) => StepRunnerLike) | undefined;
-  anchorResolverFor?: ((projectRoot: string, workspaceRoot?: string  ) => AnchorResolverPort) | undefined;
+  anchorResolverFor?: ((projectRoot: string) => AnchorResolverPort) | undefined;
   loadKnowledge?: ((input: {
     projectRoot: string;
-    workspaceRoot?: string | undefined;
     packageName: string;
   }) => Promise<LoadedKnowledgeBundle>) | undefined;
 }
@@ -408,9 +406,6 @@ export class VerifyRuntime {
           try {
             knowledge = await this.dependencies.loadKnowledge({
               projectRoot: input.projectRoot,
-              ...(input.workspaceRoot === undefined
-                ? {}
-                : { workspaceRoot: input.workspaceRoot }),
               packageName: input.config.run.packageName
             });
           } catch (error) {
@@ -690,7 +685,7 @@ export class VerifyRuntime {
             idle: input.config.idle,
             ...(this.dependencies.anchorResolverFor === undefined
               ? {}
-              : { anchorResolver: this.dependencies.anchorResolverFor(input.projectRoot, input.workspaceRoot) }),
+              : { anchorResolver: this.dependencies.anchorResolverFor(input.projectRoot) }),
             ...(input.requireFocusedInput === undefined
               ? {}
               : { requireFocusedInput: input.requireFocusedInput }),

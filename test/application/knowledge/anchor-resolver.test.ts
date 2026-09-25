@@ -55,14 +55,12 @@ function bundle(): LoadedKnowledgeBundle {
         path: "screens/demo.search.screen.json",
         sha256: "c".repeat(64),
         status: "observed" as const
-      }],
-      transitions: []
+      }]
     },
     indexSha256: "d".repeat(64),
     knowledgeHash: "e".repeat(64),
     anchors,
-    screens: [],
-    transitions: []
+    screens: []
   };
 }
 

@@ -415,20 +415,4 @@ describe("JourneyCheckService", () => {
     expect(result.entries[0]?.lifecycle).toBe("stale");
   });
 
-  it("skips Brief drift checks on local target workspaces", async () => {
-    const result = await check({
-      journeys: {
-        ".taphound/journeys/search.json": `${JSON.stringify(runtimeJourney)}\n`
-      },
-      metas: {
-        ".taphound/journeys/search.json": metaJson({
-          sourceBrief: { path: "docs/cases/search-brief.md", sha256: "0".repeat(64) }
-        })
-      }
-    }, "/workspace");
-
-    expect(result.entries[0]?.status).toBe("fresh");
-    expect(result.entries[0]?.reasons).toEqual([]);
-    expect(result.entries[0]?.lifecycle).toBe("verified");
-  });
 });

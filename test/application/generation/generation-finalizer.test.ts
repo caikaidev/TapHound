@@ -58,7 +58,6 @@ import {
   hashJourney,
   type TapHoundReport
 } from "../../../src/domain/report.js";
-import { hashGoalSpec } from "../../../src/domain/route.js";
 import type {
   ProjectBoundGenerationMetaWriterPort
 } from "../../../src/ports/generation-meta-writer.js";
@@ -619,32 +618,6 @@ describe("GenerationFinalizer", () => {
     const verifyInput = test.verify.mock.calls[0]?.[0];
     expect(verifyInput?.config.idle).toEqual(idlePolicy);
     expect(result.meta.replayPolicy?.idle).toEqual(idlePolicy);
-  });
-
-  it("publishes the bound Knowledge hash for planning-enabled sessions", async () => {
-    const goal = {
-      version: 1 as const,
-      id: "open-search",
-      targetScreen: "search",
-      parameters: {},
-      limits: { maxSteps: 5, maxReplans: 2 }
-    };
-    const test = await fixture(undefined, undefined, {}, (root) => ({
-      ...session(root),
-      version: 2,
-      planning: {
-        knowledgeHash: "f".repeat(64),
-        goalHash: hashGoalSpec(goal),
-        goal,
-        currentScreen: null,
-        currentRoute: null,
-        replansUsed: 0,
-        maxReplans: 2,
-        maxSteps: 5
-      }
-    }));
-    const result = await test.finalize.finalize(input(test.root));
-    expect(result.meta.bindings.knowledgeHash).toBe("f".repeat(64));
   });
 
   it("publishes the session source Brief binding in the exported meta", async () => {

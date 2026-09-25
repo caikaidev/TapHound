@@ -3,13 +3,7 @@ import type {
   ScreenDefinition,
   StatePredicate
 } from "../../domain/knowledge.js";
-import type {
-  ScreenDetectionReceipt
-} from "../../domain/knowledge-receipt.js";
-import {
-  hashRuntimeSnapshot,
-  type RuntimeSnapshot
-} from "../../domain/runtime-snapshot.js";
+import type { RuntimeSnapshot } from "../../domain/runtime-snapshot.js";
 import {
   resolveLocatorIdentity
 } from "../locator/locator-resolver.js";
@@ -20,7 +14,10 @@ export type AnchorMatchResult = {
   detail?: string | undefined;
 };
 
-export type ScreenDetectionResult = ScreenDetectionReceipt["result"];
+export type ScreenDetectionResult =
+  | { status: "matched"; screenId: string; evidence: AnchorMatchResult[] }
+  | { status: "ambiguous"; screenIds: string[]; evidence: AnchorMatchResult[] }
+  | { status: "unknown"; evidence: AnchorMatchResult[] };
 
 function matchesWindow(
   value: { title: string; packageName: string; type?: string | undefined },
@@ -154,21 +151,4 @@ export class ScreenDetector {
     }
     return { status: "unknown", evidence };
   };
-
-  public readonly receipt = (input: {
-    id: string;
-    recordedAt: string;
-    knowledgeHash: string;
-    snapshot: RuntimeSnapshot;
-    anchors: readonly AnchorDefinition[];
-    screens: readonly ScreenDefinition[];
-  }): ScreenDetectionReceipt => ({
-    version: 1,
-    id: input.id,
-    kind: "screenDetection",
-    recordedAt: input.recordedAt,
-    knowledgeHash: input.knowledgeHash,
-    snapshotHash: hashRuntimeSnapshot(input.snapshot),
-    result: this.detect(input)
-  });
 }

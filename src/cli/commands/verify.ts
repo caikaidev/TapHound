@@ -1,4 +1,4 @@
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 
 import { Command } from "commander";
 
@@ -19,7 +19,6 @@ import {
 } from "../../domain/workspace.js";
 import {
   exitCodeForFailure,
-  failureCodeFromUnknown,
   type FailureCode
 } from "../../domain/failure.js";
 import type { CliDependencies } from "../dependencies.js";
@@ -44,8 +43,6 @@ interface VerifyOptions {
   package?: string | undefined;
   activity?: string | undefined;
   reports?: string | undefined;
-  target?: string | undefined;
-  targets?: string | undefined;
   policyFromMeta?: boolean | undefined;
   json?: boolean | undefined;
 }
@@ -57,16 +54,6 @@ function toolVersions(checks: Awaited<ReturnType<CliDependencies["doctor"]["run"
       ? []
       : [[check.name, check.version]]
   )));
-}
-
-function targetsHome(
-  dependencies: CliDependencies,
-  explicit: string | undefined
-): string {
-  if (explicit !== undefined) {
-    return resolve(dependencies.cwd(), explicit);
-  }
-  return dependencies.localTargets.targetsHome();
 }
 
 function writeFailure(
@@ -90,8 +77,7 @@ async function runDoctorAndVerify(
   options: VerifyOptions,
   config: ReturnType<typeof TapHoundConfigSchema.parse>,
   journey: ReturnType<typeof JourneySchema.parse>,
-  projectRoot: string,
-  workspaceRoot: string | undefined
+  projectRoot: string
 ): Promise<void> {
   const json = options.json === true;
   let replayPolicy: PublishedReplayPolicy | undefined;
@@ -160,7 +146,6 @@ async function runDoctorAndVerify(
       config: replayPolicy === undefined ? config : { ...config, idle: replayPolicy.idle },
       journey,
       projectRoot,
-      ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
       devices: [{
         role: journey.devices[0]?.role ?? DEFAULT_DEVICE_ROLE,
         deviceSerial
@@ -199,8 +184,7 @@ async function runContractVerify(
   dependencies: CliDependencies,
   options: VerifyOptions,
   config: ReturnType<typeof TapHoundConfigSchema.parse>,
-  projectRoot: string,
-  workspaceRoot: string | undefined
+  projectRoot: string
 ): Promise<void> {
   const json = options.json === true;
   if (dependencies.contractVerifier === undefined) {
@@ -220,7 +204,6 @@ async function runContractVerify(
       }
       const loaded = await dependencies.contractLoader.load({
         projectRoot,
-        ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
         contractPath: resolve(projectRoot, options.contract as string)
       });
       replayPolicy = await loadPublishedReplayPolicy({
@@ -267,7 +250,6 @@ async function runContractVerify(
     );
     const result = await dependencies.contractVerifier.verify({
       projectRoot,
-      ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
       config: replayPolicy === undefined ? config : { ...config, idle: replayPolicy.idle },
       devices: [{
         role: DEFAULT_DEVICE_ROLE,
@@ -305,146 +287,30 @@ async function runContractVerify(
   }
 }
 
-async function runTargetVerify(
-  dependencies: CliDependencies,
-  options: VerifyOptions
-): Promise<void> {
-  const json = options.json === true;
-  if (options.journey === undefined) {
-    writeFailure(
-      dependencies,
-      json,
-      "CONFIG_INVALID",
-      "verify --target requires --journey"
-    );
-    return;
-  }
-  const id = options.target as string;
-  const home = targetsHome(dependencies, options.targets);
-  const resolver = dependencies.localTargets.targetResolver(home);
-
-  let resolved;
-  try {
-    resolved = await resolver.resolve(id);
-  } catch (error) {
-    writeFailure(
-      dependencies,
-      json,
-      failureCodeFromUnknown(error) ?? "INTERNAL_ERROR",
-      errorMessage(error)
-    );
-    return;
-  }
-
-  const name = options.journey;
-  if (name.includes("/") || name.includes("\\")) {
-    writeFailure(
-      dependencies,
-      json,
-      "CONFIG_INVALID",
-      `--journey must be a bare Journey name with --target; got: ${name}`
-    );
-    return;
-  }
-
-  const loaded = await dependencies.localTargets.configStore.loadTargets(home);
-  const entry = loaded.targets[id];
-  if (entry === undefined) {
-    writeFailure(
-      dependencies,
-      json,
-      "LOCAL_TARGET_NOT_FOUND",
-      `Local target "${id}" is not registered. Add it with: taphound local add ${id} --path <path>`
-    );
-    return;
-  }
-
-  const fingerprint = await resolver.fingerprint(resolved.project, entry.run.packageName);
-  try {
-    await dependencies.localTargets.localTargetService(home)
-      .assertProjectUnchanged(resolved, fingerprint.hash);
-  } catch (error) {
-    writeFailure(
-      dependencies,
-      json,
-      failureCodeFromUnknown(error) ?? "INTERNAL_ERROR",
-      errorMessage(error)
-    );
-    return;
-  }
-
-  const workspaceRoot = resolved.workspaceRoot;
-  const synthesized = dependencies.localTargets.localTargetService(home)
-    .configForTarget({
-      entry,
-      resolvedPath: resolved.resolvedPath,
-      workspaceRoot
-    });
-  const config = TapHoundConfigSchema.parse({
-    ...synthesized,
-    run: {
-      packageName: options.package ?? synthesized.run.packageName,
-      activity: options.activity ?? synthesized.run.activity
-    },
-    artifactsDir: options.reports === undefined
-      ? synthesized.artifactsDir
-      : resolve(workspaceRoot, options.reports)
-  });
-  assertArtifactDirectory(resolved.workspaceRoot, config.artifactsDir, ".");
-
-  const fileName = name.endsWith(".json") ? name : `${name}.json`;
-  let journey;
-  try {
-    journey = JourneySchema.parse(
-      await dependencies.readJson(join(workspaceRoot, "journeys", fileName))
-    );
-  } catch (error) {
-    const output = failureOutput(2, "CONFIG_INVALID", errorMessage(error));
-    if (json) {
-      writeJson(dependencies.stdout, output);
-    } else {
-      writeLine(dependencies.stderr, output.failure.message);
-    }
-    dependencies.setExitCode(2);
-    return;
-  }
-
-  await runDoctorAndVerify(
-    dependencies,
-    options,
-    config,
-    journey,
-    resolved.resolvedPath,
-    workspaceRoot
-  );
-}
-
 export function createVerifyCommand(dependencies: CliDependencies): Command {
   return new Command("verify")
     .description("Deterministically verify a TapHound Journey or Acceptance Contract")
     .option("--project <path>", "Android project root", dependencies.cwd())
     .option("--config <path>", "TapHound config path", CONFIG_PATH)
-    .option("--journey <path>", "TapHound Journey path or bare name with --target")
+    .option("--journey <path>", "TapHound Journey path")
     .option("--contract <path>", "Acceptance Contract path (mutually exclusive with --journey)")
     .option("--diff <ref>", "Verify the Journeys a Git change affects (diff mode)")
     .option("--base <ref>", "Base Git ref for --diff (default origin/main)")
-    .option("--head <ref>", "Head Git ref for --diff (defaults to HEAD, or WORKTREE with --target)")
+    .option("--head <ref>", "Head Git ref for --diff (HEAD by default, or WORKTREE)")
     .option("--scope <p0,p1,p2>", "Selection tiers for --diff", "p0,p1")
     .option("--device <serial>", "Select an online Android device")
     .option("--package <name>", "Override run.packageName")
     .option("--activity <name>", "Override run.activity")
     .option("--reports <path>", "Report output under .taphound/build")
-    .option("--target <id>", "Registered local target id")
-    .option("--targets <path>", "Targets workspace base path")
     .option("--policy-from-meta", "Require the bound strict Generation Replay policy")
     .option("--json", "Emit one machine-readable JSON value")
     .action(async (options: VerifyOptions): Promise<void> => {
-      if (options.policyFromMeta === true && (options.diff !== undefined || options.target !== undefined)) {
+      if (options.policyFromMeta === true && options.diff !== undefined) {
         writeFailure(
           dependencies,
           options.json === true,
           "CONFIG_INVALID",
-          "--policy-from-meta supports --journey or --contract in a project workspace, not --diff or --target"
+          "--policy-from-meta supports --journey or --contract, not --diff"
         );
         return;
       }
@@ -456,8 +322,6 @@ export function createVerifyCommand(dependencies: CliDependencies): Command {
           ...(options.head === undefined ? {} : { head: options.head }),
           ...(options.device === undefined ? {} : { device: options.device }),
           ...(options.scope === undefined ? {} : { scope: options.scope }),
-          ...(options.target === undefined ? {} : { target: options.target }),
-          ...(options.targets === undefined ? {} : { targets: options.targets }),
           json: options.json === true
         });
         return;
@@ -480,20 +344,6 @@ export function createVerifyCommand(dependencies: CliDependencies): Command {
         );
         return;
       }
-      if (options.contract !== undefined && options.target !== undefined) {
-        writeFailure(
-          dependencies,
-          options.json === true,
-          "CONFIG_INVALID",
-          "verify --contract does not support --target in this version; run it against a project workspace"
-        );
-        return;
-      }
-      if (options.target !== undefined) {
-        await runTargetVerify(dependencies, options);
-        return;
-      }
-
       let config;
       if (options.contract === undefined) {
         let journey;
@@ -531,8 +381,7 @@ export function createVerifyCommand(dependencies: CliDependencies): Command {
           options,
           config,
           journey,
-          options.project,
-          undefined
+          options.project
         );
         return;
       }
@@ -567,8 +416,7 @@ export function createVerifyCommand(dependencies: CliDependencies): Command {
         dependencies,
         options,
         contractConfig,
-        options.project,
-        undefined
+        options.project
       );
     });
 }

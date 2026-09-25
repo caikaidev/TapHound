@@ -10,6 +10,7 @@ pnpm-debug.log*
 
 # Build outputs
 dist/
+.build-tools/
 coverage/
 **/build/
 
@@ -39,14 +40,7 @@ local.properties
 # OS
 .DS_Store
 
-# Local Target (registered local targets; generated per-target workspace guard)
-# Root local-target workspace (real app context/journeys/runs/generations/cache)
-.taphound/local/
-benchmarks/targets.local.json
-benchmarks/targets.local.example.json
-benchmarks/apps/local/
-benchmarks/cases/local/
-benchmarks/.taphound/
+# Generated TapHound workspace guard
 .taphound/.gitignore
 
 # Local verification results and process records (not version-controlled)

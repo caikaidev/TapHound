@@ -11,8 +11,7 @@ import {
 } from "../../domain/project-context.js";
 import {
   assertProjectPathUnder,
-  CONTEXT_DIR,
-  TAPHOUND_DIR
+  CONTEXT_DIR
 } from "../../domain/workspace.js";
 import type {
   ProjectIdentityInspector
@@ -55,7 +54,6 @@ export class ContextGenerateError extends Error {
 
 export interface ContextGenerateInput {
   readonly projectRoot: string;
-  readonly contextRoot?: string | undefined;
   readonly contextPath: string;
   readonly force?: boolean;
 }
@@ -229,8 +227,7 @@ export class ContextGenerator {
   public readonly generate = async (
     input: ContextGenerateInput
   ): Promise<ContextGenerateResult> => {
-    const contextRoot = input.contextRoot ?? input.projectRoot;
-    const inWorkspace = input.contextRoot !== undefined;
+    const contextRoot = input.projectRoot;
     const contextPath = isAbsolute(input.contextPath)
       ? input.contextPath
       : resolve(contextRoot, input.contextPath);
@@ -241,16 +238,12 @@ export class ContextGenerator {
       (message) => new ContextGenerateError("CONTEXT_INVALID", message)
     );
 
-    const reduce = (relativePath: string): string =>
-      inWorkspace && relativePath.startsWith(`${TAPHOUND_DIR}/`)
-        ? relativePath.slice(TAPHOUND_DIR.length + 1)
-        : relativePath;
-    const documentRelativePath = reduce(contextRelativePath);
+    const documentRelativePath = contextRelativePath;
     try {
       assertProjectPathUnder(
         contextRoot,
         documentRelativePath,
-        inWorkspace ? "context" : CONTEXT_DIR,
+        CONTEXT_DIR,
         "Project Context output"
       );
     } catch (error) {
@@ -355,7 +348,7 @@ export class ContextGenerator {
       const shardSha256 = await writeDocument(
         this.dependencies.writer,
         contextRoot,
-        reduce(shardPath),
+        shardPath,
         parsed.data
       );
 
@@ -365,12 +358,12 @@ export class ContextGenerator {
         kind: module.kind,
         status: "notAnalyzed",
         evidenceCount: evidence.length,
-        contextPath: reduce(shardPath),
+        contextPath: shardPath,
         sha256: shardSha256
       });
 
       moduleReferences.push(
-        buildModuleReference(module, reduce(shardPath), shardSha256, module.dependsOn)
+        buildModuleReference(module, shardPath, shardSha256, module.dependsOn)
       );
     }
 

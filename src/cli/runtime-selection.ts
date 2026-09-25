@@ -69,10 +69,6 @@ function argvOptionValue(
   return value;
 }
 
-function argvHasTarget(argv: readonly string[]): boolean {
-  return argv.some((argument) => argument.startsWith("--target"));
-}
-
 export interface RuntimeBackendInvocation {
   env: Record<string, string | undefined>;
   argv: readonly string[];
@@ -93,10 +89,7 @@ async function configBackendChoice(
   try {
     text = await invocation.readConfigFile(configPath);
   } catch {
-    // Local-target mode: the project config lives in the target workspace and
-    // is not readable here. Keep the explicit local ADB choice for that path;
-    // all other unreadable configs use the normal auto resolution.
-    return argvHasTarget(invocation.argv) ? "adb" : "auto";
+    return "auto";
   }
   let parsed: unknown;
   try {

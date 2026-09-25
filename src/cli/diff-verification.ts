@@ -16,7 +16,6 @@ import {
   failureCodeFromUnknown,
   type FailureCode
 } from "../domain/failure.js";
-import type { TargetResolver } from "../application/target/target-resolver.js";
 import type { CliDependencies } from "./dependencies.js";
 import {
   errorMessage,
@@ -33,8 +32,6 @@ export interface DiffVerificationOptions {
   head?: string | undefined;
   device?: string | undefined;
   scope?: string | undefined;
-  target?: string | undefined;
-  targets?: string | undefined;
   json?: boolean | undefined;
 }
 
@@ -55,10 +52,6 @@ export interface DiffVerificationResult {
   overall: "passed" | "failed" | "error";
   exitCode: 0 | 1 | 2 | 3 | 4;
   note?: string | undefined;
-  target?: {
-    id: string;
-    resolvedPath: string;
-  };
 }
 
 function selectedScopes(scope: string | undefined): ("p0" | "p1" | "p2")[] {
@@ -83,16 +76,6 @@ function toolVersions(
   )));
 }
 
-function targetsHome(
-  dependencies: CliDependencies,
-  explicit: string | undefined
-): string {
-  if (explicit !== undefined) {
-    return resolve(dependencies.cwd(), explicit);
-  }
-  return dependencies.localTargets.targetsHome();
-}
-
 function writeFailure(
   dependencies: CliDependencies,
   json: boolean,
@@ -109,37 +92,12 @@ function writeFailure(
   dependencies.setExitCode(exitCode);
 }
 
-async function resolveTarget(
-  dependencies: CliDependencies,
-  options: DiffVerificationOptions
-): Promise<{
-  resolvedTarget?: Awaited<ReturnType<TargetResolver["resolve"]>> | undefined;
-  workspaceRoot?: string | undefined;
-  projectRoot: string;
-}> {
-  let resolvedTarget;
-  let workspaceRoot;
-  let projectRoot;
-  if (options.target !== undefined) {
-    const id = options.target;
-    const home = targetsHome(dependencies, options.targets);
-    const resolver = dependencies.localTargets.targetResolver(home);
-    resolvedTarget = await resolver.resolve(id);
-    workspaceRoot = resolvedTarget.workspaceRoot;
-    projectRoot = resolvedTarget.resolvedPath;
-  } else {
-    projectRoot = options.project;
-  }
-  return { resolvedTarget, workspaceRoot, projectRoot };
-}
-
 /**
  * Diff-driven verification: compute the ImpactSet for a Git change, select
  * the affected Journeys by tier (p0/p1/p2), and verify each one on the
  * connected device.
  *
- * This is the Agent-facing entry used by both `verify-changes` and
- * `verify --diff`; it never parses the app's internals — the Coding Agent
+ * This is the Agent-facing entry behind `verify --diff`; it never parses the app's internals — the Coding Agent
  * only sees Journey names + verdicts.
  */
 export async function runDiffVerification(
@@ -153,93 +111,24 @@ export async function runDiffVerification(
     ) {
       throw new Error("TapHound change verification is not configured");
     }
-    const head = options.head
-      ?? (options.target === undefined ? "HEAD" : "WORKTREE");
+    const head = options.head ?? "HEAD";
+    const projectRoot = options.project;
+    const config = TapHoundConfigSchema.parse(await dependencies.readJson(
+      resolve(projectRoot, options.config)
+    ));
+    assertArtifactDirectory(projectRoot, config.artifactsDir);
+    await assertNoLegacyWorkspace(dependencies, projectRoot);
 
-    const { resolvedTarget, workspaceRoot, projectRoot } =
-      await resolveTarget(dependencies, options);
-
-    let config;
-    if (resolvedTarget !== undefined) {
-      const loaded = await dependencies.localTargets.configStore
-        .loadTargets(targetsHome(dependencies, options.targets));
-      const entry = loaded.targets[resolvedTarget.id];
-      if (entry === undefined) {
-        writeFailure(
-          dependencies,
-          options.json === true,
-          "LOCAL_TARGET_NOT_FOUND",
-          `Local target "${resolvedTarget.id}" is not registered. Add it with: taphound local add ${resolvedTarget.id} --path <path>`
-        );
-        return;
-      }
-      const fingerprint = await dependencies.localTargets
-        .targetResolver(targetsHome(dependencies, options.targets))
-        .fingerprint(resolvedTarget.project, entry.run.packageName);
-      try {
-        await dependencies.localTargets.localTargetService(
-          targetsHome(dependencies, options.targets)
-        ).assertProjectUnchanged(resolvedTarget, fingerprint.hash);
-      } catch (error) {
-        writeFailure(
-          dependencies,
-          options.json === true,
-          failureCodeFromUnknown(error) ?? "INTERNAL_ERROR",
-          errorMessage(error)
-        );
-        return;
-      }
-      config = TapHoundConfigSchema.parse(
-        dependencies.localTargets.localTargetService(
-          targetsHome(dependencies, options.targets)
-        ).configForTarget({
-          entry,
-          resolvedPath: resolvedTarget.resolvedPath,
-          workspaceRoot: resolvedTarget.workspaceRoot
-        })
-      );
-      assertArtifactDirectory(
-        resolvedTarget.workspaceRoot,
-        config.artifactsDir,
-        "."
-      );
-    } else {
-      const rawConfig = await dependencies.readJson(
-        resolve(options.project, options.config)
-      );
-      config = TapHoundConfigSchema.parse(rawConfig);
-      assertArtifactDirectory(options.project, config.artifactsDir);
-      await assertNoLegacyWorkspace(dependencies, options.project);
-    }
-
-    let changeSet;
-    let impact;
-    if (resolvedTarget !== undefined) {
-      const gitRoot = resolvedTarget.project.gitRoot
-        ?? resolvedTarget.resolvedPath;
-      changeSet = await dependencies.gitDiff.diff({
-        projectRoot: gitRoot,
-        base: options.base,
-        head
-      });
-      impact = await dependencies.impact.resolve({
-        projectRoot: resolvedTarget.resolvedPath,
-        workspaceRoot: resolvedTarget.workspaceRoot,
-        packageName: config.run.packageName,
-        changeSet
-      });
-    } else {
-      changeSet = await dependencies.gitDiff.diff({
-        projectRoot: options.project,
-        base: options.base,
-        head
-      });
-      impact = await dependencies.impact.resolve({
-        projectRoot: options.project,
-        packageName: config.run.packageName,
-        changeSet
-      });
-    }
+    const changeSet = await dependencies.gitDiff.diff({
+      projectRoot,
+      base: options.base,
+      head
+    });
+    const impact = await dependencies.impact.resolve({
+      projectRoot,
+      packageName: config.run.packageName,
+      changeSet
+    });
     const scopes = selectedScopes(options.scope);
     const selected = scopes.flatMap((tier) => (
       impact.selectedJourneys[tier].map((entry) => ({
@@ -289,8 +178,7 @@ export async function runDiffVerification(
     for (const entry of selected) {
       const bytes = await dependencies.journeyCompositionStore.read({
         projectRoot,
-        relativePath: entry.path,
-        ...(workspaceRoot === undefined ? {} : { workspaceRoot })
+        relativePath: entry.path
       });
       const journey: Journey = JourneySchema.parse(
         JSON.parse(bytes.toString("utf8"))
@@ -312,7 +200,6 @@ export async function runDiffVerification(
         config,
         journey,
         projectRoot,
-        ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
         devices: [{
           role: journey.devices[0]?.role ?? DEFAULT_DEVICE_ROLE,
           deviceSerial
@@ -358,15 +245,7 @@ export async function runDiffVerification(
       results,
       overall,
       exitCode,
-      ...(note === undefined ? {} : { note }),
-      ...(resolvedTarget === undefined
-        ? {}
-        : {
-          target: {
-            id: resolvedTarget.id,
-            resolvedPath: resolvedTarget.resolvedPath
-          }
-        })
+      ...(note === undefined ? {} : { note })
     };
     if (options.json === true) {
       writeJson(dependencies.stdout, payload);

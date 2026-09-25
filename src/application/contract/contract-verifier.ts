@@ -31,7 +31,6 @@ import { ContractError, ContractLoader } from "./contract-loader.js";
 
 export interface ContractVerifyInput {
   projectRoot: string;
-  workspaceRoot?: string | undefined;
   config: TapHoundConfig;
   devices: DeviceAssignment[];
   toolVersions: Record<string, string>;
@@ -47,7 +46,6 @@ export interface ContractVerifierDependencies {
   verify: (input: VerifyInput) => Promise<VerifyResult>;
   loadKnowledge?: ((input: {
     projectRoot: string;
-    workspaceRoot?: string | undefined;
     packageName: string;
   }) => Promise<LoadedKnowledgeBundle>) | undefined;
   readText: (path: string) => Promise<string>;
@@ -215,7 +213,6 @@ export class ContractVerifier {
     try {
       loaded = await this.loader.load({
         projectRoot: input.projectRoot,
-        workspaceRoot: input.workspaceRoot,
         contractPath: input.contractPath
       });
     } catch (error) {
@@ -258,7 +255,6 @@ export class ContractVerifier {
       try {
         knowledge = await this.dependencies.loadKnowledge({
           projectRoot: input.projectRoot,
-          workspaceRoot: input.workspaceRoot,
           packageName: input.config.run.packageName
         });
       } catch (error) {
@@ -341,9 +337,6 @@ export class ContractVerifier {
         config: input.config,
         journey: loaded.journey,
         projectRoot: input.projectRoot,
-        ...(input.workspaceRoot === undefined
-          ? {}
-          : { workspaceRoot: input.workspaceRoot }),
         devices: input.devices,
         toolVersions: input.toolVersions,
         ...(input.generatedReplayPolicy === undefined

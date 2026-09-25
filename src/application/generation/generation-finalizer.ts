@@ -23,7 +23,6 @@ import {
   type Journey
 } from "../../domain/journey.js";
 import {
-  ProjectRelativePathSchema,
   ResolvedProjectContextSchema,
   type ResolvedProjectContext
 } from "../../domain/project-context.js";
@@ -109,16 +108,7 @@ interface ExpectedVerification {
 }
 
 export const GenerationOutputPathSchema = JourneyOutputPathSchema;
-export const GenerationWorkspaceOutputPathSchema =
-  ProjectRelativePathSchema.refine(
-    (path) => path.startsWith("journeys/")
-      && path.endsWith(".json")
-      && !path.endsWith(".resolve.json")
-      && path.split("/").every(
-        (segment) => segment.length > 0 && segment !== "."
-      ),
-    "Generation workspace output must be a normalized JSON file under journeys"
-  );
+
 
 export type GenerationFinalizationStage =
   | "precondition"
@@ -144,7 +134,6 @@ export class GenerationFinalizationError extends Error {
 export interface GenerationFinalizeInput {
   generationId: string;
   projectRoot: string;
-  workspaceRoot?: string | undefined;
   config: TapHoundConfig;
   context: ResolvedProjectContext;
   contextFromSnapshot?: boolean | undefined;
@@ -277,11 +266,7 @@ export class GenerationFinalizer {
     const context = ResolvedProjectContextSchema.parse(input.context);
     const project = ProjectDescriptionSchema.parse(input.project);
     const canonicalProjectRoot = await realpath(input.projectRoot);
-    const outputPath = (
-      input.workspaceRoot === undefined
-        ? GenerationOutputPathSchema
-        : GenerationWorkspaceOutputPathSchema
-    ).parse(input.outputPath);
+    const outputPath = GenerationOutputPathSchema.parse(input.outputPath);
     const name = input.name === undefined
       ? derivedJourneyName(outputPath)
       : z.string().trim().min(1).parse(input.name);
@@ -397,9 +382,6 @@ export class GenerationFinalizer {
           config: replayConfig,
           journey,
           projectRoot: canonicalProjectRoot,
-          ...(input.workspaceRoot === undefined
-            ? {}
-            : { workspaceRoot: input.workspaceRoot }),
           devices: [{
             role: journey.devices[0]?.role ?? DEFAULT_DEVICE_ROLE,
             deviceSerial: input.deviceSerial
@@ -619,9 +601,6 @@ export class GenerationFinalizer {
       const exported = await this.dependencies.publisher.export({
         generationId: session.id,
         projectRoot: input.projectRoot,
-        ...(input.workspaceRoot === undefined
-          ? {}
-          : { workspaceRoot: input.workspaceRoot }),
         journeyPath: outputPath,
         journey,
         meta
@@ -1334,9 +1313,6 @@ export class GenerationFinalizer {
         projectHash: session.bindings.projectHash,
         configHash: session.bindings.configHash,
         contextHash: session.bindings.contextHash,
-        ...(session.planning === undefined
-          ? {}
-          : { knowledgeHash: session.planning.knowledgeHash }),
         ...(session.bindings.uiBackend === undefined
           ? {}
           : { uiBackend: session.bindings.uiBackend })

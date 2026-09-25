@@ -2,31 +2,18 @@ import { describe, expect, it } from "vitest";
 
 import {
   CONFIG_PATH,
-  BENCHMARKS_DIR,
-  BENCHMARK_RUNS_DIR,
-  GROUND_TRUTH_DIR,
   KNOWLEDGE_DIR,
-  KNOWLEDGE_RECEIPTS_DIR,
   activeGenerationBundleName,
   assertArtifactDirectory,
   assertProjectPathUnder,
   legacyWorkspaceMessage,
-  localTargetWorkspaceRoot,
-  parseSnapshotEvidenceReference,
-  tapHoundPath,
-  TARGETS_DIR
+  parseSnapshotEvidenceReference
 } from "../../src/domain/workspace.js";
 
 describe("workspace paths", () => {
   it("keeps the config inside the committed TapHound workspace", () => {
     expect(CONFIG_PATH).toBe(".taphound/config.json");
     expect(KNOWLEDGE_DIR).toBe(".taphound/knowledge");
-    expect(BENCHMARKS_DIR).toBe(".taphound/benchmarks");
-    expect(GROUND_TRUTH_DIR).toBe(".taphound/ground-truth");
-    expect(KNOWLEDGE_RECEIPTS_DIR).toBe(
-      ".taphound/build/knowledge-receipts"
-    );
-    expect(BENCHMARK_RUNS_DIR).toBe(".taphound/build/benchmark-runs");
   });
 
   it("rejects Core artifacts and generated files outside .taphound", () => {
@@ -105,29 +92,5 @@ describe("legacyWorkspaceMessage", () => {
     expect(legacyWorkspaceMessage([run])).toContain(
       `mv ${run} .taphound/build/runs/${run.slice(".taphound/".length)}`
     );
-  });
-});
-
-describe("local target workspace", () => {
-  it("derives the per-target workspace root", () => {
-    expect(localTargetWorkspaceRoot("/repo/benchmarks", "work-app")).toBe(
-      "/repo/benchmarks/.taphound/local/work-app"
-    );
-  });
-
-  it("tapHoundPath is identity when no workspace root is set", () => {
-    expect(tapHoundPath("/proj", undefined, ".taphound/knowledge")).toBe(
-      "/proj/.taphound/knowledge"
-    );
-  });
-
-  it("tapHoundPath rebases TapHound-owned data onto the workspace root", () => {
-    expect(tapHoundPath("/real/app", "/ws", ".taphound/journeys/x.json")).toBe(
-      "/ws/journeys/x.json"
-    );
-  });
-
-  it("exposes the benchmarks targets directory constant", () => {
-    expect(TARGETS_DIR).toBe("benchmarks");
   });
 });

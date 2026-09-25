@@ -11,7 +11,6 @@ import type { ObserveInput } from "../../src/application/observe/observe-service
 import type { ObserveReport } from "../../src/domain/observation.js";
 import { runtimeConfig, runtimeJourney } from "../fakes/runtime-fixture.js";
 import { fakeWorkspaceLayout } from "../fakes/workspace-layout.js";
-import { defaultLocalTargets } from "../fakes/local-targets.js";
 
 class BufferOutput implements TextOutput {
   public value = "";
@@ -135,7 +134,6 @@ function baseDependencies(
     generationStarter: { start: vi.fn() },
     runtimeObserver: { observe: vi.fn() },
     workspaceLayout: fakeWorkspaceLayout(),
-    localTargets: defaultLocalTargets(),
     readFile: vi.fn(() => Promise.resolve(Buffer.alloc(0))),
     readJson: vi.fn((path: string): Promise<unknown> => {
       if (path.endsWith("verdict.json")) {

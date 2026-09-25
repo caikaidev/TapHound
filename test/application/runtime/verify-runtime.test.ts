@@ -253,8 +253,7 @@ describe("VerifyRuntime", () => {
         packageName: "com.example.app",
         revision: 1,
         anchors: [],
-        screens: [],
-        transitions: []
+        screens: []
       },
       indexSha256: "a".repeat(64),
       knowledgeHash: "b".repeat(64),
@@ -276,8 +275,7 @@ describe("VerifyRuntime", () => {
         optionalAnchors: [],
         forbiddenAnchors: [],
         predicates: []
-      }],
-      transitions: []
+      }]
     };
     const loadKnowledge = vi.fn(() => Promise.resolve(knowledge));
     const result = await new VerifyRuntime({

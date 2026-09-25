@@ -1,8 +1,7 @@
 import type {
   AnchorDefinition,
   KnowledgeBundleIndex,
-  ScreenDefinition,
-  TransitionDefinition
+  ScreenDefinition
 } from "../domain/knowledge.js";
 
 export interface LoadedKnowledgeBundle {
@@ -11,30 +10,21 @@ export interface LoadedKnowledgeBundle {
   knowledgeHash: string;
   anchors: AnchorDefinition[];
   screens: ScreenDefinition[];
-  transitions: TransitionDefinition[];
 }
 
-export interface WriteKnowledgeBundleInput {
-  projectRoot: string;
-  packageName: string;
-  expectedKnowledgeHash?: string | undefined;
-  anchors: readonly AnchorDefinition[];
-  screens: readonly ScreenDefinition[];
-  transitions: readonly TransitionDefinition[];
-}
-
-export interface WriteKnowledgeBundleResult {
+export interface KnowledgeRehashResult {
   indexPath: string;
   knowledgeHash: string;
   revision: number;
+  changed: boolean;
+  anchors: number;
+  screens: number;
 }
 
 export interface KnowledgeRegistryPort {
-  load: (
+  load: (projectRoot: string) => Promise<LoadedKnowledgeBundle>;
+  rehash: (
     projectRoot: string,
-    workspaceRoot?: string  
-  ) => Promise<LoadedKnowledgeBundle>;
-  writePromoted: (
-    input: WriteKnowledgeBundleInput
-  ) => Promise<WriteKnowledgeBundleResult>;
+    packageName: string
+  ) => Promise<KnowledgeRehashResult>;
 }

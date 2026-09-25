@@ -49,7 +49,6 @@ export class JourneyRetirer {
 
   public readonly retire = async (input: {
     projectRoot: string;
-    workspaceRoot?: string | undefined;
     journeyPath: string;
     reason: string;
     now: Date;
@@ -61,10 +60,7 @@ export class JourneyRetirer {
     try {
       journeyBytes = await this.dependencies.store.read({
         projectRoot: input.projectRoot,
-        relativePath: journeyPath,
-        ...(input.workspaceRoot === undefined
-          ? {}
-          : { workspaceRoot: input.workspaceRoot })
+        relativePath: journeyPath
       });
     } catch {
       throw new JourneyRetireError(
@@ -84,10 +80,7 @@ export class JourneyRetirer {
 
     const metaBytes = await this.dependencies.store.readJourneyMeta({
       projectRoot: input.projectRoot,
-      journeyPath,
-      ...(input.workspaceRoot === undefined
-        ? {}
-        : { workspaceRoot: input.workspaceRoot })
+      journeyPath
     });
     if (metaBytes === null) {
       throw new JourneyRetireError(
@@ -123,17 +116,11 @@ export class JourneyRetirer {
     await this.dependencies.store.writeText({
       projectRoot: input.projectRoot,
       relativePath: metaPath,
-      content: serialize(updated),
-      ...(input.workspaceRoot === undefined
-        ? {}
-        : { workspaceRoot: input.workspaceRoot })
+      content: serialize(updated)
     });
     const written = await this.dependencies.store.readJourneyMeta({
       projectRoot: input.projectRoot,
-      journeyPath,
-      ...(input.workspaceRoot === undefined
-        ? {}
-        : { workspaceRoot: input.workspaceRoot })
+      journeyPath
     });
     if (written === null) {
       throw new JourneyRetireError(

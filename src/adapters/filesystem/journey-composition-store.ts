@@ -15,9 +15,7 @@ import {
   BUILD_DIR,
   EXTERNAL_FLOWS_DIR,
   FLOWS_DIR,
-  JOURNEYS_DIR,
-  TAPHOUND_DIR,
-  tapHoundPath
+  JOURNEYS_DIR
 } from "../../domain/workspace.js";
 import type {
   JourneyCompositionStore
@@ -41,23 +39,6 @@ function contained(root: string, candidate: string): boolean {
     );
 }
 
-function inspectorBase(
-  projectRoot: string,
-  workspaceRoot: string | undefined
-): string {
-  return workspaceRoot ?? projectRoot;
-}
-
-function inspectorRelative(
-  workspaceRoot: string | undefined,
-  relativePath: string
-): string {
-  return workspaceRoot !== undefined
-    && relativePath.startsWith(`${TAPHOUND_DIR}/`)
-    ? relativePath.slice(TAPHOUND_DIR.length + 1)
-    : relativePath;
-}
-
 export class FileSystemJourneyCompositionStore
 implements JourneyCompositionStore {
   private readonly inspector = new NodeProjectFileInspector();
@@ -65,11 +46,10 @@ implements JourneyCompositionStore {
   public readonly read = async (input: {
     projectRoot: string;
     relativePath: string;
-    workspaceRoot?: string | undefined;
   }): Promise<Buffer> => {
     const inspected = await this.inspector.inspectProjectFile({
-      projectRoot: inspectorBase(input.projectRoot, input.workspaceRoot),
-      relativePath: inspectorRelative(input.workspaceRoot, input.relativePath),
+      projectRoot: input.projectRoot,
+      relativePath: input.relativePath,
       maximumBytes: MAX_COMPOSITION_BYTES
     });
     if (inspected.status !== "inspected" || inspected.bytes === undefined) {
@@ -81,20 +61,13 @@ implements JourneyCompositionStore {
   };
 
   public readonly listFlowPaths = async (
-    projectRoot: string,
-    workspaceRoot?: string  
+    projectRoot: string
   ): Promise<readonly string[]> => {
     const canonicalRoot = await realpath(projectRoot);
-    const canonicalWorkspace = workspaceRoot === undefined
-      ? undefined
-      : await realpath(workspaceRoot);
-    const containmentRoot = canonicalWorkspace ?? canonicalRoot;
-    const flowRoot = resolve(
-      tapHoundPath(canonicalRoot, canonicalWorkspace, FLOWS_DIR)
-    );
+        const flowRoot = resolve(canonicalRoot, FLOWS_DIR);
     try {
       const canonicalFlowRoot = await realpath(flowRoot);
-      if (!contained(containmentRoot, canonicalFlowRoot)) {
+      if (!contained(canonicalRoot, canonicalFlowRoot)) {
         throw new Error("Flow directory escapes the project root");
       }
       const rootStats = await lstat(flowRoot);
@@ -113,9 +86,7 @@ implements JourneyCompositionStore {
     }
 
     const paths: string[] = [];
-    const externalDir = resolve(
-      tapHoundPath(canonicalRoot, workspaceRoot, EXTERNAL_FLOWS_DIR)
-    );
+    const externalDir = resolve(canonicalRoot, EXTERNAL_FLOWS_DIR);
     const visit = async (directory: string): Promise<void> => {
       const entries = await readdir(directory, { withFileTypes: true });
       for (const entry of entries) {
@@ -129,7 +100,7 @@ implements JourneyCompositionStore {
           }
           await visit(path);
         } else if (entry.isFile() && entry.name.endsWith(".json")) {
-          paths.push(relative(containmentRoot, path).replaceAll("\\", "/"));
+          paths.push(relative(canonicalRoot, path).replaceAll("\\", "/"));
         }
       }
     };
@@ -138,20 +109,13 @@ implements JourneyCompositionStore {
   };
 
   public readonly listJourneyPaths = async (
-    projectRoot: string,
-    workspaceRoot?: string  
+    projectRoot: string
   ): Promise<readonly string[]> => {
     const canonicalRoot = await realpath(projectRoot);
-    const canonicalWorkspace = workspaceRoot === undefined
-      ? undefined
-      : await realpath(workspaceRoot);
-    const containmentRoot = canonicalWorkspace ?? canonicalRoot;
-    const journeyRoot = resolve(
-      tapHoundPath(canonicalRoot, canonicalWorkspace, JOURNEYS_DIR)
-    );
+        const journeyRoot = resolve(canonicalRoot, JOURNEYS_DIR);
     try {
       const canonicalJourneyRoot = await realpath(journeyRoot);
-      if (!contained(containmentRoot, canonicalJourneyRoot)) {
+      if (!contained(canonicalRoot, canonicalJourneyRoot)) {
         throw new Error("Journey directory escapes the project root");
       }
       const rootStats = await lstat(journeyRoot);
@@ -185,7 +149,7 @@ implements JourneyCompositionStore {
           && !entry.name.endsWith(".meta.json")
           && !entry.name.endsWith(".resolve.json")
         ) {
-          paths.push(relative(containmentRoot, path).replaceAll("\\", "/"));
+          paths.push(relative(canonicalRoot, path).replaceAll("\\", "/"));
         }
       }
     };
@@ -196,7 +160,6 @@ implements JourneyCompositionStore {
   public readonly readJourneyMeta = async (input: {
     projectRoot: string;
     journeyPath: string;
-    workspaceRoot?: string | undefined;
   }): Promise<Buffer | null> => {
     if (
       !input.journeyPath.endsWith(".json")
@@ -209,8 +172,8 @@ implements JourneyCompositionStore {
     }
     const metaPath = `${input.journeyPath.slice(0, -".json".length)}.meta.json`;
     const inspected = await this.inspector.inspectProjectFile({
-      projectRoot: inspectorBase(input.projectRoot, input.workspaceRoot),
-      relativePath: inspectorRelative(input.workspaceRoot, metaPath),
+      projectRoot: input.projectRoot,
+      relativePath: metaPath,
       maximumBytes: MAX_COMPOSITION_BYTES
     });
     if (inspected.status === "notFound") {
@@ -228,26 +191,12 @@ implements JourneyCompositionStore {
     projectRoot: string;
     relativePath: string;
     content: string;
-    workspaceRoot?: string | undefined;
   }): Promise<void> => {
-    if (input.workspaceRoot === undefined) {
-      await ensureBuildLayout(input.projectRoot);
-    }
-    const boundRoot = input.workspaceRoot ?? input.projectRoot;
+    await ensureBuildLayout(input.projectRoot);
     await writeProjectBoundText({
-      projectRoot: boundRoot,
-      authorityRoot: resolve(
-        boundRoot,
-        input.workspaceRoot === undefined ? BUILD_DIR : "runs"
-      ),
-      outputPath: resolve(
-        boundRoot,
-        input.workspaceRoot === undefined
-          ? input.relativePath
-          : input.relativePath.startsWith(`${TAPHOUND_DIR}/`)
-            ? input.relativePath.slice(TAPHOUND_DIR.length + 1)
-            : input.relativePath
-      )
+      projectRoot: input.projectRoot,
+      authorityRoot: resolve(input.projectRoot, BUILD_DIR),
+      outputPath: resolve(input.projectRoot, input.relativePath)
     }, input.content);
   };
 

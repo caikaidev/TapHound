@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { extname, join, resolve } from "node:path";
+import { extname, resolve } from "node:path";
 
 import {
   GenerationBundleManifestSchema,
@@ -191,19 +191,16 @@ export class GenerationPublisher {
   public readonly export = async (input: {
     generationId: string;
     projectRoot: string;
-    workspaceRoot?: string | undefined;
     journeyPath: string;
     journey: Journey;
     meta: GenerationMeta;
   }): Promise<{ journeyPath: string; metaPath: string }> => {
     const journey = JourneySchema.parse(input.journey);
     const meta = GenerationMetaSchema.parse(input.meta);
-    const exportRoot = input.workspaceRoot ?? input.projectRoot;
+    const exportRoot = input.projectRoot;
     const journeyPath = resolve(exportRoot, input.journeyPath);
     const metaPath = generationMetaOutputPath(journeyPath);
-    const authorityRoot = input.workspaceRoot === undefined
-      ? resolve(exportRoot, BUILD_DIR)
-      : join(exportRoot, "runs");
+    const authorityRoot = resolve(exportRoot, BUILD_DIR);
     try {
       await this.dependencies.journeyWriter.writeProjectBound({
         projectRoot: exportRoot,

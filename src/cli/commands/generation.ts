@@ -10,8 +10,7 @@ import {
 
 import {
   GenerationFinalizationError,
-  GenerationOutputPathSchema,
-  GenerationWorkspaceOutputPathSchema
+  GenerationOutputPathSchema
 } from "../../application/generation/generation-finalizer.js";
 import {
   GenerationOperationError,
@@ -20,11 +19,6 @@ import {
 import {
   ContextLoadError
 } from "../../application/context/context-loader.js";
-import {
-  TargetError,
-  type ResolvedTarget,
-  type TargetEntry
-} from "../../domain/target.js";
 import type { TapHoundConfig } from "../../domain/config.js";
 import type {
   RuntimeObservation
@@ -51,7 +45,6 @@ import { LocatorSchema } from "../../domain/layout.js";
 import type { ResolvedProjectContext } from "../../domain/project-context.js";
 import { ProjectRelativePathSchema } from "../../domain/project-context.js";
 import { RuntimeSnapshotSchema } from "../../domain/runtime-snapshot.js";
-import { GoalSpecSchema } from "../../domain/route.js";
 import {
   assertArtifactDirectory,
   CONFIG_PATH,
@@ -84,16 +77,8 @@ interface GenerationStartOptions {
   baseFlow?: string | undefined;
   externalFlow?: string[] | undefined;
   brief?: string | undefined;
-  goal?: string | undefined;
   compact?: boolean | undefined;
-  target?: string | undefined;
-  targets?: string | undefined;
   json?: boolean | undefined;
-}
-
-interface GenerationTargetOptions {
-  target: string;
-  targets?: string | undefined;
 }
 
 interface GenerationObserveOptions {
@@ -114,7 +99,6 @@ interface GenerationStepOptions extends GenerationObserveOptions {
   replace?: string | undefined;
 }
 
-type GenerationNextOptions = GenerationObserveOptions;
 
 interface GenerationConfirmOptions extends GenerationObserveOptions {
   challenge: string;
@@ -141,8 +125,6 @@ interface GenerationFinalizeOptions extends GenerationObserveOptions {
   device?: string | undefined;
   allowEvidenceDrift?: boolean | undefined;
   detach?: boolean | undefined;
-  target?: string | undefined;
-  targets?: string | undefined;
 }
 
 interface GenerationRecoverOptions extends GenerationObserveOptions {
@@ -267,69 +249,13 @@ async function loadConfig(
   }
 }
 
-interface GenerationTargetContext {
-  target: ResolvedTarget;
-  entry: TargetEntry;
-  config: TapHoundConfig;
-  projectRoot: string;
-  workspaceRoot: string;
-}
-
-async function resolveGenerationTarget(
-  dependencies: CliDependencies,
-  options: GenerationTargetOptions
-): Promise<GenerationTargetContext> {
-  const home = targetsHome(dependencies, options);
-  const resolver = dependencies.localTargets.targetResolver(home);
-  const target = await resolver.resolve(options.target);
-  const loaded = await dependencies.localTargets.configStore.loadTargets(home);
-  const entry = loaded.targets[options.target];
-  if (entry === undefined) {
-    throw new TargetError(
-      "LOCAL_TARGET_NOT_FOUND",
-      `Local target "${options.target}" is not registered. Add it with: taphound local add ${options.target} --path <path>`
-    );
-  }
-  const config = dependencies.localTargets.localTargetService(home)
-    .configForTarget({
-      entry,
-      resolvedPath: target.resolvedPath,
-      workspaceRoot: target.workspaceRoot
-    });
-  const fingerprint = await resolver.fingerprint(
-    target.project,
-    entry.run.packageName
-  );
-  await dependencies.localTargets.localTargetService(home)
-    .assertProjectUnchanged(target, fingerprint.hash);
-  return {
-    target,
-    entry,
-    config,
-    projectRoot: target.resolvedPath,
-    workspaceRoot: target.workspaceRoot
-  };
-}
-
 async function generationConfig(
   dependencies: CliDependencies,
-  options: GenerationOptions & { target?: string | undefined; targets?: string | undefined }
+  options: GenerationOptions
 ): Promise<{
   projectRoot: string;
-  workspaceRoot?: string | undefined;
   config: TapHoundConfig;
 }> {
-  if (options.target !== undefined) {
-    const context = await resolveGenerationTarget(dependencies, {
-      target: options.target,
-      targets: options.targets
-    });
-    return {
-      projectRoot: context.projectRoot,
-      workspaceRoot: context.workspaceRoot,
-      config: context.config
-    };
-  }
   const projectRoot = await canonicalProjectRoot(
     dependencies.cwd(),
     options.project
@@ -342,17 +268,6 @@ async function generationConfig(
     })
   };
 }
-
-function targetsHome(
-  dependencies: CliDependencies,
-  options: { targets?: string | undefined }
-): string {
-  const explicit = options.targets ?? process.env.TAPHOUND_TARGETS_HOME;
-  return explicit === undefined
-    ? dependencies.cwd()
-    : resolve(dependencies.cwd(), explicit);
-}
-
 
 function tools(
   checks: Awaited<ReturnType<CliDependencies["doctor"]["run"]>>["checks"]
@@ -615,16 +530,14 @@ async function executeApproved(
 function requireRuntime(
   dependencies: CliDependencies,
   projectRoot: string,
-  config: TapHoundConfig,
-  workspaceRoot?: string  
+  config: TapHoundConfig
 ): NonNullable<ReturnType<NonNullable<CliDependencies["generationRuntime"]>>> {
   if (dependencies.generationRuntime === undefined) {
     throw new Error("Generation command runtime is unavailable");
   }
   return dependencies.generationRuntime({
     projectRoot,
-    config,
-    ...(workspaceRoot === undefined ? {} : { workspaceRoot })
+    config
   });
 }
 
@@ -640,7 +553,7 @@ function createStartCommand(dependencies: CliDependencies): Command {
     .description("Start a Core-owned generation session")
     .option("--project <path>", "Android project root", dependencies.cwd())
     .option("--config <path>", "TapHound config path", CONFIG_PATH)
-    .option("--context <path>", "Project Context path (workspace-relative with --target)")
+    .option("--context <path>", "Project Context path")
     .option("--module <id...>", "Select Context modules for this session")
     .option("--device <serial>", "Select an online Android device")
     .option(
@@ -660,77 +573,26 @@ function createStartCommand(dependencies: CliDependencies): Command {
       "Allow changed source evidence; replay remains mandatory"
     )
     .option(
-      "--goal <path>",
-      "Bind a strict Goal Spec and the current committed Knowledge Registry"
-    )
-    .option(
       "--compact",
       "Summarize contextSelection as indexHash plus module ids instead of per-module binding hashes"
     )
-    .option("--target <id>", "Registered local target id")
-    .option("--targets <path>", "Targets workspace base path")
     .option("--json", "Emit one machine-readable JSON value")
     .action(async (options: GenerationStartOptions): Promise<void> => {
       try {
-        const targetContext = options.target === undefined
-          ? undefined
-          : await resolveGenerationTarget(dependencies, {
-              target: options.target,
-              targets: options.targets
-            });
-        if (
-          targetContext !== undefined
-          && (options.baseFlow !== undefined || options.externalFlow !== undefined)
-        ) {
-          throw new GenerationOperationError(
-            "FLOW_INVALID",
-            "Reusable Flows are not supported for registered local targets yet"
-          );
-        }
-        if (targetContext !== undefined && options.brief !== undefined) {
-          throw new GenerationOperationError(
-            "BRIEF_INVALID",
-            "Journey Brief binding is not supported for registered local targets yet"
-          );
-        }
-        const { projectRoot, workspaceRoot, config } =
-          targetContext === undefined
-            ? await (async (): Promise<{
-                projectRoot: string;
-                workspaceRoot: undefined;
-                config: TapHoundConfig;
-              }> => {
-                const canonical = await canonicalProjectRoot(
-                  dependencies.cwd(),
-                  options.project
-                );
-                return {
-                  projectRoot: canonical,
-                  workspaceRoot: undefined,
-                  config: await loadConfig(dependencies, {
-                    project: canonical,
-                    config: options.config
-                  })
-                };
-              })()
-            : {
-                projectRoot: targetContext.projectRoot,
-                workspaceRoot: targetContext.workspaceRoot,
-                config: targetContext.config
-              };
+        const projectRoot = await canonicalProjectRoot(
+          dependencies.cwd(),
+          options.project
+        );
+        const config = await loadConfig(dependencies, {
+          project: projectRoot,
+          config: options.config
+        });
         const contextPath = resolve(
-          workspaceRoot ?? projectRoot,
-          options.context === undefined
-            ? workspaceRoot === undefined
-              ? CONTEXT_INDEX_PATH
-              : "context/project-context.json"
-            : options.context
+          projectRoot,
+          options.context ?? CONTEXT_INDEX_PATH
         );
         const loaded = await dependencies.contextLoader.load({
           projectRoot,
-          ...(workspaceRoot === undefined
-            ? {}
-            : { workspaceRoot }),
           contextPath,
           allowIncomplete: true,
           ...(options.module === undefined ? {} : { moduleIds: options.module })
@@ -754,7 +616,7 @@ function createStartCommand(dependencies: CliDependencies): Command {
             let bytes: Buffer;
             try {
               bytes = await dependencies.readFile(
-                resolve(workspaceRoot ?? projectRoot, briefPath)
+                resolve(projectRoot, briefPath)
               );
             } catch (error) {
               throw new GenerationOperationError(
@@ -769,33 +631,6 @@ function createStartCommand(dependencies: CliDependencies): Command {
               sha256: createHash("sha256").update(bytes).digest("hex")
             };
           })();
-        const goalPath = options.goal;
-        const planning = goalPath === undefined
-          ? undefined
-          : await (async (): Promise<{
-              knowledgeHash: string;
-              goal: z.infer<typeof GoalSpecSchema>;
-            }> => {
-              if (dependencies.knowledge === undefined) {
-                throw new GenerationOperationError(
-                  "KNOWLEDGE_INVALID",
-                  "Knowledge services are unavailable"
-                );
-              }
-              const goal = GoalSpecSchema.parse(
-                await dependencies.readJson(
-                  resolve(workspaceRoot ?? projectRoot, goalPath)
-                )
-              );
-              const knowledge = await dependencies.knowledge.load({
-                projectRoot,
-                ...(workspaceRoot === undefined
-                  ? {}
-                  : { workspaceRoot }),
-                packageName: context.packageName
-              });
-              return { knowledgeHash: knowledge.knowledgeHash, goal };
-            })();
         const doctor = await dependencies.doctor.run({
           packageName: config.run.packageName,
           ...(config.ui?.backend === undefined
@@ -926,9 +761,6 @@ function createStartCommand(dependencies: CliDependencies): Command {
           })();
         const session = await dependencies.generationStarter.start({
           projectRoot,
-          ...(workspaceRoot === undefined
-            ? {}
-            : { workspaceRoot }),
           config,
           context,
           project,
@@ -939,7 +771,6 @@ function createStartCommand(dependencies: CliDependencies): Command {
           ...(baseFlow === undefined ? {} : { baseFlow }),
           ...(externalFlows === undefined ? {} : { externalFlows }),
           ...(sourceBrief === undefined ? {} : { sourceBrief }),
-          ...(planning === undefined ? {} : { planning }),
           ...(options.allowEvidenceDrift === true
             ? { allowEvidenceDrift: true }
             : {})
@@ -974,8 +805,7 @@ function createStartCommand(dependencies: CliDependencies): Command {
             : { sourceBrief: session.sourceBrief }),
           ...(session.externalFlows.length === 0
             ? {}
-            : { externalFlows: session.externalFlows }),
-          ...(session.version === 1 ? {} : { planning: session.planning })
+            : { externalFlows: session.externalFlows })
         };
         if (options.json === true) {
           writeJson(dependencies.stdout, output);
@@ -1002,22 +832,17 @@ function createObserveCommand(dependencies: CliDependencies): Command {
       "--compact",
       "Emit binding plus authoritative snapshotRef instead of the full snapshot"
     )
-    .option("--target <id>", "Registered local target id")
-    .option("--targets <path>", "Targets workspace base path")
     .option("--json", "Emit one machine-readable JSON value")
     .action(async (options: GenerationObserveOptions): Promise<void> => {
       try {
         const generationId = GenerationSessionIdSchema.parse(options.session);
-        const { projectRoot, workspaceRoot, config } = await generationConfig(
+        const { projectRoot, config } = await generationConfig(
           dependencies,
           options
         );
         const observation = dependencies.generationRuntime === undefined
           ? await dependencies.runtimeObserver.observe({
               projectRoot,
-              ...(workspaceRoot === undefined
-                ? {}
-                : { workspaceRoot }),
               generationId,
               idle: config.idle,
               ...(dependencies.signal === undefined
@@ -1028,8 +853,7 @@ function createObserveCommand(dependencies: CliDependencies): Command {
               const runtime = requireRuntime(
                 dependencies,
                 projectRoot,
-                config,
-                workspaceRoot
+                config
               );
               await assertRuntimeConfig(runtime, generationId);
               return runtime.observer.observe({
@@ -1047,10 +871,7 @@ function createObserveCommand(dependencies: CliDependencies): Command {
           snapshotRef: observation.snapshotRef,
           ...(options.compact === true
             ? {}
-            : { snapshot: observation.snapshot }),
-          ...(observation.planning === undefined
-            ? {}
-            : { planning: observation.planning })
+            : { snapshot: observation.snapshot })
         };
         if (options.json === true) {
           writeJson(dependencies.stdout, output);
@@ -1089,95 +910,6 @@ function createObserveCommand(dependencies: CliDependencies): Command {
     });
 }
 
-function createNextCommand(dependencies: CliDependencies): Command {
-  return addCommonOptions(
-    new Command("next")
-      .description("Recognize, plan, and execute the next known Transition")
-      .option(
-        "--compact",
-        "Return authoritative snapshot references instead of full snapshots"
-      ),
-    dependencies
-  ).action(async (options: GenerationNextOptions): Promise<void> => {
-    try {
-      const generationId = GenerationSessionIdSchema.parse(options.session);
-      const { projectRoot, workspaceRoot, config } = await generationConfig(
-          dependencies,
-          options
-        );
-      const runtime = requireRuntime(dependencies, projectRoot, config, workspaceRoot);
-      await assertRuntimeConfig(runtime, generationId);
-      if (runtime.resolvePlannedAction === undefined) {
-        throw new GenerationOperationError(
-          "KNOWLEDGE_INVALID",
-          "Generation planning runtime is unavailable"
-        );
-      }
-      const observation = await runtime.observer.observe({
-        generationId,
-        idle: config.idle,
-        ...(dependencies.signal === undefined
-          ? {}
-          : { signal: dependencies.signal })
-      });
-      const session = await runtime.readSession(generationId);
-      if (session.version !== 2 || session.planning === undefined) {
-        throw new GenerationOperationError(
-          "KNOWLEDGE_INVALID",
-          "Generation session has no planning binding"
-        );
-      }
-      if (session.planning.currentRoute?.segments.length === 0) {
-        writeSuccess(dependencies, options, {
-          status: "goalReached",
-          exitCode: 0,
-          generationId,
-          revision: session.revision,
-          screen: session.planning.currentScreen,
-          goal: session.planning.goal
-        }, `Generation Goal reached at ${session.planning.currentScreen as string}`);
-        return;
-      }
-      const resolution = await runtime.resolvePlannedAction({
-        session,
-        snapshot: observation.snapshot
-      });
-      if (resolution.status === "failed") {
-        throw new GenerationOperationError(
-          resolution.failure.code,
-          resolution.failure.message,
-          resolution.failure
-        );
-      }
-      const confirmation = await runtime.confirmation.request({
-        generationId,
-        proposal: resolution.action.proposal,
-        snapshot: observation.snapshot,
-        source: "planner"
-      });
-      if (confirmation.status === "confirmationRequired") {
-        writeSuccess(dependencies, options, {
-          status: "confirmationRequired",
-          exitCode: 0,
-          generationId,
-          revision: confirmation.revision,
-          transitionId: resolution.action.transitionId,
-          challenge: confirmation.challenge
-        }, `Confirmation required: ${confirmation.challenge.challengeId}`);
-        return;
-      }
-      await executeApproved(dependencies, options, runtime, {
-        generationId,
-        proposal: confirmation.proposal,
-        snapshot: confirmation.snapshot,
-        source: "planner"
-      });
-    } catch (error) {
-      mappedFailure(dependencies, options, error);
-    }
-  });
-}
-
 function addCommonOptions(
   command: Command,
   dependencies: CliDependencies
@@ -1186,8 +918,6 @@ function addCommonOptions(
     .option("--project <path>", "Android project root", dependencies.cwd())
     .option("--config <path>", "TapHound config path", CONFIG_PATH)
     .requiredOption("--session <id>", "Generation session id")
-    .option("--target <id>", "Registered local target id")
-    .option("--targets <path>", "Targets workspace base path")
     .option("--json", "Emit one machine-readable JSON value");
 }
 
@@ -1208,11 +938,11 @@ function createStepCommand(dependencies: CliDependencies): Command {
   ).action(async (options: GenerationStepOptions): Promise<void> => {
     try {
       const generationId = GenerationSessionIdSchema.parse(options.session);
-      const { projectRoot, workspaceRoot, config } = await generationConfig(
+      const { projectRoot, config } = await generationConfig(
           dependencies,
           options
         );
-      const runtime = requireRuntime(dependencies, projectRoot, config, workspaceRoot);
+      const runtime = requireRuntime(dependencies, projectRoot, config);
       await assertRuntimeConfig(runtime, generationId);
       if (options.replace !== undefined) {
         if (options.input !== undefined) {
@@ -1342,11 +1072,11 @@ function createConfirmCommand(dependencies: CliDependencies): Command {
         );
       }
       const decision = options.decision;
-      const { projectRoot, workspaceRoot, config } = await generationConfig(
+      const { projectRoot, config } = await generationConfig(
           dependencies,
           options
         );
-      const runtime = requireRuntime(dependencies, projectRoot, config, workspaceRoot);
+      const runtime = requireRuntime(dependencies, projectRoot, config);
       await assertRuntimeConfig(runtime, generationId);
       const approved = await runtime.confirmation.confirmStored({
         generationId,
@@ -1394,11 +1124,11 @@ function createManualCommand(dependencies: CliDependencies): Command {
     try {
       const generationId = GenerationSessionIdSchema.parse(options.session);
       const action = ManualActionSchema.parse(options.action);
-      const { projectRoot, workspaceRoot, config } = await generationConfig(
+      const { projectRoot, config } = await generationConfig(
           dependencies,
           options
         );
-      const runtime = requireRuntime(dependencies, projectRoot, config, workspaceRoot);
+      const runtime = requireRuntime(dependencies, projectRoot, config);
       await assertRuntimeConfig(runtime, generationId);
       const existing = await runtime.confirmation.findPendingManual({
         generationId,
@@ -1528,11 +1258,11 @@ function createBridgeCommand(dependencies: CliDependencies): Command {
         scenario,
         options.description
       );
-      const { projectRoot, workspaceRoot, config } = await generationConfig(
+      const { projectRoot, config } = await generationConfig(
           dependencies,
           options
         );
-      const runtime = requireRuntime(dependencies, projectRoot, config, workspaceRoot);
+      const runtime = requireRuntime(dependencies, projectRoot, config);
       await assertRuntimeConfig(runtime, generationId);
       const session = await runtime.readSession(generationId);
       if (session.pendingConfirmation?.status === "pending") {
@@ -1613,7 +1343,7 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
       )
       .requiredOption(
         "--output <path>",
-        "Journey output under .taphound/journeys (workspace-relative with --target)"
+        "Journey output under .taphound/journeys"
       )
       .option("--name <name>", "Generated Journey name")
       .option("--device <serial>", "Select an online Android device")
@@ -1629,18 +1359,15 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
   ).action(async (options: GenerationFinalizeOptions): Promise<void> => {
     try {
       const generationId = GenerationSessionIdSchema.parse(options.session);
-      const { projectRoot, workspaceRoot, config } = await generationConfig(
+      const { projectRoot, config } = await generationConfig(
           dependencies,
           options
         );
-      const outputPath = (workspaceRoot === undefined
-        ? GenerationOutputPathSchema
-        : GenerationWorkspaceOutputPathSchema
-      ).parse(options.output);
+      const outputPath = GenerationOutputPathSchema.parse(options.output);
       const name = options.name === undefined
         ? undefined
         : z.string().trim().min(1).parse(options.name);
-      const runtime = requireRuntime(dependencies, projectRoot, config, workspaceRoot);
+      const runtime = requireRuntime(dependencies, projectRoot, config);
       await assertRuntimeConfig(runtime, generationId);
       const session = await runtime.readSession(generationId);
       const snapshotContext = await runtime.readContextSnapshot(generationId);
@@ -1659,7 +1386,7 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
           throw new Error("Detached finalization is unavailable");
         }
         const jobId = dependencies.createDetachedJobId();
-        const jobHome = workspaceRoot ?? projectRoot;
+        const jobHome = projectRoot;
         const outputJobPath =
           `${JOBS_DIR}/${generationId}/${jobId}-output.json`;
         const progressJobPath =
@@ -1670,12 +1397,8 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
           "finalize",
           "--project",
           projectRoot,
-          ...(workspaceRoot === undefined
-            ? ["--config", options.config]
-            : ["--target", String(options.target)]),
-          ...(workspaceRoot !== undefined && options.targets !== undefined
-            ? ["--targets", options.targets]
-            : []),
+          "--config",
+          options.config,
           "--session",
           generationId,
           ...(options.context === undefined
@@ -1736,13 +1459,7 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
         }
         const loaded = await dependencies.contextLoader.load({
           projectRoot: projectRoot,
-          ...(workspaceRoot === undefined
-            ? {}
-            : { workspaceRoot }),
-          contextPath: resolve(
-            workspaceRoot ?? projectRoot,
-            contextOption
-          ),
+          contextPath: resolve(projectRoot, contextOption),
           moduleIds: session.contextSelection.modules.map((module) => module.id)
         });
         context = loaded.context;
@@ -1792,9 +1509,6 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
       const result = await runtime.finalizer.finalize({
         generationId,
         projectRoot: projectRoot,
-        ...(workspaceRoot === undefined
-          ? {}
-          : { workspaceRoot }),
         config,
         context,
         ...(contextFromSnapshot ? { contextFromSnapshot: true } : {}),
@@ -1843,11 +1557,11 @@ function createStatusCommand(dependencies: CliDependencies): Command {
   ).action(async (options: GenerationStatusOptions): Promise<void> => {
     try {
       const generationId = GenerationSessionIdSchema.parse(options.session);
-      const { projectRoot, workspaceRoot, config } = await generationConfig(
+      const { projectRoot, config } = await generationConfig(
           dependencies,
           options
         );
-      const runtime = requireRuntime(dependencies, projectRoot, config, workspaceRoot);
+      const runtime = requireRuntime(dependencies, projectRoot, config);
       await assertRuntimeConfig(runtime, generationId);
       const timeoutMs = z.coerce.number().int().positive().parse(
         options.timeoutMs ?? "900000"
@@ -1934,11 +1648,11 @@ function createRecoverCommand(dependencies: CliDependencies): Command {
         );
       }
       const generationId = GenerationSessionIdSchema.parse(options.session);
-      const { projectRoot, workspaceRoot, config } = await generationConfig(
+      const { projectRoot, config } = await generationConfig(
           dependencies,
           options
         );
-      const runtime = requireRuntime(dependencies, projectRoot, config, workspaceRoot);
+      const runtime = requireRuntime(dependencies, projectRoot, config);
       await assertRuntimeConfig(runtime, generationId);
       const before = await runtime.recovery.status(generationId);
       if (!before.recovery.available) {
@@ -1982,15 +1696,14 @@ function createReopenCommand(dependencies: CliDependencies): Command {
   ).action(async (options: GenerationReopenOptions): Promise<void> => {
     try {
       const generationId = GenerationSessionIdSchema.parse(options.session);
-      const { projectRoot, workspaceRoot, config } = await generationConfig(
+      const { projectRoot, config } = await generationConfig(
         dependencies,
         options
       );
       const runtime = requireRuntime(
         dependencies,
         projectRoot,
-        config,
-        workspaceRoot
+        config
       );
       await assertRuntimeConfig(runtime, generationId);
       const session = await runtime.reopen.reopen({
@@ -2023,11 +1736,11 @@ function createArchiveCommand(dependencies: CliDependencies): Command {
   ).action(async (options: GenerationObserveOptions): Promise<void> => {
     try {
       const generationId = GenerationSessionIdSchema.parse(options.session);
-      const { projectRoot, workspaceRoot, config } = await generationConfig(
+      const { projectRoot, config } = await generationConfig(
           dependencies,
           options
         );
-      const runtime = requireRuntime(dependencies, projectRoot, config, workspaceRoot);
+      const runtime = requireRuntime(dependencies, projectRoot, config);
       await assertRuntimeConfig(runtime, generationId);
       const session = await runtime.archive(generationId);
       writeSuccess(dependencies, options, {
@@ -2076,11 +1789,11 @@ function createConfigCommand(dependencies: CliDependencies): Command {
     ).action(async (options: GenerationConfigIdleOptions): Promise<void> => {
       try {
         const generationId = GenerationSessionIdSchema.parse(options.session);
-        const { projectRoot, workspaceRoot, config } = await generationConfig(
+        const { projectRoot, config } = await generationConfig(
           dependencies,
           options
         );
-        const runtime = requireRuntime(dependencies, projectRoot, config, workspaceRoot);
+        const runtime = requireRuntime(dependencies, projectRoot, config);
         await assertRuntimeConfig(runtime, generationId);
         const strategy = options.strategy === undefined
           ? undefined
@@ -2148,19 +1861,16 @@ function createListCommand(dependencies: CliDependencies): Command {
     .option("--project <path>", "Android project root", dependencies.cwd())
     .option("--config <path>", "TapHound config path", CONFIG_PATH)
     .option("--json", "Emit one machine-readable JSON value")
-    .option("--target <id>", "Registered local target id")
-    .option("--targets <path>", "Targets workspace base path")
     .action(async (options: GenerationListOptions): Promise<void> => {
       try {
-        const { projectRoot, workspaceRoot, config } = await generationConfig(
+        const { projectRoot, config } = await generationConfig(
           dependencies,
           options
         );
         const runtime = requireRuntime(
           dependencies,
           projectRoot,
-          config,
-          workspaceRoot
+          config
         );
         const sessions = await runtime.list();
         if (options.json === true) {
@@ -2186,7 +1896,6 @@ export function createGenerationCommand(
     .description("Manage deterministic generation sessions")
     .addCommand(createStartCommand(dependencies))
     .addCommand(createObserveCommand(dependencies))
-    .addCommand(createNextCommand(dependencies))
     .addCommand(createStepCommand(dependencies))
     .addCommand(createConfirmCommand(dependencies))
     .addCommand(createManualCommand(dependencies))

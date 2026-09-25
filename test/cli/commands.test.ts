@@ -20,19 +20,11 @@ import {
 } from "../../src/application/generation/generation-starter.js";
 import { createProgram } from "../../src/cli/program.js";
 import type { CliDependencies, TextOutput } from "../../src/cli/dependencies.js";
-import type { BenchmarkStore } from "../../src/ports/benchmark-store.js";
-import type {
-  BenchmarkCaseRecord
-} from "../../src/ports/benchmark-store.js";
-import type {
-  BenchmarkRunResult
-} from "../../src/domain/benchmark.js";
 import {
   GenerationSessionStoreError
 } from "../../src/ports/generation-session-store.js";
 import { runtimeConfig, runtimeJourney } from "../fakes/runtime-fixture.js";
 import { fakeWorkspaceLayout } from "../fakes/workspace-layout.js";
-import { defaultLocalTargets } from "../fakes/local-targets.js";
 import { validReport } from "../fixtures/report.js";
 import {
   uiSnapshotFactory,
@@ -206,15 +198,6 @@ function dependencies(): {
         }))
       },
       workspaceLayout: fakeWorkspaceLayout(),
-      localTargets: defaultLocalTargets(),
-      uiCache: {
-        status: vi.fn(() => Promise.resolve({
-          directory: ".taphound/build/cache/ui",
-          entries: 2,
-          bytes: 512
-        })),
-        clear: vi.fn(() => Promise.resolve())
-      },
       runtimeObserver: {
         observe: vi.fn(() => Promise.resolve({
           binding: {
@@ -258,114 +241,6 @@ function dependencies(): {
   };
 }
 
-const benchmarkCaseRecord = (overrides: {
-  routeTransitionIds?: string[];
-  startScreen?: string;
-  targetScreen?: string;
-} = {}): BenchmarkCaseRecord => ({
-  benchmark: {
-    version: 1,
-    id: "home-search",
-    description: "Open search from Home",
-    goal: {
-      version: 1,
-      id: "goal-home-search",
-      targetScreen: "home-search",
-      parameters: {},
-      limits: { maxSteps: 4, maxReplans: 2 }
-    },
-    preconditions: [],
-    tags: []
-  },
-  groundTruth: {
-    version: 1,
-    caseId: "home-search",
-    startScreen: overrides.startScreen ?? "home",
-    targetScreen: overrides.targetScreen ?? "home-search",
-    routeTransitionIds: overrides.routeTransitionIds ?? ["home-to-home-search"],
-    expectedOutcome: "success"
-  }
-});
-
-const fakeBenchmarkStore = (
-  records: readonly BenchmarkCaseRecord[]
-): BenchmarkStore => ({
-  readCases: vi.fn(() => Promise.resolve(records)),
-  writeResult: vi.fn(),
-  readResult: vi.fn()
-});
-
-const fakeKnowledge = (): NonNullable<CliDependencies["knowledge"]> => ({
-  load: vi.fn(() => Promise.resolve({
-    index: {
-      version: 1 as const,
-      packageName: "com.example.app",
-      revision: 1,
-      anchors: [],
-      screens: [
-        {
-          id: "home",
-          path: ".taphound/knowledge/screens/home.json",
-          sha256: "1".repeat(64),
-          status: "verified" as const
-        },
-        {
-          id: "home-search",
-          path: ".taphound/knowledge/screens/home-search.json",
-          sha256: "2".repeat(64),
-          status: "verified" as const
-        }
-      ],
-      transitions: [{
-        id: "home-to-home-search",
-        path: ".taphound/knowledge/transitions/home-to-home-search.json",
-        sha256: "3".repeat(64),
-        status: "verified" as const
-      }]
-    },
-    indexSha256: "b".repeat(64),
-    knowledgeHash: "a".repeat(64),
-    anchors: [],
-    screens: [
-      {
-        version: 1 as const,
-        id: "home",
-        status: "verified" as const,
-        requiredAnchors: ["home-activity"],
-        optionalAnchors: [],
-        forbiddenAnchors: [],
-        predicates: []
-      },
-      {
-        version: 1 as const,
-        id: "home-search",
-        status: "verified" as const,
-        requiredAnchors: ["home-search-activity"],
-        optionalAnchors: [],
-        forbiddenAnchors: [],
-        predicates: []
-      }
-    ],
-    transitions: [
-      {
-        version: 1 as const,
-        id: "home-to-home-search",
-        status: "verified" as const,
-        fromScreen: "home",
-        toScreen: "home-search",
-        semantic: "open-home-search",
-        action: { action: "click" as const, anchorId: "search-anchor" },
-        verification: { targetScreen: "home-search", timeoutMs: 5000 },
-        observations: { attempts: 0, successes: 0, recoveryCost: 0 }
-      }
-    ]
-  })),
-  bootstrap: vi.fn(),
-  promote: vi.fn(),
-  evolve: vi.fn(),
-  listReceipts: vi.fn()
-});
-
 describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", () => {
     const program = createProgram(dependencies().value);
     const commands = [
@@ -379,7 +254,7 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
       )
     );
 
-    expect(configOptions).toHaveLength(27);
+    expect(configOptions).toHaveLength(23);
     expect(configOptions.every(
       (option) => option.defaultValue === CONFIG_PATH
     )).toBe(true);
@@ -395,30 +270,6 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
     expect(JSON.parse(test.stdout.value)).toMatchObject({ status: "passed" });
     expect(test.stderr.value).toBe("");
     expect(test.exitCodes).toEqual([0]);
-  });
-
-  it("inspects and explicitly clears only the rebuildable UI cache", async () => {
-    const test = dependencies();
-
-    await createProgram(test.value).parseAsync([
-      "node", "taphound", "ui-cache", "status", "--project", "/project", "--json"
-    ]);
-    expect(JSON.parse(test.stdout.value)).toEqual({
-      status: "ok",
-      cache: {
-        directory: ".taphound/build/cache/ui",
-        entries: 2,
-        bytes: 512
-      }
-    });
-    expect(test.value.uiCache?.status).toHaveBeenCalledWith("/project");
-
-    test.stdout.value = "";
-    await createProgram(test.value).parseAsync([
-      "node", "taphound", "ui-cache", "clear", "--project", "/project", "--yes", "--json"
-    ]);
-    expect(JSON.parse(test.stdout.value)).toEqual({ status: "cleared" });
-    expect(test.value.uiCache?.clear).toHaveBeenCalledWith("/project");
   });
 
   it("replays the Journeys selected by impact and reports the verdict", async () => {
@@ -488,10 +339,10 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
     };
 
     await createProgram(test.value).parseAsync([
-      "node", "taphound", "verify-changes",
+      "node", "taphound", "verify",
       "--project", "/project",
       "--config", "/project/.taphound/config.json",
-      "--base", "origin/main",
+      "--diff", "origin/main",
       "--head", "HEAD",
       "--json"
     ]);
@@ -2501,379 +2352,39 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
     expect(versionOption).toBeDefined();
   });
 
-  it("lists benchmark cases with one exact JSON result", async () => {
+  it("rebuilds the Knowledge index from the configured package", async () => {
     const test = dependencies();
-    const store = fakeBenchmarkStore([benchmarkCaseRecord()]);
-
-    await createProgram({...test.value, benchmark: { store }}).parseAsync([
-      "node", "taphound", "benchmark", "list",
-      "--project", "/project",
-      "--json"
-    ]);
-
-    expect(JSON.parse(test.stdout.value)).toMatchObject({
-      status: "listed",
-      exitCode: 0,
-      directory: ".taphound/benchmarks",
-      cases: [{
-        id: "home-search",
-        targetScreen: "home-search",
-        hasGroundTruth: true
-      }]
-    });
-    expect(test.exitCodes).toEqual([0]);
-  });
-
-  it("validates benchmark ground truth against the Knowledge Registry", async () => {
-    const test = dependencies();
-    const store = fakeBenchmarkStore([benchmarkCaseRecord()]);
-
-    await createProgram({
-      ...test.value,
-      benchmark: { store },
-      knowledge: fakeKnowledge()
-    }).parseAsync([
-      "node", "taphound", "benchmark", "validate",
-      "--project", "/project",
-      "--json"
-    ]);
-
-    expect(JSON.parse(test.stdout.value)).toMatchObject({
-      status: "valid",
-      exitCode: 0,
-      cases: [{ id: "home-search", ok: true, issues: [] }]
-    });
-    expect(test.exitCodes).toEqual([0]);
-  });
-
-  it("fails benchmark validation with per-case issues at exit 2", async () => {
-    const test = dependencies();
-    const store = fakeBenchmarkStore([
-      benchmarkCaseRecord({
-        routeTransitionIds: ["missing-transition"]
-      })
-    ]);
-
-    await createProgram({
-      ...test.value,
-      benchmark: { store },
-      knowledge: fakeKnowledge()
-    }).parseAsync([
-      "node", "taphound", "benchmark", "validate",
-      "--project", "/project",
-      "--json"
-    ]);
-
-    expect(JSON.parse(test.stdout.value)).toMatchObject({
-      status: "invalid",
-      exitCode: 2,
-      cases: [{
-        id: "home-search",
-        ok: false,
-        issues: ["Unknown route Transition: missing-transition"]
-      }]
-    });
-    expect(test.exitCodes).toEqual([2]);
-  });
-
-  it("accepts a contiguous multi-hop ground truth route", async () => {
-    const test = dependencies();
-    const knowledge = fakeKnowledge();
-    const base = await knowledge.load({ projectRoot: "/project" });
-    vi.mocked(knowledge.load).mockResolvedValue({
-      ...base,
-      screens: [...base.screens, {
-        version: 1 as const,
-        id: "detail",
-        status: "verified" as const,
-        requiredAnchors: ["detail-activity"],
-        optionalAnchors: [],
-        forbiddenAnchors: [],
-        predicates: []
-      }],
-      transitions: [...base.transitions, {
-        version: 1 as const,
-        id: "home-search-to-detail",
-        status: "verified" as const,
-        fromScreen: "home-search",
-        toScreen: "detail",
-        semantic: "open-detail",
-        action: { action: "click" as const, anchorId: "detail-anchor" },
-        verification: { targetScreen: "detail", timeoutMs: 5000 },
-        observations: { attempts: 0, successes: 0, recoveryCost: 0 }
-      }]
-    });
-    const store = fakeBenchmarkStore([
-      benchmarkCaseRecord({
-        routeTransitionIds: ["home-to-home-search", "home-search-to-detail"],
-        targetScreen: "detail"
-      })
-    ]);
-
-    await createProgram({
-      ...test.value,
-      benchmark: { store },
-      knowledge
-    }).parseAsync([
-      "node", "taphound", "benchmark", "validate",
-      "--project", "/project",
-      "--json"
-    ]);
-
-    expect(JSON.parse(test.stdout.value)).toMatchObject({
-      status: "valid",
-      exitCode: 0,
-      cases: [{ id: "home-search", ok: true, issues: [] }]
-    });
-    expect(test.exitCodes).toEqual([0]);
-  });
-
-  it("rejects a ground truth route with a discontinuous Transition chain", async () => {
-    const test = dependencies();
-    const store = fakeBenchmarkStore([
-      benchmarkCaseRecord({
-        routeTransitionIds: ["home-to-home-search", "home-to-home-search"]
-      })
-    ]);
-
-    await createProgram({
-      ...test.value,
-      benchmark: { store },
-      knowledge: fakeKnowledge()
-    }).parseAsync([
-      "node", "taphound", "benchmark", "validate",
-      "--project", "/project",
-      "--json"
-    ]);
-
-    expect(JSON.parse(test.stdout.value)).toMatchObject({
-      status: "invalid",
-      exitCode: 2,
-      cases: [{
-        id: "home-search",
-        ok: false,
-        issues: [
-          "Route Transition home-to-home-search must start at Screen"
-          + " home-search but starts at home"
-        ]
-      }]
-    });
-    expect(test.exitCodes).toEqual([2]);
-  });
-
-  it("rejects a ground truth route that ends away from the target Screen", async () => {
-    const test = dependencies();
-    const store = fakeBenchmarkStore([
-      benchmarkCaseRecord({ routeTransitionIds: [] })
-    ]);
-
-    await createProgram({
-      ...test.value,
-      benchmark: { store },
-      knowledge: fakeKnowledge()
-    }).parseAsync([
-      "node", "taphound", "benchmark", "validate",
-      "--project", "/project",
-      "--json"
-    ]);
-
-    expect(JSON.parse(test.stdout.value)).toMatchObject({
-      status: "invalid",
-      exitCode: 2,
-      cases: [{
-        id: "home-search",
-        ok: false,
-        issues: [
-          "Route ends at Screen home but the Ground Truth target is"
-          + " home-search"
-        ]
-      }]
-    });
-    expect(test.exitCodes).toEqual([2]);
-  });
-
-  it("compares two benchmark runs with one exact JSON result", async () => {
-    const test = dependencies();
-    const run = (
-      runId: string,
-      firstRunSuccessRate: number
-    ): BenchmarkRunResult => ({
-      version: 1 as const,
-      runId,
-      startedAt: "2026-09-06T00:00:00.000Z",
-      completedAt: "2026-09-06T00:01:00.000Z",
-      results: [],
-      metrics: {
-        eligibleCases: 1,
-        passedCases: firstRunSuccessRate === 1 ? 1 : 0,
-        firstRunSuccessRate,
-        routeAccuracy: null,
-        averageRecognitionMs: 10,
-        averagePlanningMs: 20,
-        averageRecoveryCount: 0,
-        totalLlmCalls: 0,
-        totalLlmInputTokens: 0,
-        totalLlmOutputTokens: 0
-      }
-    });
-    const store: BenchmarkStore = {
-      readCases: vi.fn(),
-      writeResult: vi.fn(),
-      readResult: vi.fn((_projectRoot: string, runId: string) => Promise.resolve(
-        runId === "run-a" ? run("run-a", 0) : run("run-b", 1)
-      ))
-    };
-
-    await createProgram({
-      ...test.value,
-      benchmark: { store }
-    }).parseAsync([
-      "node", "taphound", "benchmark", "compare",
-      "--project", "/project",
-      "--baseline", "run-a",
-      "--candidate", "run-b",
-      "--json"
-    ]);
-
-    expect(JSON.parse(test.stdout.value)).toMatchObject({
-      status: "compared",
-      exitCode: 0,
-      baseline: "run-a",
-      candidate: "run-b",
-      metrics: { firstRunSuccessRate: { baseline: 0, candidate: 1 } }
-    });
-    expect(test.exitCodes).toEqual([0]);
-  });
-
-  it("evolves Knowledge from bound receipts with one exact JSON result", async () => {
-    const test = dependencies();
-    const knowledge = fakeKnowledge();
-    vi.mocked(knowledge.evolve).mockResolvedValue({
-      status: "evolved",
-      knowledgeHash: "9".repeat(64),
-      revision: 2,
-      foldedReceipts: 3,
-      summary: {
-        transitionsUpdated: 1,
-        anchorsUpgraded: 2,
-        screensUpgraded: 1
-      }
-    });
-
-    await createProgram({
-      ...test.value,
-      knowledge
-    }).parseAsync([
-      "node", "taphound", "knowledge", "evolve",
-      "--project", "/project",
-      "--expected-hash", "a".repeat(64),
-      "--json"
-    ]);
-
-    expect(knowledge.evolve).toHaveBeenCalledWith({
-      projectRoot: "/project",
-      packageName: "com.example.app",
-      expectedKnowledgeHash: "a".repeat(64)
-    });
-    expect(JSON.parse(test.stdout.value)).toEqual({
-      status: "evolved",
-      exitCode: 0,
-      knowledgeHash: "9".repeat(64),
-      revision: 2,
-      foldedReceipts: 3,
-      summary: {
-        transitionsUpdated: 1,
-        anchorsUpgraded: 2,
-        screensUpgraded: 1
-      }
-    });
-    expect(test.exitCodes).toEqual([0]);
-  });
-
-  it("reports unchanged Knowledge evolution without a Registry write", async () => {
-    const test = dependencies();
-    const knowledge = fakeKnowledge();
-    vi.mocked(knowledge.evolve).mockResolvedValue({
-      status: "unchanged",
+    const rehash = vi.fn(() => Promise.resolve({
+      indexPath: ".taphound/knowledge/index.json",
       knowledgeHash: "a".repeat(64),
-      revision: 1,
-      foldedReceipts: 0
-    });
+      revision: 2,
+      changed: true,
+      anchors: 3,
+      screens: 1
+    }));
+    test.value.knowledge = { load: vi.fn(), rehash };
 
-    await createProgram({
-      ...test.value,
-      knowledge
-    }).parseAsync([
-      "node", "taphound", "knowledge", "evolve",
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "knowledge", "rehash",
       "--project", "/project",
       "--json"
     ]);
 
-    expect(knowledge.evolve).toHaveBeenCalledWith({
+    expect(rehash).toHaveBeenCalledWith({
       projectRoot: "/project",
       packageName: "com.example.app"
     });
     expect(JSON.parse(test.stdout.value)).toEqual({
-      status: "unchanged",
+      status: "rehashed",
       exitCode: 0,
+      indexPath: ".taphound/knowledge/index.json",
       knowledgeHash: "a".repeat(64),
-      revision: 1,
-      foldedReceipts: 0
+      revision: 2,
+      changed: true,
+      anchors: 3,
+      screens: 1
     });
     expect(test.exitCodes).toEqual([0]);
-  });
-
-  it("drafts a strict Goal Spec for a known target Screen", async () => {
-    const test = dependencies();
-    const knowledge = fakeKnowledge();
-
-    await createProgram({
-      ...test.value,
-      knowledge
-    }).parseAsync([
-      "node", "taphound", "knowledge", "goal",
-      "--project", "/project",
-      "--target", "home-search",
-      "--parameter", "query=hello world",
-      "--max-steps", "5",
-      "--max-replans", "1",
-      "--json"
-    ]);
-
-    expect(JSON.parse(test.stdout.value)).toEqual({
-      status: "drafted",
-      exitCode: 0,
-      goal: {
-        version: 1,
-        id: "goal-home-search",
-        targetScreen: "home-search",
-        parameters: { query: "hello world" },
-        limits: { maxSteps: 5, maxReplans: 1 }
-      }
-    });
-    expect(test.exitCodes).toEqual([0]);
-  });
-
-  it("rejects a Goal Spec for an unknown target Screen", async () => {
-    const test = dependencies();
-    const knowledge = fakeKnowledge();
-
-    await createProgram({
-      ...test.value,
-      knowledge
-    }).parseAsync([
-      "node", "taphound", "knowledge", "goal",
-      "--project", "/project",
-      "--target", "missing-screen",
-      "--json"
-    ]);
-
-    expect(JSON.parse(test.stdout.value)).toMatchObject({
-      status: "failed",
-      exitCode: 2,
-      code: "KNOWLEDGE_INVALID"
-    });
-    expect(test.exitCodes).toEqual([2]);
   });
 
   it("promotes a verified Journey after checking intact evidence", async () => {

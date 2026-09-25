@@ -71,8 +71,7 @@ function resolveCandidate(
 export class KnowledgeAnchorResolver implements AnchorResolverPort {
   public constructor(
     private readonly registry: Pick<KnowledgeRegistryPort, "load">,
-    private readonly projectRoot: string,
-    private readonly workspaceRoot?: string | undefined
+    private readonly projectRoot: string
   ) {}
 
   public readonly resolve = async (
@@ -84,7 +83,7 @@ export class KnowledgeAnchorResolver implements AnchorResolverPort {
     }
   ): Promise<AnchorResolution> => {
     void input.signal;
-    const bundle = await this.registry.load(this.projectRoot, this.workspaceRoot);
+    const bundle = await this.registry.load(this.projectRoot);
     const anchor = bundle.anchors.find(
       (candidate) => candidate.id === input.anchorId
     );

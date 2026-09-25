@@ -26,16 +26,11 @@ describe("createProgram", () => {
       "journey",
       "generation",
       "knowledge",
-      "benchmark",
-      "playbook",
       "baseline",
       "failure",
-      "local",
       "init",
       "align",
-      "impact",
-      "verify-changes",
-      "ui-cache"
+      "impact"
     ]);
     expect(
       createProgram().commands.find((command) => command.name() === "project")
@@ -55,7 +50,6 @@ describe("createProgram", () => {
     ).toEqual([
       "start",
       "observe",
-      "next",
       "step",
       "confirm",
       "manual",
@@ -71,18 +65,6 @@ describe("createProgram", () => {
     expect(
       createProgram().commands.find((command) => command.name() === "knowledge")
         ?.commands.map((command) => command.name())
-    ).toEqual(["status", "bootstrap", "goal", "plan", "receipts", "promote", "evolve", "feature-map"]);
-    expect(
-      createProgram().commands.find((command) => command.name() === "benchmark")
-        ?.commands.map((command) => command.name())
-    ).toEqual(["validate", "list", "run", "compare", "false-done"]);
-    expect(
-      createProgram().commands.find((command) => command.name() === "playbook")
-        ?.commands.map((command) => command.name())
-    ).toEqual(["validate"]);
-    expect(
-      createProgram().commands.find((command) => command.name() === "ui-cache")
-        ?.commands.map((command) => command.name())
-    ).toEqual(["status", "clear"]);
+    ).toEqual(["status", "rehash"]);
   });
 });

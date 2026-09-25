@@ -52,7 +52,7 @@ describe("exitCodeForFailure", () => {
   });
 
   it("defines exactly the approved failure vocabulary", () => {
-    expect(FAILURE_CODES).toHaveLength(85);
+    expect(FAILURE_CODES).toHaveLength(75);
   });
 
   it.each([

@@ -4,7 +4,6 @@ import { createProgram } from "../../src/cli/program.js";
 import type { CliDependencies, TextOutput } from "../../src/cli/dependencies.js";
 import type { ImpactSet } from "../../src/domain/impact.js";
 import { fakeWorkspaceLayout } from "../fakes/workspace-layout.js";
-import { defaultLocalTargets } from "../fakes/local-targets.js";
 
 class BufferOutput implements TextOutput {
   public value = "";
@@ -21,7 +20,6 @@ const emptyImpact: ImpactSet = {
   affectedFeatures: [],
   affectedScreens: [],
   affectedAnchors: [],
-  affectedTransitions: [],
   selectedJourneys: { p0: [], p1: [], p2: [] },
   skippedJourneys: [],
   provenance: {
@@ -77,7 +75,6 @@ function baseDependencies(exitCodes: number[]): DiffDependencies {
     generationStarter: { start: vi.fn() },
     runtimeObserver: { observe: vi.fn() },
     workspaceLayout: fakeWorkspaceLayout(),
-    localTargets: defaultLocalTargets(),
     journeyCompositionStore: {
       writeText: vi.fn(),
       read: vi.fn(() => Promise.resolve(Buffer.from(

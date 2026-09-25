@@ -13,7 +13,6 @@ import {
   hashGenerationConfirmationEvidence,
   verificationPhaseLabel
 } from "../../src/domain/generation.js";
-import { hashGoalSpec } from "../../src/domain/route.js";
 
 const hashes = {
   projectHash: "d".repeat(64),
@@ -140,15 +139,7 @@ describe("generation error contract", () => {
       "BRIEF_INVALID",
       "KNOWLEDGE_INVALID",
       "KNOWLEDGE_STALE",
-      "SCREEN_UNKNOWN",
-      "SCREEN_AMBIGUOUS",
-      "NO_ROUTE",
-      "TARGET_UNKNOWN",
-      "ROUTE_LIMIT_EXCEEDED",
-      "ANCHOR_UNKNOWN",
       "ANCHOR_AMBIGUOUS",
-      "PARAMETER_MISSING",
-      "REPLAN_BUDGET_EXHAUSTED",
       "FLOW_INVALID",
       "FLOW_REPLAY_FAILED",
       "APP_LAUNCH_FAILED",
@@ -179,37 +170,15 @@ describe("generation error contract", () => {
   });
 });
 
-describe("generation planning sessions", () => {
-  it("reads legacy v1 sessions and requires planning only for v2", () => {
+describe("generation session versions", () => {
+  it("accepts v1 sessions and rejects removed planning sessions", () => {
     expect(GenerationSessionSchema.parse(validSession())).toMatchObject({
       version: 1
     });
-    const goal = {
-      version: 1 as const,
-      id: "open-detail",
-      targetScreen: "detail",
-      parameters: {},
-      limits: { maxSteps: 5, maxReplans: 2 }
-    };
-    const v2 = {
-      ...(validSession() as object),
-      version: 2,
-      planning: {
-        knowledgeHash: "1".repeat(64),
-        goalHash: hashGoalSpec(goal),
-        goal,
-        currentScreen: null,
-        currentRoute: null,
-        replansUsed: 0,
-        maxReplans: 2,
-        maxSteps: 5
-      }
-    };
-    expect(GenerationSessionSchema.parse(v2)).toMatchObject({ version: 2 });
     expect(() => GenerationSessionSchema.parse({
       ...(validSession() as object),
       version: 2
-    })).toThrow(/requires planning/);
+    })).toThrow();
   });
 });
 

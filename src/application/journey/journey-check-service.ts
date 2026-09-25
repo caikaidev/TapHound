@@ -81,7 +81,6 @@ export class JourneyCheckError extends Error {
 
 export interface JourneyCheckInput {
   projectRoot: string;
-  workspaceRoot?: string | undefined;
   config: TapHoundConfig;
   project: ProjectDescription;
   bundle: ProjectContext;
@@ -141,8 +140,7 @@ export class JourneyCheckService {
     input: JourneyCheckInput
   ): Promise<JourneyCheckResult> => {
     const paths = await this.dependencies.store.listJourneyPaths(
-      input.projectRoot,
-      input.workspaceRoot
+      input.projectRoot
     );
     const projectHash = hashGenerationBinding(input.project);
     const configHash = hashGenerationBinding(input.config);
@@ -153,7 +151,6 @@ export class JourneyCheckService {
     for (const journeyPath of paths) {
       entries.push(await this.checkJourney({
         projectRoot: input.projectRoot,
-        workspaceRoot: input.workspaceRoot,
         journeyPath,
         projectHash,
         configHash,
@@ -165,7 +162,6 @@ export class JourneyCheckService {
 
   private readonly checkJourney = async (input: {
     projectRoot: string;
-    workspaceRoot?: string | undefined;
     journeyPath: string;
     projectHash: string;
     configHash: string;
@@ -190,10 +186,7 @@ export class JourneyCheckService {
     try {
       bytes = await this.dependencies.store.read({
         projectRoot: input.projectRoot,
-        relativePath: input.journeyPath,
-        ...(input.workspaceRoot === undefined
-          ? {}
-          : { workspaceRoot: input.workspaceRoot })
+        relativePath: input.journeyPath
       });
     } catch (error) {
       return entry(
@@ -216,10 +209,7 @@ export class JourneyCheckService {
     try {
       metaBytes = await this.dependencies.store.readJourneyMeta({
         projectRoot: input.projectRoot,
-        journeyPath: input.journeyPath,
-        ...(input.workspaceRoot === undefined
-          ? {}
-          : { workspaceRoot: input.workspaceRoot })
+        journeyPath: input.journeyPath
       });
     } catch (error) {
       return entry(
@@ -271,10 +261,7 @@ export class JourneyCheckService {
         reasons.push("module-missing");
       }
     }
-    if (
-      meta.sourceBrief !== undefined
-      && input.workspaceRoot === undefined
-    ) {
+    if (meta.sourceBrief !== undefined) {
       reasons.push(...await this.briefDriftReason(
         input.projectRoot,
         meta.sourceBrief

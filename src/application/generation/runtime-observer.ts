@@ -4,7 +4,6 @@ import { primaryAppPid } from "../../domain/app-process.js";
 import {
   GenerationSessionIdSchema,
   GenerationSessionSchema,
-  type GenerationPlanning,
   type GenerationSession,
   type PendingConfirmation
 } from "../../domain/generation.js";
@@ -37,29 +36,20 @@ import type {
   GenerationSessionStore
 } from "../../ports/generation-session-store.js";
 import { GenerationOperationError } from "./generation-starter.js";
-import type { GenerationPlanningTiming } from "./generation-planner.js";
 import { closeUiSnapshotProvider } from "../ui/ui-snapshot-lifecycle.js";
 import { uiStabilityProbe } from "../ui/ui-stability-probe.js";
 
 export type RuntimeObservationBinding = ProposalBinding;
-
-export interface SnapshotPlanning {
-  planning: GenerationPlanning;
-  timing?: GenerationPlanningTiming | undefined;
-}
 
 export interface RuntimeObservation {
   binding: RuntimeObservationBinding;
   snapshot: RuntimeSnapshot;
   snapshotHash: string;
   snapshotRef: string;
-  planning?: GenerationPlanning | undefined;
-  planningTiming?: GenerationPlanningTiming | undefined;
 }
 
 export interface RuntimeObserveInput {
   generationId: string;
-  workspaceRoot?: string | undefined;
   idle?: IdleConfig | undefined;
   signal?: AbortSignal | undefined;
 }
@@ -104,11 +94,6 @@ export interface RuntimeObserverDependencies {
   createAttemptId: () => string;
   uiCacheEnabled?: boolean | undefined;
   uiSnapshotTimeoutMs?: number | undefined;
-  planSnapshot?: (input: {
-    session: GenerationSession;
-    snapshot: RuntimeSnapshot;
-    verifyTransition: boolean;
-  }) => Promise<SnapshotPlanning> | SnapshotPlanning;
 }
 
 export interface SnapshotReobservationGuardDependencies {
@@ -334,7 +319,7 @@ export class RuntimeObserver {
       await closeUiSnapshotProvider(uiSnapshotProvider);
     }
 
-    return await this.commit(current, runtime, false, views, input.signal);
+    return await this.commit(current, runtime, views, input.signal);
     } finally {
       await session.close();
     }
@@ -362,7 +347,7 @@ export class RuntimeObserver {
     });
     try {
       const views = this.dependencies.sessionPorts(session);
-      return await this.commit(current, input.runtime, true, views, input.signal);
+      return await this.commit(current, input.runtime, views, input.signal);
     } finally {
       await session.close();
     }
@@ -371,7 +356,6 @@ export class RuntimeObserver {
   private async commit(
     current: GenerationSession,
     runtime: CollectedRuntimeState,
-    verifyTransition: boolean,
     views: RuntimeSessionPortViews,
     signal?: AbortSignal
   ): Promise<RuntimeObservation> {
@@ -448,23 +432,6 @@ export class RuntimeObserver {
       snapshotPath,
       snapshot
     );
-    const planningResult = current.version === 2
-      ? await (async (): Promise<SnapshotPlanning> => {
-          if (this.dependencies.planSnapshot === undefined) {
-            throw new GenerationOperationError(
-              "KNOWLEDGE_INVALID",
-              "Planning-aware observation is not configured"
-            );
-          }
-          return this.dependencies.planSnapshot({
-            session: current,
-            snapshot,
-            verifyTransition
-          });
-        })()
-      : undefined;
-    const planning = planningResult?.planning;
-    const planningTiming = planningResult?.timing;
     const next = GenerationSessionSchema.parse({
       ...current,
       revision: baseRevision,
@@ -472,8 +439,7 @@ export class RuntimeObserver {
         ...current.bindings,
         snapshotHash,
         uiBackend: runtime.uiSnapshot.backend
-      },
-      ...(planning === undefined ? {} : { planning })
+      }
     });
     await this.dependencies.store.commitSnapshot(
       current.id,
@@ -493,9 +459,7 @@ export class RuntimeObserver {
       },
       snapshot,
       snapshotHash,
-      snapshotRef,
-      ...(planning === undefined ? {} : { planning }),
-      ...(planningTiming === undefined ? {} : { planningTiming })
+      snapshotRef
     };
   }
 }

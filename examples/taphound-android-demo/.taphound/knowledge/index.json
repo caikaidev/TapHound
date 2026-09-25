@@ -35,13 +35,5 @@
       "sha256": "39d3f6c3216cb56bb7a0b08ce4a57c47d17604b251b9da37c754832b902d1f29",
       "status": "observed"
     }
-  ],
-  "transitions": [
-    {
-      "id": "demo.main.open_search",
-      "path": ".taphound/knowledge/transitions/demo.main.open_search.json",
-      "sha256": "ddc7d06100db6621f6d1c714830636dc949f57d17d1709f9d93a1afb8199687f",
-      "status": "verified"
-    }
   ]
 }

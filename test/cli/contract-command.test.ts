@@ -9,7 +9,6 @@ import type { ObserveReport } from "../../src/domain/observation.js";
 import { runtimeConfig, runtimeJourney } from "../fakes/runtime-fixture.js";
 import { hashJourney } from "../../src/domain/report.js";
 import { fakeWorkspaceLayout } from "../fakes/workspace-layout.js";
-import { defaultLocalTargets } from "../fakes/local-targets.js";
 
 class BufferOutput implements TextOutput {
   public value = "";
@@ -49,7 +48,6 @@ function baseDependencies(exitCodes: number[]): CliDependencies {
     generationStarter: { start: vi.fn() },
     runtimeObserver: { observe: vi.fn() },
     workspaceLayout: fakeWorkspaceLayout(),
-    localTargets: defaultLocalTargets(),
     readFile: vi.fn(() => Promise.resolve(Buffer.alloc(0))),
     readJson: vi.fn((path: string) => Promise.resolve(
       path.includes("journey") ? runtimeJourney : runtimeConfig
@@ -236,19 +234,6 @@ describe("verify --contract", () => {
       verdict: string;
     };
     expect(output.verdict).toBe("fail");
-  });
-
-  it("rejects --contract together with --target", async () => {
-    const exitCodes: number[] = [];
-    const dependencies = baseDependencies(exitCodes);
-    await createProgram(dependencies).parseAsync([
-      "node", "taphound", "verify",
-      "--config", "/project/.taphound/config.json",
-      "--contract", "contracts/search.json",
-      "--target", "demo",
-      "--json"
-    ]);
-    expect(exitCodes).toEqual([2]);
   });
 });
 

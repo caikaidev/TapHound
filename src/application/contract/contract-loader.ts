@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { join } from "node:path";
 
 import {
   AcceptanceContractSchema,
@@ -10,7 +11,6 @@ import {
   type Journey
 } from "../../domain/journey.js";
 import { hashJourney } from "../../domain/report.js";
-import { tapHoundPath } from "../../domain/workspace.js";
 
 export class ContractError extends Error {
   public constructor(
@@ -42,7 +42,6 @@ export class ContractLoader {
 
   public readonly load = async (input: {
     projectRoot: string;
-    workspaceRoot?: string | undefined;
     contractPath: string;
   }): Promise<LoadedContract> => {
     let contractText: string;
@@ -67,11 +66,7 @@ export class ContractLoader {
         }`
       );
     }
-    const journeyPath = tapHoundPath(
-      input.projectRoot,
-      input.workspaceRoot,
-      contract.journey.path
-    );
+    const journeyPath = join(input.projectRoot, contract.journey.path);
     let journeyText: string;
     try {
       journeyText = await this.dependencies.readText(journeyPath);

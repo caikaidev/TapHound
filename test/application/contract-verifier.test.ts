@@ -779,14 +779,12 @@ describe("ContractVerifier", () => {
           packageName: "com.example.app",
           revision: 1,
           anchors: [],
-          screens: [],
-          transitions: []
+          screens: []
         },
         indexSha256: "a".repeat(64),
         knowledgeHash: "b".repeat(64),
         anchors: [],
-        screens: [],
-        transitions: []
+        screens: []
       },
       readText: readTextStub({
         [JOURNEY_PATH]: JOURNEY_TEXT,

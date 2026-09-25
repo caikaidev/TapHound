@@ -282,16 +282,11 @@ describe("TapHound documentation examples", () => {
       "journey",
       "generation",
       "knowledge",
-      "benchmark",
-      "playbook",
       "baseline",
       "failure",
-      "local",
       "init",
       "align",
-      "impact",
-      "verify-changes",
-      "ui-cache"
+      "impact"
     ]);
     for (const doc of [readme, readmeZh]) {
       expect(doc).toContain("# TapHound");

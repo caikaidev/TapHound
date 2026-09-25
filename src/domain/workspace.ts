@@ -1,6 +1,5 @@
 import {
   isAbsolute,
-  join,
   relative,
   resolve
 } from "node:path";
@@ -14,25 +13,16 @@ export const KNOWLEDGE_DIR = `${TAPHOUND_DIR}/knowledge`;
 export const KNOWLEDGE_INDEX_PATH = `${KNOWLEDGE_DIR}/index.json`;
 export const KNOWLEDGE_ANCHORS_DIR = `${KNOWLEDGE_DIR}/anchors`;
 export const KNOWLEDGE_SCREENS_DIR = `${KNOWLEDGE_DIR}/screens`;
-export const KNOWLEDGE_TRANSITIONS_DIR = `${KNOWLEDGE_DIR}/transitions`;
-export const BENCHMARKS_DIR = `${TAPHOUND_DIR}/benchmarks`;
-export const GROUND_TRUTH_DIR = `${TAPHOUND_DIR}/ground-truth`;
 export const FLOWS_DIR = `${TAPHOUND_DIR}/flows`;
 export const EXTERNAL_FLOWS_DIR = `${FLOWS_DIR}/external`;
 export const JOURNEY_SOURCES_DIR = `${TAPHOUND_DIR}/sources`;
 export const JOURNEYS_DIR = `${TAPHOUND_DIR}/journeys`;
 export const CONTRACTS_DIR = `${TAPHOUND_DIR}/contracts`;
 export const BASELINES_DIR = `${TAPHOUND_DIR}/baselines`;
-export const PLAYBOOKS_DIR = `${TAPHOUND_DIR}/playbooks`;
 export const BUILD_DIR = `${TAPHOUND_DIR}/build`;
 export const GENERATIONS_DIR = `${BUILD_DIR}/generations`;
 export const JOBS_DIR = `${BUILD_DIR}/jobs`;
 export const DEFAULT_ARTIFACTS_DIR = `${BUILD_DIR}/runs`;
-export const UI_CACHE_DIR = `${BUILD_DIR}/cache/ui`;
-export const KNOWLEDGE_RECEIPTS_DIR = `${BUILD_DIR}/knowledge-receipts`;
-export const BENCHMARK_RUNS_DIR = `${BUILD_DIR}/benchmark-runs`;
-export const FALSE_DONE_DIR = `${TAPHOUND_DIR}/false-done`;
-export const FALSE_DONE_RUNS_DIR = `${BUILD_DIR}/false-done-runs`;
 export const WORKFLOWS_DIR = `${BUILD_DIR}/workflows`;
 
 export function workflowManifestPath(caseId: string): string {
@@ -40,31 +30,6 @@ export function workflowManifestPath(caseId: string): string {
     throw new Error("Workflow Case id must be a safe lowercase path component");
   }
   return `${WORKFLOWS_DIR}/${caseId}/manifest.json`;
-}
-export const TARGETS_DIR = "benchmarks";
-export const TARGETS_CONFIG_PATH = `${TARGETS_DIR}/targets.json`;
-export const TARGETS_LOCAL_CONFIG_PATH = `${TARGETS_DIR}/targets.local.json`;
-export const LOCAL_WORKSPACE_DIR = `${TAPHOUND_DIR}/local`;
-export const LOCAL_WORKSPACE_IGNORE = "local/\n";
-
-export function localTargetWorkspaceRoot(
-  targetsHome: string,
-  targetId: string
-): string {
-  return join(targetsHome, LOCAL_WORKSPACE_DIR, targetId);
-}
-
-export function tapHoundPath(
-  projectRoot: string,
-  workspaceRoot: string | undefined,
-  relative: string
-): string {
-  const base = workspaceRoot ?? projectRoot;
-  const reduced = workspaceRoot !== undefined
-    && relative.startsWith(`${TAPHOUND_DIR}/`)
-    ? relative.slice(TAPHOUND_DIR.length + 1)
-    : relative;
-  return join(base, reduced);
 }
 
 export const BUILD_IGNORE_FILE = `${TAPHOUND_DIR}/.gitignore`;

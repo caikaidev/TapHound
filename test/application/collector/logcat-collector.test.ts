@@ -272,4 +272,27 @@ describe("LogcatCollector", () => {
     await expect(collector.start({ deviceSerial: "device" }))
       .rejects.toThrow(/already started/i);
   });
+
+  it("retains the newest lines in order after sustained buffer overflow", async () => {
+    const adb = adbPort();
+    const collector = new LogcatCollector(adb, new FakeClock(), {
+      maxLines: 100,
+      maxBytes: 1024 * 1024
+    });
+    await collector.start({ deviceSerial: "device", pids: [42] });
+    const options = captureOptions(adb);
+
+    for (let index = 0; index < 5000; index += 1) {
+      options.onStdoutLine(
+        `07-19 15:00:00.001  42  42 D App: line ${String(index)}`
+      );
+    }
+
+    const retained = collector.lines().map((line) => line.message);
+    expect(retained).toHaveLength(100);
+    expect(retained[0]).toBe("line 4900");
+    expect(retained.at(-1)).toBe("line 4999");
+    expect(collector.rawLines()).toHaveLength(100);
+    expect(collector.metadata()).toMatchObject({ droppedLines: 4900 });
+  });
 });

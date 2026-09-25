@@ -93,12 +93,20 @@ export function deviceIdentityResolver(
   adb: Pick<AdbPort, "deviceIdentity">,
   identity: Omit<AppIdentity, "signal">
 ): () => Promise<DeviceIdentity | undefined> {
-  return (): Promise<DeviceIdentity | undefined> => {
+  // Device identity is immutable for a run; only a successful lookup is
+  // memoized so a transient getprop failure is retried on the next wait.
+  let resolved: DeviceIdentity | undefined;
+  return async (): Promise<DeviceIdentity | undefined> => {
+    if (resolved !== undefined) {
+      return resolved;
+    }
     const current = adb.deviceIdentity;
     if (current === undefined) {
-      return Promise.resolve(undefined);
+      return undefined;
     }
     const requested = { ...identity };
-    return current.call(adb, requested).catch((): undefined => undefined);
+    resolved = await current.call(adb, requested)
+      .catch((): undefined => undefined);
+    return resolved;
   };
 }

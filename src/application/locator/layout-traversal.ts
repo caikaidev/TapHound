@@ -5,12 +5,27 @@ export interface LayoutEntry {
   ancestors: readonly LayoutElement[];
 }
 
+/**
+ * Pre-order (document order) flattening. Siblings share one ancestor array,
+ * and entries are appended to a single result instead of re-spreading every
+ * subtree at each level.
+ */
 export function flattenLayout(
   elements: readonly LayoutElement[],
   ancestors: readonly LayoutElement[] = []
 ): LayoutEntry[] {
-  return elements.flatMap((element) => [
-    { element, ancestors },
-    ...flattenLayout(element.children, [...ancestors, element])
-  ]);
+  const entries: LayoutEntry[] = [];
+  const visit = (
+    siblings: readonly LayoutElement[],
+    parents: readonly LayoutElement[]
+  ): void => {
+    for (const element of siblings) {
+      entries.push({ element, ancestors: parents });
+      if (element.children.length > 0) {
+        visit(element.children, [...parents, element]);
+      }
+    }
+  };
+  visit(elements, ancestors);
+  return entries;
 }

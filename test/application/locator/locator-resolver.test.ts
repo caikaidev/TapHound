@@ -456,4 +456,27 @@ describe("resolveLocator", () => {
       matchedBy: "text"
     });
   });
+
+  it("resolves indexed regex matches in document order across nesting", () => {
+    const roots = [element({
+      id: "root",
+      children: [
+        element({
+          id: "outer",
+          text: "row 1",
+          children: [element({ id: "inner", text: "row 2" })]
+        }),
+        element({ id: "sibling", text: "row 3" })
+      ]
+    })];
+
+    for (const [index, id] of ["outer", "inner", "sibling"].entries()) {
+      const resolution = resolveLocator(roots, {
+        text: "^row \\d$",
+        match: "regex",
+        index
+      });
+      expect(resolution).toMatchObject({ status: "found", element: { id } });
+    }
+  });
 });

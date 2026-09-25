@@ -66,6 +66,22 @@ function center(element: LayoutElement): Point | undefined {
   };
 }
 
+const compiledPatterns = new Map<string, RegExp>();
+const MAX_COMPILED_PATTERNS = 256;
+
+/** Locator regexes are non-global, so a cached instance is stateless. */
+function compiledPattern(pattern: string): RegExp {
+  let compiled = compiledPatterns.get(pattern);
+  if (compiled === undefined) {
+    if (compiledPatterns.size >= MAX_COMPILED_PATTERNS) {
+      compiledPatterns.clear();
+    }
+    compiled = new RegExp(pattern);
+    compiledPatterns.set(pattern, compiled);
+  }
+  return compiled;
+}
+
 function fieldValueMatches(
   elementValue: string | undefined,
   locatorValue: string,
@@ -81,7 +97,7 @@ function fieldValueMatches(
     return elementValue.startsWith(locatorValue);
   }
   if (match === "regex") {
-    return new RegExp(locatorValue).test(elementValue);
+    return compiledPattern(locatorValue).test(elementValue);
   }
   return elementValue === locatorValue;
 }

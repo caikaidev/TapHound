@@ -20,6 +20,33 @@ export function normalizeResourceId(
   return separator >= 0 ? value.slice(separator + 4) : value;
 }
 
+function isEdge(value: number): boolean {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+/**
+ * Hot-path variant for already-numeric edges (one call per parsed node).
+ * Enforces the same contract as `RawBoundsSchema` plus `BoundsSchema`
+ * without allocating Zod issues for valid input.
+ */
+export function normalizeBoundsEdges(
+  left: number,
+  top: number,
+  right: number,
+  bottom: number
+): Bounds | undefined {
+  if (!isEdge(left) || !isEdge(top) || !isEdge(right) || !isEdge(bottom)) {
+    return normalizeBounds({ left, top, right, bottom });
+  }
+  if (right < left || bottom < top) {
+    throw new Error("Bounds edges are reversed");
+  }
+  if (right === left || bottom === top) {
+    return undefined;
+  }
+  return { left, top, right, bottom };
+}
+
 export function normalizeBounds(value: unknown): Bounds | undefined {
   const raw = RawBoundsSchema.parse(value);
   if (raw.right < raw.left || raw.bottom < raw.top) {

@@ -56,4 +56,46 @@ describe("parseUiAutomatorLayout", () => {
       clickable: true
     });
   });
+
+  it("decodes numeric character references in multi-line text", () => {
+    const layout = parseUiAutomatorLayout(
+      '<hierarchy><node text="Line 1&#10;Line 2 &#x1F600; &amp;lt;" ' +
+      'content-desc="a&#9;b" bounds="[0,0][100,100]" /></hierarchy>'
+    );
+
+    expect(layout[0]).toMatchObject({
+      text: "Line 1\nLine 2 \u{1F600} &lt;",
+      contentDescription: "a\tb"
+    });
+  });
+
+  it("keeps an unescaped > inside a quoted attribute value", () => {
+    const layout = parseUiAutomatorLayout(
+      '<hierarchy><node text="a > b" bounds="[0,0][100,100]">' +
+      "<node text='next>' bounds=\"[0,0][50,50]\" /></node></hierarchy>"
+    );
+
+    expect(layout[0]).toMatchObject({ text: "a > b" });
+    expect(layout[0]?.children[0]).toMatchObject({ text: "next>" });
+  });
+
+  it("parses a deep hierarchy in document order with stable ids", () => {
+    const depth = 40;
+    const xml = "<hierarchy>"
+      + Array.from({ length: depth }, (_, index) => (
+        `<node resource-id="com.example:id/n${String(index)}" bounds="[0,0][10,10]">`
+      )).join("")
+      + "</node>".repeat(depth)
+      + "</hierarchy>";
+
+    let current = parseUiAutomatorLayout(xml)[0];
+    for (let index = 0; index < depth; index += 1) {
+      expect(current).toMatchObject({
+        id: `ui-${String(index)}`,
+        resourceId: `n${String(index)}`
+      });
+      current = current?.children[0];
+    }
+    expect(current).toBeUndefined();
+  });
 });

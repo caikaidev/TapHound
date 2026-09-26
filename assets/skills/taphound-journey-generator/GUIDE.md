@@ -972,7 +972,6 @@ Each step: observe -> AI generates -> build envelope ->
 taphound generation finalize \
   --project examples/taphound-android-demo \
   --session <generationId> \
-  --context .taphound/context/project-context.json \
   --output .taphound/journeys/generated-search.json \
   --device emulator-5554 \
   --json

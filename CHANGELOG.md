@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0-dev.10 — 2026-09-26
 
 TapHound's goal is unchanged: an external agent proposes, and a deterministic
 Core binds state, executes, replays, and publishes evidence. This release

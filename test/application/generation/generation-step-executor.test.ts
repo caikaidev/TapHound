@@ -1,3 +1,4 @@
+import type { LogcatOptions } from "../../../src/ports/adb.js";
 import { describe, expect, it, vi } from "vitest";
 import {
   uiSnapshotProviderFromLayout
@@ -205,15 +206,17 @@ function harness(
     completion: Promise.resolve(ok),
     stop: stopLogcat
   };
-  let foregroundCalls = 0;
+  // The app shows the before Activity until an action runs.
+  let acted = false;
+  const act = (): Promise<typeof ok> => {
+    acted = true;
+    return Promise.resolve(ok);
+  };
   const adb = {
-    foregroundComponent: vi.fn(() => {
-      foregroundCalls += 1;
-      return Promise.resolve({
-        packageName: "com.example.app",
-        activity: foregroundCalls <= 3 ? activity : afterActivity
-      });
-    }),
+    foregroundComponent: vi.fn(() => Promise.resolve({
+      packageName: "com.example.app",
+      activity: acted ? afterActivity : activity
+    })),
     currentActivity: vi.fn(() => Promise.resolve(afterActivity)),
     appProcesses: vi.fn(() => Promise.resolve([
       { pid: 42, name: "com.example.app" }
@@ -226,12 +229,12 @@ function harness(
     })),
     tap: vi.fn(() => {
       calls.push("action");
-      return Promise.resolve(ok);
+      return act();
     }),
-    longClick: vi.fn(() => Promise.resolve(ok)),
-    swipe: vi.fn(() => Promise.resolve(ok)),
-    back: vi.fn(() => Promise.resolve(ok)),
-    inputText: vi.fn(() => Promise.resolve(ok)),
+    longClick: vi.fn(act),
+    swipe: vi.fn(act),
+    back: vi.fn(act),
+    inputText: vi.fn(act),
     startLogcat: vi.fn(() => running)
   };
   const guard = vi.fn(() => {
@@ -1655,54 +1658,85 @@ describe("GenerationStepExecutor", () => {
     expect(test.current().state).toBe("recoveryRequired");
   });
 
-  it("rechecks identity after Expect passes", async () => {
+  it("rechecks identity after a Logcat Expect, which proves nothing about the screen", async () => {
     const runtime = snapshot();
     const test = harness(session(runtime));
-    test.adb.foregroundComponent
-      .mockResolvedValueOnce({
+    let emit: ((line: string) => void) | undefined;
+    test.adb.startLogcat.mockImplementation(((options: LogcatOptions) => {
+      emit = options.onStdoutLine;
+      return {
+        started: Promise.resolve(undefined),
+        completion: Promise.resolve(ok),
+        stop: test.stopLogcat
+      };
+    }) as never);
+    // The action logs "ready", then the app leaves for another Activity
+    // after the post-action observation but before the step completes.
+    let acted = false;
+    let postActionReads = 0;
+    test.adb.tap.mockImplementation((() => {
+      acted = true;
+      emit?.("09-26 12:00:01.000    42    42 I App: ready");
+      return Promise.resolve(ok);
+    }) as never);
+    test.adb.foregroundComponent.mockImplementation((() => {
+      if (acted) postActionReads += 1;
+      return Promise.resolve({
         packageName: "com.example.app",
-        activity
-      })
-      .mockResolvedValueOnce({
-        packageName: "com.example.app",
-        activity
-      })
-      .mockResolvedValueOnce({
-        packageName: "com.example.app",
-        activity: afterActivity
-      })
-      .mockResolvedValueOnce({
-        packageName: "com.example.app",
-        activity: afterActivity
-      })
-      .mockResolvedValueOnce({
-        packageName: "com.example.app",
-        activity: afterActivity
-      })
-      .mockResolvedValueOnce({
-        packageName: "com.example.app",
-        activity: "com.example.app.EscapedActivity"
+        activity: !acted
+          ? activity
+          : postActionReads === 1
+            ? afterActivity
+            : "com.example.app.EscapedActivity"
       });
-    const expected: ProposedStep = {
-      ...proposal(runtime),
-      expect: {
-        type: "activity",
-        value: afterActivity,
-        timeoutMs: 10
-      }
-    };
+    }) as never);
 
     const result = await test.execute({
       generationId: "generation-1",
-      proposal: expected,
+      proposal: {
+        ...proposal(runtime),
+        expect: {
+          type: "logcat",
+          tag: "App",
+          pattern: "ready",
+          match: "literal",
+          timeoutMs: 10
+        }
+      },
       snapshot: runtime,
       source: "planner"
     });
 
+    expect(test.adb.tap).toHaveBeenCalledOnce();
     expect(result).toMatchObject({
       status: "failed",
-      failure: { code: "SNAPSHOT_STALE" }
+      failure: {
+        code: "SNAPSHOT_STALE",
+        message: "Generation Activity changed unexpectedly"
+      }
     });
+  });
+
+  it("does not recheck identity after an Activity Expect already proved it", async () => {
+    const runtime = snapshot();
+    const test = harness(session(runtime));
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: {
+        ...proposal(runtime),
+        expect: { type: "activity", value: afterActivity, timeoutMs: 10 }
+      },
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result.status).toBe("succeeded");
+    // Pre-action: the guarded read and the pre-mutation check. Post-action:
+    // the read before and after its own Layout capture (this idle backend
+    // settles without a Layout). The Expect: one guarded read, and nothing
+    // after it.
+    expect(test.adb.foregroundComponent).toHaveBeenCalledTimes(5);
   });
 
   it("lets an Activity Expect poll from checkpoint A to expected B", async () => {

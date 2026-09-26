@@ -3060,8 +3060,10 @@ implements GenerationSessionStore {
         }
         throw error;
       }
+      // The lock excludes other processes as soon as link() returns; it
+      // needs no directory sync. Only its owner record is synced (above), so
+      // a lock that survives a power loss names a dead owner and is reaped.
       try {
-        await this.syncDirectory(this.locksRoot);
         await verifyStoreDirectory(generationRootEvidence);
         await verifyStoreDirectory(locksRootEvidence);
       } catch (error) {
@@ -3100,7 +3102,6 @@ implements GenerationSessionStore {
       }
       await this.hooks.afterLockTombstoneRename?.();
       await unlink(tombstone);
-      await this.syncDirectory(this.locksRoot);
     } catch (error) {
       if (!isErrnoException(error) || error.code !== "ENOENT") {
         throw error;
@@ -3127,8 +3128,9 @@ implements GenerationSessionStore {
           movedIdentity.dev === identity.dev
           && movedIdentity.ino === identity.ino
         ) {
+          // A release lost to a power loss reappears as a dead-owner lock,
+          // which the next acquirer reaps; it needs no directory sync.
           await unlink(tombstone);
-          await this.syncDirectory(this.locksRoot);
         } else {
           await rename(tombstone, lockPath).catch(() => undefined);
         }

@@ -1419,25 +1419,30 @@ export class GenerationStepExecutor {
     ]);
     const windowHierarchy = assessWindowHierarchy(topology, layout);
     throwIfCancelled(signal);
-    const confirmedForeground = await this.boundViews().adb
-      .foregroundComponent(identity());
-    throwIfCancelled(signal);
-    if (confirmedForeground.packageName !== session.target.packageName) {
-      fail("PACKAGE_ESCAPE", "Foreground package escaped generation target");
-    }
-    const confirmedPid = primaryAppPid(
-      await this.boundViews().adb.appProcesses(identity()),
-      session.target.packageName
-    );
-    throwIfCancelled(signal);
-    if (confirmedPid === null || confirmedPid !== expectedPid) {
-      fail("APP_CRASHED", "Generation process identity changed");
-    }
-    if (
-      confirmedForeground.activity
-        !== (expectedActivity ?? foreground.activity)
-    ) {
-      fail("SNAPSHOT_STALE", "Generation Activity changed unexpectedly");
+    // A Layout captured here must be bracketed by a second identity check.
+    // A settled Layout passed in was captured before the checks above, so
+    // they already confirm it and a second pair would observe nothing new.
+    if (stableLayout === undefined) {
+      const confirmedForeground = await this.boundViews().adb
+        .foregroundComponent(identity());
+      throwIfCancelled(signal);
+      if (confirmedForeground.packageName !== session.target.packageName) {
+        fail("PACKAGE_ESCAPE", "Foreground package escaped generation target");
+      }
+      const confirmedPid = primaryAppPid(
+        await this.boundViews().adb.appProcesses(identity()),
+        session.target.packageName
+      );
+      throwIfCancelled(signal);
+      if (confirmedPid === null || confirmedPid !== expectedPid) {
+        fail("APP_CRASHED", "Generation process identity changed");
+      }
+      if (
+        confirmedForeground.activity
+          !== (expectedActivity ?? foreground.activity)
+      ) {
+        fail("SNAPSHOT_STALE", "Generation Activity changed unexpectedly");
+      }
     }
     if (authoritativeSnapshot !== undefined) {
       const liveHash = hashRuntimeSnapshot({

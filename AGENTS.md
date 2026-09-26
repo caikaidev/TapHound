@@ -239,6 +239,13 @@ codes covered by a taxonomy test), expected/actual and evidence refs are
 derived from report facts — offline, deterministic, no model call (see
 `docs/failure-classification.md`).
 
+Under the generated Replay policy, `StepRunner` keeps foreground and process
+proofs per device epoch: a Layout capture, a device mutation, a completed
+action, or an Expect wait starts a new epoch, and a check that would repeat
+one already made in the current epoch is skipped. Every capture is still
+followed by a check and every mutation preceded by one; Expect observations
+always read the device because they watch the app change on its own.
+
 Each step checks the before Activity, resolves a deterministic locator, applies
 an explicitly configured annotated-label fallback only when eligible, executes
 the ADB action, waits for layout stability, checks process and after Activity,

@@ -13,7 +13,7 @@
     "generatedReplay": [
       {
         "appProcesses": 2,
-        "foregroundComponent": 9,
+        "foregroundComponent": 7,
         "stabilitySample": 6,
         "tap": 3,
         "uiCapture": 4
@@ -21,9 +21,9 @@
     ],
     "generation": [
       {
-        "appProcesses": 9,
+        "appProcesses": 7,
         "captureScreenshot": 2,
-        "foregroundComponent": 14,
+        "foregroundComponent": 12,
         "openSession": 3,
         "openUiSnapshots": 2,
         "stabilitySample": 8,
@@ -68,28 +68,28 @@
     "generatedReplay": [
       {
         "appProcesses": 2,
-        "foregroundComponent": 5,
+        "foregroundComponent": 3,
         "stabilitySample": 2,
         "tap": 1,
         "uiCapture": 1
       },
       {
         "appProcesses": 2,
-        "foregroundComponent": 5,
+        "foregroundComponent": 3,
         "stabilitySample": 2,
         "tap": 1,
         "uiCapture": 1
       },
       {
-        "appProcesses": 2,
-        "foregroundComponent": 5,
+        "appProcesses": 1,
+        "foregroundComponent": 2,
         "inputText": 1,
         "stabilitySample": 2,
         "uiCapture": 1
       },
       {
-        "appProcesses": 2,
-        "foregroundComponent": 5,
+        "appProcesses": 1,
+        "foregroundComponent": 2,
         "stabilitySample": 2,
         "tap": 1,
         "uiCapture": 1
@@ -97,9 +97,9 @@
     ],
     "generation": [
       {
-        "appProcesses": 9,
+        "appProcesses": 7,
         "captureScreenshot": 2,
-        "foregroundComponent": 9,
+        "foregroundComponent": 7,
         "openSession": 3,
         "openUiSnapshots": 2,
         "stabilitySample": 4,
@@ -109,9 +109,9 @@
         "windowTopology": 4
       },
       {
-        "appProcesses": 7,
+        "appProcesses": 5,
         "captureScreenshot": 1,
-        "foregroundComponent": 7,
+        "foregroundComponent": 5,
         "openSession": 2,
         "openUiSnapshots": 1,
         "stabilitySample": 2,
@@ -121,9 +121,9 @@
         "windowTopology": 3
       },
       {
-        "appProcesses": 7,
+        "appProcesses": 5,
         "captureScreenshot": 1,
-        "foregroundComponent": 7,
+        "foregroundComponent": 5,
         "inputText": 1,
         "openSession": 2,
         "openUiSnapshots": 1,
@@ -133,9 +133,9 @@
         "windowTopology": 3
       },
       {
-        "appProcesses": 7,
+        "appProcesses": 5,
         "captureScreenshot": 1,
-        "foregroundComponent": 7,
+        "foregroundComponent": 5,
         "openSession": 2,
         "openUiSnapshots": 1,
         "stabilitySample": 2,
@@ -166,7 +166,7 @@
     "generatedReplay": [
       {
         "appProcesses": 2,
-        "foregroundComponent": 5,
+        "foregroundComponent": 3,
         "stabilitySample": 2,
         "tap": 1,
         "uiCapture": 1
@@ -174,16 +174,16 @@
       {
         "appProcesses": 2,
         "back": 1,
-        "foregroundComponent": 5,
+        "foregroundComponent": 3,
         "stabilitySample": 2,
         "uiCapture": 1
       }
     ],
     "generation": [
       {
-        "appProcesses": 9,
+        "appProcesses": 7,
         "captureScreenshot": 2,
-        "foregroundComponent": 9,
+        "foregroundComponent": 7,
         "openSession": 3,
         "openUiSnapshots": 2,
         "stabilitySample": 4,
@@ -193,10 +193,10 @@
         "windowTopology": 4
       },
       {
-        "appProcesses": 7,
+        "appProcesses": 5,
         "back": 1,
         "captureScreenshot": 1,
-        "foregroundComponent": 7,
+        "foregroundComponent": 5,
         "openSession": 2,
         "openUiSnapshots": 1,
         "stabilitySample": 2,
@@ -216,7 +216,7 @@
     "generatedReplay": [
       {
         "appProcesses": 1,
-        "foregroundComponent": 43,
+        "foregroundComponent": 22,
         "uiCapture": 21
       }
     ],
@@ -257,29 +257,28 @@
     "generatedReplay": [
       {
         "appProcesses": 2,
-        "foregroundComponent": 5,
+        "foregroundComponent": 3,
         "stabilitySample": 2,
         "tap": 1,
         "uiCapture": 1
       },
       {
         "appProcesses": 2,
-        "foregroundComponent": 5,
+        "foregroundComponent": 3,
         "stabilitySample": 2,
         "tap": 1,
         "uiCapture": 1
       },
       {
-        "appProcesses": 1,
-        "foregroundComponent": 43,
+        "foregroundComponent": 21,
         "uiCapture": 21
       }
     ],
     "generation": [
       {
-        "appProcesses": 9,
+        "appProcesses": 7,
         "captureScreenshot": 2,
-        "foregroundComponent": 9,
+        "foregroundComponent": 7,
         "openSession": 3,
         "openUiSnapshots": 2,
         "stabilitySample": 4,
@@ -289,9 +288,9 @@
         "windowTopology": 4
       },
       {
-        "appProcesses": 7,
+        "appProcesses": 5,
         "captureScreenshot": 1,
-        "foregroundComponent": 7,
+        "foregroundComponent": 5,
         "openSession": 2,
         "openUiSnapshots": 1,
         "stabilitySample": 2,
@@ -316,7 +315,7 @@
     "generatedReplay": [
       {
         "appProcesses": 2,
-        "foregroundComponent": 5,
+        "foregroundComponent": 3,
         "stabilitySample": 2,
         "tap": 1,
         "uiCapture": 1
@@ -324,9 +323,9 @@
     ],
     "generation": [
       {
-        "appProcesses": 9,
+        "appProcesses": 7,
         "captureScreenshot": 2,
-        "foregroundComponent": 9,
+        "foregroundComponent": 7,
         "openSession": 3,
         "openUiSnapshots": 2,
         "stabilitySample": 4,
@@ -357,22 +356,22 @@
     "generatedReplay": [
       {
         "appProcesses": 2,
-        "foregroundComponent": 5,
+        "foregroundComponent": 3,
         "stabilitySample": 2,
         "tap": 1,
         "uiCapture": 1
       },
       {
         "appProcesses": 1,
-        "foregroundComponent": 3,
+        "foregroundComponent": 2,
         "uiCapture": 1
       }
     ],
     "generation": [
       {
-        "appProcesses": 9,
+        "appProcesses": 7,
         "captureScreenshot": 2,
-        "foregroundComponent": 9,
+        "foregroundComponent": 7,
         "openSession": 3,
         "openUiSnapshots": 2,
         "stabilitySample": 4,
@@ -397,7 +396,7 @@
     "generatedReplay": [
       {
         "appProcesses": 6,
-        "foregroundComponent": 9,
+        "foregroundComponent": 7,
         "stabilitySample": 2,
         "tap": 1,
         "uiCapture": 3
@@ -405,9 +404,9 @@
     ],
     "generation": [
       {
-        "appProcesses": 12,
+        "appProcesses": 10,
         "captureScreenshot": 1,
-        "foregroundComponent": 12,
+        "foregroundComponent": 10,
         "openSession": 2,
         "openUiSnapshots": 2,
         "stabilitySample": 4,

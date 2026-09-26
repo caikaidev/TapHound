@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Performance
+
+- Replay of a generated Journey skips foreground and process checks that
+  would repeat an observation made in the same device epoch (no Layout
+  capture, device mutation, completed action, or Expect wait since). Every
+  capture is still followed by a check and every mutation preceded by one;
+  Expect observations always read the device. On the parity scenarios this
+  removes 25% of device calls (19.3 → 14.5 per step).
+- Generation no longer re-checks foreground and process identity after an
+  observation that reuses an already settled Layout, since the first checks
+  already follow its capture: 4 fewer device calls per step.
+- The generation session lock no longer syncs its directory on acquire and
+  release (the lock excludes other processes as soon as it is linked, and a
+  lock surviving a power loss names a dead owner and is reaped). A
+  Generation step now issues 44 instead of 74 fsyncs.
+
 ### Changed
 
 - The Recorder records a bridge through the same `BridgeRunner` as Replay and

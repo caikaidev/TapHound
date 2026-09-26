@@ -132,7 +132,10 @@ export class StepRunner {
     this.actionExecutor = new ActionExecutor(
       options.adb,
       options.deviceSerial,
-      (): void => options.uiSnapshotProvider.invalidate?.("beforeAction")
+      (): void => {
+        this.advanceDeviceEpoch();
+        options.uiSnapshotProvider.invalidate?.("beforeAction");
+      }
     );
     this.fallbackResolver = new FallbackResolver(
       options.screenshots,
@@ -196,12 +199,33 @@ export class StepRunner {
     timeoutMs: this.options.idle.timeoutMs
   });
 
+  /**
+   * Device facts observed since the last Layout capture, device mutation, or
+   * completed action. Within one epoch nothing TapHound did could have
+   * changed them, so a repeated check observes nothing new: every capture
+   * still gets a check after it, and every mutation a check before it.
+   */
+  private deviceEpoch = 0;
+  private foregroundProof:
+    | { packageName: string; activity: string; epoch: number }
+    | undefined;
+  private pidProof: { pid: number | null; epoch: number } | undefined;
+
+  private advanceDeviceEpoch(): void {
+    this.deviceEpoch += 1;
+  }
+
   private readonly primaryPid = async (
     identity: AppIdentity
   ): Promise<number | null> => {
+    if (this.pidProof?.epoch === this.deviceEpoch) {
+      return this.pidProof.pid;
+    }
     const processes = await this.options.adb.appProcesses(identity);
     this.options.logcat.scopeToPids(appProcessPids(processes));
-    return primaryAppPid(processes, this.options.packageName);
+    const pid = primaryAppPid(processes, this.options.packageName);
+    this.pidProof = { pid, epoch: this.deviceEpoch };
+    return pid;
   };
 
   private async generatedForeground(
@@ -209,6 +233,14 @@ export class StepRunner {
     code: "ACTIVITY_BEFORE_MISMATCH" | "ACTIVITY_AFTER_MISMATCH",
     signal?: AbortSignal
   ): Promise<{ packageName: string; activity: string }> {
+    const proof = this.foregroundProof;
+    if (
+      proof?.epoch === this.deviceEpoch
+      && proof.packageName === this.options.packageName
+      && proof.activity === expectedActivity
+    ) {
+      return { packageName: proof.packageName, activity: proof.activity };
+    }
     const foreground = await this.options.adb.foregroundComponent(
       this.identity(signal)
     );
@@ -222,6 +254,7 @@ export class StepRunner {
         }/${foreground.activity}`
       ), { code });
     }
+    this.foregroundProof = { ...foreground, epoch: this.deviceEpoch };
     return foreground;
   }
 
@@ -247,6 +280,7 @@ export class StepRunner {
     signal?: AbortSignal,
     freshness: CaptureUiSnapshotOptions["freshness"] = "sameMutationEpoch"
   ): Promise<readonly LayoutElement[]> {
+    this.advanceDeviceEpoch();
     const snapshot = await this.options.uiSnapshotProvider.capture({
       reason,
       freshness,
@@ -271,6 +305,9 @@ export class StepRunner {
       input: ExpectationObservationInput,
       deadline: number
     ): Promise<string> => {
+      // Expect watches the app change on its own over time: never reuse an
+      // earlier observation.
+      this.advanceDeviceEpoch();
       const identity = (): ReturnType<StepRunner["identity"]> => ({
         packageName: this.options.packageName,
         deviceSerial: this.options.deviceSerial,
@@ -1011,6 +1048,7 @@ export class StepRunner {
             `Knowledge anchor ${step.anchor} resolved to an element without bounds`
           );
         }
+        this.advanceDeviceEpoch();
         const tapped = await this.options.adb.tap(
           anchorResolution.point,
           this.options.deviceSerial,
@@ -1088,6 +1126,8 @@ export class StepRunner {
       settledLayout = idle.layout;
     }
 
+    // Whatever the step did (including a plain wait) may have changed the app.
+    this.advanceDeviceEpoch();
     const pid = await this.primaryPid(identity);
     if (pid === null) {
       return fail("APP_CRASHED", "App process is no longer running");
@@ -1155,6 +1195,8 @@ export class StepRunner {
         signal,
         observations?.boundary() ?? {}
       );
+      // Time passed while Expect waited; later checks must observe again.
+      this.advanceDeviceEpoch();
       if (expectation.status === "cancelled") {
         report.expectation = {
           type: expectation.type,

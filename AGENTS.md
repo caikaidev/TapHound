@@ -503,7 +503,8 @@ provides `SimulatedDevice`, a deterministic state-machine `RuntimeBackend`
 (`test/harness/demo-app.ts` models the demo app), and a runner that drives
 the production composition root through `createProductionDependencies`'
 `runtimeBackend` and `clock` options: only the device and time are simulated.
-Each scenario must reach identical per-step verdicts in `verify` and in
+Each scenario must reach identical per-step verdicts in `verify` (under both
+the recorded and the generated Replay policy) and in
 `generation start → observe → step` (and finalize when it passes). Per-step
 device-call counts are pinned in
 `test/parity/__snapshots__/device-calls.json`; a change to that file is a

@@ -118,10 +118,17 @@ function countsBetween(
   );
 }
 
+/**
+ * `recorded` replays a Journey as authored; `generated` applies the stricter
+ * policy that finalization and `verify` use for a generated Journey.
+ */
+export type ReplayPolicy = "recorded" | "generated";
+
 export async function runReplay(
   app: SimulatedApp,
   project: ParityProject,
-  journey: Journey
+  journey: Journey,
+  policy: ReplayPolicy = "recorded"
 ): Promise<EngineRun> {
   const device = new SimulatedDevice(app);
   const boundaries: number[] = [];
@@ -131,6 +138,9 @@ export async function runReplay(
     projectRoot: project.root,
     devices: [{ role: "default", deviceSerial: SIMULATED_SERIAL }],
     toolVersions: {},
+    ...(policy === "generated"
+      ? { generatedReplayPolicy: true, requireFocusedInput: true }
+      : {}),
     progress: (event): void => {
       if (event.stage === "replaying" || event.stage === "collecting") {
         boundaries.push(device.timeline.length);

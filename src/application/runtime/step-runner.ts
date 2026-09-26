@@ -40,6 +40,11 @@ import {
   type ExpectationObservationInput
 } from "../assertion/expectation-evaluator.js";
 import {
+  GuardedExpectationObservations,
+  settledExpectationForeground,
+  type GuardedExpectationProbe
+} from "../assertion/guarded-expectation.js";
+import {
   IdleWaiter,
   type IdleConfig,
   type IdleResult
@@ -248,83 +253,61 @@ export class StepRunner {
     return snapshot.roots;
   }
 
-  private async observeExpectedActivity(
-    expectedActivity: string | undefined,
-    expectedPid: number,
-    input: ExpectationObservationInput
-  ): Promise<
-    | { status: "observed"; activity: string }
-    | { status: "failed"; message: string }
-  > {
-    const deadline = this.options.clock.now() + input.timeoutMs;
-    const identity = (): ReturnType<StepRunner["identity"]> => ({
-      packageName: this.options.packageName,
-      deviceSerial: this.options.deviceSerial,
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-      timeoutMs: Math.max(1, deadline - this.options.clock.now())
-    });
-    const foreground = await this.options.adb.foregroundComponent(identity());
-    if (
-      foreground.packageName !== this.options.packageName
-      || (
-        expectedActivity !== undefined
-        && foreground.activity !== expectedActivity
-      )
-    ) {
-      return {
-        status: "failed",
-        message: `Generated Expect foreground changed to ${
-          foreground.packageName
-        }/${foreground.activity}`
-      };
-    }
-    const pid = await this.primaryPid(identity());
-    if (pid !== expectedPid) {
-      return {
-        status: "failed",
-        message: `Generated Expect process changed from ${
-          String(expectedPid)
-        } to ${String(pid)}`
-      };
-    }
-    return { status: "observed", activity: foreground.activity };
-  }
-
-  private async observeExpectedLayout(
+  /**
+   * Generated Replay observes Expect under the process identity it replays:
+   * every observation re-checks the foreground package and primary PID, and
+   * a Layout is re-checked after capture at the post-action Activity.
+   */
+  private expectationProbe(
     expectedActivity: string,
-    expectedPid: number,
-    input: ExpectationObservationInput
-  ): Promise<
-    | {
-      status: "observed";
-      layout: readonly LayoutElement[];
-    }
-    | { status: "failed"; message: string }
-  > {
-    const deadline = this.options.clock.now() + input.timeoutMs;
-    const observationInput = (): ExpectationObservationInput => ({
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-      timeoutMs: Math.max(1, deadline - this.options.clock.now())
-    });
-    const before = await this.observeExpectedActivity(
-      expectedActivity,
-      expectedPid,
-      observationInput()
-    );
-    if (before.status === "failed") return before;
-    const layout = await this.captureLayout(
-      "expect",
-      observationInput().timeoutMs,
-      input.signal
-    );
-    const after = await this.observeExpectedActivity(
-      expectedActivity,
-      expectedPid,
-      observationInput()
-    );
-    return after.status === "failed"
-      ? after
-      : { status: "observed", layout };
+    expectedPid: number
+  ): GuardedExpectationProbe<{ layout: readonly LayoutElement[] }> {
+    const guard = async (
+      activity: string | undefined,
+      input: ExpectationObservationInput,
+      deadline: number
+    ): Promise<string> => {
+      const identity = (): ReturnType<StepRunner["identity"]> => ({
+        packageName: this.options.packageName,
+        deviceSerial: this.options.deviceSerial,
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+        timeoutMs: Math.max(1, deadline - this.options.clock.now())
+      });
+      const foreground = await this.options.adb.foregroundComponent(identity());
+      if (
+        foreground.packageName !== this.options.packageName
+        || (activity !== undefined && foreground.activity !== activity)
+      ) {
+        throw new Error(`Generated Expect foreground changed to ${
+          foreground.packageName
+        }/${foreground.activity}`);
+      }
+      const pid = await this.primaryPid(identity());
+      if (pid !== expectedPid) {
+        throw new Error(`Generated Expect process changed from ${
+          String(expectedPid)
+        } to ${String(pid)}`);
+      }
+      return foreground.activity;
+    };
+    return {
+      activity: (input): Promise<string> => guard(
+        undefined,
+        input,
+        this.options.clock.now() + input.timeoutMs
+      ),
+      layout: async (input): Promise<{ layout: readonly LayoutElement[] }> => {
+        const deadline = this.options.clock.now() + input.timeoutMs;
+        await guard(expectedActivity, input, deadline);
+        const layout = await this.captureLayout(
+          "expect",
+          Math.max(1, deadline - this.options.clock.now()),
+          input.signal
+        );
+        await guard(expectedActivity, input, deadline);
+        return { layout };
+      }
+    };
   }
 
   private async captureGeneratedLayout(
@@ -484,6 +467,9 @@ export class StepRunner {
     const generatedPid = this.options.generatedReplayPolicy === true
       ? await this.primaryPid(identity)
       : undefined;
+    // The stable post-action Layout; generated Replay's first element Expect
+    // observation reuses it after the post-action identity checks.
+    let settledLayout: readonly LayoutElement[] | undefined;
     if (
       this.options.generatedReplayPolicy === true
       && generatedPid === null
@@ -636,6 +622,7 @@ export class StepRunner {
         return fail(bridge.code, bridge.message);
       }
       report.idle = idleStepReport(bridge.idle);
+      settledLayout = bridge.idle.layout;
     } else if (
       step.action === "wait"
       && step.until !== undefined
@@ -1077,6 +1064,7 @@ export class StepRunner {
           withIdleAdvice("Layout did not become stable before timeout", idle)
         );
       }
+      settledLayout = idle.layout;
     }
 
     const pid = await this.primaryPid(identity);
@@ -1124,6 +1112,12 @@ export class StepRunner {
     }
 
     if (step.expect !== undefined) {
+      const observations = generatedPid === undefined || generatedPid === null
+        ? undefined
+        : new GuardedExpectationObservations(
+            this.expectationProbe(step.activity.after, generatedPid),
+            settledLayout === undefined ? undefined : { layout: settledLayout }
+          );
       const expectation = await this.expectationEvaluator.evaluate(
         step.expect,
         {
@@ -1138,24 +1132,7 @@ export class StepRunner {
             : { markers: this.options.markers })
         },
         signal,
-        generatedPid === undefined || generatedPid === null
-          ? {}
-          : {
-              activity: (input): ReturnType<
-                StepRunner["observeExpectedActivity"]
-              > => this.observeExpectedActivity(
-                undefined,
-                generatedPid,
-                input
-              ),
-              layout: (input): ReturnType<
-                StepRunner["observeExpectedLayout"]
-              > => this.observeExpectedLayout(
-                step.activity.after,
-                generatedPid,
-                input
-              )
-            }
+        observations?.boundary() ?? {}
       );
       if (expectation.status === "cancelled") {
         report.expectation = {
@@ -1184,13 +1161,14 @@ export class StepRunner {
       if (expectation.status === "failed") {
         return fail(expectation.code, expectation.message);
       }
-      if (this.options.generatedReplayPolicy === true) {
-        const expectedActivity = step.expect.type === "activity"
-          ? step.expect.value
-          : step.activity.after;
+      const settled = settledExpectationForeground(
+        step.expect,
+        step.activity.after
+      );
+      if (this.options.generatedReplayPolicy === true && !settled.proven) {
         try {
           await this.assertGeneratedForeground(
-            expectedActivity,
+            settled.activity,
             "ACTIVITY_AFTER_MISMATCH",
             signal
           );

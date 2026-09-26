@@ -1043,7 +1043,9 @@ describe("scrollTo replay", () => {
         }
       }
     });
-    expect(postActionObservations).toBe(4);
+    // After-Activity check, one poll on A, one on B; the guarded passing
+    // observation needs no further foreground re-check.
+    expect(postActionObservations).toBe(3);
   });
 
   it("keeps a persistent foreign Activity Expect failure as EXPECT_ACTIVITY_FAILED", async () => {

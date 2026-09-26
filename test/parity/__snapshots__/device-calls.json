@@ -10,6 +10,15 @@
         "uiCapture": 5
       }
     ],
+    "generatedReplay": [
+      {
+        "appProcesses": 2,
+        "foregroundComponent": 9,
+        "stabilitySample": 6,
+        "tap": 3,
+        "uiCapture": 4
+      }
+    ],
     "generation": [
       {
         "appProcesses": 9,
@@ -54,6 +63,36 @@
         "stabilitySample": 2,
         "tap": 1,
         "uiCapture": 2
+      }
+    ],
+    "generatedReplay": [
+      {
+        "appProcesses": 2,
+        "foregroundComponent": 5,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 1
+      },
+      {
+        "appProcesses": 2,
+        "foregroundComponent": 5,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 1
+      },
+      {
+        "appProcesses": 2,
+        "foregroundComponent": 5,
+        "inputText": 1,
+        "stabilitySample": 2,
+        "uiCapture": 1
+      },
+      {
+        "appProcesses": 2,
+        "foregroundComponent": 5,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 1
       }
     ],
     "generation": [
@@ -124,6 +163,22 @@
         "uiCapture": 1
       }
     ],
+    "generatedReplay": [
+      {
+        "appProcesses": 2,
+        "foregroundComponent": 5,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 1
+      },
+      {
+        "appProcesses": 2,
+        "back": 1,
+        "foregroundComponent": 5,
+        "stabilitySample": 2,
+        "uiCapture": 1
+      }
+    ],
     "generation": [
       {
         "appProcesses": 9,
@@ -158,6 +213,13 @@
         "uiCapture": 21
       }
     ],
+    "generatedReplay": [
+      {
+        "appProcesses": 1,
+        "foregroundComponent": 43,
+        "uiCapture": 21
+      }
+    ],
     "generation": [
       {
         "appProcesses": 2,
@@ -189,6 +251,27 @@
       },
       {
         "currentActivity": 1,
+        "uiCapture": 21
+      }
+    ],
+    "generatedReplay": [
+      {
+        "appProcesses": 2,
+        "foregroundComponent": 5,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 1
+      },
+      {
+        "appProcesses": 2,
+        "foregroundComponent": 5,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 1
+      },
+      {
+        "appProcesses": 1,
+        "foregroundComponent": 43,
         "uiCapture": 21
       }
     ],
@@ -228,6 +311,15 @@
         "stabilitySample": 2,
         "tap": 1,
         "uiCapture": 4
+      }
+    ],
+    "generatedReplay": [
+      {
+        "appProcesses": 6,
+        "foregroundComponent": 9,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 3
       }
     ],
     "generation": [

@@ -55,10 +55,11 @@ import {
 } from "../../domain/system-app-profiles.js";
 import type { ExternalStep } from "../../domain/journey.js";
 import type { ExternalFlowResolution } from "../journey/external-flow-resolver.js";
+import { ExpectationEvaluator } from "../assertion/expectation-evaluator.js";
 import {
-  ExpectationEvaluator,
-  type ExpectationObservationInput
-} from "../assertion/expectation-evaluator.js";
+  GuardedExpectationObservations,
+  settledExpectationForeground
+} from "../assertion/guarded-expectation.js";
 import { LogcatCollector } from "../collector/logcat-collector.js";
 import { logcatStopFailed } from "../collector/logcat-stop.js";
 import { ActionExecutor, type ActionTarget } from "../interaction/action-executor.js";
@@ -1098,8 +1099,24 @@ export class GenerationStepExecutor {
         );
         if (finalStep.expect !== undefined) {
           const expectationStartedAt = this.dependencies.clock.now();
-          let expectationRuntime: LiveRuntime | undefined;
-          let settledLayout: readonly LayoutElement[] | undefined = after.layout;
+          const observations = new GuardedExpectationObservations<LiveRuntime>({
+            activity: (observation): Promise<string> => this.assertForegroundIdentity(
+              session,
+              authoritativePid,
+              undefined,
+              observation.signal,
+              observation.timeoutMs
+            ),
+            layout: (observation): Promise<LiveRuntime> => this.observeLive(
+              session,
+              authoritativePid,
+              after.activity,
+              observation.signal,
+              undefined,
+              observation.timeoutMs
+            ),
+            rethrow: (error): boolean => error instanceof StepCancelledError
+          }, after);
           const expectation = await new ExpectationEvaluator(
             this.boundViews().adb,
             this.boundUiSnapshotProvider(),
@@ -1109,65 +1126,7 @@ export class GenerationStepExecutor {
             packageName: session.target.packageName,
             deviceSerial: session.target.deviceSerial,
             stepStartedAt
-          }, input.signal, {
-            activity: async (
-              observation: ExpectationObservationInput
-            ): Promise<
-              | { status: "observed"; activity: string }
-              | { status: "failed"; message: string }
-            > => {
-              try {
-                const activity = await this.assertForegroundIdentity(
-                  session,
-                  authoritativePid,
-                  undefined,
-                  observation.signal,
-                  observation.timeoutMs
-                );
-                return { status: "observed", activity };
-              } catch (error) {
-                if (error instanceof StepCancelledError) throw error;
-                return {
-                  status: "failed",
-                  message: error instanceof Error
-                    ? error.message
-                    : "Generated Expect Activity observation failed"
-                };
-              }
-            },
-            layout: async (
-              observation: ExpectationObservationInput
-            ): Promise<
-              | { status: "observed"; layout: readonly LayoutElement[] }
-              | { status: "failed"; message: string }
-            > => {
-              if (settledLayout !== undefined) {
-                const reused = settledLayout;
-                settledLayout = undefined;
-                return { status: "observed", layout: reused };
-              }
-              try {
-                const guarded = await this.observeLive(
-                  session,
-                  authoritativePid,
-                  after.activity,
-                  observation.signal,
-                  undefined,
-                  observation.timeoutMs
-                );
-                expectationRuntime = guarded;
-                return { status: "observed", layout: guarded.layout };
-              } catch (error) {
-                if (error instanceof StepCancelledError) throw error;
-                return {
-                  status: "failed",
-                  message: error instanceof Error
-                    ? error.message
-                    : "Generated Expect Layout observation failed"
-                };
-              }
-            }
-          });
+          }, input.signal, observations.boundary());
           if (expectation.status === "cancelled") {
             outcome = {
               status: "cancelled",
@@ -1185,7 +1144,7 @@ export class GenerationStepExecutor {
               authoritativePid,
               finalStep.expect,
               after,
-              expectationRuntime,
+              observations.lastLayoutObservation(),
               input.signal
             );
             throwIfCancelled(input.signal);
@@ -1404,35 +1363,27 @@ export class GenerationStepExecutor {
   }
 
   /**
-   * A passing expectation already proves the post-action state: an `element`
-   * expectation proves it on the Layout it resolved against, and an `activity`
-   * expectation that matches the observed post-action Activity adds nothing to
-   * re-observe. Only a state the post-action observation cannot vouch for is
-   * observed again.
+   * The post-action runtime after a passing expectation: an `element`
+   * expectation already observed it, and a proven `activity` expectation on
+   * the post-action Activity adds nothing to re-observe. Otherwise the
+   * settled foreground is observed again.
    */
   private async settledExpectationRuntime(
     session: GenerationSession,
     expectedPid: number,
     expectation: Expectation,
     after: LiveRuntime,
-    expectationRuntime: LiveRuntime | undefined,
+    lastLayoutObservation: LiveRuntime | undefined,
     signal?: AbortSignal
   ): Promise<LiveRuntime> {
+    const settled = settledExpectationForeground(expectation, after.activity);
     if (expectation.type === "element") {
-      return expectationRuntime ?? after;
+      return lastLayoutObservation ?? after;
     }
-    if (
-      expectation.type === "activity"
-      && expectation.value === after.activity
-    ) {
+    if (settled.proven && settled.activity === after.activity) {
       return after;
     }
-    return this.observeLive(
-      session,
-      expectedPid,
-      expectation.type === "activity" ? expectation.value : after.activity,
-      signal
-    );
+    return this.observeLive(session, expectedPid, settled.activity, signal);
   }
 
   private async observeLive(

@@ -11,7 +11,7 @@ import {
 } from "../harness/parity-runner.js";
 
 /**
- * Golden parity: Replay and Generation must reach the same per-step verdicts
+ * Golden parity: Replay (recorded and generated policy) and Generation must reach the same per-step verdicts
  * on the same simulated device. Device-call counts are pinned in a file
  * snapshot so performance work shows up as a reviewed diff.
  */
@@ -35,9 +35,17 @@ describe("Replay ↔ Generation parity on a simulated device", () => {
   for (const scenario of scenarios) {
     it(`agrees on "${scenario.name}"`, async () => {
       const replay = await runReplay(demoApp, project, scenario.journey);
+      const generatedReplay = await runReplay(
+        demoApp,
+        project,
+        scenario.journey,
+        "generated"
+      );
       const generation = await runGeneration(demoApp, project, scenario.journey);
 
       expect(replay.outcomes.map((step) => step.outcome)).toEqual(scenario.expected);
+      expect(generatedReplay.outcomes.map((step) => step.outcome))
+        .toEqual(scenario.expected);
       expect(generation.outcomes.map((step) => step.outcome)).toEqual(scenario.expected);
       for (const [index, step] of generation.outcomes.entries()) {
         if (step.outcome !== "passed") continue;
@@ -51,6 +59,7 @@ describe("Replay ↔ Generation parity on a simulated device", () => {
       }
       deviceCalls[scenario.name] = {
         replay: replay.stepCalls,
+        generatedReplay: generatedReplay.stepCalls,
         generation: generation.stepCalls
       };
     }, SCENARIO_TIMEOUT_MS);

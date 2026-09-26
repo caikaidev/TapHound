@@ -97,6 +97,11 @@ artifacts must be regenerated.
   `Array#shift`.
 - Device identity for idle profiles is resolved once per run with parallel
   `getprop` calls.
+- Generated Replay (finalize and `verify` of a generated Journey) evaluates
+  Expect through the same guarded observations as Generation: the first
+  element observation reuses the settled post-action Layout, and a passing
+  `activity` or `element` Expect no longer re-checks the foreground it just
+  proved. A step with such an Expect makes 7 fewer device calls.
 
 ### Fixed
 

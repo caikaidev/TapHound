@@ -44,8 +44,7 @@ import {
 import { logcatStopFailed } from "../collector/logcat-stop.js";
 import type { ReportWriter } from "../report/report-writer.js";
 import { ActivityWaiter } from "./activity-waiter.js";
-import { launchFailure } from "./launch-failure.js";
-import { ProcessWaiter } from "./process-waiter.js";
+import { coldLaunchApp } from "./cold-launch.js";
 import {
   StepRunner,
   type StepRunResult,
@@ -554,50 +553,20 @@ export class VerifyRuntime {
           break;
         }
 
-        const app = {
-          packageName: input.config.run.packageName,
-          ...(input.signal === undefined ? {} : { signal: input.signal }),
-          timeoutMs: input.config.idle.timeoutMs
-        };
-        const stopped = await deviceSession.forceStop(app);
-        const launched = commandFailed(stopped)
-          ? undefined
-          : await deviceSession.launchApp({
+        try {
+          const launched = await coldLaunchApp(
+            runtime.views.adb,
+            this.dependencies.clock,
+            {
               packageName: input.config.run.packageName,
               activity: launchActivity,
-              ...(input.signal === undefined ? {} : { signal: input.signal }),
-              timeoutMs: input.config.idle.timeoutMs
-            });
-        const launchError = launched === undefined
-          ? commandMessage(stopped, "App reset failed")
-          : launchFailure(launched);
-        if (launchError !== undefined) {
-          layers.run = "failed";
-          setPrimary("APP_LAUNCH_FAILED", launchError, "run");
-          break;
-        }
-
-        try {
-          const launchReadinessStartedAt = this.dependencies.clock.now();
-          const processReadiness = await new ProcessWaiter(
-            runtime.views.adb,
-            this.dependencies.clock
-          ).wait({
-            packageName: input.config.run.packageName,
-            deviceSerial: runtime.deviceSerial,
-            pollIntervalMs: input.config.idle.pollIntervalMs,
-            timeoutMs: input.config.idle.timeoutMs,
-            ...(input.signal === undefined ? {} : { signal: input.signal })
-          });
-          if (processReadiness.status === "timeout") {
-            setPrimary(
-              "APP_LAUNCH_FAILED",
-              "App process was not found after launch",
-              "readiness"
-            );
-            break;
-          }
-          if (processReadiness.status === "cancelled") {
+              deviceSerial: runtime.deviceSerial,
+              pollIntervalMs: input.config.idle.pollIntervalMs,
+              timeoutMs: input.config.idle.timeoutMs,
+              signal: input.signal
+            }
+          );
+          if (launched.status === "cancelled") {
             setPrimary(
               "INTERNAL_ERROR",
               "Verification was cancelled",
@@ -605,7 +574,16 @@ export class VerifyRuntime {
             );
             break;
           }
-          runtime.logcat.scopeToPids(processReadiness.pids);
+          if (launched.status === "failed") {
+            if (launched.stage === "process") {
+              setPrimary("APP_LAUNCH_FAILED", launched.message, "readiness");
+            } else {
+              layers.run = "failed";
+              setPrimary("APP_LAUNCH_FAILED", launched.message, "run");
+            }
+            break;
+          }
+          runtime.logcat.scopeToPids(launched.pids);
           const soleRole = soleRoleForJourney(input.journey);
           const firstOwnStep = input.journey.steps.find(
             (step) => stepDeviceRole(step, soleRole) === runtime.role
@@ -613,11 +591,9 @@ export class VerifyRuntime {
           if (firstOwnStep === undefined) {
             throw new Error("Journey requires at least one step");
           }
+          // The readiness budget starts once the launch command returned.
           const remainingReadinessMs = input.config.idle.timeoutMs
-            - (
-              this.dependencies.clock.now()
-              - launchReadinessStartedAt
-            );
+            - launched.processWaitMs;
           if (remainingReadinessMs <= 0) {
             setPrimary(
               "APP_LAUNCH_FAILED",

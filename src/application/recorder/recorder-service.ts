@@ -35,8 +35,7 @@ import {
   type ExternalDriveOutcome
 } from "../interaction/external-step-runner.js";
 import { resolveLocator } from "../locator/locator-resolver.js";
-import { launchFailure } from "../runtime/launch-failure.js";
-import { ProcessWaiter } from "../runtime/process-waiter.js";
+import { coldLaunchApp } from "../runtime/cold-launch.js";
 import { IdleWaiter } from "../wait/idle-waiter.js";
 import { deviceIdentityResolver } from "../wait/idle-profiles.js";
 import {
@@ -112,13 +111,6 @@ function failedCommand(result: {
     || result.spawnError !== undefined;
 }
 
-function commandMessage(
-  result: { stderr: string; spawnError?: string | undefined },
-  fallback: string
-): string {
-  return result.stderr.trim() || result.spawnError || fallback;
-}
-
 function annotatedPath(outputPath: string): string {
   const output = parse(outputPath);
   return `${output.dir}/${output.name}.annotated.png`;
@@ -171,48 +163,22 @@ export class RecorderService {
         message: `Package ${input.config.run.packageName} is not installed on ${input.deviceSerial}`
       };
     }
-    const stopped = await views.adb.forceStop(identity);
-    if (failedCommand(stopped)) {
-      return {
-        status: "failed",
-        stepsRecorded: 0,
-        message: commandMessage(stopped, "App reset failed")
-      };
-    }
-    const launchError = launchFailure(
-      await views.adb.launchActivity({
-        packageName: input.config.run.packageName,
-        activity: launchActivity,
-        deviceSerial: input.deviceSerial,
-        ...(input.signal === undefined ? {} : { signal: input.signal }),
-        timeoutMs: input.config.idle.timeoutMs
-      })
-    );
-    if (launchError !== undefined) {
-      return {
-        status: "failed",
-        stepsRecorded: 0,
-        message: launchError
-      };
-    }
-    const processReadiness = await new ProcessWaiter(
-      views.adb,
-      this.dependencies.clock
-    ).wait({
+    const launched = await coldLaunchApp(views.adb, this.dependencies.clock, {
       packageName: input.config.run.packageName,
+      activity: launchActivity,
       deviceSerial: input.deviceSerial,
       pollIntervalMs: input.config.idle.pollIntervalMs,
       timeoutMs: input.config.idle.timeoutMs,
-      ...(input.signal === undefined ? {} : { signal: input.signal })
+      signal: input.signal
     });
-    if (processReadiness.status === "cancelled") {
+    if (launched.status === "cancelled") {
       return { status: "cancelled", stepsRecorded: 0 };
     }
-    if (processReadiness.status === "timeout") {
+    if (launched.status === "failed") {
       return {
         status: "failed",
         stepsRecorded: 0,
-        message: "App process was not found after launch"
+        message: launched.message
       };
     }
 

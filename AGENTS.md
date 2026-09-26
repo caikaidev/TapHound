@@ -203,7 +203,9 @@ regenerate stale artifacts instead.
 
 `VerifyRuntime` checks installation, starts Logcat, force-stops and cold-launches
 the app, waits for process and Activity readiness, and runs Journey steps through
-`StepRunner`.
+`StepRunner`. Replay, the Recorder, and Generation share one cold launch
+(`coldLaunchApp` in `src/application/runtime/cold-launch.ts`: force-stop,
+launch, wait for the process) and differ only in how they report its failure.
 
 `VerifyInput` accepts optional `hooks` (`beforeSteps`/`afterSteps`, see
 `src/application/runtime/verify-runtime.ts`). Each hook receives the device

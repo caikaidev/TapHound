@@ -25,6 +25,11 @@
   now borrow a session like every other device consumer (closing it when
   done instead of caching one per serial for the process lifetime), and idle
   device profiles read the device identity from the observing session.
+- Replay, the Recorder, and Generation share one cold launch. Their failure
+  messages now agree: a failed reset says whether it was cancelled, timed
+  out, or which exit code it returned (instead of "App reset failed"), and
+  Generation reports a missing process as "App process was not found after
+  launch".
 - The Recorder records a bridge through the same `BridgeRunner` as Replay and
   Generation, and runs each chosen External Step through `ExternalStepRunner`
   before recording it: a step is recorded only if it executes the way Replay

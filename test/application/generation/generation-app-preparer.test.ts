@@ -168,7 +168,7 @@ describe("GenerationAppPreparer", () => {
     await expect(service.prepare({
       config,
       deviceSerial: "emulator-5554"
-    })).rejects.toThrow("App process readiness timed out");
+    })).rejects.toThrow("App process was not found after launch");
     expect(currentActivity).not.toHaveBeenCalled();
   });
 });

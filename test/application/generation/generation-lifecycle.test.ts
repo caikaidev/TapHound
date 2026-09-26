@@ -494,6 +494,11 @@ function makeBackProposal(
   };
 }
 
+// The full lifecycle writes through the durable session Store (fsync per
+// write). It takes ~10 s alone and exceeds the default budget when the
+// suite's parallel workers contend for fsync.
+const DURABLE_LIFECYCLE_TIMEOUT_MS = 120_000;
+
 describe("Generation lifecycle regression", () => {
   it("executes start → observe → click → back+confirmation → click → finalize with consistent revisions", async () => {
     const test = await createLifecycleFixture();
@@ -687,7 +692,7 @@ describe("Generation lifecycle regression", () => {
     const manifest = JSON.parse(manifestText) as { files: { path: string }[] };
     expect(manifest.files.map((f) => f.path)).toContain("verified/journey.json");
     expect(manifest.files.map((f) => f.path)).toContain("verification/report.json");
-  });
+  }, DURABLE_LIFECYCLE_TIMEOUT_MS);
 
   it("rejects finalize when verification report has fallbackUsed", async () => {
     const test = await createLifecycleFixture();

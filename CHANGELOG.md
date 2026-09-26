@@ -50,6 +50,13 @@ artifacts must be regenerated.
 - The flat Checkpoint form (`activity`, `screen`, `visibleElements`,
   `absentElements`). Checkpoints use `expect: { allOf, timeoutMs }` only.
 
+### Fixed
+
+- Generation proposal validation reports `LOCATOR_NOT_FOUND` and
+  `LOCATOR_AMBIGUOUS` like Replay does (and as the Journey Skill documents)
+  instead of mapping every Locator failure to `ACTION_UNSUPPORTED`. Found by
+  the new Replay ↔ Generation parity harness.
+
 ### Fixed (compatibility cleanup)
 
 - Journey meta now records the session's bound External Flows; previously the

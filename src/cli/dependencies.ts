@@ -45,6 +45,7 @@ import {
   CachedUiSnapshotProviderFactory
 } from "../application/ui/cached-ui-snapshot-provider.js";
 import { CameraProbeAdapter } from "../adapters/camera/camera-probe-adapter.js";
+import type { Clock } from "../ports/clock.js";
 import { SystemClock } from "../adapters/clock/system-clock.js";
 import { FileSystemArtifactStore } from "../adapters/filesystem/artifact-store.js";
 import { FileSystemContextDocumentWriter } from "../adapters/filesystem/context-document-writer.js";
@@ -187,7 +188,10 @@ import type {
   ChangeSet
 } from "../domain/impact.js";
 import type { Journey } from "../domain/journey.js";
-import type { RuntimeSessionOpener } from "../ports/runtime-backend.js";
+import type {
+  RuntimeBackend,
+  RuntimeSessionOpener
+} from "../ports/runtime-backend.js";
 import type { ScreenshotPort } from "../ports/screenshot.js";
 import type { UiSnapshotProviderFactory } from "../ports/ui-snapshot.js";
 import type { UiStabilityProbe } from "../ports/ui-stability.js";
@@ -367,6 +371,13 @@ export interface ProductionDependencyOptions {
   ) => GenerationSessionStore;
   runtimeBackendChoice?: RuntimeBackendChoice | undefined;
   mobileMcpToolsFactory?: (() => MobileMcpTools) | undefined;
+  /**
+   * Replaces the device backend while keeping every other production wire.
+   * Used by the simulated-device parity harness; the CLI never sets it.
+   */
+  runtimeBackend?: RuntimeBackend | undefined;
+  /** Single time source for waits, polling, and cache TTLs (tests inject a virtual clock). */
+  clock?: Clock | undefined;
 }
 
 function runId(): string {
@@ -417,6 +428,8 @@ export function createProductionDependencies(
     options.runtimeBackendChoice ?? readRuntimeBackendChoice(process.env)
   );
   const runner = new NodeProcessRunner();
+  const clock = options.clock ?? new SystemClock();
+  const now = (): number => clock.now();
   const permissionCaptureTimeoutMs = 10_000;
   let adb: AdbPort;
   let sessions: RuntimeSessionOpener;
@@ -424,7 +437,17 @@ export function createProductionDependencies(
   let uiStability: UiStabilityProbe;
   let uiSnapshots: UiSnapshotProviderFactory;
   let sharedBackend: SharedSessionRuntimeBackend | undefined;
-  if (backendId === "mobile-mcp") {
+  if (options.runtimeBackend !== undefined) {
+    const backend = options.runtimeBackend;
+    sessions = backend;
+    adb = new RuntimeBackendAdbBridge({ backend });
+    screenshots = new SessionBackedScreenshotAdapter(backend);
+    uiStability = new SessionBackedUiStabilityAdapter(backend);
+    uiSnapshots = new CachedUiSnapshotProviderFactory(
+      new SessionBackedUiSnapshotProviderFactory(backend),
+      now
+    );
+  } else if (backendId === "mobile-mcp") {
     const backend = new SharedSessionRuntimeBackend(
       new MobileMcpRuntimeBackend({
         createTools: options.mobileMcpToolsFactory
@@ -437,7 +460,8 @@ export function createProductionDependencies(
     screenshots = new SessionBackedScreenshotAdapter(backend);
     uiStability = new SessionBackedUiStabilityAdapter(backend);
     uiSnapshots = new CachedUiSnapshotProviderFactory(
-      new SessionBackedUiSnapshotProviderFactory(backend)
+      new SessionBackedUiSnapshotProviderFactory(backend),
+      now
     );
   } else {
     const adbAdapter = new AdbAdapter(runner);
@@ -447,7 +471,8 @@ export function createProductionDependencies(
         new SystemUiAutomatorSnapshotProviderFactory(runner),
         new AndroidCliSnapshotProviderFactory(runner),
         new AppiumUiSnapshotProviderFactory(runner)
-      )
+      ),
+      now
     );
     const adbBackend = new AdbRuntimeBackend({
       adb: adbAdapter,
@@ -462,7 +487,6 @@ export function createProductionDependencies(
     uiStability = androidCli;
     uiSnapshots = autoSnapshots;
   }
-  const clock = new SystemClock();
   const waitUntilIdle = (
     deviceSerial: string,
     config: Parameters<IdleWaiter["waitUntilIdle"]>[0],

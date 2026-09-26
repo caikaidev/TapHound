@@ -44,6 +44,7 @@ import {
   GenerationSessionStoreError
 } from "../../../src/ports/generation-session-store.js";
 import { contextSelection } from "../../fixtures/project-context.js";
+import { TEST_SNAPSHOT_UI, TEST_UI_BACKEND } from "../../fakes/ui-backend.js";
 
 const temporaryRoots: string[] = [];
 
@@ -63,7 +64,8 @@ function session(revision = 0): GenerationSession {
       projectHash: "d".repeat(64),
       configHash: "e".repeat(64),
       contextHash: "a".repeat(64),
-      snapshotHash: revision === 0 ? null : "b".repeat(64)
+      snapshotHash: revision === 0 ? null : "b".repeat(64),
+      uiBackend: TEST_UI_BACKEND
     },
     target: {
       packageName: "com.example.app",
@@ -87,7 +89,8 @@ function session(revision = 0): GenerationSession {
     pendingConfirmation: null,
     verification: { status: "notRun" },
     publication: { status: "notRun" },
-    externalFlows: []
+    externalFlows: [],
+    verificationHistory: []
   };
 }
 
@@ -535,12 +538,13 @@ describe("RuntimeObserver", () => {
         semanticWindowIds: ["window-1"],
         diagnostics: [],
         recovery: []
-      }
+      },
+      ...TEST_SNAPSHOT_UI
     });
     expect(result.snapshotHash).toBe(hashRuntimeSnapshot(result.snapshot));
     expect(test.store.current).toMatchObject({
       revision: 1,
-      bindings: { snapshotHash: result.snapshotHash }
+      bindings: { snapshotHash: result.snapshotHash, uiBackend: TEST_UI_BACKEND }
     });
     expect(test.identities).toEqual([
       {

@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 
 import type { CheckpointDefinition } from "../../domain/checkpoint.js";
+import type { Locator } from "../../domain/layout.js";
 import type { CheckpointReport } from "../../domain/report.js";
-import type { RuntimeSnapshotV1 } from "../../domain/runtime-snapshot.js";
+import type { ScreenObservation } from "../recognition/screen-detector.js";
 import type { LoadedKnowledgeBundle } from "../../ports/knowledge-registry.js";
 import type { AdbPort } from "../../ports/adb.js";
 import type { UiSnapshotProvider } from "../../ports/ui-snapshot.js";
@@ -15,10 +16,43 @@ import { ScreenDetector } from "../recognition/screen-detector.js";
 
 type Condition = CheckpointReport["conditions"][number];
 
+/** One point-in-time UI observation request derived from `allOf` conditions. */
+interface UiExpect {
+  activity?: string | undefined;
+  screen?: string | undefined;
+  visibleElements: readonly Locator[];
+  absentElements: readonly Locator[];
+}
+
+interface UiObservation {
+  conditions: Condition[];
+  matchedScreen?: string | undefined;
+  snapshot?: UiSnapshot | undefined;
+}
+
+
 export interface CheckpointEvaluation {
   report: CheckpointReport;
   matchedScreen?: string | undefined;
-  snapshot?: UiSnapshot | undefined;
+}
+
+export interface CheckpointEvaluateInput {
+  checkpoint: CheckpointDefinition;
+  provider: UiSnapshotProvider;
+  adb: AdbPort;
+  packageName: string;
+  deviceSerial: string;
+  timeoutMs: number;
+  knowledge?: LoadedKnowledgeBundle | undefined;
+  knowledgeError?: string | undefined;
+  signal?: AbortSignal | undefined;
+  clock?: Clock | undefined;
+  logcat?: LogcatCollector | undefined;
+  stepStartedAt?: number | undefined;
+  runStartedAt?: number | undefined;
+  markers?: ReadonlyMap<string, number> | undefined;
+  logcatEvidenceRef?: string | undefined;
+  writeSnapshot?: ((path: string, snapshot: UiSnapshot) => Promise<void>) | undefined;
 }
 
 function errorMessage(error: unknown): string {
@@ -26,29 +60,29 @@ function errorMessage(error: unknown): string {
 }
 
 function unresolvedConditions(
-  checkpoint: CheckpointDefinition,
+  expect: UiExpect,
   message: string
 ): Condition[] {
   return [
-    ...(checkpoint.expect.activity === undefined ? [] : [{
+    ...(expect.activity === undefined ? [] : [{
       kind: "activity" as const,
       status: "unresolved" as const,
-      expected: checkpoint.expect.activity,
+      expected: expect.activity,
       message
     }]),
-    ...(checkpoint.expect.screen === undefined ? [] : [{
+    ...(expect.screen === undefined ? [] : [{
       kind: "screen" as const,
       status: "unresolved" as const,
-      expected: checkpoint.expect.screen,
+      expected: expect.screen,
       message
     }]),
-    ...checkpoint.expect.visibleElements.map((locator): Condition => ({
+    ...expect.visibleElements.map((locator): Condition => ({
       kind: "visibleElement",
       status: "unresolved",
       locator,
       message
     })),
-    ...checkpoint.expect.absentElements.map((locator): Condition => ({
+    ...expect.absentElements.map((locator): Condition => ({
       kind: "absentElement",
       status: "unresolved",
       locator,
@@ -81,29 +115,10 @@ function checkpointResult(
 export class CheckpointEvaluator {
   private readonly detector = new ScreenDetector();
 
-  public readonly evaluate = async (input: {
-    checkpoint: CheckpointDefinition;
-    provider: UiSnapshotProvider;
-    adb: AdbPort;
-    packageName: string;
-    deviceSerial: string;
-    timeoutMs: number;
-    knowledge?: LoadedKnowledgeBundle | undefined;
-    knowledgeError?: string | undefined;
-    signal?: AbortSignal | undefined;
-    clock?: Clock | undefined;
-    logcat?: LogcatCollector | undefined;
-    stepStartedAt?: number | undefined;
-    runStartedAt?: number | undefined;
-    markers?: ReadonlyMap<string, number> | undefined;
-    logcatEvidenceRef?: string | undefined;
-    writeSnapshot?: ((path: string, snapshot: UiSnapshot) => Promise<void>) | undefined;
-    exposeSnapshot?: boolean | undefined;
-  }): Promise<CheckpointEvaluation> => {
-    const { checkpoint } = input;
-    if (checkpoint.expect.allOf !== undefined) {
-      return this.evaluateAllOf(input);
-    }
+  private readonly observeUi = async (
+    input: CheckpointEvaluateInput,
+    expect: UiExpect
+  ): Promise<UiObservation> => {
     let snapshot;
     try {
       snapshot = await input.provider.capture({
@@ -113,10 +128,9 @@ export class CheckpointEvaluator {
         ...(input.signal === undefined ? {} : { signal: input.signal })
       });
     } catch (error) {
-      return checkpointResult(
-        checkpoint,
-        unresolvedConditions(checkpoint, `Checkpoint layout unavailable: ${errorMessage(error)}`)
-      );
+      return {
+        conditions: unresolvedConditions(expect, `Checkpoint layout unavailable: ${errorMessage(error)}`)
+      };
     }
 
     let foreground;
@@ -128,24 +142,22 @@ export class CheckpointEvaluator {
         ...(input.signal === undefined ? {} : { signal: input.signal })
       });
     } catch (error) {
-      return checkpointResult(
-        checkpoint,
-        unresolvedConditions(checkpoint, `Checkpoint foreground unavailable: ${errorMessage(error)}`)
-      );
+      return {
+        conditions: unresolvedConditions(expect, `Checkpoint foreground unavailable: ${errorMessage(error)}`)
+      };
     }
     if (foreground.packageName !== input.packageName) {
-      return checkpointResult(
-        checkpoint,
-        unresolvedConditions(
-          checkpoint,
+      return {
+        conditions: unresolvedConditions(
+          expect,
           `Checkpoint foreground package ${foreground.packageName} is not ${input.packageName}`
         )
-      );
+      };
     }
     const activity = foreground.activity;
     const conditions: Condition[] = [];
-    if (checkpoint.expect.activity !== undefined) {
-      const expected = checkpoint.expect.activity;
+    if (expect.activity !== undefined) {
+      const expected = expect.activity;
       conditions.push({
         kind: "activity",
         status: activity === expected ? "passed" : "failed",
@@ -154,8 +166,8 @@ export class CheckpointEvaluator {
       });
     }
     let matchedScreen: string | undefined;
-    if (checkpoint.expect.screen !== undefined) {
-      const expected = checkpoint.expect.screen;
+    if (expect.screen !== undefined) {
+      const expected = expect.screen;
       if (
         input.knowledge === undefined
         || input.knowledge.index.packageName !== input.packageName
@@ -178,16 +190,8 @@ export class CheckpointEvaluator {
           message: `Screen ${expected} is not defined in Project Knowledge`
         });
       } else {
-        const runtimeSnapshot: RuntimeSnapshotV1 = {
-          version: 1,
-          generationId: "checkpoint",
-          baseRevision: 1,
-          deviceSerial: input.deviceSerial,
-          expectedPackageName: input.packageName,
-          foregroundPackageName: input.packageName,
+        const runtimeSnapshot: ScreenObservation = {
           activity,
-          pid: null,
-          capturedAt: snapshot.capturedAt,
           layout: [...snapshot.roots]
         };
         try {
@@ -225,8 +229,8 @@ export class CheckpointEvaluator {
       }
     }
     for (const [kind, locators] of [
-      ["visibleElement", checkpoint.expect.visibleElements],
-      ["absentElement", checkpoint.expect.absentElements]
+      ["visibleElement", expect.visibleElements],
+      ["absentElement", expect.absentElements]
     ] as const) {
       for (const locator of locators) {
         const resolution = resolveLocatorIdentity(snapshot.roots, locator);
@@ -257,24 +261,21 @@ export class CheckpointEvaluator {
         }
       }
     }
-    return {
-      ...checkpointResult(checkpoint, conditions, matchedScreen),
-      ...(input.exposeSnapshot === true ? { snapshot } : {})
-    };
+    return { conditions, matchedScreen, snapshot };
   };
 
-  private readonly evaluateAllOf = async (
-    input: Parameters<CheckpointEvaluator["evaluate"]>[0]
+  public readonly evaluate = async (
+    input: CheckpointEvaluateInput
   ): Promise<CheckpointEvaluation> => {
     const { checkpoint, clock, logcat } = input;
-    const allOf = checkpoint.expect.allOf ?? [];
+    const allOf = checkpoint.expect.allOf;
     const startedAtMs = clock?.now() ?? 0;
-    const timeoutMs = checkpoint.expect.timeoutMs ?? 0;
+    const timeoutMs = checkpoint.expect.timeoutMs;
     const deadline = startedAtMs + timeoutMs;
     const uiConditions = allOf.filter((condition) => condition.kind !== "logcatEvent");
     const activityCondition = uiConditions.find((condition) => condition.kind === "activity");
     const screenCondition = uiConditions.find((condition) => condition.kind === "screen");
-    const uiExpect = {
+    const uiExpect: UiExpect = {
       ...(activityCondition?.kind === "activity" ? { activity: activityCondition.expected } : {}),
       ...(screenCondition?.kind === "screen" ? { screen: screenCondition.expected } : {}),
       visibleElements: uiConditions.flatMap((condition) => (
@@ -383,15 +384,10 @@ export class CheckpointEvaluator {
       if (uiConditions.some((condition) =>
         observed.get(allOf.indexOf(condition))?.status !== "passed"
       )) {
-        const ui = await this.evaluate({
+        const ui = await this.observeUi({
           ...input,
-          checkpoint: {
-            ...checkpoint,
-            expect: uiExpect
-          },
-          timeoutMs: Math.min(input.timeoutMs, remaining),
-          exposeSnapshot: true
-        });
+          timeoutMs: Math.min(input.timeoutMs, remaining)
+        }, uiExpect);
         const uiObservedAtMs = clock.now();
         if (ui.matchedScreen !== undefined) {
           matchedScreen = ui.matchedScreen;
@@ -401,7 +397,7 @@ export class CheckpointEvaluator {
             || observed.get(index)?.status === "passed") {
             continue;
           }
-          const matching = ui.report.conditions.find((entry) => (
+          const matching = ui.conditions.find((entry) => (
             identity(entry) === identity({
               ...condition,
               status: "passed"

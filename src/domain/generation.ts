@@ -242,7 +242,7 @@ const GenerationSessionFields = {
     configHash: Sha256Schema,
     contextHash: Sha256Schema,
     snapshotHash: Sha256Schema.nullable(),
-    uiBackend: UiBackendDescriptorSchema.optional()
+    uiBackend: UiBackendDescriptorSchema
   }),
   target: z.strictObject({
     packageName: z.string().regex(
@@ -257,13 +257,13 @@ const GenerationSessionFields = {
   variables: GenerationVariablesSchema,
   baseFlow: GenerationBaseFlowSchema.optional(),
   sourceBrief: GenerationSourceBriefSchema.optional(),
-  externalFlows: z.array(GenerationExternalFlowBindingSchema).default([]),
+  externalFlows: z.array(GenerationExternalFlowBindingSchema),
   candidateSteps: z.array(JourneyStepSchema),
   candidateSources: z.array(GenerationStepSourceSchema),
   inFlight: GenerationInFlightSchema.nullable(),
   pendingConfirmation: PendingConfirmationSchema.nullable(),
   verification: VerificationSchema,
-  verificationHistory: z.array(VerificationHistoryEntrySchema).optional(),
+  verificationHistory: z.array(VerificationHistoryEntrySchema),
   publication: PublicationSchema
 };
 
@@ -466,20 +466,19 @@ export const GenerationMetaSchema = z.strictObject({
   }).optional(),
   generationId: GenerationSessionIdSchema,
   journeyPath: ProjectRelativePathSchema,
-  journeySha256: Sha256Schema.optional(),
+  journeySha256: Sha256Schema,
   bindings: z.strictObject({
     projectHash: Sha256Schema,
     configHash: Sha256Schema,
     contextHash: Sha256Schema,
-    knowledgeHash: Sha256Schema.optional(),
-    uiBackend: UiBackendDescriptorSchema.optional()
+    uiBackend: UiBackendDescriptorSchema
   }),
   replayPolicy: z.strictObject({
     generatedReplayPolicy: z.boolean(),
     requireFocusedInput: z.boolean(),
     idle: IdlePolicySchema
-  }).optional(),
-  contextSelection: ContextSelectionSchema.optional(),
+  }),
+  contextSelection: ContextSelectionSchema,
   verification: z.strictObject({
     reportPath: BundleRelativePathSchema,
     reportSha256: Sha256Schema,
@@ -488,7 +487,7 @@ export const GenerationMetaSchema = z.strictObject({
   }),
   baseFlow: GenerationBaseFlowSchema.optional(),
   sourceBrief: GenerationSourceBriefSchema.optional(),
-  externalFlows: z.array(GenerationExternalFlowBindingSchema).default([]),
+  externalFlows: z.array(GenerationExternalFlowBindingSchema),
   manualOverrideStepIndexes: z.array(z.number().int().nonnegative())
 }).superRefine((meta, context) => {
   if (meta.status === "verified" && meta.promotion !== undefined) {
@@ -585,9 +584,7 @@ export function generationCoreIdentity(
       projectHash: session.bindings.projectHash,
       configHash: session.bindings.configHash,
       contextHash: session.bindings.contextHash,
-      ...(session.bindings.uiBackend === undefined
-        ? {}
-        : { uiBackend: session.bindings.uiBackend })
+      uiBackend: session.bindings.uiBackend
     },
     target: session.target,
     contextSelection: session.contextSelection,

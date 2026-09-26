@@ -42,7 +42,7 @@ import {
   writeJson,
   writeLine
 } from "../output.js";
-import { assertNoLegacyWorkspace } from "../workspace-guard.js";
+import { prepareWorkspace } from "../workspace-guard.js";
 import { canonicalProjectRoot } from "../project-root.js";
 
 interface JourneyResolveOptions {
@@ -180,7 +180,7 @@ function createResolveCommand(dependencies: CliDependencies): Command {
     .option("--json", "Emit one machine-readable JSON value")
     .action(async (options: JourneyResolveOptions): Promise<void> => {
       try {
-        await assertNoLegacyWorkspace(dependencies, options.project);
+        await prepareWorkspace(dependencies, options.project);
         const composition = requireComposition(dependencies);
         const resolution = await composition.resolver.resolve({
           projectRoot: options.project,
@@ -235,7 +235,7 @@ function createListFlowsCommand(dependencies: CliDependencies): Command {
     .option("--include-external", "Also list External Flows")
     .action(async (options: JourneyListOptions): Promise<void> => {
       try {
-        await assertNoLegacyWorkspace(dependencies, options.project);
+        await prepareWorkspace(dependencies, options.project);
         const entries = await requireComposition(
           dependencies
         ).resolver.listFlows(options.project);
@@ -328,7 +328,7 @@ function createCheckCommand(dependencies: CliDependencies): Command {
           dependencies.cwd(),
           options.project
         );
-        await assertNoLegacyWorkspace(dependencies, projectRoot);
+        await prepareWorkspace(dependencies, projectRoot);
         const composition = requireComposition(dependencies);
         let config: TapHoundConfig;
         try {
@@ -420,7 +420,7 @@ function createPromoteCommand(dependencies: CliDependencies): Command {
     .action(async (options: JourneyPromoteOptions): Promise<void> => {
       try {
         const projectRoot = options.project;
-        await assertNoLegacyWorkspace(dependencies, projectRoot);
+        await prepareWorkspace(dependencies, projectRoot);
         const composition = requireComposition(dependencies);
         const result = await new JourneyPromoter({
           store: composition.store
@@ -463,7 +463,7 @@ function createRetireCommand(dependencies: CliDependencies): Command {
     .action(async (options: JourneyRetireOptions): Promise<void> => {
       try {
         const projectRoot = options.project;
-        await assertNoLegacyWorkspace(dependencies, projectRoot);
+        await prepareWorkspace(dependencies, projectRoot);
         const composition = requireComposition(dependencies);
         const result = await new JourneyRetirer({
           store: composition.store

@@ -4,6 +4,12 @@ import type {
   StatePredicate
 } from "../../domain/knowledge.js";
 import type { RuntimeSnapshot } from "../../domain/runtime-snapshot.js";
+
+/** The runtime facts Screen detection reads; any live observation provides them. */
+export type ScreenObservation = Pick<
+  RuntimeSnapshot,
+  "activity" | "layout" | "windowHierarchy"
+>;
 import {
   resolveLocatorIdentity
 } from "../locator/locator-resolver.js";
@@ -32,7 +38,7 @@ function matchesWindow(
 }
 
 function matchAnchor(
-  snapshot: RuntimeSnapshot,
+  snapshot: ScreenObservation,
   anchor: AnchorDefinition
 ): AnchorMatchResult {
   switch (anchor.identity.kind) {
@@ -84,7 +90,7 @@ function matchAnchor(
 
 function predicateResult(
   predicate: StatePredicate,
-  snapshot: RuntimeSnapshot,
+  snapshot: ScreenObservation,
   evidence: ReadonlyMap<string, AnchorMatchResult>
 ): "match" | "noMatch" | "unknown" {
   if (predicate.kind === "activityIs") {
@@ -101,7 +107,7 @@ function predicateResult(
 
 function screenResult(
   screen: ScreenDefinition,
-  snapshot: RuntimeSnapshot,
+  snapshot: ScreenObservation,
   evidence: ReadonlyMap<string, AnchorMatchResult>
 ): "match" | "noMatch" | "unknown" {
   let unknown = false;
@@ -125,7 +131,7 @@ function screenResult(
 
 export class ScreenDetector {
   public readonly detect = (input: {
-    snapshot: RuntimeSnapshot;
+    snapshot: ScreenObservation;
     anchors: readonly AnchorDefinition[];
     screens: readonly ScreenDefinition[];
   }): ScreenDetectionResult => {

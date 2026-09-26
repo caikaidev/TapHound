@@ -5,6 +5,7 @@ import {
 } from "../../../src/application/generation/risk-evaluator.js";
 import type { InteractionPolicy } from "../../../src/domain/project-context.js";
 import { RuntimeSnapshotSchema } from "../../../src/domain/runtime-snapshot.js";
+import { TEST_SNAPSHOT_UI } from "../../fakes/ui-backend.js";
 
 function policy(
   overrides: Partial<InteractionPolicy> = {}
@@ -59,7 +60,7 @@ describe("RiskEvaluator", () => {
 
   it("requires confirmation for a semantically hard-committing click", () => {
     const snapshot = RuntimeSnapshotSchema.parse({
-      version: 1,
+      version: 2,
       generationId: "generation-1",
       baseRevision: 1,
       deviceSerial: "emulator-5554",
@@ -76,7 +77,8 @@ describe("RiskEvaluator", () => {
         enabled: true,
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
         children: []
-      }]
+      }],
+      ...TEST_SNAPSHOT_UI
     });
 
     expect(evaluator.evaluate({
@@ -111,7 +113,7 @@ describe("RiskEvaluator", () => {
 
     for (const locator of softCommitCases) {
       const snapshot = RuntimeSnapshotSchema.parse({
-        version: 1,
+        version: 2,
         generationId: "generation-1",
         baseRevision: 1,
         deviceSerial: "emulator-5554",
@@ -128,7 +130,8 @@ describe("RiskEvaluator", () => {
           enabled: true,
           bounds: { left: 0, top: 0, right: 100, bottom: 100 },
           children: []
-        }]
+        }],
+        ...TEST_SNAPSHOT_UI
       });
 
       const result = evaluator.evaluate({
@@ -148,7 +151,7 @@ describe("RiskEvaluator", () => {
 
   it("still confirms soft-commit actions when policy requires the action", () => {
     const snapshot = RuntimeSnapshotSchema.parse({
-      version: 1,
+      version: 2,
       generationId: "generation-1",
       baseRevision: 1,
       deviceSerial: "emulator-5554",
@@ -165,7 +168,8 @@ describe("RiskEvaluator", () => {
         enabled: true,
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
         children: []
-      }]
+      }],
+      ...TEST_SNAPSHOT_UI
     });
 
     expect(evaluator.evaluate({
@@ -191,7 +195,7 @@ describe("RiskEvaluator", () => {
 
   it("does not classify search submission as an external commit", () => {
     const snapshot = RuntimeSnapshotSchema.parse({
-      version: 1,
+      version: 2,
       generationId: "generation-1",
       baseRevision: 1,
       deviceSerial: "emulator-5554",
@@ -207,7 +211,8 @@ describe("RiskEvaluator", () => {
         enabled: true,
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
         children: []
-      }]
+      }],
+      ...TEST_SNAPSHOT_UI
     });
 
     expect(evaluator.evaluate({
@@ -226,7 +231,7 @@ describe("RiskEvaluator", () => {
 
   it("does not let search context suppress a destructive action", () => {
     const snapshot = RuntimeSnapshotSchema.parse({
-      version: 1,
+      version: 2,
       generationId: "generation-1",
       baseRevision: 1,
       deviceSerial: "emulator-5554",
@@ -242,7 +247,8 @@ describe("RiskEvaluator", () => {
         enabled: true,
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
         children: []
-      }]
+      }],
+      ...TEST_SNAPSHOT_UI
     });
 
     expect(evaluator.evaluate({
@@ -267,7 +273,7 @@ describe("RiskEvaluator", () => {
 
   it("does not let search context suppress a send action", () => {
     const snapshot = RuntimeSnapshotSchema.parse({
-      version: 1,
+      version: 2,
       generationId: "generation-1",
       baseRevision: 1,
       deviceSerial: "emulator-5554",
@@ -283,7 +289,8 @@ describe("RiskEvaluator", () => {
         enabled: true,
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
         children: []
-      }]
+      }],
+      ...TEST_SNAPSHOT_UI
     });
 
     expect(evaluator.evaluate({

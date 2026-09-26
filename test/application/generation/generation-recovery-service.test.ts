@@ -9,6 +9,7 @@ import type {
 import {
   GenerationSessionStoreError
 } from "../../../src/ports/generation-session-store.js";
+import { TEST_UI_BACKEND } from "../../fakes/ui-backend.js";
 
 function session(
   overrides: Partial<GenerationSession> = {}
@@ -22,7 +23,8 @@ function session(
       projectHash: "a".repeat(64),
       configHash: "b".repeat(64),
       contextHash: "c".repeat(64),
-      snapshotHash: "d".repeat(64)
+      snapshotHash: "d".repeat(64),
+      uiBackend: TEST_UI_BACKEND
     },
     target: {
       packageName: "com.example.app",
@@ -57,6 +59,7 @@ function session(
     inFlight: null,
     pendingConfirmation: null,
     verification: { status: "notRun" },
+    verificationHistory: [],
     publication: { status: "notRun" },
     externalFlows: [],
     ...overrides

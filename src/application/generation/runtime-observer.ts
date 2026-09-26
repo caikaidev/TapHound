@@ -230,9 +230,9 @@ export class RuntimeObserver {
     });
     try {
     const views = this.dependencies.sessionPorts(session);
-    const boundBackendSelection = current.bindings.uiBackend === undefined
-      ? undefined
-      : uiBackendIdAsSelection(current.bindings.uiBackend.id);
+    const boundBackendSelection = uiBackendIdAsSelection(
+      current.bindings.uiBackend.id
+    );
     const uiSnapshotProvider = await session.openUiSnapshots({
       timeoutMs: idle?.timeoutMs ?? 5000,
       ...(boundBackendSelection === undefined
@@ -245,26 +245,13 @@ export class RuntimeObserver {
     });
     let runtime: CollectedRuntimeState;
     try {
-      const bound = current.bindings.uiBackend;
       if (
-        bound !== undefined
-        && JSON.stringify(bound) !== JSON.stringify(uiSnapshotProvider.descriptor)
+        JSON.stringify(current.bindings.uiBackend)
+          !== JSON.stringify(uiSnapshotProvider.descriptor)
       ) {
         throw new GenerationOperationError(
           "CONFIG_INVALID",
           "Generation UI backend does not match the authoritative session"
-        );
-      }
-      if (
-        bound === undefined
-        && (
-          current.bindings.snapshotHash !== null
-          || current.candidateSteps.length !== 0
-        )
-      ) {
-        throw new GenerationOperationError(
-          "CONFIG_INVALID",
-          "Legacy generation with authoritative evidence has no UI backend binding"
         );
       }
       if (
@@ -507,8 +494,7 @@ export class SnapshotReobservationGuard {
         );
       }
       if (
-        session.bindings.uiBackend !== undefined
-        && JSON.stringify(session.bindings.uiBackend)
+        JSON.stringify(session.bindings.uiBackend)
           !== JSON.stringify(this.dependencies.uiSnapshotProvider.descriptor)
       ) {
         throw new GenerationOperationError(
@@ -526,7 +512,7 @@ const runtime = await collectRuntime(
         signal
       );
       const snapshot = RuntimeSnapshotSchema.parse({
-        version: session.bindings.uiBackend === undefined ? 1 : 2,
+        version: 2,
         generationId: session.id,
         baseRevision: binding.baseRevision,
         deviceSerial: session.target.deviceSerial,
@@ -538,14 +524,10 @@ const runtime = await collectRuntime(
         screenshotPath: "non-authoritative://runtime-reobservation",
         layout: runtime.layout,
         windowHierarchy: runtime.windowHierarchy,
-        ...(session.bindings.uiBackend === undefined
-          ? {}
-          : {
-              uiBackend: runtime.uiSnapshot.backend,
-              uiObservationId: runtime.uiSnapshot.observationId,
-              uiCaptureDurationMs: runtime.uiSnapshot.durationMs,
-              viewport: runtime.uiSnapshot.viewport
-            })
+        uiBackend: runtime.uiSnapshot.backend,
+        uiObservationId: runtime.uiSnapshot.observationId,
+        uiCaptureDurationMs: runtime.uiSnapshot.durationMs,
+        viewport: runtime.uiSnapshot.viewport
       });
       if (hashRuntimeSnapshot(snapshot) !== binding.snapshotHash) {
         // A targetless proposal (wait) does not consume the Layout, so a

@@ -12,7 +12,7 @@ import {
   assertProjectPathUnder
 } from "../../domain/workspace.js";
 import { failureOutput, writeJson, writeLine } from "../output.js";
-import { assertNoLegacyWorkspace } from "../workspace-guard.js";
+import { prepareWorkspace } from "../workspace-guard.js";
 
 
 interface CaptureOptions {
@@ -86,7 +86,7 @@ function createCaptureCommand(dependencies: CliDependencies): Command {
         return;
       }
       try {
-        await assertNoLegacyWorkspace(dependencies, options.project);
+        await prepareWorkspace(dependencies, options.project);
       } catch (error) {
         writeFailure(
           dependencies,
@@ -172,7 +172,7 @@ function createCompareCommand(dependencies: CliDependencies): Command {
         return;
       }
       try {
-        await assertNoLegacyWorkspace(dependencies, options.project);
+        await prepareWorkspace(dependencies, options.project);
       } catch (error) {
         writeFailure(
           dependencies,

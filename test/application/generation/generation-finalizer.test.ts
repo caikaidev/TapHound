@@ -76,6 +76,7 @@ import type {
 } from "../../../src/application/runtime/verify-runtime.js";
 import { commandResult } from "../../fakes/process-runner.js";
 import { contextSelection } from "../../fixtures/project-context.js";
+import { TEST_UI_BACKEND } from "../../fakes/ui-backend.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -165,7 +166,11 @@ function report(root: string, fallbackUsed = false): TapHoundReport {
     },
     journey: { name: "generated", sha256: hashJourney(journey) },
     environment: {
-      devices: [{ role: "default", deviceSerial: "emulator-5554" }],
+      devices: [{
+        role: "default",
+        deviceSerial: "emulator-5554",
+        uiBackend: TEST_UI_BACKEND
+      }],
       tools: { adb: "1" }
     },
     layers: {
@@ -248,7 +253,11 @@ function bridgeReport(root: string): TapHoundReport {
     },
     journey: { name: "generated", sha256: hashJourney(journey) },
     environment: {
-      devices: [{ role: "default", deviceSerial: "emulator-5554" }],
+      devices: [{
+        role: "default",
+        deviceSerial: "emulator-5554",
+        uiBackend: TEST_UI_BACKEND
+      }],
       tools: { adb: "1" }
     },
     layers: {
@@ -312,7 +321,8 @@ function session(root: string): GenerationSession {
       projectHash: hashGenerationBinding(description),
       configHash: hashGenerationBinding(config),
       contextHash: hashGenerationBinding(context),
-      snapshotHash: "c".repeat(64)
+      snapshotHash: "c".repeat(64),
+      uiBackend: TEST_UI_BACKEND
     },
     target: {
       packageName: "com.example.app",
@@ -343,7 +353,8 @@ function session(root: string): GenerationSession {
     pendingConfirmation: null,
     verification: { status: "notRun" },
     publication: { status: "notRun" },
-    externalFlows: []
+    externalFlows: [],
+    verificationHistory: []
   };
 }
 
@@ -387,9 +398,6 @@ async function bridgeFixture(
   const forceStop = vi.fn<ForceStopFunction>(
     () => Promise.resolve(commandResult())
   );
-  const validateContext = vi.fn(
-    () => Promise.resolve({ status: "valid" as const })
-  );
   const publisher = new GenerationPublisher({
     store,
     journeyWriter,
@@ -403,12 +411,10 @@ async function bridgeFixture(
     forceStop,
     finalize: new GenerationFinalizer({
       store,
-      contextValidator: { validate: validateContext },
       verifyRuntime: { verify },
       publisher,
       generateAttemptId: (): string => "verification-attempt"
-    }),
-    validateContext
+    })
   };
 }
 
@@ -422,16 +428,6 @@ interface FinalizerFixture {
   finalize: GenerationFinalizer;
   verify: Mock<VerifyFunction>;
   forceStop: Mock<ForceStopFunction>;
-  validateContext: Mock<() => Promise<
-    | { status: "valid" }
-    | {
-        status: "stale";
-        reason: {
-          code: "EVIDENCE_HASH_MISMATCH";
-          message: string;
-        };
-      }
-  >>;
 }
 
 async function fixture(
@@ -457,9 +453,6 @@ async function fixture(
   const forceStop = vi.fn<ForceStopFunction>(
     () => Promise.resolve(commandResult())
   );
-  const validateContext = vi.fn(
-    () => Promise.resolve({ status: "valid" as const })
-  );
   const publisher = new GenerationPublisher({
     store,
     journeyWriter,
@@ -473,14 +466,10 @@ async function fixture(
     forceStop,
     finalize: new GenerationFinalizer({
       store,
-      contextValidator: {
-        validate: validateContext
-      },
       verifyRuntime: { verify },
       publisher,
       generateAttemptId: (): string => "verification-attempt"
-    }),
-    validateContext
+    })
   };
 }
 
@@ -617,7 +606,7 @@ describe("GenerationFinalizer", () => {
     expect(test.verify).toHaveBeenCalledOnce();
     const verifyInput = test.verify.mock.calls[0]?.[0];
     expect(verifyInput?.config.idle).toEqual(idlePolicy);
-    expect(result.meta.replayPolicy?.idle).toEqual(idlePolicy);
+    expect(result.meta.replayPolicy.idle).toEqual(idlePolicy);
   });
 
   it("publishes the session source Brief binding in the exported meta", async () => {
@@ -647,7 +636,6 @@ describe("GenerationFinalizer", () => {
     const phases: VerificationPhase[] = [];
     const finalize = new GenerationFinalizer({
       store: test.store,
-      contextValidator: { validate: test.validateContext },
       verifyRuntime: { verify: test.verify },
       publisher: new GenerationPublisher({
         store: test.store,
@@ -714,7 +702,6 @@ describe("GenerationFinalizer", () => {
     const test = await fixture();
     const finalize = new GenerationFinalizer({
       store: test.store,
-      contextValidator: { validate: test.validateContext },
       verifyRuntime: { verify: test.verify },
       publisher: new GenerationPublisher({
         store: test.store,
@@ -819,11 +806,6 @@ describe("GenerationFinalizer", () => {
     expect(test.verify).toHaveBeenCalledOnce();
     const retry = new GenerationFinalizer({
       store: test.store,
-      contextValidator: {
-        validate: vi.fn(
-          () => Promise.resolve({ status: "valid" as const })
-        )
-      },
       verifyRuntime: { verify: test.verify },
       publisher: new GenerationPublisher({
         store: test.store,
@@ -884,41 +866,6 @@ describe("GenerationFinalizer", () => {
     release?.();
     await expect(first).resolves.toMatchObject({ status: "verified" });
     expect(test.verify).toHaveBeenCalledOnce();
-  });
-
-  it("revalidates current manifest sources before recovering a crash receipt", async () => {
-    const test = await fixture();
-    const manifestPath = join(
-      test.root,
-      "app/src/main/AndroidManifest.xml"
-    );
-    await mkdir(join(test.root, "app/src/main"), { recursive: true });
-    await writeFile(manifestPath, "original", "utf8");
-    test.validateContext.mockImplementation(async () => (
-      await readFile(manifestPath, "utf8") === "original"
-        ? { status: "valid" as const }
-        : {
-            status: "stale" as const,
-            reason: {
-              code: "EVIDENCE_HASH_MISMATCH" as const,
-              message: "manifest source changed"
-            }
-          }
-    ));
-    await writeCrashRecoveryEvidence(test);
-    await writeFile(manifestPath, "changed after replay crash", "utf8");
-
-    await expect(test.finalize.finalize(input(test.root))).rejects.toMatchObject({
-      code: "VERIFICATION_FAILED"
-    });
-    await expect(test.store.read("generation-1")).resolves.toMatchObject({
-      verification: {
-        status: "failed",
-        failure: { code: "CONTEXT_STALE" }
-      }
-    });
-    expect(test.verify).not.toHaveBeenCalled();
-    expect(test.validateContext).toHaveBeenCalledOnce();
   });
 
   it("leaves a running attempt in progress when its receipt is truly absent", async () => {
@@ -1080,7 +1027,8 @@ describe("GenerationFinalizer", () => {
         projectHash: running.bindings.projectHash,
         configHash: running.bindings.configHash,
         contextHash: running.bindings.contextHash,
-        snapshotHash: running.bindings.snapshotHash
+        snapshotHash: running.bindings.snapshotHash,
+        uiBackend: TEST_UI_BACKEND
       },
       tools: { adb: "1" },
       report: {
@@ -1145,122 +1093,6 @@ describe("GenerationFinalizer", () => {
     expect(projectHash?.actual).toMatch(/^[a-f\d]{8}$/);
     expect(test.forceStop).not.toHaveBeenCalled();
     expect(test.verify).not.toHaveBeenCalled();
-  });
-
-  it("rolls back the attempt when Context changes after replay", async () => {
-    const test = await fixture();
-    test.validateContext
-      .mockResolvedValueOnce({ status: "valid" })
-      .mockResolvedValueOnce({
-        status: "stale",
-        reason: {
-          code: "EVIDENCE_HASH_MISMATCH",
-          message: "context changed"
-        }
-      });
-
-    await expect(test.finalize.finalize(input(test.root))).rejects.toMatchObject({
-      code: "CONTEXT_STALE"
-    });
-    await expect(test.store.read("generation-1")).resolves.toMatchObject({
-      verification: { status: "notRun" }
-    });
-    expect(test.verify).toHaveBeenCalledOnce();
-  });
-
-  it("keeps the session retryable when Context drifts before replay", async () => {
-    const test = await fixture();
-    test.validateContext.mockResolvedValueOnce({
-      status: "stale",
-      reason: {
-        code: "EVIDENCE_HASH_MISMATCH",
-        message: "context changed"
-      }
-    });
-
-    await expect(test.finalize.finalize(input(test.root))).rejects.toMatchObject({
-      code: "CONTEXT_STALE",
-      stage: "precondition"
-    });
-    await expect(test.store.read("generation-1")).resolves.toMatchObject({
-      verification: { status: "notRun" }
-    });
-    expect(test.verify).not.toHaveBeenCalled();
-    expect(test.validateContext).toHaveBeenCalledOnce();
-
-    const result = await test.finalize.finalize(input(test.root));
-
-    expect(result).toMatchObject({ status: "verified", replayed: true });
-    expect(test.verify).toHaveBeenCalledOnce();
-  });
-
-  it("skips live context validation when the context comes from the session snapshot", async () => {
-    const test = await fixture();
-    test.validateContext.mockResolvedValueOnce({
-      status: "stale",
-      reason: {
-        code: "EVIDENCE_HASH_MISMATCH",
-        message: "context changed"
-      }
-    });
-
-    const result = await test.finalize.finalize({
-      ...input(test.root),
-      contextFromSnapshot: true
-    });
-
-    expect(result).toMatchObject({ status: "verified", replayed: true });
-    expect(test.verify).toHaveBeenCalledOnce();
-    expect(test.validateContext).not.toHaveBeenCalled();
-  });
-
-  it("durably fails when the abort rollback itself is rejected", async () => {
-    const test = await fixture();
-    test.validateContext
-      .mockResolvedValueOnce({ status: "valid" })
-      .mockResolvedValueOnce({
-        status: "stale",
-        reason: {
-          code: "EVIDENCE_HASH_MISMATCH",
-          message: "context changed"
-        }
-      });
-    vi.spyOn(test.store, "abortVerification").mockRejectedValueOnce(
-      new GenerationSessionStoreError(
-        "IO_ERROR",
-        "abort rejected"
-      )
-    );
-
-    await expect(test.finalize.finalize(input(test.root))).rejects.toMatchObject({
-      code: "CONTEXT_STALE"
-    });
-    await expect(test.store.read("generation-1")).resolves.toMatchObject({
-      verification: {
-        status: "failed",
-        failure: { code: "CONTEXT_STALE" }
-      }
-    });
-  });
-  it("allows post-replay evidence drift only with explicit opt-in", async () => {
-    const test = await fixture();
-    test.validateContext
-      .mockResolvedValueOnce({ status: "valid" })
-      .mockResolvedValueOnce({
-        status: "stale",
-        reason: {
-          code: "EVIDENCE_HASH_MISMATCH",
-          message: "implementation-only source change"
-        }
-      });
-
-    await expect(test.finalize.finalize({
-      ...input(test.root),
-      allowEvidenceDrift: true
-    })).resolves.toMatchObject({
-      status: "verified",
-      replayed: true
-    });
   });
 
   it.each([

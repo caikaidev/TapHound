@@ -28,12 +28,13 @@ import {
   GenerationSessionStoreError
 } from "../../../src/ports/generation-session-store.js";
 import { contextSelection } from "../../fixtures/project-context.js";
+import { TEST_SNAPSHOT_UI, TEST_UI_BACKEND } from "../../fakes/ui-backend.js";
 
 const activity = "com.example.app.MainActivity";
 
 function snapshot(): RuntimeSnapshot {
   return {
-    version: 1,
+    version: 2,
     generationId: "generation-1",
     baseRevision: 2,
     deviceSerial: "emulator-5554",
@@ -42,7 +43,8 @@ function snapshot(): RuntimeSnapshot {
     activity,
     pid: 42,
     capturedAt: "2026-07-22T12:00:00.000Z",
-    layout: []
+    layout: [],
+    ...TEST_SNAPSHOT_UI
   };
 }
 
@@ -68,7 +70,8 @@ function session(runtime = snapshot()): GenerationSession {
       projectHash: "a".repeat(64),
       configHash: "b".repeat(64),
       contextHash: "c".repeat(64),
-      snapshotHash: hashRuntimeSnapshot(runtime)
+      snapshotHash: hashRuntimeSnapshot(runtime),
+      uiBackend: TEST_UI_BACKEND
     },
     target: {
       packageName: "com.example.app",
@@ -92,7 +95,8 @@ function session(runtime = snapshot()): GenerationSession {
     pendingConfirmation: null,
     verification: { status: "notRun" },
     publication: { status: "notRun" },
-    externalFlows: []
+    externalFlows: [],
+    verificationHistory: []
   };
 }
 
@@ -239,7 +243,8 @@ describe("GenerationConfirmationService", () => {
         revision: 0,
         bindings: {
           ...active.bindings,
-          snapshotHash: null
+          snapshotHash: null,
+          uiBackend: TEST_UI_BACKEND
         }
       });
       await store.commitSnapshot("generation-1", 0, active);
@@ -341,7 +346,8 @@ describe("GenerationConfirmationService", () => {
       ...current,
       bindings: {
         ...current.bindings,
-        snapshotHash: hashRuntimeSnapshot(runtime)
+        snapshotHash: hashRuntimeSnapshot(runtime),
+        uiBackend: TEST_UI_BACKEND
       },
       target: {
         ...current.target,

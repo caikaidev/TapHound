@@ -28,8 +28,9 @@ const baseline: Baseline = {
     before: "com.example.app.MainActivity",
     after: "com.example.app.SearchActivity"
   }],
-  elements: [{ locator: { resourceId: "search" }, kind: "present" }],
+  elements: [{ locator: { resourceId: "search" }, stepIndex: 0, kind: "present" }],
   screens: [{ screen: "search", status: "matched" }],
+  requiredEvidence: { screens: true },
   sourceReportPath: "/project/.taphound/build/runs/run-1/report.json"
 };
 

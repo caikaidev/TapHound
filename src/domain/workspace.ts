@@ -77,12 +77,6 @@ export function assertProjectPathUnder(
   return candidate;
 }
 
-export const LEGACY_WORKSPACE_DIRECTORIES = [
-  `${TAPHOUND_DIR}/generations`,
-  `${TAPHOUND_DIR}/jobs`,
-  `${TAPHOUND_DIR}/runs`
-] as const;
-
 const SNAPSHOT_EVIDENCE_REFERENCE_PATTERN = new RegExp(
   `^${
     GENERATIONS_DIR.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
@@ -109,35 +103,4 @@ export function parseSnapshotEvidenceReference(
     return null;
   }
   return match[2] ?? null;
-}
-
-const LEGACY_MOVE_TARGETS: Record<string, string> = {
-  [`${TAPHOUND_DIR}/generations`]: GENERATIONS_DIR,
-  [`${TAPHOUND_DIR}/jobs`]: JOBS_DIR,
-  [`${TAPHOUND_DIR}/runs`]: DEFAULT_ARTIFACTS_DIR
-};
-
-function legacyMoveTarget(path: string): string | undefined {
-  return LEGACY_MOVE_TARGETS[path]
-    ?? (path.startsWith(`${TAPHOUND_DIR}/`)
-      ? `${DEFAULT_ARTIFACTS_DIR}/${path.slice(TAPHOUND_DIR.length + 1)}`
-      : undefined);
-}
-
-export function legacyWorkspaceMessage(
-  found: readonly string[]
-): string {
-  const moves = found.map((path) => {
-    const target = legacyMoveTarget(path);
-    return target === undefined
-      ? `  rm -r ${path}`
-      : `  mv ${path} ${target}`;
-  });
-  return [
-    `Legacy TapHound workspace directories found: ${found.join(", ")}.`,
-    `Every ephemeral artifact now lives under ${BUILD_DIR}/. Move them:`,
-    ...moves,
-    `Then set artifactsDir to ${DEFAULT_ARTIFACTS_DIR} or omit it to use the`,
-    "default, and ignore only .taphound/build/ in version control."
-  ].join("\n");
 }

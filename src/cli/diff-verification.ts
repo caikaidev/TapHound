@@ -23,7 +23,7 @@ import {
   writeJson,
   writeLine
 } from "./output.js";
-import { assertNoLegacyWorkspace } from "./workspace-guard.js";
+import { prepareWorkspace } from "./workspace-guard.js";
 
 export interface DiffVerificationOptions {
   project: string;
@@ -117,7 +117,7 @@ export async function runDiffVerification(
       resolve(projectRoot, options.config)
     ));
     assertArtifactDirectory(projectRoot, config.artifactsDir);
-    await assertNoLegacyWorkspace(dependencies, projectRoot);
+    await prepareWorkspace(dependencies, projectRoot);
 
     const changeSet = await dependencies.gitDiff.diff({
       projectRoot,

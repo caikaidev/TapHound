@@ -17,7 +17,7 @@ import {
   writeJson,
   writeLine
 } from "../output.js";
-import { assertNoLegacyWorkspace } from "../workspace-guard.js";
+import { prepareWorkspace } from "../workspace-guard.js";
 
 interface ContractOptions {
   project: string;
@@ -77,7 +77,7 @@ export function createContractCommand(
       }
       const contractPath = resolve(options.project, options.contract);
       try {
-        await assertNoLegacyWorkspace(dependencies, options.project);
+        await prepareWorkspace(dependencies, options.project);
       } catch (error) {
         writeFailure(
           dependencies,
@@ -149,7 +149,7 @@ function createContractReviewCommand(
       const verdictPath = resolve(project, options.verdict);
       const findingsPath = resolve(project, options.findings);
       try {
-        await assertNoLegacyWorkspace(dependencies, project);
+        await prepareWorkspace(dependencies, project);
       } catch (error) {
         writeFailure(
           dependencies,

@@ -39,6 +39,7 @@ import {
 import type { Journey } from "../../src/domain/journey.js";
 import { hashJourney } from "../../src/domain/report.js";
 import { CONFIG_PATH } from "../../src/domain/workspace.js";
+import { TEST_REPLAY_POLICY, TEST_SNAPSHOT_UI, TEST_UI_BACKEND } from "../fakes/ui-backend.js";
 
 const generationContext = resolvedProjectContext;
 
@@ -170,7 +171,8 @@ function dependencies(): {
             projectHash: "d".repeat(64),
             configHash: "e".repeat(64),
             contextHash: "a".repeat(64),
-            snapshotHash: null
+            snapshotHash: null,
+            uiBackend: TEST_UI_BACKEND
           },
           target: {
             packageName: "com.example.app",
@@ -194,7 +196,8 @@ function dependencies(): {
           pendingConfirmation: null,
           verification: { status: "notRun" as const },
           publication: { status: "notRun" as const },
-          externalFlows: []
+          externalFlows: [],
+          verificationHistory: []
         }))
       },
       workspaceLayout: fakeWorkspaceLayout(),
@@ -208,7 +211,7 @@ function dependencies(): {
           snapshotHash: "b".repeat(64),
           snapshotRef: ".taphound/build/generations/generation-1/evidence/snapshots/revision-000001/attempt-1/snapshot.json",
           snapshot: {
-            version: 1 as const,
+            version: 2 as const,
             generationId: "generation-1",
             baseRevision: 1,
             deviceSerial: "emulator-5554",
@@ -219,7 +222,8 @@ function dependencies(): {
             capturedAt: "2026-07-22T12:01:00.000Z",
             screenshotPath:
               "evidence/snapshots/revision-000001/screen.png",
-            layout: []
+            layout: [],
+            ...TEST_SNAPSHOT_UI
           }
         }))
       },
@@ -497,7 +501,8 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
         projectHash: "d".repeat(64),
         configHash: "e".repeat(64),
         contextHash: "a".repeat(64),
-        snapshotHash: null
+        snapshotHash: null,
+        uiBackend: TEST_UI_BACKEND
       },
       contextSelection,
       variables: {
@@ -599,7 +604,8 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
         projectHash: "d".repeat(64),
         configHash: "e".repeat(64),
         contextHash: "a".repeat(64),
-        snapshotHash: null
+        snapshotHash: null,
+        uiBackend: TEST_UI_BACKEND
       },
       target: {
         packageName: "com.example.app",
@@ -628,7 +634,8 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
         flowSha256: "a".repeat(64),
         escapedPackageName: "com.android.camera",
         stepCount: 1
-      }]
+      }],
+      verificationHistory: []
     });
 
     await createProgram(test.value).parseAsync([
@@ -684,7 +691,8 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
         projectHash: "d".repeat(64),
         configHash: "e".repeat(64),
         contextHash: "a".repeat(64),
-        snapshotHash: null
+        snapshotHash: null,
+        uiBackend: TEST_UI_BACKEND
       },
       target: {
         packageName: "com.example.app",
@@ -712,7 +720,8 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
         path: "docs/cases/search-brief.md",
         sha256: createHash("sha256").update(briefContent).digest("hex")
       },
-      externalFlows: []
+      externalFlows: [],
+      verificationHistory: []
     });
 
     await createProgram(test.value).parseAsync([
@@ -1222,7 +1231,8 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
       bindings: {
         projectHash,
         configHash: hashGenerationBinding(runtimeConfig),
-        contextHash: "c".repeat(64)
+        contextHash: "c".repeat(64),
+        uiBackend: TEST_UI_BACKEND
       },
       contextSelection,
       verification: {
@@ -1231,7 +1241,10 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
         runId: "verify-run",
         runs: 1
       },
-      manualOverrideStepIndexes: []
+      manualOverrideStepIndexes: [],
+      journeySha256: "e".repeat(64),
+      replayPolicy: TEST_REPLAY_POLICY,
+      externalFlows: []
     })}\n`;
     test.value.journeyResolver = {
       resolve: vi.fn(),
@@ -1298,7 +1311,8 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
       bindings: {
         projectHash,
         configHash: hashGenerationBinding(runtimeConfig),
-        contextHash: "c".repeat(64)
+        contextHash: "c".repeat(64),
+        uiBackend: TEST_UI_BACKEND
       },
       contextSelection,
       verification: {
@@ -1307,7 +1321,10 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
         runId: "verify-run",
         runs: 1
       },
-      manualOverrideStepIndexes: []
+      manualOverrideStepIndexes: [],
+      journeySha256: "e".repeat(64),
+      replayPolicy: TEST_REPLAY_POLICY,
+      externalFlows: []
     })}\n`;
     test.value.journeyResolver = {
       resolve: vi.fn(),
@@ -1353,7 +1370,8 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
       bindings: {
         projectHash,
         configHash: hashGenerationBinding(runtimeConfig),
-        contextHash: "c".repeat(64)
+        contextHash: "c".repeat(64),
+        uiBackend: TEST_UI_BACKEND
       },
       contextSelection: {
         ...contextSelection,
@@ -1368,7 +1386,10 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
         runId: "verify-run",
         runs: 1
       },
-      manualOverrideStepIndexes: []
+      manualOverrideStepIndexes: [],
+      journeySha256: "e".repeat(64),
+      replayPolicy: TEST_REPLAY_POLICY,
+      externalFlows: []
     })}\n`;
     test.value.journeyResolver = {
       resolve: vi.fn(),
@@ -1528,7 +1549,7 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
       snapshotHash: "b".repeat(64),
       snapshotRef: ".taphound/build/generations/generation-1/evidence/snapshots/revision-000001/attempt-1/snapshot.json",
       snapshot: {
-        version: 1,
+        version: 2,
         generationId: "generation-1",
         baseRevision: 1,
         deviceSerial: "emulator-5554",
@@ -1538,7 +1559,8 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
         pid: null,
         capturedAt: "2026-07-22T12:01:00.000Z",
         screenshotPath: "evidence/snapshots/revision-000001/screen.png",
-        layout: []
+        layout: [],
+        ...TEST_SNAPSHOT_UI
       }
     });
     expect(test.stdout.value.endsWith("\n")).toBe(true);
@@ -2403,7 +2425,8 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
       bindings: {
         projectHash: "a".repeat(64),
         configHash: "b".repeat(64),
-        contextHash: "c".repeat(64)
+        contextHash: "c".repeat(64),
+        uiBackend: TEST_UI_BACKEND
       },
       verification: {
         reportPath: "verification/report.json",
@@ -2413,7 +2436,11 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
         runId: "verify-run",
         runs: 1
       },
-      manualOverrideStepIndexes: []
+      manualOverrideStepIndexes: [],
+      journeySha256: "e".repeat(64),
+      replayPolicy: TEST_REPLAY_POLICY,
+      contextSelection,
+      externalFlows: []
     };
     const writes: Array<{ relativePath: string; content: string }> = [];
     test.value.journeyCompositionStore = {
@@ -2492,7 +2519,8 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
       bindings: {
         projectHash: "a".repeat(64),
         configHash: "b".repeat(64),
-        contextHash: "c".repeat(64)
+        contextHash: "c".repeat(64),
+        uiBackend: TEST_UI_BACKEND
       },
       verification: {
         reportPath: "verification/report.json",
@@ -2500,7 +2528,11 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
         runId: "verify-run",
         runs: 1
       },
-      manualOverrideStepIndexes: []
+      manualOverrideStepIndexes: [],
+      journeySha256: "e".repeat(64),
+      replayPolicy: TEST_REPLAY_POLICY,
+      contextSelection,
+      externalFlows: []
     };
     test.value.journeyCompositionStore = {
       read: vi.fn(() => Promise.resolve(

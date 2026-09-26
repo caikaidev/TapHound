@@ -16,6 +16,7 @@ import {
 import type { GenerationSession } from "../../../src/domain/generation.js";
 import type { TapHoundConfig } from "../../../src/domain/config.js";
 import { resolvedProjectContext } from "../../fixtures/project-context.js";
+import { TEST_UI_BACKEND } from "../../fakes/ui-backend.js";
 
 const roots: string[] = [];
 
@@ -57,7 +58,8 @@ function session(overrides?: {
       projectHash: "0".repeat(64),
       configHash: "1".repeat(64),
       contextHash: "2".repeat(64),
-      snapshotHash: null
+      snapshotHash: null,
+      uiBackend: TEST_UI_BACKEND
     },
     target: {
       packageName: "com.example.app",
@@ -80,7 +82,8 @@ function session(overrides?: {
     pendingConfirmation: overrides?.pendingConfirmation ?? null,
     verification: overrides?.verification ?? { status: "notRun" },
     publication: { status: "notRun" },
-    externalFlows: []
+    externalFlows: [],
+    verificationHistory: []
   };
 }
 

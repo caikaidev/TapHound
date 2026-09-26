@@ -18,6 +18,8 @@ import { JourneySchema } from "../../../src/domain/journey.js";
 import { hashJourney } from "../../../src/domain/report.js";
 import { validReport } from "../../fixtures/report.js";
 import search from "../../fixtures/journeys/search.json" with { type: "json" };
+import { TEST_UI_BACKEND } from "../../fakes/ui-backend.js";
+import { contextSelection } from "../../fixtures/project-context.js";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const helper = join(repo, "assets", "skills", "taphound-preserve", "scripts", "handoff.mjs");
@@ -99,7 +101,8 @@ async function setup(mode: "journey" | "contract" = "journey"): Promise<{
     journeySha256: journeySha,
     bindings: {
       projectHash: "a".repeat(64), configHash: "b".repeat(64),
-      contextHash: "c".repeat(64)
+      contextHash: "c".repeat(64),
+      uiBackend: TEST_UI_BACKEND
     },
     verification: {
       reportPath: "verification/report.json", reportSha256: "d".repeat(64),
@@ -111,7 +114,9 @@ async function setup(mode: "journey" | "contract" = "journey"): Promise<{
       idle: {
         strategy: "structural", pollIntervalMs: 250, stablePolls: 2, timeoutMs: 5000
       }
-    }
+    },
+    contextSelection,
+    externalFlows: []
   }));
   await put(baseline, baselineValue);
   await put(join(before, "report.json"), report);

@@ -123,15 +123,10 @@ function checkpointMatches(actual, expected) {
     || actual.timeoutMs !== expected.timeoutMs
     || !Array.isArray(actual.allOf) || actual.allOf.length !== 1
     || JSON.stringify(canonical(actual.allOf[0]))
-      !== JSON.stringify(canonical(expected.allOf[0]))
-    || (actual.visibleElements !== undefined
-      && (!Array.isArray(actual.visibleElements) || actual.visibleElements.length > 0))
-    || (actual.absentElements !== undefined
-      && (!Array.isArray(actual.absentElements) || actual.absentElements.length > 0))) {
+      !== JSON.stringify(canonical(expected.allOf[0]))) {
     return false;
   }
-  return Object.keys(actual).every((key) =>
-    ["allOf", "timeoutMs", "visibleElements", "absentElements"].includes(key));
+  return Object.keys(actual).every((key) => ["allOf", "timeoutMs"].includes(key));
 }
 function observablePassed(report, evidence) {
   if (evidence.source === "step") {

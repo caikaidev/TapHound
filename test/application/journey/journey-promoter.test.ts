@@ -11,6 +11,8 @@ import { JourneySchema } from "../../../src/domain/journey.js";
 import type { TapHoundReport } from "../../../src/domain/report.js";
 import type { JourneyCompositionStore } from "../../../src/ports/journey-composition-store.js";
 import { validReport } from "../../fixtures/report.js";
+import { TEST_REPLAY_POLICY, TEST_UI_BACKEND } from "../../fakes/ui-backend.js";
+import { contextSelection } from "../../fixtures/project-context.js";
 
 const JOURNEY_PATH = ".taphound/journeys/generated.json";
 const META_PATH = ".taphound/journeys/generated.meta.json";
@@ -48,7 +50,8 @@ function validMeta(reportSha256: string): GenerationMeta {
     bindings: {
       projectHash: "a".repeat(64),
       configHash: "b".repeat(64),
-      contextHash: "c".repeat(64)
+      contextHash: "c".repeat(64),
+      uiBackend: TEST_UI_BACKEND
     },
     verification: {
       reportPath: "verification/report.json",
@@ -56,7 +59,11 @@ function validMeta(reportSha256: string): GenerationMeta {
       runId: "verify-run",
       runs: 1
     },
-    manualOverrideStepIndexes: []
+    manualOverrideStepIndexes: [],
+    journeySha256: "e".repeat(64),
+    replayPolicy: TEST_REPLAY_POLICY,
+    contextSelection,
+    externalFlows: []
   });
 }
 

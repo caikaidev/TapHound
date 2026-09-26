@@ -3,7 +3,6 @@ import {
   lstat,
   mkdir,
   open,
-  readdir,
   realpath
 } from "node:fs/promises";
 import { join } from "node:path";
@@ -12,39 +11,10 @@ import {
   BUILD_DIR,
   BUILD_IGNORE_CONTENT,
   BUILD_IGNORE_FILE,
-  LEGACY_WORKSPACE_DIRECTORIES,
   TAPHOUND_DIR
 } from "../../domain/workspace.js";
 import type { WorkspaceLayoutPort } from "../../ports/workspace-layout.js";
 import { isErrnoException } from "../../shared/errors.js";
-import { compareStrings } from "../../shared/strings.js";
-
-const STRAY_RUN_DIRECTORY = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-export async function findLegacyDirectories(
-  projectRoot: string
-): Promise<readonly string[]> {
-  try {
-    const entries = await readdir(join(projectRoot, TAPHOUND_DIR), {
-      withFileTypes: true
-    });
-    const legacyNames = new Set(LEGACY_WORKSPACE_DIRECTORIES.map(
-      (path) => path.slice(TAPHOUND_DIR.length + 1)
-    ));
-    return entries
-      .filter((entry) => (
-        legacyNames.has(entry.name)
-        || STRAY_RUN_DIRECTORY.test(entry.name)
-      ) && (entry.isDirectory() || entry.isSymbolicLink()))
-      .map((entry) => `${TAPHOUND_DIR}/${entry.name}`)
-      .sort((left, right) => compareStrings(left, right));
-  } catch (error) {
-    if (!isErrnoException(error) || error.code !== "ENOENT") {
-      throw error;
-    }
-    return [];
-  }
-}
 
 export async function ensureBuildIgnored(projectRoot: string): Promise<void> {
   let handle: Awaited<ReturnType<typeof open>> | undefined;
@@ -96,10 +66,6 @@ export async function ensureBuildLayout(projectRoot: string): Promise<void> {
 }
 
 export class FileSystemWorkspaceLayout implements WorkspaceLayoutPort {
-  public readonly findLegacyDirectories = async (
-    projectRoot: string
-  ): Promise<readonly string[]> => findLegacyDirectories(projectRoot);
-
   public readonly ensureBuildIgnored = async (
     projectRoot: string
   ): Promise<void> => {

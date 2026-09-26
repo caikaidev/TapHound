@@ -42,7 +42,6 @@ import {
   type BridgeScenario
 } from "../../domain/journey.js";
 import { LocatorSchema } from "../../domain/layout.js";
-import type { ResolvedProjectContext } from "../../domain/project-context.js";
 import { ProjectRelativePathSchema } from "../../domain/project-context.js";
 import { RuntimeSnapshotSchema } from "../../domain/runtime-snapshot.js";
 import {
@@ -64,7 +63,7 @@ import {
   writeJson,
   writeLine
 } from "../output.js";
-import { assertNoLegacyWorkspace } from "../workspace-guard.js";
+import { prepareWorkspace } from "../workspace-guard.js";
 import { canonicalProjectRoot } from "../project-root.js";
 
 interface GenerationStartOptions {
@@ -119,11 +118,9 @@ interface GenerationBridgeOptions extends GenerationObserveOptions {
 }
 
 interface GenerationFinalizeOptions extends GenerationObserveOptions {
-  context?: string | undefined;
   output: string;
   name?: string | undefined;
   device?: string | undefined;
-  allowEvidenceDrift?: boolean | undefined;
   detach?: boolean | undefined;
 }
 
@@ -239,7 +236,7 @@ async function loadConfig(
       resolve(options.project, options.config)
     ));
     assertArtifactDirectory(options.project, config.artifactsDir);
-    await assertNoLegacyWorkspace(dependencies, options.project);
+    await prepareWorkspace(dependencies, options.project);
     return config;
   } catch (error) {
     throw new GenerationOperationError(
@@ -1337,20 +1334,12 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
   return addCommonOptions(
     new Command("finalize")
       .description("Verify and publish a generated Journey")
-      .option(
-        "--context <path>",
-        "Project Context path (legacy sessions without a stored snapshot)"
-      )
       .requiredOption(
         "--output <path>",
         "Journey output under .taphound/journeys"
       )
       .option("--name <name>", "Generated Journey name")
       .option("--device <serial>", "Select an online Android device")
-      .option(
-        "--allow-evidence-drift",
-        "Allow changed source evidence; replay remains mandatory"
-      )
       .option(
         "--detach",
         "Run verification in a detached process and return immediately"
@@ -1369,14 +1358,7 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
         : z.string().trim().min(1).parse(options.name);
       const runtime = requireRuntime(dependencies, projectRoot, config);
       await assertRuntimeConfig(runtime, generationId);
-      const session = await runtime.readSession(generationId);
-      const snapshotContext = await runtime.readContextSnapshot(generationId);
-      if (snapshotContext === null && options.context === undefined) {
-        throw new GenerationOperationError(
-          "CONFIG_INVALID",
-          "--context is required for generation sessions without a stored context snapshot"
-        );
-      }
+      const context = await runtime.readContextSnapshot(generationId);
       if (options.detach === true) {
         if (
           dependencies.detachedProcess === undefined
@@ -1401,18 +1383,12 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
           options.config,
           "--session",
           generationId,
-          ...(options.context === undefined
-            ? []
-            : ["--context", options.context]),
           "--output",
           options.output,
           ...(options.name === undefined ? [] : ["--name", options.name]),
           ...(options.device === undefined
             ? []
             : ["--device", options.device]),
-          ...(options.allowEvidenceDrift === true
-            ? ["--allow-evidence-drift"]
-            : []),
           "--json"
         ];
         const launched = await dependencies.detachedProcess.launch({
@@ -1433,36 +1409,16 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
         }, `Generation finalization started: ${generationId}`);
         return;
       }
-      let context: ResolvedProjectContext;
-      let contextFromSnapshot = false;
-      if (snapshotContext !== null) {
-        context = snapshotContext;
-        contextFromSnapshot = true;
-        const verdict = await dependencies.contextValidator.validate({
-          context,
-          projectRoot: projectRoot,
-          config
-        });
-        if (verdict.status !== "valid") {
-          writeLine(
-            dependencies.stderr,
-            `TapHound warning: live project context drifted from the session snapshot (${verdict.reason.code}: ${verdict.reason.message}); the session snapshot remains authoritative`
-          );
-        }
-      } else {
-        const contextOption = options.context;
-        if (contextOption === undefined) {
-          throw new GenerationOperationError(
-            "CONFIG_INVALID",
-            "--context is required for generation sessions without a stored context snapshot"
-          );
-        }
-        const loaded = await dependencies.contextLoader.load({
-          projectRoot: projectRoot,
-          contextPath: resolve(projectRoot, contextOption),
-          moduleIds: session.contextSelection.modules.map((module) => module.id)
-        });
-        context = loaded.context;
+      const verdict = await dependencies.contextValidator.validate({
+        context,
+        projectRoot,
+        config
+      });
+      if (verdict.status !== "valid") {
+        writeLine(
+          dependencies.stderr,
+          `TapHound warning: live project context drifted from the session snapshot (${verdict.reason.code}: ${verdict.reason.message}); the session snapshot remains authoritative`
+        );
       }
       const doctor = await dependencies.doctor.run({
         packageName: config.run.packageName,
@@ -1511,14 +1467,10 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
         projectRoot: projectRoot,
         config,
         context,
-        ...(contextFromSnapshot ? { contextFromSnapshot: true } : {}),
         project,
         outputPath,
         ...(name === undefined ? {} : { name }),
         deviceSerial,
-        ...(options.allowEvidenceDrift === true
-          ? { allowEvidenceDrift: true }
-          : {}),
         manualReplay: process.stdin.isTTY,
         toolVersions: tools(doctor.checks),
         ...(dependencies.signal === undefined
@@ -1532,10 +1484,7 @@ function createFinalizeCommand(dependencies: CliDependencies): Command {
         bundlePath: result.bundlePath,
         journeyPath: result.journeyPath,
         metaPath: result.metaPath,
-        replayed: result.replayed,
-        ...(options.allowEvidenceDrift === true
-          ? { evidenceDriftAllowed: true }
-          : {})
+        replayed: result.replayed
       }, `Generation verified: ${result.journeyPath}`);
     } catch (error) {
       mappedFailure(dependencies, options, error);
@@ -1716,7 +1665,7 @@ function createReopenCommand(dependencies: CliDependencies): Command {
         generationId,
         revision: session.revision,
         verification: session.verification,
-        preservedFailure: session.verificationHistory?.at(-1),
+        preservedFailure: session.verificationHistory.at(-1),
         nextAction: {
           command: "generation step --replace <index>",
           then: "generation finalize"

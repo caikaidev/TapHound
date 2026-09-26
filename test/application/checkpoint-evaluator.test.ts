@@ -18,7 +18,8 @@ function evaluate(
     adb: runtimeFixture().adb,
     packageName: "com.example.app",
     deviceSerial: "emulator-5554",
-    timeoutMs: 500
+    timeoutMs: 500,
+    clock: new FakeClock()
   });
 }
 
@@ -261,12 +262,21 @@ describe("CheckpointEvaluator", () => {
       version: 1,
       id: "search-absent",
       name: "Search absent",
-      expect: { absentElements: [{ resourceId: "search" }] }
+      expect: {
+        allOf: [
+          { kind: "absentElement", locator: { resourceId: "search" } }
+        ],
+        timeoutMs: 100
+      }
     });
     const result = await evaluate([element, { ...element, id: "another" }], checkpoint);
     expect(result.report).toMatchObject({
       status: "unresolved",
-      conditions: [{ kind: "absentElement", status: "unresolved" }]
+      conditions: [{
+        kind: "absentElement",
+        status: "unresolved",
+        message: expect.stringContaining("matches 2") as unknown
+      }]
     });
   });
 
@@ -276,9 +286,12 @@ describe("CheckpointEvaluator", () => {
       id: "ready",
       name: "Ready",
       expect: {
-        activity: "com.example.app.SearchActivity",
-        visibleElements: [{ resourceId: "search" }],
-        absentElements: [{ resourceId: "spinner" }]
+        allOf: [
+          { kind: "activity", expected: "com.example.app.SearchActivity" },
+          { kind: "visibleElement", locator: { resourceId: "search" } },
+          { kind: "absentElement", locator: { resourceId: "spinner" } }
+        ],
+        timeoutMs: 100
       }
     });
     const provider = uiSnapshotProvider();
@@ -289,12 +302,13 @@ describe("CheckpointEvaluator", () => {
       adb: runtimeFixture().adb,
       packageName: "com.example.app",
       deviceSerial: "emulator-5554",
-      timeoutMs: 500
+      timeoutMs: 500,
+      clock: new FakeClock()
     });
     expect(provider.capture).toHaveBeenCalledWith({
       reason: "evidence",
       freshness: "forceFresh",
-      timeoutMs: 500
+      timeoutMs: 100
     });
     expect(result.report.status).toBe("unresolved");
     expect(result.report.conditions.map((condition) => condition.status))
@@ -306,7 +320,12 @@ describe("CheckpointEvaluator", () => {
       version: 1,
       id: "spinner-gone",
       name: "Spinner gone",
-      expect: { absentElements: [{ resourceId: "spinner" }] }
+      expect: {
+        allOf: [
+          { kind: "absentElement", locator: { resourceId: "spinner" } }
+        ],
+        timeoutMs: 100
+      }
     });
     const fixture = runtimeFixture();
     vi.mocked(fixture.adb.foregroundComponent).mockResolvedValue({
@@ -319,11 +338,16 @@ describe("CheckpointEvaluator", () => {
       adb: fixture.adb,
       packageName: "com.example.app",
       deviceSerial: "emulator-5554",
-      timeoutMs: 500
+      timeoutMs: 500,
+      clock: new FakeClock()
     });
     expect(result.report).toMatchObject({
       status: "unresolved",
-      conditions: [{ kind: "absentElement", status: "unresolved" }]
+      conditions: [{
+        kind: "absentElement",
+        status: "unresolved",
+        message: expect.stringContaining("com.example.other") as unknown
+      }]
     });
   });
 });

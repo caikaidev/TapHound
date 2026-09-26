@@ -8,6 +8,7 @@ import {
   type GenerationSession
 } from "../../../src/domain/generation.js";
 import { contextSelection } from "../../fixtures/project-context.js";
+import { TEST_UI_BACKEND } from "../../fakes/ui-backend.js";
 
 function failedSession(): GenerationSession {
   return GenerationSessionSchema.parse({
@@ -19,7 +20,8 @@ function failedSession(): GenerationSession {
       projectHash: "a".repeat(64),
       configHash: "b".repeat(64),
       contextHash: "c".repeat(64),
-      snapshotHash: "d".repeat(64)
+      snapshotHash: "d".repeat(64),
+      uiBackend: TEST_UI_BACKEND
     },
     target: {
       packageName: "com.example.app",
@@ -49,7 +51,8 @@ function failedSession(): GenerationSession {
         message: "step 0 locator missing"
       }
     },
-    publication: { status: "notRun" }
+    publication: { status: "notRun" },
+    verificationHistory: []
   });
 }
 

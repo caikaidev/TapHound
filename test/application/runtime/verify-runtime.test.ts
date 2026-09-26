@@ -101,15 +101,14 @@ describe("VerifyRuntime", () => {
         }],
         checkpoints: [{
           version: 1, id: "search-ready", name: "Search ready", status: "inferred",
-          stepIndex: 1, expect: { visibleElements: [], absentElements: [],
-            timeoutMs: 200, allOf: [
+          stepIndex: 1, expect: { allOf: [
             { kind: "absentElement", locator: { resourceId: "spinner" } },
             { kind: "logcatEvent", expect: {
               type: "logcatEvent", tag: "Search", event: "results",
               fields: { query: "hello" }, unique: true,
               window: { from: "marker", markerId: "search-start" }
             } }
-          ] }
+          ], timeoutMs: 200 }
         }]
       }
     });
@@ -142,9 +141,12 @@ describe("VerifyRuntime", () => {
           stepIndex: 0,
           status: "inferred",
           expect: {
-            activity: "com.example.app.SearchActivity",
-            visibleElements: [{ resourceId: "search" }],
-            absentElements: [{ resourceId: "spinner" }]
+            allOf: [
+              { kind: "activity", expected: "com.example.app.SearchActivity" },
+              { kind: "visibleElement", locator: { resourceId: "search" } },
+              { kind: "absentElement", locator: { resourceId: "spinner" } }
+            ],
+            timeoutMs: 100
           }
         }, {
           version: 1,
@@ -152,8 +154,10 @@ describe("VerifyRuntime", () => {
           name: "At end",
           status: "inferred",
           expect: {
-            visibleElements: [{ resourceId: "search" }],
-            absentElements: []
+            allOf: [
+              { kind: "visibleElement", locator: { resourceId: "search" } }
+            ],
+            timeoutMs: 100
           }
         }]
       }
@@ -193,8 +197,10 @@ describe("VerifyRuntime", () => {
           stepIndex: 0,
           status: "inferred",
           expect: {
-            visibleElements: [{ resourceId: "not-present" }],
-            absentElements: []
+            allOf: [
+              { kind: "visibleElement", locator: { resourceId: "not-present" } }
+            ],
+            timeoutMs: 100
           }
         }]
       }
@@ -227,7 +233,12 @@ describe("VerifyRuntime", () => {
           name: "Search screen",
           stepIndex: 0,
           status: "inferred",
-          expect: { screen: "search", visibleElements: [], absentElements: [] }
+          expect: {
+            allOf: [
+              { kind: "screen", expected: "search" }
+            ],
+            timeoutMs: 100
+          }
         }]
       }
     });
@@ -290,7 +301,12 @@ describe("VerifyRuntime", () => {
           id: "search-screen",
           name: "Search screen",
           status: "inferred",
-          expect: { screen: "search", visibleElements: [], absentElements: [] }
+          expect: {
+            allOf: [
+              { kind: "screen", expected: "search" }
+            ],
+            timeoutMs: 100
+          }
         }]
       }
     });

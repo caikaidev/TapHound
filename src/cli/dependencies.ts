@@ -234,9 +234,7 @@ export interface GenerationCliRuntime {
   archive: (id: string) => Promise<GenerationSession>;
   list: () => Promise<readonly GenerationSession[]>;
   readSession: (id: string) => Promise<GenerationSession>;
-  readContextSnapshot: (
-    id: string
-  ) => Promise<ResolvedProjectContext | null>;
+  readContextSnapshot: (id: string) => Promise<ResolvedProjectContext>;
   assertConfigIdentity: (id: string) => Promise<void>;
   updateIdlePolicy: (
     id: string,
@@ -908,7 +906,6 @@ export function createProductionDependencies(
       });
       const finalizer = new GenerationFinalizer({
         store,
-        contextValidator,
         verifyRuntime,
         publisher,
         generateAttemptId: randomUUID,
@@ -957,7 +954,7 @@ export function createProductionDependencies(
         },
         list: (): Promise<readonly GenerationSession[]> => store.list(),
         readSession: (id): Promise<GenerationSession> => store.read(id),
-        readContextSnapshot: (id): Promise<ResolvedProjectContext | null> => (
+        readContextSnapshot: (id): Promise<ResolvedProjectContext> => (
           readGenerationContextSnapshot({ store }, id)
         ),
         assertConfigIdentity: async (id): Promise<void> => {

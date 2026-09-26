@@ -15,9 +15,12 @@
     "name": "Search ready",
     "stepIndex": 0,
     "expect": {
-      "activity": "com.example.app.SearchActivity",
-      "visibleElements": [{ "resourceId": "search" }],
-      "absentElements": [{ "resourceId": "spinner" }]
+      "allOf": [
+        { "kind": "activity", "expected": "com.example.app.SearchActivity" },
+        { "kind": "visibleElement", "locator": { "resourceId": "search" } },
+        { "kind": "absentElement", "locator": { "resourceId": "spinner" } }
+      ],
+      "timeoutMs": 100
     }
   }]
 }

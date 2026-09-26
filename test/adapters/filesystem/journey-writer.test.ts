@@ -17,6 +17,7 @@ import { FileSystemGenerationMetaWriter } from "../../../src/adapters/filesystem
 import { FileSystemJourneyWriter } from "../../../src/adapters/filesystem/journey-writer.js";
 import { runtimeJourney } from "../../fakes/runtime-fixture.js";
 import { contextSelection } from "../../fixtures/project-context.js";
+import { TEST_UI_BACKEND } from "../../fakes/ui-backend.js";
 
 const roots: string[] = [];
 
@@ -141,10 +142,22 @@ describe("FileSystemJourneyWriter", () => {
         status: "verified",
         generationId: "generation-1",
         journeyPath: ".taphound/journeys/search.json",
+        journeySha256: "e".repeat(64),
         bindings: {
           projectHash: "a".repeat(64),
           configHash: "b".repeat(64),
-          contextHash: "c".repeat(64)
+          contextHash: "c".repeat(64),
+          uiBackend: TEST_UI_BACKEND
+        },
+        replayPolicy: {
+          generatedReplayPolicy: true,
+          requireFocusedInput: true,
+          idle: {
+            strategy: "hybrid",
+            pollIntervalMs: 100,
+            stablePolls: 2,
+            timeoutMs: 1000
+          }
         },
         contextSelection,
         verification: {

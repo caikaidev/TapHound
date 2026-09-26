@@ -4,10 +4,11 @@ import {
   RuntimeSnapshotSchema,
   hashRuntimeSnapshot
 } from "../../src/domain/runtime-snapshot.js";
+import { TEST_SNAPSHOT_UI } from "../fakes/ui-backend.js";
 
 function validSnapshot(): unknown {
   return {
-    version: 1,
+    version: 2,
     generationId: "generation-1",
     baseRevision: 1,
     deviceSerial: "emulator-5554",
@@ -23,7 +24,8 @@ function validSnapshot(): unknown {
       enabled: true,
       bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
       children: []
-    }]
+    }],
+    ...TEST_SNAPSHOT_UI
   };
 }
 
@@ -83,7 +85,8 @@ describe("hashRuntimeSnapshot", () => {
       deviceSerial: snapshot.deviceSerial,
       baseRevision: snapshot.baseRevision,
       generationId: snapshot.generationId,
-      version: snapshot.version
+      version: snapshot.version,
+      ...TEST_SNAPSHOT_UI
     }));
   });
 

@@ -613,9 +613,9 @@ export class GenerationStepExecutor {
       });
       try {
       const views = this.dependencies.sessionPorts(deviceSession);
-      const boundBackendSelection = session.bindings.uiBackend === undefined
-        ? undefined
-        : uiBackendIdAsSelection(session.bindings.uiBackend.id);
+      const boundBackendSelection = uiBackendIdAsSelection(
+        session.bindings.uiBackend.id
+      );
       const uiSnapshotProvider = await deviceSession.openUiSnapshots({
         timeoutMs: idle.timeoutMs,
         ...(boundBackendSelection === undefined
@@ -668,8 +668,7 @@ export class GenerationStepExecutor {
       await this.dependencies.store.read(input.generationId)
     );
     if (
-      session.bindings.uiBackend !== undefined
-      && JSON.stringify(session.bindings.uiBackend)
+      JSON.stringify(session.bindings.uiBackend)
         !== JSON.stringify(this.boundUiSnapshotProvider().descriptor)
     ) {
       throw new GenerationOperationError(
@@ -1503,15 +1502,11 @@ export class GenerationStepExecutor {
    * The freshness guard captured this Layout and proved it equals the
    * authoritative binding hash, and nothing mutates the device between that
    * capture and the pre-action observation, so re-capturing it would only
-   * repeat the most expensive device call of the step. Legacy v1 snapshots
-   * carry no UI metadata and still capture.
+   * repeat the most expensive device call of the step.
    */
   private adoptFreshSnapshotUi(
     fresh: RuntimeSnapshot
-  ): readonly LayoutElement[] | undefined {
-    if (fresh.version !== 2) {
-      return undefined;
-    }
+  ): readonly LayoutElement[] {
     this.currentViewport = fresh.viewport;
     this.currentUiSnapshot = {
       observationId: fresh.uiObservationId,

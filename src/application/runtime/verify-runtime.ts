@@ -397,8 +397,9 @@ export class VerifyRuntime {
 
     try {
       if (input.journey.checkpoints?.some(
-        (checkpoint) => checkpoint.expect.screen !== undefined
-          || checkpoint.expect.allOf?.some((condition) => condition.kind === "screen")
+        (checkpoint) => checkpoint.expect.allOf.some(
+          (condition) => condition.kind === "screen"
+        )
       )) {
         if (this.dependencies.loadKnowledge === undefined) {
           knowledgeError = "Project Knowledge loader is not configured";

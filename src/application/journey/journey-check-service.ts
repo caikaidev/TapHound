@@ -30,7 +30,6 @@ export type JourneyCheckReason =
   | "journey-path-mismatch"
   | "project-hash"
   | "config-hash"
-  | "meta-legacy"
   | "module-drift"
   | "module-missing"
   | "brief-drift"
@@ -243,23 +242,19 @@ export class JourneyCheckService {
     if (meta.bindings.configHash !== input.configHash) {
       reasons.push("config-hash");
     }
-    if (meta.contextSelection === undefined) {
-      reasons.push("meta-legacy");
-    } else {
-      for (const module of meta.contextSelection.modules) {
-        const reference = input.modulesById.get(module.id);
-        if (reference === undefined) {
-          driftedModules.push({ id: module.id, reason: "missing" });
-        } else if (reference.sha256 !== module.sha256) {
-          driftedModules.push({ id: module.id, reason: "sha256" });
-        }
+    for (const module of meta.contextSelection.modules) {
+      const reference = input.modulesById.get(module.id);
+      if (reference === undefined) {
+        driftedModules.push({ id: module.id, reason: "missing" });
+      } else if (reference.sha256 !== module.sha256) {
+        driftedModules.push({ id: module.id, reason: "sha256" });
       }
-      if (driftedModules.some((module) => module.reason === "sha256")) {
-        reasons.push("module-drift");
-      }
-      if (driftedModules.some((module) => module.reason === "missing")) {
-        reasons.push("module-missing");
-      }
+    }
+    if (driftedModules.some((module) => module.reason === "sha256")) {
+      reasons.push("module-drift");
+    }
+    if (driftedModules.some((module) => module.reason === "missing")) {
+      reasons.push("module-missing");
     }
     if (meta.sourceBrief !== undefined) {
       reasons.push(...await this.briefDriftReason(

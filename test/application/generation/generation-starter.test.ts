@@ -224,7 +224,9 @@ describe("GenerationStarter", () => {
       inFlight: null,
       pendingConfirmation: null,
       verification: { status: "notRun" },
-      publication: { status: "notRun" }
+      publication: { status: "notRun" },
+      verificationHistory: [],
+      externalFlows: []
     });
     expect(session.id).not.toBe(session.variables.runId);
     expect(session.bindings.projectHash).toMatch(/^[a-f\d]{64}$/);

@@ -9,6 +9,8 @@ import type { ObserveReport } from "../../src/domain/observation.js";
 import { runtimeConfig, runtimeJourney } from "../fakes/runtime-fixture.js";
 import { hashJourney } from "../../src/domain/report.js";
 import { fakeWorkspaceLayout } from "../fakes/workspace-layout.js";
+import { TEST_UI_BACKEND } from "../fakes/ui-backend.js";
+import { contextSelection } from "../fixtures/project-context.js";
 
 class BufferOutput implements TextOutput {
   public value = "";
@@ -135,7 +137,8 @@ describe("verify --contract", () => {
           bindings: {
             projectHash: "a".repeat(64),
             configHash: "b".repeat(64),
-            contextHash: "c".repeat(64)
+            contextHash: "c".repeat(64),
+            uiBackend: TEST_UI_BACKEND
           },
           replayPolicy: {
             generatedReplayPolicy: true,
@@ -148,7 +151,9 @@ describe("verify --contract", () => {
             runId: "verify-run",
             runs: 1
           },
-          manualOverrideStepIndexes: []
+          manualOverrideStepIndexes: [],
+          contextSelection,
+          externalFlows: []
         }
         : runtimeConfig
     ));

@@ -29,47 +29,6 @@ async function temporaryRoot(): Promise<string> {
 }
 
 describe("FileSystemWorkspaceLayout", () => {
-  it("reports no legacy directories for a fresh or current workspace", async () => {
-    const root = await temporaryRoot();
-    const layout = new FileSystemWorkspaceLayout();
-
-    await expect(layout.findLegacyDirectories(root)).resolves.toEqual([]);
-
-    await mkdir(join(root, ".taphound", "build", "generations"), {
-      recursive: true
-    });
-    await mkdir(join(root, ".taphound", "journeys"));
-
-    await expect(layout.findLegacyDirectories(root)).resolves.toEqual([]);
-  });
-
-  it("reports every legacy directory in a stable order", async () => {
-    const root = await temporaryRoot();
-    const outside = await temporaryRoot();
-    const layout = new FileSystemWorkspaceLayout();
-    await mkdir(join(root, ".taphound", "runs"), { recursive: true });
-    await mkdir(join(root, ".taphound", "generations"));
-    await symlink(outside, join(root, ".taphound", "jobs"));
-
-    await expect(layout.findLegacyDirectories(root)).resolves.toEqual([
-      ".taphound/generations",
-      ".taphound/jobs",
-      ".taphound/runs"
-    ]);
-  });
-
-  it("reports timestamped Verify run directories at the workspace root", async () => {
-    const root = await temporaryRoot();
-    const layout = new FileSystemWorkspaceLayout();
-    const stray = "2026-08-06T12-34-56.789Z-123e4567-e89b-42d3-a456-426614174000";
-    await mkdir(join(root, ".taphound", stray), { recursive: true });
-    await mkdir(join(root, ".taphound", "journeys"));
-
-    await expect(layout.findLegacyDirectories(root)).resolves.toEqual([
-      `.taphound/${stray}`
-    ]);
-  });
-
   it("initializes the safe build layout from a fresh project", async () => {
     const root = await temporaryRoot();
     const layout = new FileSystemWorkspaceLayout();
@@ -80,7 +39,6 @@ describe("FileSystemWorkspaceLayout", () => {
       join(root, ".taphound", ".gitignore"),
       "utf8"
     )).resolves.toBe("build/\n");
-    await expect(layout.findLegacyDirectories(root)).resolves.toEqual([]);
   });
 
   it("creates the build ignore file exactly once", async () => {

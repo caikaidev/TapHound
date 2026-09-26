@@ -19,7 +19,7 @@ import {
   writeJson,
   writeLine
 } from "../output.js";
-import { assertNoLegacyWorkspace } from "../workspace-guard.js";
+import { prepareWorkspace } from "../workspace-guard.js";
 
 interface RecordOptions {
   project: string;
@@ -51,7 +51,7 @@ export function createRecordCommand(dependencies: CliDependencies): Command {
           options.project,
           ResolvedJourneyPathSchema.parse(options.output)
         );
-        await assertNoLegacyWorkspace(dependencies, options.project);
+        await prepareWorkspace(dependencies, options.project);
       } catch (error) {
         const output = failureOutput(2, "CONFIG_INVALID", errorMessage(error));
         if (options.json === true) {

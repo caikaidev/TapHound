@@ -36,6 +36,7 @@ import {
   projectContextModule,
   resolvedProjectContext
 } from "../fixtures/project-context.js";
+import { TEST_SNAPSHOT_UI, TEST_UI_BACKEND } from "../fakes/ui-backend.js";
 
 class BufferOutput implements TextOutput {
   public value = "";
@@ -45,7 +46,7 @@ class BufferOutput implements TextOutput {
 }
 
 const snapshot = {
-  version: 1 as const,
+  version: 2 as const,
   generationId: "generation-1",
   baseRevision: 2,
   deviceSerial: "emulator-5554",
@@ -54,7 +55,8 @@ const snapshot = {
   activity: "com.example.app.MainActivity",
   pid: 42,
   capturedAt: "2026-07-23T00:00:00.000Z",
-  layout: []
+  layout: [],
+  ...TEST_SNAPSHOT_UI
 };
 
 const proposal = {
@@ -176,7 +178,8 @@ function harness(signal?: AbortSignal): Harness {
       projectHash: "a".repeat(64),
       configHash: "b".repeat(64),
       contextHash: "c".repeat(64),
-      snapshotHash: null
+      snapshotHash: null,
+      uiBackend: TEST_UI_BACKEND
     },
     target: {
       packageName: "com.example.app",
@@ -236,7 +239,7 @@ function harness(signal?: AbortSignal): Harness {
     }
   }));
   const readContextSnapshot = vi.fn(
-    (): Promise<unknown> => Promise.resolve(null)
+    (): Promise<unknown> => Promise.resolve(resolvedProjectContext)
   );
   const updateIdlePolicy = vi.fn(() => Promise.resolve({
     revision: 5,
@@ -461,7 +464,8 @@ describe("generation JSON process protocol", () => {
           projectHash: "a".repeat(64),
           configHash: "b".repeat(64),
           contextHash: "c".repeat(64),
-          snapshotHash: null
+          snapshotHash: null,
+          uiBackend: TEST_UI_BACKEND
         },
         contextSelection: {
           bundleVersion: 2 as const,
@@ -646,31 +650,6 @@ describe("generation JSON process protocol", () => {
     expect(test.execute).not.toHaveBeenCalled();
   });
 
-  it("rejects a legacy workspace layout before any generation work", async () => {
-    const test = harness();
-    test.workspaceLayout.legacyDirectories = [".taphound/jobs"];
-
-    await createProgram(test.dependencies).parseAsync([
-      "node", "taphound", "generation", "observe",
-      "--project", "/project",
-      "--session", "generation-1",
-      "--json"
-    ]);
-
-    const output = JSON.parse(test.stdout.value) as {
-      exitCode: number;
-      failure: { code: string; message: string };
-    };
-    expect(output.exitCode).toBe(2);
-    expect(output.failure.code).toBe("CONFIG_INVALID");
-    expect(output.failure.message).toContain(
-      "mv .taphound/jobs .taphound/build/jobs"
-    );
-    expect(test.observe).not.toHaveBeenCalled();
-    expect(test.assertConfigIdentity).not.toHaveBeenCalled();
-    expect(test.exitCodes).toEqual([2]);
-  });
-
   it("maps pending-confirmation observation blocking to structured risk", async () => {
     const test = harness();
     test.observe.mockRejectedValueOnce(new GenerationOperationError(
@@ -788,7 +767,7 @@ describe("generation JSON process protocol", () => {
       "finalize",
       [
         "generation", "finalize", "--session", "../invalid",
-        "--context", "context.json", "--output", "journey.json"
+        "--output", "journey.json"
       ]
     ]
   ])("rejects invalid %s session IDs before side effects", async (
@@ -1515,7 +1494,6 @@ describe("generation JSON process protocol", () => {
       "node", "taphound", "generation", "finalize",
       "--project", "/project",
       "--session", "generation-1",
-      "--context", "context.json",
       "--output", ".taphound/journeys/generated.json",
       "--json"
     ]);
@@ -1559,7 +1537,6 @@ describe("generation JSON process protocol", () => {
       "node", "taphound", "generation", "finalize",
       "--project", ".",
       "--session", "generation-1",
-      "--context", "context.json",
       "--output", ".taphound/journeys/generated.json",
       "--json"
     ]);
@@ -1589,8 +1566,7 @@ describe("generation JSON process protocol", () => {
       expect.objectContaining({ context: resolvedProjectContext })
     );
     expect(test.finalize).toHaveBeenCalledWith(expect.objectContaining({
-      context: resolvedProjectContext,
-      contextFromSnapshot: true
+      context: resolvedProjectContext
     }));
     expect(JSON.parse(test.stdout.value)).toMatchObject({
       status: "verified",
@@ -1622,36 +1598,14 @@ describe("generation JSON process protocol", () => {
       "TapHound warning: live project context drifted from the session snapshot"
     );
     expect(test.stderr.value).toContain("EVIDENCE_HASH_MISMATCH");
-    expect(test.finalize).toHaveBeenCalledWith(
-      expect.objectContaining({ contextFromSnapshot: true })
-    );
+    expect(test.finalize).toHaveBeenCalledOnce();
     expect(JSON.parse(test.stdout.value)).toMatchObject({
       status: "verified",
       exitCode: 0
     });
   });
 
-  it("requires --context for legacy sessions without a stored snapshot", async () => {
-    const test = harness();
-
-    await createProgram(test.dependencies).parseAsync([
-      "node", "taphound", "generation", "finalize",
-      "--project", "/project",
-      "--session", "generation-1",
-      "--output", ".taphound/journeys/generated.json",
-      "--json"
-    ]);
-
-    expect(test.contextLoad).not.toHaveBeenCalled();
-    expect(test.finalize).not.toHaveBeenCalled();
-    expect(JSON.parse(test.stdout.value)).toMatchObject({
-      status: "error",
-      exitCode: 2,
-      failure: { code: "CONFIG_INVALID" }
-    });
-  });
-
-  it("omits --context in the detached finalize child for snapshot sessions", async () => {
+  it("launches the detached finalize child without a --context option", async () => {
     const test = harness();
     test.readContextSnapshot.mockResolvedValueOnce(resolvedProjectContext);
     const launch = test.dependencies.detachedProcess?.launch as unknown as Mock;
@@ -2066,7 +2020,6 @@ describe("generation JSON process protocol", () => {
       "node", "taphound", "generation", "finalize",
       "--project", "/project",
       "--session", "generation-1",
-      "--context", "context.json",
       "--output", ".taphound/journeys/generated.json",
       "--detach",
       "--json"
@@ -2096,7 +2049,6 @@ describe("generation JSON process protocol", () => {
       "node", "taphound", "generation", "finalize",
       "--project", "/project",
       "--session", "generation-1",
-      "--context", "context.json",
       "--output", "../escaping.json",
       "--detach",
       "--json"
@@ -2121,7 +2073,6 @@ describe("generation JSON process protocol", () => {
       "node", "taphound", "generation", "finalize",
       "--project", "/project",
       "--session", "generation-1",
-      "--context", "context.json",
       "--output", "../escape.json",
       "--json"
     ]);
@@ -2658,7 +2609,7 @@ describe("generation JSON process protocol", () => {
         contextSelection,
         pendingConfirmation: challenge
       })),
-      readContextSnapshot: vi.fn((): Promise<unknown> => Promise.resolve(null)),
+      readContextSnapshot: vi.fn((): Promise<unknown> => Promise.resolve(resolvedProjectContext)),
       updateIdlePolicy: test.updateIdlePolicy,
       replace: test.replace,
       assertConfigIdentity: test.assertConfigIdentity

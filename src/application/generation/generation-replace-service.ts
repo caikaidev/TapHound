@@ -80,18 +80,6 @@ function assertReplaceable(session: GenerationSession): void {
       "Generation steps cannot be replaced after publication"
     );
   }
-  if (
-    session.bindings.uiBackend === undefined
-    && (
-      session.bindings.snapshotHash !== null
-      || session.candidateSteps.length !== 0
-    )
-  ) {
-    throw new GenerationOperationError(
-      "CONFIG_INVALID",
-      "Legacy generation sessions with evidence cannot replace steps; start a new session"
-    );
-  }
 }
 
 function assertReplaceIndex(

@@ -26,6 +26,7 @@ import {
   GenerationSessionStoreError
 } from "../../../src/ports/generation-session-store.js";
 import { contextSelection } from "../../fixtures/project-context.js";
+import { TEST_UI_BACKEND } from "../../fakes/ui-backend.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -78,7 +79,8 @@ function validSession(
       projectHash: "d".repeat(64),
       configHash: "e".repeat(64),
       contextHash: "a".repeat(64),
-      snapshotHash: "b".repeat(64)
+      snapshotHash: "b".repeat(64),
+      uiBackend: TEST_UI_BACKEND
     },
     target: {
       packageName: "com.example.app",
@@ -102,6 +104,7 @@ function validSession(
     inFlight: null,
     pendingConfirmation: null,
     verification: { status: "notRun" },
+    verificationHistory: [],
     publication: { status: "notRun" },
     ...overrides
   };
@@ -371,7 +374,8 @@ describe("FileSystemGenerationSessionStore", () => {
         projectHash: "d".repeat(64),
         configHash: "e".repeat(64),
         contextHash: "a".repeat(64),
-        snapshotHash: null
+        snapshotHash: null,
+        uiBackend: TEST_UI_BACKEND
       }
     }));
     const committed = validSession(1, {
@@ -379,7 +383,8 @@ describe("FileSystemGenerationSessionStore", () => {
         projectHash: "d".repeat(64),
         configHash: "e".repeat(64),
         contextHash: "a".repeat(64),
-        snapshotHash: "c".repeat(64)
+        snapshotHash: "c".repeat(64),
+        uiBackend: TEST_UI_BACKEND
       }
     });
 
@@ -399,36 +404,6 @@ describe("FileSystemGenerationSessionStore", () => {
         }
       })
     ), "INVALID_TRANSITION");
-  });
-
-  it("allows an evidence-free legacy session to bind its backend with its first snapshot", async () => {
-    const root = await temporaryRoot();
-    const store = new FileSystemGenerationSessionStore(root);
-    const initial = validSession(0, {
-      bindings: {
-        projectHash: "d".repeat(64),
-        configHash: "e".repeat(64),
-        contextHash: "a".repeat(64),
-        snapshotHash: null
-      }
-    });
-    const backend = {
-      id: "system-uiautomator" as const,
-      adapterVersion: "system-uiautomator-v1",
-      configSha256: "f".repeat(64)
-    };
-    await store.create(initial);
-
-    const committed = validSession(1, {
-      bindings: {
-        ...initial.bindings,
-        snapshotHash: "c".repeat(64),
-        uiBackend: backend
-      }
-    });
-    await store.commitSnapshot("generation-1", 0, committed);
-
-    await expect(store.read("generation-1")).resolves.toEqual(committed);
   });
 
   it("atomically begins a safe step without changing candidate or Core state", async () => {
@@ -701,7 +676,8 @@ describe("FileSystemGenerationSessionStore", () => {
         projectHash: "d".repeat(64),
         configHash: "e".repeat(64),
         contextHash: "c".repeat(64),
-        snapshotHash: "b".repeat(64)
+        snapshotHash: "b".repeat(64),
+        uiBackend: TEST_UI_BACKEND
       }
     }],
     ["variables", {
@@ -1299,7 +1275,8 @@ describe("FileSystemGenerationSessionStore", () => {
     await store.create(validSession(0, {
       bindings: {
         ...validSession().bindings,
-        snapshotHash: null
+        snapshotHash: null,
+        uiBackend: TEST_UI_BACKEND
       }
     }));
     await expectStoreError(store.commitSnapshot(
@@ -1308,7 +1285,8 @@ describe("FileSystemGenerationSessionStore", () => {
       validSession(1, {
         bindings: {
           ...validSession().bindings,
-          snapshotHash: "c".repeat(64)
+          snapshotHash: "c".repeat(64),
+          uiBackend: TEST_UI_BACKEND
         },
         target: changedTarget
       })
@@ -1333,7 +1311,8 @@ describe("FileSystemGenerationSessionStore", () => {
       validSession(1, {
         bindings: {
           ...validSession().bindings,
-          snapshotHash: "c".repeat(64)
+          snapshotHash: "c".repeat(64),
+          uiBackend: TEST_UI_BACKEND
         }
       })
     ), "INVALID_TRANSITION");
@@ -1350,7 +1329,8 @@ describe("FileSystemGenerationSessionStore", () => {
       validSession(1, {
         bindings: {
           ...validSession().bindings,
-          snapshotHash: "c".repeat(64)
+          snapshotHash: "c".repeat(64),
+          uiBackend: TEST_UI_BACKEND
         }
       })
     ), "INVALID_TRANSITION");
@@ -2462,7 +2442,8 @@ describe("FileSystemGenerationSessionStore", () => {
         revision: completed.revision + 1,
         bindings: {
           ...completed.bindings,
-          snapshotHash: "9".repeat(64)
+          snapshotHash: "9".repeat(64),
+          uiBackend: TEST_UI_BACKEND
         }
       }
     ), "INVALID_TRANSITION");

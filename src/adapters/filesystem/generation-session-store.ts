@@ -472,29 +472,17 @@ function transitionStableState(
     candidateSources: session.candidateSources,
     pendingConfirmation: session.pendingConfirmation,
     verification: session.verification,
-    verificationHistory: session.verificationHistory ?? [],
+    verificationHistory: session.verificationHistory,
     publication: session.publication
   };
 }
 
 function assertCoreIdentityPreserved(
   current: GenerationSession,
-  next: GenerationSession,
-  allowInitialUiBackendBinding = false
+  next: GenerationSession
 ): void {
   const currentIdentity = generationCoreIdentity(current);
   const nextIdentity = generationCoreIdentity(next);
-  if (
-    allowInitialUiBackendBinding
-    && current.bindings.uiBackend === undefined
-    && next.bindings.uiBackend !== undefined
-  ) {
-    nextIdentity.bindings = {
-      projectHash: nextIdentity.bindings.projectHash,
-      configHash: nextIdentity.bindings.configHash,
-      contextHash: nextIdentity.bindings.contextHash
-    };
-  }
   if (
     JSON.stringify(currentIdentity) !== JSON.stringify(nextIdentity)
   ) {
@@ -521,21 +509,12 @@ function assertSnapshotTransition(
   current: GenerationSession,
   next: GenerationSession
 ): void {
-  const initialBackendBinding = current.bindings.snapshotHash === null
-    && current.bindings.uiBackend === undefined
-    && next.bindings.uiBackend !== undefined
-    && current.candidateSteps.length === 0
-    && current.candidateSources.length === 0;
-  assertCoreIdentityPreserved(current, next, initialBackendBinding);
+  assertCoreIdentityPreserved(current, next);
   const currentBindings = {
     projectHash: current.bindings.projectHash,
     configHash: current.bindings.configHash,
     contextHash: current.bindings.contextHash,
-    ...(initialBackendBinding
-      ? { uiBackend: next.bindings.uiBackend }
-      : current.bindings.uiBackend === undefined
-        ? {}
-        : { uiBackend: current.bindings.uiBackend })
+    uiBackend: current.bindings.uiBackend
   };
   const { snapshotHash: nextSnapshotHash, ...nextBindings } = next.bindings;
   if (
@@ -701,8 +680,8 @@ function assertVerificationReopenTransition(
 ): void {
   assertCoreIdentityPreserved(current, next);
   assertLatestSnapshotPreserved(current, next);
-  const currentHistory = current.verificationHistory ?? [];
-  const nextHistory = next.verificationHistory ?? [];
+  const currentHistory = current.verificationHistory;
+  const nextHistory = next.verificationHistory;
   const expectedHistory = current.verification.status === "failed"
     ? [
         ...currentHistory,

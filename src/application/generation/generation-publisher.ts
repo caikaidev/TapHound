@@ -127,8 +127,8 @@ export class GenerationPublisher {
       input.generationId !== report.generationId
       || input.generationId !== meta.generationId
       || report.steps.length !== journey.steps.length
-      || (meta.journeySha256 !== undefined && meta.journeySha256 !== verificationReport.journey.sha256)
-      || (meta.journeySha256 !== undefined && meta.journeySha256 !== hashJourney(journey))
+      || meta.journeySha256 !== verificationReport.journey.sha256
+      || meta.journeySha256 !== hashJourney(journey)
     ) {
       throw new Error("Generation bundle identities do not align");
     }

@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- The Recorder records a bridge through the same `BridgeRunner` as Replay and
+  Generation, and runs each chosen External Step through `ExternalStepRunner`
+  before recording it: a step is recorded only if it executes the way Replay
+  will execute it (same foreground checks, `resourceId` resolution, action
+  capability, and settle wait). A step that fails before acting is reported
+  and can be chosen again; a step that acts but never settles now fails the
+  bridge, instead of being dropped from the recording while the bridge
+  continued from a state the recorded steps no longer describe.
+
 ## 0.2.0-dev.10 — 2026-09-26
 
 TapHound's goal is unchanged: an external agent proposes, and a deterministic

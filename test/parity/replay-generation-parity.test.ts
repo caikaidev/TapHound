@@ -4,11 +4,29 @@ import { demoApp, scenarios } from "../harness/demo-app.js";
 import type { JourneyStep } from "../../src/domain/journey.js";
 import {
   createParityProject,
+  runRecording,
   finalizeGeneration,
   runGeneration,
   runReplay,
   type ParityProject
 } from "../harness/parity-runner.js";
+
+/** The Recorder never invents expectations, inside or outside the app. */
+function withoutExpectations(step: JourneyStep): JourneyStep {
+  const stripped: JourneyStep = { ...step };
+  delete stripped.expect;
+  if (stripped.action === "bridge" && stripped.externalSteps !== undefined) {
+    return {
+      ...stripped,
+      externalSteps: stripped.externalSteps.map((external) => {
+        const copy = { ...external };
+        delete copy.expect;
+        return copy;
+      })
+    };
+  }
+  return stripped;
+}
 
 /**
  * Golden parity: Replay (recorded and generated policy) and Generation must reach the same per-step verdicts
@@ -64,6 +82,22 @@ describe("Replay ↔ Generation parity on a simulated device", () => {
         generatedReplay: generatedReplay.stepCalls,
         generation: generation.stepCalls
       };
+    }, SCENARIO_TIMEOUT_MS);
+  }
+
+  for (const scenario of scenarios) {
+    const moves = scenario.record;
+    if (moves === undefined) continue;
+    it(`records "${scenario.name}" as a Journey that replays`, async () => {
+      const recording = await runRecording(demoApp, project, scenario.journey.name, moves);
+
+      expect(recording.failures).toEqual([]);
+      expect(recording.journey.steps).toEqual(
+        scenario.journey.steps.map(withoutExpectations)
+      );
+      const replay = await runReplay(demoApp, project, recording.journey);
+      expect(replay.outcomes.map((step) => step.outcome))
+        .toEqual(recording.journey.steps.map(() => "passed"));
     }, SCENARIO_TIMEOUT_MS);
   }
 

@@ -202,6 +202,7 @@ import {
   type GenerationSession
 } from "../domain/generation.js";
 import type { InitPromptPort } from "../ports/init-prompt.js";
+import type { RecorderPromptPort } from "../ports/recorder-prompt.js";
 import type {
   GenerationSessionStore
 } from "../ports/generation-session-store.js";
@@ -378,6 +379,8 @@ export interface ProductionDependencyOptions {
   runtimeBackend?: RuntimeBackend | undefined;
   /** Single time source for waits, polling, and cache TTLs (tests inject a virtual clock). */
   clock?: Clock | undefined;
+  /** Replaces the interactive Recorder prompt (the parity harness scripts it). */
+  recorderPrompt?: RecorderPromptPort | undefined;
 }
 
 function runId(): string {
@@ -740,7 +743,7 @@ export function createProductionDependencies(
       sessions,
       sessionPorts: runtimeSessionPortViews,
       clock,
-      prompt: new InquirerRecorderPrompt(),
+      prompt: options.recorderPrompt ?? new InquirerRecorderPrompt(),
       journeyWriter: new FileSystemJourneyWriter()
     }),
       verifier: productionVerifyRuntime,

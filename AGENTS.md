@@ -274,13 +274,17 @@ a partial Journey, and the recorder does not invent business `expect`
 assertions.
 
 For `bridge` actions, the recorder selects a scenario and return timeout,
-clicks the trigger, polls for the package escape, then records external steps
+then runs the same `BridgeRunner` as Replay and Generation with a `drive`
+external phase: it records external steps
 (click/longClick/inputText/swipe/scrollTo/back/wait/finish) against the
-escaped package with `resourceId`-only locators (v1 XML-only restriction).
-Steps are written inline with `replayMode: "auto"`, `escapedPackageName`, and
-the captured `externalSteps` so replay and finalize can verify them
-deterministically. If the trigger does not cause an escape, the recorder aborts
-the bridge step.
+escaped package with `resourceId`-only locators (v1 XML-only restriction),
+running each chosen step (except `scrollTo`, already scrolled while choosing)
+through `ExternalStepRunner` so only a step that replays is recorded. A step
+that fails before acting is reported and can be chosen again; one that acts
+but never settles fails the bridge. Steps are written inline with
+`replayMode: "auto"`, `escapedPackageName`, and the captured `externalSteps`
+so replay and finalize can verify them deterministically. If the trigger does
+not cause an escape, the recorder skips the bridge step.
 
 ### Alignment Flow
 
@@ -510,7 +514,11 @@ the production composition root through `createProductionDependencies`'
 `runtimeBackend` and `clock` options: only the device and time are simulated.
 Each scenario must reach identical per-step verdicts in `verify` (under both
 the recorded and the generated Replay policy) and in
-`generation start → observe → step` (and finalize when it passes). Per-step
+`generation start → observe → step` (and finalize when it passes). A scenario
+with a `record` script is also recorded through `taphound record` (scripted
+prompt answers via the `recorderPrompt` option); the recorded Journey must
+equal the scenario Journey without expectations and replay with every step
+passing. Per-step
 device-call counts are pinned in
 `test/parity/__snapshots__/device-calls.json`; a change to that file is a
 reviewed performance diff (update it with `npx vitest run test/parity -u`).

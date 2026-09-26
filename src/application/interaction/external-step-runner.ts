@@ -390,12 +390,32 @@ export interface BridgeRunInput {
   returnTimeoutMs: number;
   /** Engine policy for the escaped package; a failure stops the bridge. */
   acceptEscape: (escapedPackageName: string) => ExternalStepFailure | undefined;
-  /** External steps to run inside the escaped app, if any. */
-  externalSteps: (
-    escapedPackageName: string
-  ) => Promise<readonly ExternalStep[] | undefined>;
+  external: ExternalPhase;
   signal?: AbortSignal | undefined;
 }
+
+/** What happens inside the escaped app between escape and return. */
+export type ExternalPhase =
+  /** Replay and Generation run a known step list, if any. */
+  | {
+      kind: "steps";
+      steps: (
+        escapedPackageName: string
+      ) => Promise<readonly ExternalStep[] | undefined>;
+    }
+  /**
+   * The Recorder drives the escaped app one chosen step at a time (each
+   * through the same ExternalStepRunner) and reports the steps it ran.
+   */
+  | {
+      kind: "drive";
+      drive: (escapedPackageName: string) => Promise<ExternalDriveOutcome>;
+    };
+
+export type ExternalDriveOutcome =
+  | { status: "driven"; steps: readonly ExternalStep[] }
+  | { status: "cancelled" }
+  | ({ status: "failed" } & ExternalStepFailure);
 
 export interface BridgeTiming {
   actionMs: number;
@@ -471,20 +491,34 @@ export class BridgeRunner {
     const rejected = input.acceptEscape(escaped.packageName);
     if (rejected !== undefined) return failed(rejected);
 
-    const externalSteps = await input.externalSteps(escaped.packageName);
-    if (externalSteps !== undefined) {
-      const external = await this.dependencies.externalSteps.run(
-        externalSteps,
-        escaped.packageName,
-        input.signal
-      );
-      if (external.status === "cancelled") return cancelledOutcome();
-      if (external.status === "failed") {
+    let externalSteps: readonly ExternalStep[] | undefined;
+    if (input.external.kind === "drive") {
+      const driven = await input.external.drive(escaped.packageName);
+      if (driven.status === "cancelled") return cancelledOutcome();
+      if (driven.status === "failed") {
         return failed({
-          code: external.code,
-          message: external.message,
-          ...(external.details === undefined ? {} : { details: external.details })
+          code: driven.code,
+          message: driven.message,
+          ...(driven.details === undefined ? {} : { details: driven.details })
         });
+      }
+      externalSteps = driven.steps;
+    } else {
+      externalSteps = await input.external.steps(escaped.packageName);
+      if (externalSteps !== undefined) {
+        const external = await this.dependencies.externalSteps.run(
+          externalSteps,
+          escaped.packageName,
+          input.signal
+        );
+        if (external.status === "cancelled") return cancelledOutcome();
+        if (external.status === "failed") {
+          return failed({
+            code: external.code,
+            message: external.message,
+            ...(external.details === undefined ? {} : { details: external.details })
+          });
+        }
       }
     }
 

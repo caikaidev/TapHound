@@ -937,16 +937,19 @@ export class GenerationStepExecutor {
             }
             return undefined;
           },
-          externalSteps: (escapedPackageName) => (
-            proposedFlow === undefined
-              ? Promise.resolve(undefined)
-              : this.resolveExternalFlow(
-                  session,
-                  proposedFlow,
-                  escapedPackageName,
-                  input.signal
-                )
-          ),
+          external: {
+            kind: "steps",
+            steps: (escapedPackageName) => (
+              proposedFlow === undefined
+                ? Promise.resolve(undefined)
+                : this.resolveExternalFlow(
+                    session,
+                    proposedFlow,
+                    escapedPackageName,
+                    input.signal
+                  )
+            )
+          },
           signal: input.signal
         });
         timing.actionExecutionMs = bridge.timing.actionMs;

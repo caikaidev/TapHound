@@ -607,9 +607,12 @@ export class StepRunner {
                 message: `Bridge escaped to "${escapedPackageName}", but the Journey recorded "${recordedEscape}"`
               }
         ),
-        externalSteps: (): Promise<readonly ExternalStep[] | undefined> => (
-          Promise.resolve(step.externalSteps)
-        ),
+        external: {
+          kind: "steps",
+          steps: (): Promise<readonly ExternalStep[] | undefined> => (
+            Promise.resolve(step.externalSteps)
+          )
+        },
         signal
       });
       if (bridge.status === "cancelled") {

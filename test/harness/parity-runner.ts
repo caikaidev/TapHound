@@ -19,7 +19,12 @@ import {
   CONTEXT_INDEX_PATH,
   EXTERNAL_FLOWS_DIR
 } from "../../src/domain/workspace.js";
+import type { RecorderPromptPort } from "../../src/ports/recorder-prompt.js";
 import { CAMERA_FLOW, cameraFlow } from "./demo-app.js";
+import {
+  ScriptedRecorderPrompt,
+  type RecordMove
+} from "./scripted-recorder-prompt.js";
 import { FakeClock } from "../fakes/fake-clock.js";
 import {
   SIMULATED_SERIAL,
@@ -95,13 +100,50 @@ export async function createParityProject(): Promise<ParityProject> {
  * cache TTL runs on a virtual clock, so retry counts are deterministic and
  * timeouts cost no wall time.
  */
-function dependencies(device: SimulatedDevice): CliDependencies {
+function dependencies(
+  device: SimulatedDevice,
+  recorderPrompt?: RecorderPromptPort
+): CliDependencies {
   const clock = new FakeClock();
   clock.currentTime = 1_000_000;
   return createProductionDependencies(undefined, {
     runtimeBackend: device,
-    clock
+    clock,
+    ...(recorderPrompt === undefined ? {} : { recorderPrompt })
   });
+}
+
+export interface RecordingRun {
+  journey: Journey;
+  /** Failures the Recorder reported to the person while recording. */
+  failures: readonly string[];
+}
+
+/**
+ * Records a Journey through `taphound record` with scripted answers, the
+ * way a person would, and returns what it wrote.
+ */
+export async function runRecording(
+  app: SimulatedApp,
+  project: ParityProject,
+  name: string,
+  moves: readonly RecordMove[]
+): Promise<RecordingRun> {
+  const prompt = new ScriptedRecorderPrompt(moves);
+  const result = await dependencies(new SimulatedDevice(app), prompt)
+    .recorder.record({
+      config: PARITY_CONFIG,
+      projectRoot: project.root,
+      deviceSerial: SIMULATED_SERIAL,
+      journeyName: name,
+      outputPath: join(project.root, ".taphound", "journeys", `recorded-${name}.json`)
+    });
+  if (result.status !== "completed") {
+    throw new Error(`Recording ${name} ${result.status}: ${
+      result.status === "failed" ? result.message : "cancelled"
+    } (${prompt.failures.join("; ")})`);
+  }
+  return { journey: result.journey, failures: prompt.failures };
 }
 
 function countsBetween(

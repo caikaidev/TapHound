@@ -1,6 +1,7 @@
 import type { LayoutElement } from "../../src/domain/layout.js";
 import type { Journey, JourneyStep } from "../../src/domain/journey.js";
 import type { ExternalStep } from "../../src/domain/external-flow.js";
+import type { RecordMove } from "./scripted-recorder-prompt.js";
 import type { SimulatedApp } from "./simulated-device.js";
 
 /**
@@ -302,6 +303,12 @@ export interface ParityScenario {
    * `ACTION_UNSUPPORTED`.
    */
   generation?: readonly string[];
+  /**
+   * How a person records this Journey with `taphound record`. The recorded
+   * Journey must match `journey` (the Recorder adds no expectations) and
+   * replay with every step passing.
+   */
+  record?: readonly RecordMove[];
 }
 
 const openSettings: JourneyStep = {
@@ -336,12 +343,30 @@ export const scenarios: readonly ParityScenario[] = [
   {
     name: "camera bridge through an External Flow",
     journey: journey("camera", [takePhoto]),
-    expected: ["passed"]
+    expected: ["passed"],
+    record: [{
+      action: "bridgeTrigger",
+      scenario: "photoCapture",
+      description: "Attach a photo from the system camera",
+      returnTimeoutMs: 2000,
+      target: "take_photo",
+      external: [
+        { action: "click", target: "mode_photo" },
+        // The shutter returns to the app, which ends the external steps.
+        { action: "click", target: "shutter_button" }
+      ]
+    }]
   },
   {
     name: "search happy path",
     journey: journey("search", [openSearch, focusField, typeQuery, submitQuery]),
-    expected: ["passed", "passed", "passed", "passed"]
+    expected: ["passed", "passed", "passed", "passed"],
+    record: [
+      { action: "click", target: "open_search" },
+      { action: "click", target: "search_input" },
+      { action: "inputText", text: "hello world" },
+      { action: "click", target: "submit_search" }
+    ]
   },
   {
     name: "back navigation",
@@ -349,7 +374,11 @@ export const scenarios: readonly ParityScenario[] = [
       openSearch,
       { action: "back", activity: { before: SEARCH, after: MAIN } }
     ]),
-    expected: ["passed", "passed"]
+    expected: ["passed", "passed"],
+    record: [
+      { action: "click", target: "open_search" },
+      { action: "back" }
+    ]
   },
   {
     name: "missing locator",

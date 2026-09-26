@@ -27,6 +27,14 @@
 
 ### Changed
 
+- `taphound-accept` and `taphound-preserve` are merged into
+  `taphound-verify-change`, which classifies each change (new behavior with
+  or without UI, refactor, UI toolkit migration, structural UI change) and
+  routes it to accept or preserve mode. It ships the Workflow manifest JSON
+  Schema instead of pointing at TapHound source files that installed
+  projects do not have. Delete previously installed `taphound-accept` and
+  `taphound-preserve` Skill directories after running `taphound init`.
+
 - The Journey Generator Skill ships a shorter `SKILL.md` (mid-session
   corrections and cross-app bridges moved to `references/`) and no longer
   installs `GUIDE.md`, which moved to `docs/journey-generator-guide.md`. It

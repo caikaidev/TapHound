@@ -1,22 +1,7 @@
----
-name: taphound-accept
-description: >-
-  Verify one intentional Android behavior change against a hash-bound
-  Acceptance Contract and an independent TapHound Replay. Record provenance
-  and a passing Verdict before promoting a Journey.
-compatibility: Requires TapHound CLI, a validated project, and an installed app on an online Android device.
-metadata:
-  author: TapHound
-  version: "1.0"
----
+# Accept mode
 
-# Accept one Case
-
-Use this Workflow Skill for a new feature, fix, or intentional UI change.
-Keep mixed changes separate: one Case per new behavior; run
-`taphound-preserve` separately for existing behavior that must remain.
-This Skill owns requirements, orchestration, code/build/install provenance,
-Contract and final decision, not TapHound Core or Journey proposal internals.
+A new feature, fix, or intentional UI change. The gate is a hash-bound
+Acceptance Contract whose Verdict is `pass` in an independent Replay.
 
 1. Record the Case id (lowercase letters/digits/hyphens, starting with a
    letter), requirement source reference and SHA-256 of a redacted summary.
@@ -51,21 +36,3 @@ Contract and final decision, not TapHound Core or Journey proposal internals.
    `taphound baseline capture --project <project> --report <report.json> --verdict <verdict.json> --contract-sha256 <digest> --out <baseline.json> --json`.
    The Baseline is not this Case's pass condition. Never overwrite an
    existing asset without user permission.
-5. Persist the reconstructible manifest at the location derived from
-   `src/domain/workspace.ts`'s `workflowManifestPath(caseId)`:
-   `.taphound/build/workflows/<caseId>/manifest.json`. Validate against
-   `src/domain/workflow-manifest.ts`. That build subtree is ephemeral and
-   ignored; do not put it beside committed Journeys. Keep command JSON
-   outputs in this Case's build directory. Record *each* executed CLI argv,
-   process exit code, and JSON result path, plus report/verdict paths, the
-   Journey/Contract/Knowledge hashes, replayPolicy meta/hash/strictness,
-   requirement digest and both diff digests. Record any pause reason.
-   Check the directory is under build and not a symlink before writing;
-   do not overwrite an existing manifest or result file silently.
-
-`PASS` requires the Contract Verdict `pass`, a passing report and successful
-recorded commands. An explicit refusal, missing precondition, interrupted
-recovery or required human approval becomes Workflow `PAUSED` (never a
-fabricated Core Verdict). Deterministic failed evidence becomes `FAIL`;
-preserve its original CLI result unchanged. No reviewer may rewrite a
-deterministic `fail` or `invalid`.

@@ -1,7 +1,7 @@
 # Workflow Skills
 
-`taphound init` installs `taphound-case-suite`, `taphound-accept`, and
-`taphound-preserve` alongside the Journey Generator and Brief Author. These
+`taphound init` installs `taphound-case-suite` and `taphound-verify-change`
+(accept and preserve modes) alongside the Journey Generator and Brief Author. These
 packaged Skills direct external agents to use **existing public CLI commands
 only**. Core does not analyze requirements, build/install apps, manage
 multi-Case decisions, or invoke a model. No Workflow reads or writes a
@@ -32,6 +32,18 @@ raw Logcat, screenshots, captures, credentials, or user content. Frozen
 catalog changes require a new Suite ID. One-device execution is always serial.
 See `assets/skills/taphound-case-suite/SKILL.md`.
 
+## Development scenarios
+
+`taphound-verify-change` classifies each AI-coded change before work starts:
+
+| Change | Mode | Gate |
+|---|---|---|
+| New behavior without UI changes | accept, through an existing UI flow | Contract `pass`, typically with `logcatEvent` assertions on structured app logs |
+| New behavior with UI changes | accept, with a newly generated Journey | Contract `pass` |
+| Refactor with no UI change | preserve, Baseline | `equivalent: true` |
+| UI toolkit migration (XML → Compose) | preserve, large UI refactor | the new Journey proves every frozen observable |
+| Major structural UI change in the same toolkit | preserve: Baseline if the old Journey still replays, otherwise large UI refactor | as above |
+
 ## Accept and Preserve
 
 Accept proves intentional new behavior with a hash-bound Contract Verdict
@@ -59,7 +71,10 @@ ephemeral and ignored. `WorkflowManifestSchema` in
 `PASS` requires a strict policy, recorded successful commands, a report, plus
 a passing bound Verdict for Accept or pre/post reports and an equivalent
 Baseline for Preserve. The Skill must validate referenced JSON, hashes and
-paths in addition to the structural manifest schema. Missing pre-change
+paths in addition to the structural manifest schema. The installed
+Skill ships the structural schema as `schemas/workflow-manifest.schema.json`
+(rendered by `npm run skills:schemas`) and states these cross-field rules in
+`SKILL.md`, since installed projects have no TapHound source. Missing pre-change
 evidence, unavailable strict policy or required human decisions lead to
 `PAUSED`. Failed device/Contract/comparison evidence leads to `FAIL`; neither
 is re-labeled `PASS`. Keep raw Logcat and captured values outside the
@@ -86,7 +101,7 @@ is an explicit install-provenance **attestation**, not a measurement of the
 APK installed on the device; A must separately record the build/install
 receipt. This package is a transport and identity check, not a replacement
 for Core's strict Replay and Baseline comparison or physical mixed-change
-acceptance. See the installed `taphound-preserve/SKILL.md` for the input JSON
+acceptance. See the installed `taphound-verify-change/references/preserve.md` for the input JSON
 and exact A/B commands.
 Review the JSON evidence before sharing; SHA-256 detects drift but is not
 an authenticity signature against someone who can rewrite the shared bundle.

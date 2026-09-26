@@ -17,7 +17,7 @@ import { TEST_UI_BACKEND } from "../../fakes/ui-backend.js";
 import { contextSelection } from "../../fixtures/project-context.js";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-const helper = join(repo, "assets/skills/taphound-preserve/scripts/ui-refactor.mjs");
+const helper = join(repo, "assets/skills/taphound-verify-change/scripts/ui-refactor.mjs");
 const sha = (bytes: string): string => createHash("sha256").update(bytes).digest("hex");
 const paths: string[] = [];
 afterEach(async () => {

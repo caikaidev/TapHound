@@ -1,21 +1,9 @@
----
-name: taphound-preserve
-description: >-
-  Prove that an Android refactor preserves previously captured behavior
-  with independent TapHound Replays and Baseline comparison.
-compatibility: Requires TapHound CLI, a frozen Journey and an installed app on an online Android device.
-metadata:
-  author: TapHound
-  version: "1.0"
----
+# Preserve mode
 
-# Preserve one Case
-
-Use this Workflow Skill for a refactor or internal change that should not
-change observable behavior. If the same patch adds behavior, hand that
-separate Case to `taphound-accept`; neither outcome substitutes for the other.
-The agent owns pre/post build/install and requirement provenance outside Core.
-Do not read or write `.taphound/build/generations`.
+A refactor or internal change that must not change observable behavior. The
+gate is a Baseline captured from the pre-change app and an `equivalent:true`
+comparison against an independent post-change Replay. Paths such as
+`scripts/handoff.mjs` are relative to this Skill's directory.
 
 1. Before modifying the app, freeze a verified Journey, the requirement
    source/redacted digest, its SHA-256, the replayPolicy meta digest (if
@@ -60,17 +48,6 @@ Do not read or write `.taphound/build/generations`.
    --json` may select additional affected Journeys, but it is neither a
    Contract Verdict nor a Baseline result. Record actual selected tiers and
    refs, or `used:false`.
-5. Write a Case manifest via
-   `src/domain/workspace.ts`'s `workflowManifestPath(caseId)`:
-   `.taphound/build/workflows/<caseId>/manifest.json`.
-   `src/domain/workflow-manifest.ts` specifies the strict shape. Preserve
-   redacted requirement source/digest, separate implementation/asset diff
-   files/digests, Journey/optional Contract/Knowledge/replayPolicy bindings,
-   diff scope, each CLI argv/process exit/JSON output path, pre/post reports,
-   Baseline and compare JSON path, `equivalent` and Workflow
-   `PASS`/`FAIL`/`PAUSED` with pause reason. Keep results in build, refuse
-   symlink escapes and silent overwrite. Do not copy raw request data into
-   the manifest. Never treat another Case's Verdict as this Case's proof.
 
 ## Two-agent, two-worktree handoff
 

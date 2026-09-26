@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { ProposedStepSchema } from "../../src/domain/proposed-step.js";
+import { WorkflowManifestSchema } from "../../src/domain/workflow-manifest.js";
 
 type JsonSchema = Record<string, unknown>;
 
@@ -50,5 +51,17 @@ describe("Skill JSON Schemas", () => {
 
     expect(Object.fromEntries(actionProperties(skill)))
       .toEqual(Object.fromEntries(core));
+  });
+
+  it("ship the Workflow manifest schema rendered from the Core schema", async () => {
+    const shipped = await readFile(
+      "assets/skills/taphound-verify-change/schemas/workflow-manifest.schema.json",
+      "utf8"
+    );
+
+    // Stale? Run `npm run build && npm run skills:schemas`.
+    expect(shipped).toBe(
+      `${JSON.stringify(z.toJSONSchema(WorkflowManifestSchema), null, 2)}\n`
+    );
   });
 });

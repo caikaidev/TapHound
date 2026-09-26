@@ -12,7 +12,7 @@ TapHound does not build or install APKs. The target package must already be
 installed before recording, generation, or verification.
 
 `taphound init` scans `assets/skills/` and installs every skill directory
-containing a `SKILL.md`. Five skills ship with TapHound:
+containing a `SKILL.md`. Four skills ship with TapHound:
 
 - `taphound-journey-generator` drives one deterministic Journey generation session.
   Requirement analysis, planning, coding, build/install, multi-Case
@@ -33,22 +33,19 @@ containing a `SKILL.md`. Five skills ship with TapHound:
   validates hash-bound Base Flow proofs, and marks a Case verified only after
   generation finalization plus a different-run independent Replay. Its helper
   never reads or writes Core generation bundles directly.
-- `taphound-accept` orchestrates one intentional behavior-change Case using a
-  hash-bound Contract and an independent strict Replay; Contract Verdict
-  `pass` is its completion gate.
-- `taphound-preserve` orchestrates one behavior-preservation Case using a
-  pre-change Baseline and independent post-change Replay; `equivalent: true`
-  is its completion gate. Both Workflow Skills store redacted provenance
-  manifests under the ignored build subtree and never bypass Core policies.
-  For two worktrees it also packages a digest-checked `handoff.md` entry and
-  portable pre-change evidence bundle; the target agent validates and stages
-  frozen assets before independent post-change Replay (see
-  `docs/workflow-skills.md`). The APK install hash is Agent A's attestation,
-  not a measurement of the installed device binary.
-  Large UI refactors use its separate `ui-refactor.mjs` gate: A freezes a
-  behavior Case and real old-APK Replay, B generates a different Journey and
-  independently proves the same exact observables. That result is
-  frozen-observable conformance, not Core Baseline equivalence.
+- `taphound-verify-change` proves one code change per Case with an
+  independent strict Replay and a redacted provenance manifest under the
+  ignored build subtree. Accept mode (new behavior, with or without UI) gates
+  on a hash-bound Contract Verdict `pass`; preserve mode (refactors) gates on
+  a pre-change Baseline and `equivalent: true`. For two worktrees it
+  packages a digest-checked `handoff.md` entry and portable pre-change
+  evidence; the APK install hash is Agent A's attestation, not a measurement
+  of the installed device binary. UI toolkit migrations and major structural
+  UI changes use its `ui-refactor.mjs` gate: A freezes a behavior Case and a
+  real old-APK Replay, B generates a different Journey and independently
+  proves the same exact observables (frozen-observable conformance, not Core
+  Baseline equivalence). It ships the manifest JSON Schema rendered from
+  `src/domain/workflow-manifest.ts` (`npm run skills:schemas`).
 
 The Journey Skill may consume one optional project-relative
 `taphound-journey-brief.md` through a `journeyBrief: {path, sha256}` binding.

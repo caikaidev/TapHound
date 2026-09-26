@@ -42,6 +42,7 @@
     "bench:false-done": "tsc -p tsconfig.tools.json && node .build-tools/tools/false-done/main.js",
     "brand:render": "node scripts/render-brand-assets.mjs",
     "build": "node scripts/build.mjs",
+    "skills:schemas": "node scripts/render-skill-schemas.mjs",
     "coverage": "vitest run --coverage",
     "dev:setup": "node scripts/dev-setup.mjs",
     "lint": "eslint .",

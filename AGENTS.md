@@ -211,7 +211,7 @@ replay report or exit code; a throwing hook becomes an `unresolved` outcome
 collected in `VerifyResult.hookOutcomes`. `beforeSteps` reuses the readiness
 snapshot; `afterSteps` captures one fresh snapshot only when configured.
 
-`verify --contract` (and `contract validate`) validate an Acceptance Contract
+`verify --contract` validates an Acceptance Contract
 (`src/domain/contract.ts`, `src/application/contract/`): a hash-bound Journey
 reference plus preconditions, post-journey assertions, and evidence
 requirements. The Verdict (`pass`/`fail`/`inconclusive`/`needsReview`/`invalid`)

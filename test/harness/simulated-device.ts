@@ -211,18 +211,27 @@ export class SimulatedDevice implements RuntimeBackend {
   private fire(trigger: SimulatedTrigger, chain: readonly string[] = []): void {
     const from = this.screen;
     if (from === undefined) return;
-    const transition = this.app.transitions.find((candidate) => {
+    const matches = (
+      candidate: SimulatedApp["transitions"][number],
+      elementId?: string
+    ): boolean => {
       if (candidate.from !== from || candidate.on.action !== trigger.action) {
         return false;
       }
       if (candidate.on.action === "tap" || candidate.on.action === "longClick") {
-        return chain.includes(candidate.on.elementId);
+        return candidate.on.elementId === elementId;
       }
       if (candidate.on.action === "inputText" && trigger.action === "inputText") {
         return candidate.on.text === trigger.text;
       }
       return true;
-    });
+    };
+    // A touch is handled by the deepest element in the hit chain that reacts.
+    const transition = trigger.action === "tap" || trigger.action === "longClick"
+      ? chain.map((elementId) => this.app.transitions.find(
+          (candidate) => matches(candidate, elementId)
+        )).find((candidate) => candidate !== undefined)
+      : this.app.transitions.find((candidate) => matches(candidate));
     if (transition !== undefined) this.enter(transition.to);
   }
 

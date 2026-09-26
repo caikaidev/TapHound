@@ -67,6 +67,16 @@ artifacts must be regenerated.
   `escapedPackageName` and fails with `EXTERNAL_PACKAGE_MISMATCH` otherwise,
   instead of accepting any foreground change. Replay and Generation now share
   one bridge implementation (`BridgeRunner`).
+- Generation touched the center of a clickable ancestor when a Locator
+  matched a non-clickable child (for example a row label), which could hit a
+  different control covering the row center. Every engine now touches the
+  matched element's own point; the capability is still checked on the nearest
+  clickable/longClickable element, and a disabled one fails instead of being
+  skipped.
+- Replay of a generated Journey applies Generation's action-capability rules:
+  a click, longClick, or swipe whose target nothing capable handles fails with
+  `ACTION_FAILED` instead of tapping a dead element. Recorded Journeys are
+  unchanged.
 
 ### Fixed (compatibility cleanup)
 

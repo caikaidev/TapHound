@@ -303,6 +303,87 @@
       {}
     ]
   },
+  "label inside a clickable row": {
+    "replay": [
+      {
+        "appProcesses": 1,
+        "currentActivity": 2,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 2
+      }
+    ],
+    "generatedReplay": [
+      {
+        "appProcesses": 2,
+        "foregroundComponent": 5,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 1
+      }
+    ],
+    "generation": [
+      {
+        "appProcesses": 9,
+        "captureScreenshot": 2,
+        "foregroundComponent": 9,
+        "openSession": 3,
+        "openUiSnapshots": 2,
+        "stabilitySample": 4,
+        "startLogcat": 1,
+        "tap": 1,
+        "uiCapture": 2,
+        "windowTopology": 4
+      }
+    ]
+  },
+  "click on an element no clickable ancestor handles": {
+    "replay": [
+      {
+        "appProcesses": 1,
+        "currentActivity": 2,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 2
+      },
+      {
+        "appProcesses": 1,
+        "currentActivity": 2,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 1
+      }
+    ],
+    "generatedReplay": [
+      {
+        "appProcesses": 2,
+        "foregroundComponent": 5,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 1
+      },
+      {
+        "appProcesses": 1,
+        "foregroundComponent": 3,
+        "uiCapture": 1
+      }
+    ],
+    "generation": [
+      {
+        "appProcesses": 9,
+        "captureScreenshot": 2,
+        "foregroundComponent": 9,
+        "openSession": 3,
+        "openUiSnapshots": 2,
+        "stabilitySample": 4,
+        "startLogcat": 1,
+        "tap": 1,
+        "uiCapture": 2,
+        "windowTopology": 4
+      },
+      {}
+    ]
+  },
   "element expectation never appears": {
     "replay": [
       {

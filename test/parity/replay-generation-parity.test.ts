@@ -43,10 +43,12 @@ describe("Replay ↔ Generation parity on a simulated device", () => {
       );
       const generation = await runGeneration(demoApp, project, scenario.journey);
 
-      expect(replay.outcomes.map((step) => step.outcome)).toEqual(scenario.expected);
+      expect(replay.outcomes.map((step) => step.outcome))
+        .toEqual(scenario.recordedReplay ?? scenario.expected);
       expect(generatedReplay.outcomes.map((step) => step.outcome))
         .toEqual(scenario.expected);
-      expect(generation.outcomes.map((step) => step.outcome)).toEqual(scenario.expected);
+      expect(generation.outcomes.map((step) => step.outcome))
+        .toEqual(scenario.generation ?? scenario.expected);
       for (const [index, step] of generation.outcomes.entries()) {
         if (step.outcome !== "passed") continue;
         expect(step, `step ${String(index)} Activities`).toMatchObject({

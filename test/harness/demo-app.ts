@@ -96,6 +96,37 @@ function searchField(text: string | undefined, focused: boolean): LayoutElement 
 
 const submit = button("submit_search", "submit_search", "Submit", 400);
 
+/**
+ * A clickable Settings row whose label sits on the left and whose center is
+ * covered by a favorite toggle: tapping the label opens Settings, tapping the
+ * row center toggles the favorite.
+ */
+const settingsRow: LayoutElement = {
+  id: "settings_row",
+  resourceId: "settings_row",
+  enabled: true,
+  clickable: true,
+  bounds: { left: 0, top: 1000, right: 1080, bottom: 1200 },
+  children: [
+    {
+      id: "settings_label",
+      text: "Settings",
+      enabled: true,
+      bounds: { left: 40, top: 1050, right: 340, bottom: 1150 },
+      children: []
+    },
+    {
+      id: "favorite_toggle",
+      resourceId: "favorite_toggle",
+      contentDescription: "Favorite",
+      enabled: true,
+      clickable: true,
+      bounds: { left: 440, top: 1050, right: 640, bottom: 1150 },
+      children: []
+    }
+  ]
+};
+
 export const demoApp: SimulatedApp = {
   packageName: DEMO_PACKAGE,
   launchActivity: MAIN,
@@ -105,8 +136,30 @@ export const demoApp: SimulatedApp = {
       activity: MAIN,
       layout: root("main_root", [
         button("open_search", "open_search", "Search", 300),
-        button("take_photo", "take_photo", "Photo", 500)
+        button("take_photo", "take_photo", "Photo", 500),
+        settingsRow
       ])
+    },
+    settings: {
+      activity: MAIN,
+      layout: root("settings_root", [{
+        id: "settings_title",
+        resourceId: "settings_title",
+        text: "Settings",
+        enabled: true,
+        bounds: { left: 100, top: 100, right: 980, bottom: 200 },
+        children: []
+      }])
+    },
+    favorited: {
+      activity: MAIN,
+      layout: root("main_root", [{
+        id: "favorite_on",
+        resourceId: "favorite_on",
+        enabled: true,
+        bounds: { left: 100, top: 100, right: 980, bottom: 200 },
+        children: []
+      }])
     },
     photoAttached: {
       activity: MAIN,
@@ -186,6 +239,8 @@ export const demoApp: SimulatedApp = {
     { from: "searchTyped", on: { action: "tap", elementId: "submit_search" }, to: "searchSubmitted" },
     { from: "search", on: { action: "back" }, to: "main" },
     { from: "main", on: { action: "tap", elementId: "take_photo" }, to: "cameraVideo" },
+    { from: "main", on: { action: "tap", elementId: "favorite_toggle" }, to: "favorited" },
+    { from: "main", on: { action: "tap", elementId: "settings_row" }, to: "settings" },
     { from: "cameraVideo", on: { action: "tap", elementId: "mode_photo" }, to: "cameraPhoto" },
     { from: "cameraPhoto", on: { action: "tap", elementId: "shutter_button" }, to: "photoAttached" },
     { from: "searchFocused", on: { action: "back" }, to: "main" }
@@ -235,7 +290,30 @@ export interface ParityScenario {
   journey: Journey;
   /** Expected shared per-step outcome codes; `passed` for success. */
   expected: readonly string[];
+  /**
+   * Recorded-policy Replay outcomes where they intentionally differ: it
+   * does not check action capabilities, because the Recorder only offers
+   * targets that already have them.
+   */
+  recordedReplay?: readonly string[];
+  /**
+   * Generation outcomes where the code intentionally differs: it rejects a
+   * target without the action capability before mutating the device, with
+   * `ACTION_UNSUPPORTED`.
+   */
+  generation?: readonly string[];
 }
+
+const openSettings: JourneyStep = {
+  action: "click",
+  locator: { text: "Settings" },
+  activity: { before: MAIN, after: MAIN },
+  expect: {
+    type: "element",
+    locator: { resourceId: "settings_title" },
+    timeoutMs: 200
+  }
+};
 
 const takePhoto: JourneyStep = {
   action: "bridge",
@@ -294,6 +372,22 @@ export const scenarios: readonly ParityScenario[] = [
       activity: { before: SEARCH, after: SEARCH }
     }]),
     expected: ["passed", "passed", "LOCATOR_NOT_FOUND"]
+  },
+  {
+    name: "label inside a clickable row",
+    journey: journey("settings-label", [openSettings]),
+    expected: ["passed"]
+  },
+  {
+    name: "click on an element no clickable ancestor handles",
+    journey: journey("dead-click", [openSettings, {
+      action: "click",
+      locator: { resourceId: "settings_title" },
+      activity: { before: MAIN, after: MAIN }
+    }]),
+    expected: ["passed", "ACTION_FAILED"],
+    recordedReplay: ["passed", "passed"],
+    generation: ["passed", "ACTION_UNSUPPORTED"]
   },
   {
     name: "element expectation never appears",

@@ -441,6 +441,11 @@ without meta fails with `META_MISSING` and a second retire fails with
 - Locator priority is fixed: `resourceId`, then `text`, then
   `contentDescription`. Missing or ambiguous matches fail rather than selecting
   heuristically.
+  Action targets share one rule (`resolveActionTarget` in
+  `src/application/interaction/action-target.ts`) across Generation, its
+  proposal validator, generated Replay, and External Flow steps: click and
+  longClick reach the nearest capable element but touch the matched
+  element's own point; swipe needs scrollable bounds.
 - Journey `click`, `longClick`, `swipe`, `scrollTo`, and `inputText` steps may
   express their target as a semantic Knowledge `anchor` (an id from
   `.taphound/knowledge/anchors/`) instead of or alongside `locator`. Replay
@@ -509,7 +514,10 @@ the recorded and the generated Replay policy) and in
 device-call counts are pinned in
 `test/parity/__snapshots__/device-calls.json`; a change to that file is a
 reviewed performance diff (update it with `npx vitest run test/parity -u`).
-Add a scenario there before changing step execution semantics.
+Add a scenario there before changing step execution semantics. A scenario
+may declare `recordedReplay` or `generation` outcomes only for a documented,
+intentional difference (recorded Journeys skip capability checks; Generation
+rejects such proposals with `ACTION_UNSUPPORTED`).
 
 Vitest excludes `**/.worktrees/**` to prevent duplicate discovery from nested
 Git worktrees.

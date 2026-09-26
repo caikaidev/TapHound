@@ -52,6 +52,20 @@ export interface LocatorResolutionOptions {
   viewport?: DisplayViewport | undefined;
 }
 
+function pointWithin(
+  point: Point | undefined,
+  bounds: LayoutElement["bounds"]
+): Point | undefined {
+  return point !== undefined
+    && bounds !== undefined
+    && point.x >= bounds.left
+    && point.x < bounds.right
+    && point.y >= bounds.top
+    && point.y < bounds.bottom
+    ? point
+    : undefined;
+}
+
 function center(element: LayoutElement): Point | undefined {
   if (element.center !== undefined) {
     return element.center;
@@ -299,10 +313,12 @@ export function resolveLocator(
     options.requiredCapability !== undefined
     && element[options.requiredCapability] !== true
   ) {
+    // The nearest capable ancestor receives the touch; a disabled one
+    // swallows it, so it is reported instead of skipped.
     const ancestor = [...entry.ancestors].reverse().find(
-      (candidate) => candidate.enabled
-        && candidate[options.requiredCapability as "clickable" | "longClickable"]
-          === true
+      (candidate) => candidate[
+        options.requiredCapability as "clickable" | "longClickable"
+      ] === true
     );
     if (ancestor === undefined) {
       return {
@@ -320,7 +336,11 @@ export function resolveLocator(
       message: `Layout element ${element.id} is disabled`
     };
   }
-  const point = center(element);
+  // Touch the matched element itself: it dispatches to the capable ancestor,
+  // whose own center may be covered by an unrelated child control.
+  const point = element === entry.element
+    ? center(element)
+    : pointWithin(center(entry.element), element.bounds) ?? center(element);
   if (point === undefined) {
     return {
       status: "failed",

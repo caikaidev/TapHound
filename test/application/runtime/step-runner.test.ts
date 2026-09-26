@@ -80,6 +80,7 @@ function androidCli(): TestDeviceUi {
       id: "search",
       resourceId: "search",
       enabled: true,
+      clickable: true,
       bounds: { left: 0, top: 0, right: 100, bottom: 50 },
       children: []
     }])),
@@ -506,6 +507,7 @@ describe("StepRunner", () => {
             id: "search",
             resourceId: "search",
             enabled: true,
+            clickable: true,
             bounds: { left: 0, top: 0, right: 100, bottom: 50 },
             children: []
           }]);
@@ -531,6 +533,42 @@ describe("StepRunner", () => {
     expect(layoutReads).toBe(3);
     expect(test.clock.sleeps.slice(0, 2)).toEqual([100, 100]);
     expect(adb.tap).toHaveBeenCalledOnce();
+  });
+
+  it("fails a generated click on an element nothing clickable handles", async () => {
+    const cli = androidCli();
+    vi.mocked(cli.layout).mockResolvedValue([{
+      id: "search",
+      resourceId: "search",
+      enabled: true,
+      bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+      children: []
+    }]);
+    const adb = adbPort();
+    vi.mocked(adb.foregroundComponent).mockResolvedValue({
+      packageName: "com.example.app",
+      activity: checkpoint.before
+    });
+    const generated = fixture({
+      adb,
+      androidCli: cli,
+      generatedReplayPolicy: true
+    });
+
+    await expect(generated.runner.run(clickStep(), 0)).resolves.toMatchObject({
+      status: "failed",
+      failure: {
+        code: "ACTION_FAILED",
+        message: "Layout target lacks required clickable capability"
+      }
+    });
+    expect(generated.adb.tap).not.toHaveBeenCalled();
+
+    // A recorded Journey keeps the Recorder's semantics and taps it.
+    const recorded = fixture({ androidCli: cli });
+    await expect(recorded.runner.run(clickStep(), 0))
+      .resolves.toMatchObject({ status: "passed" });
+    expect(recorded.adb.tap).toHaveBeenCalledOnce();
   });
 
   it("does not poll an ambiguous Action locator", async () => {
@@ -1169,6 +1207,7 @@ describe("scrollTo replay", () => {
         id: "search",
         resourceId: "search",
         enabled: true,
+        clickable: true,
         bounds: { left: 0, top: 0, right: 100, bottom: 50 },
         children: []
       }])
@@ -1229,6 +1268,7 @@ describe("scrollTo replay", () => {
         id: "search",
         resourceId: "search",
         enabled: true,
+        clickable: true,
         bounds: { left: 0, top: 0, right: 100, bottom: 50 },
         children: []
       }])

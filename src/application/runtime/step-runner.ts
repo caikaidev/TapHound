@@ -34,7 +34,11 @@ import {
   BridgeRunner,
   ExternalStepRunner
 } from "../interaction/external-step-runner.js";
-import { resolveLocator } from "../locator/locator-resolver.js";
+import {
+  resolveLocator,
+  type LocatorResolution
+} from "../locator/locator-resolver.js";
+import { resolveActionTarget } from "../interaction/action-target.js";
 import {
   ExpectationEvaluator,
   type ExpectationObservationInput
@@ -809,9 +813,25 @@ export class StepRunner {
             "Step has no runtime locator fallback"
           );
         }
-        let resolution = resolveLocator(layout, step.locator, {
-          viewport: this.currentViewport
-        });
+        const locator = step.locator;
+        const action = step.action;
+        // Generated Replay targets exactly as Generation did; a recorded
+        // Journey keeps the Recorder's element-center semantics.
+        const locate = (): LocatorResolution => {
+          if (this.options.generatedReplayPolicy !== true) {
+            return resolveLocator(layout, locator, {
+              viewport: this.currentViewport
+            });
+          }
+          const resolved = resolveActionTarget(
+            layout,
+            action,
+            locator,
+            this.currentViewport
+          );
+          return resolved.status === "found" ? resolved.located : resolved;
+        };
+        let resolution = locate();
         const locatorDeadline = this.options.clock.now()
           + this.options.idle.timeoutMs;
         while (
@@ -857,9 +877,7 @@ export class StepRunner {
             }
             throw error;
           }
-          resolution = resolveLocator(layout, step.locator, {
-            viewport: this.currentViewport
-          });
+          resolution = locate();
         }
         if (resolution.status === "found") {
           target = {

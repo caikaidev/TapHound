@@ -11,6 +11,7 @@ import { resolveLocator } from "../locator/locator-resolver.js";
 import { withIdleAdvice } from "../wait/idle-advice.js";
 import type { IdleConfig, IdleResult, IdleWaiter } from "../wait/idle-waiter.js";
 import type { ActionExecutor, ActionTarget } from "./action-executor.js";
+import { resolveActionTarget } from "./action-target.js";
 import { ScrollToExecutor } from "./scroll-to-executor.js";
 
 /**
@@ -115,34 +116,16 @@ function requireExternalTarget(
   ) {
     return undefined;
   }
-  const resolution = resolveLocator(layout, step.locator, {
-    viewport,
-    ...(step.action === "click" ? { requiredCapability: "clickable" as const } : {}),
-    ...(step.action === "longClick"
-      ? { requiredCapability: "longClickable" as const }
-      : {})
-  });
+  const resolution = resolveActionTarget(
+    layout,
+    step.action,
+    step.locator,
+    viewport
+  );
   if (resolution.status !== "found") {
     stop(resolution.code, resolution.message);
   }
-  if (step.action === "click" && resolution.element.clickable !== true) {
-    stop("ACTION_FAILED", "External click target is not clickable");
-  }
-  if (step.action === "longClick" && resolution.element.longClickable !== true) {
-    stop("ACTION_FAILED", "External longClick target is not longClickable");
-  }
-  if (
-    step.action === "swipe"
-    && (resolution.element.scrollable !== true || resolution.element.bounds === undefined)
-  ) {
-    stop("ACTION_FAILED", "External swipe target lacks scrollable bounds");
-  }
-  return {
-    point: resolution.point,
-    ...(resolution.element.bounds === undefined
-      ? {}
-      : { bounds: resolution.element.bounds })
-  };
+  return resolution.target;
 }
 
 export class ExternalStepRunner {

@@ -62,6 +62,7 @@ import {
 } from "../assertion/guarded-expectation.js";
 import { LogcatCollector } from "../collector/logcat-collector.js";
 import { logcatStopFailed } from "../collector/logcat-stop.js";
+import { resolveActionTarget } from "../interaction/action-target.js";
 import { ActionExecutor, type ActionTarget } from "../interaction/action-executor.js";
 import { ScrollToExecutor } from "../interaction/scroll-to-executor.js";
 import {
@@ -388,49 +389,25 @@ function requireTarget(
   viewport: DisplayViewport
 ): ActionTarget | undefined {
   if (
-    step.action !== "click"
-    && step.action !== "longClick"
-    && step.action !== "swipe"
+    (
+      step.action !== "click"
+      && step.action !== "longClick"
+      && step.action !== "swipe"
+    )
+    || step.locator === undefined
   ) {
     return undefined;
   }
-  if (step.locator === undefined) {
-    return undefined;
-  }
-  const resolution = resolveLocator(layout, step.locator, {
-    viewport,
-    ...(step.action === "click" ? { requiredCapability: "clickable" } : {}),
-    ...(step.action === "longClick"
-      ? { requiredCapability: "longClickable" }
-      : {})
-  });
+  const resolution = resolveActionTarget(
+    layout,
+    step.action,
+    step.locator,
+    viewport
+  );
   if (resolution.status !== "found") {
     fail(resolution.code, resolution.message);
   }
-  if (step.action === "click" && resolution.element.clickable !== true) {
-    fail("ACTION_FAILED", "click target is not clickable");
-  }
-  if (
-    step.action === "longClick"
-    && resolution.element.longClickable !== true
-  ) {
-    fail("ACTION_FAILED", "longClick target is not longClickable");
-  }
-  if (
-    step.action === "swipe"
-    && (
-      resolution.element.scrollable !== true
-      || resolution.element.bounds === undefined
-    )
-  ) {
-    fail("ACTION_FAILED", "swipe target lacks scrollable bounds");
-  }
-  return {
-    point: resolution.point,
-    ...(resolution.element.bounds === undefined
-      ? {}
-      : { bounds: resolution.element.bounds })
-  };
+  return resolution.target;
 }
 
 function requireBridgeTrigger(

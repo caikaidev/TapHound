@@ -595,7 +595,7 @@ Checkpoint 的 `screen` 条件依赖 Knowledge 解析能力，失败关闭行为
 - 修掉 `locatorToKey` 的占位键碰撞；
 - `evidenceSha256` 要么绑定稳定的元素语义证据，要么删除（不要对人类可读消息取哈希）；
 - 若 `absent` 事实短期内无法从 passed 报告中产生，就在文档中显式声明该能力缺失，
-  等 Checkpoint 接入后由 `absentElements` 提供。
+  等 Checkpoint 接入后由 `allOf` 中的 `absentElement` 条件提供。
 
 ### 5.5 区分实现变化和测试资产变化
 

@@ -764,8 +764,7 @@ Finalize resolves the Context from the session's stored snapshot (written at
 `generation start` as `context/resolved.json`, integrity-bound to the
 session's `contextHash`), so unrelated source edits after start cannot scrap
 the session; live Context drift is printed to stderr as a warning while the
-snapshot stays authoritative. Pass `--context` only for legacy sessions
-created without a stored snapshot.
+snapshot stays authoritative.
 
 The start result contains `ownerPid`, `outputPath`, and `progressPath`. Wait
 without owning the replay process:
@@ -878,7 +877,7 @@ and classifies each entry:
 | Status | Meaning |
 |--------|---------|
 | `fresh` | Journey parses and every sidecar binding matches the live project (project/config hashes, journey path, and each `contextSelection` module's `sha256` against the live Context index, plus the bound Brief file's content hash when `sourceBrief` is present) |
-| `stale` | Structurally valid but a binding drifted: `project-hash`, `config-hash`, `journey-path-mismatch`, `module-drift`, `module-missing`, `meta-legacy`, `brief-drift`, or `brief-missing` |
+| `stale` | Structurally valid but a binding drifted: `project-hash`, `config-hash`, `journey-path-mismatch`, `module-drift`, `module-missing`, `brief-drift`, or `brief-missing` |
 | `no-meta` | No sidecar exists, so freshness cannot be proven |
 | `invalid` | Journey or sidecar is unreadable or fails its schema |
 
@@ -893,11 +892,6 @@ taphound journey check \
 check completed — findings or not; `--strict` exits `1` when any Journey is
 stale, invalid, or missing its sidecar, suitable for CI gates.
 
-Sidecars published before `contextSelection` was recorded classify as
-`stale` with reason `meta-legacy` (fail-closed). Re-running
-`generation finalize` on the original session with the same `--output`
-re-exports the sidecar with the field; publication to the same path is
-idempotent and does not repeat the verification replay.
 
 A sidecar bound with `sourceBrief` re-hashes the Brief file on every check:
 changed content reports `brief-drift` and a removed file reports

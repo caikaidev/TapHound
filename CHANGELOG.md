@@ -28,6 +28,33 @@ removes concepts that sat beside that path instead of on it.
 - **Engine benchmark** (`benchmark validate|list|run|compare`), which measured
   the removed Knowledge planner.
 
+### Removed compatibility code
+
+TapHound is pre-1.0; persisted formats now have exactly one shape and stale
+artifacts must be regenerated.
+
+- Legacy workspace detection (`.taphound/generations|jobs|runs` and root-level
+  run directories). Commands only create the `.taphound/build` layout.
+- Generation sessions without a bound UI backend and version 1
+  RuntimeSnapshots. Sessions always bind `bindings.uiBackend`; snapshots are
+  version 2 only.
+- `generation finalize --context` and `--allow-evidence-drift`. Finalize
+  always uses the session's stored Context snapshot (live drift is a
+  warning); a session without one fails with `CONTEXT_INVALID`.
+- Optional-for-old-data fields: Journey meta `journeySha256`,
+  `bindings.uiBackend`, `replayPolicy`, `contextSelection`, and
+  `externalFlows` are required (`bindings.knowledgeHash` is removed);
+  sessions require `verificationHistory` and `externalFlows`; Baselines
+  require `requiredEvidence`, element facts require `stepIndex` and are
+  always `present`. The `meta-legacy` Journey check reason is gone.
+- The flat Checkpoint form (`activity`, `screen`, `visibleElements`,
+  `absentElements`). Checkpoints use `expect: { allOf, timeoutMs }` only.
+
+### Fixed (compatibility cleanup)
+
+- Journey meta now records the session's bound External Flows; previously the
+  field was always written as an empty array.
+
 ### Changed
 
 - The False-Done Benchmark moved out of the published CLI into the repository
@@ -69,3 +96,7 @@ removes concepts that sat beside that path instead of on it.
 3. Replace `taphound verify-changes …` with `taphound verify --diff <base> …`.
 4. Active generation sessions started with `--goal` cannot be resumed; start a
    new session.
+5. Start new generation sessions; sessions and Journey meta sidecars created
+   before this release are rejected. Re-finalize Journeys whose meta sidecar
+   fails `journey check`, recapture Baselines, and rewrite flat Checkpoints as
+   `allOf` with a `timeoutMs`.

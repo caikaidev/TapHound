@@ -189,12 +189,13 @@ layout; derive every path from it instead of writing `.taphound` literals:
 `artifactsDir` is optional and defaults to `.taphound/build/runs`. Core
 artifacts must stay under `.taphound/build`; the same boundary applies to
 `verify --reports`.
-`record`, `verify`, and every `generation` subcommand refuse to run with
-`CONFIG_INVALID` (exit code 2) when the legacy `.taphound/generations`,
-`.taphound/jobs`, or `.taphound/runs` directories, or root-level timestamped
-Verify run directories, still exist. They initialize the safe build layout
-and `.taphound/.gitignore` before device work. There is no silent fallback and
-no automatic migration.
+`record`, `verify`, and every `generation` subcommand initialize the safe
+build layout and `.taphound/.gitignore` before device work.
+
+TapHound is pre-1.0: persisted protocols (sessions, snapshots, meta sidecars,
+Baselines, Knowledge indexes) have exactly one current shape. Do not add
+compatibility readers, optional-for-old-data fields, or migration shims;
+regenerate stale artifacts instead.
 
 ### Verification Flow
 
@@ -298,9 +299,7 @@ atomic `write` method. `--force` is required to overwrite an existing flow.
 The probe always `forceStop`s the camera app in a `finally` block, even on
 failure, so no camera instance is left open after alignment.
 
-`align camera` requires a valid `.taphound/config.json` and rejects legacy
-workspace layouts with `CONFIG_INVALID`, the same guard as `record`, `verify`,
-and `generation`. Device selection mirrors `doctor`: auto-select when exactly
+`align camera` requires a valid `.taphound/config.json`. Device selection mirrors `doctor`: auto-select when exactly
 one device is online, otherwise require `--device`. Missing or offline devices
 yield `ALIGN_DEVICE_UNAVAILABLE` (exit code 2).
 
@@ -343,7 +342,10 @@ Generation is a revisioned, evidence-backed state machine:
    Locator uses `index`, Core binds versioned, non-geometric semantic evidence
    of the selected element into the persisted step; Replay recomputes it
    before mutation and fails with `LOCATOR_NOT_FOUND` on mismatch, bypassing
-   annotated fallback. Older Journeys without evidence keep ordinal behavior.
+   annotated fallback. An indexed Locator whose target is not on the
+   bound snapshot (for example an expectation target that appears only after
+   the action, or an off-screen `scrollTo` target) carries no evidence and
+   keeps ordinal behavior.
    For `bridge` proposals with `--flow`, the executor resolves the bound
    External Flow, clicks the trigger, detects the escape, executes each flow
    step inside the escaped package with `resourceId`-only locators, waits for

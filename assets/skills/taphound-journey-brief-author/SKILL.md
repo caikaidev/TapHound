@@ -485,7 +485,7 @@ All edges retain their Phase 1 confidence.
 - After any Context refresh, rehash, or regeneration, committed Journeys may
   no longer match the live bundle. Run `taphound journey check --project
   <project> --context <context> --json` (read-only, no device) to surface
-  drifted Journeys (`module-drift`, `module-missing`, `meta-legacy`); the
+  drifted Journeys (`module-drift`, `module-missing`); the
   `taphound-journey-generator` Skill re-finalizes them from their sessions.
 - Conditionally rendered elements (a clear button that only appears once a
   search field has text, collapsed containers) are still valid Context

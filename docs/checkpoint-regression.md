@@ -22,18 +22,21 @@ A Checkpoint is a named expectation at a point in a Journey:
   "name": "Search results visible",
   "stepIndex": 3,
   "expect": {
-    "activity": "com.example.app.SearchActivity",
-    "screen": "search",
-    "visibleElements": [{ "resourceId": "results" }],
-    "absentElements": []
+    "timeoutMs": 3000,
+    "allOf": [
+      { "kind": "activity", "expected": "com.example.app.SearchActivity" },
+      { "kind": "screen", "expected": "search" },
+      { "kind": "visibleElement", "locator": { "resourceId": "results" } }
+    ]
   },
   "status": "inferred"
 }
 ```
 
-A Checkpoint is **not a screenshot** (architecture doc §11): `expect` carries
-deterministic, machine-checkable conditions — Activity, Knowledge Screen,
-visible/absent elements — and at least one condition is required.
+A Checkpoint is **not a screenshot** (architecture doc §11): `expect.allOf`
+carries deterministic, machine-checkable conditions — Activity, Knowledge
+Screen, visible/absent elements, structured Logcat events — evaluated on one
+shared `timeoutMs` deadline. At least one condition is required.
 
 Put Checkpoints in the Journey's top-level `checkpoints` array. They are
 included in the Journey hash; no separate Checkpoint file is read at Replay.
@@ -58,8 +61,7 @@ result cannot satisfy the Contract (see `docs/contract-schema.md`).
 
 ### Shared `allOf` window
 
-Use `allOf` instead of legacy `activity`/`screen`/`visibleElements`/
-`absentElements` to require UI and structured Logcat evidence on one shared
+`allOf` can combine UI and structured Logcat evidence on one shared
 deadline:
 
 ```json
@@ -85,8 +87,8 @@ deadline:
 Declare `search-start` explicitly as `markerId` on an earlier `wait` step.
 The event window starts at that marker, even across intervening steps.
 `stepStart` and `runStart` are also available. Logcat conditions inherit the
-Checkpoint's `timeoutMs` rather than having separate budgets. Legacy
-conditions and `allOf` cannot be mixed. Condition identities must be unique;
+Checkpoint's `timeoutMs` rather than having separate budgets. Condition
+identities must be unique;
 only one Activity and one Screen may appear in one `allOf`.
 
 UI observations capture fresh hierarchies and validate the target foreground
@@ -201,8 +203,8 @@ hooks or an evaluated Screen Checkpoint). A plain `verify` report without a
 Screen Checkpoint carries no Screen matches. When a Baseline requires Screen evidence but the current report has
 none, compare returns `BASELINE_INCOMPARABLE`, not a Screen regression.
 Use `baseline capture --no-screen-facts` if future comparisons use plain
-`verify --journey`; legacy Baselines infer this requirement from their
-`screens` array.
+`verify --journey`; every Baseline records this requirement in
+`requiredEvidence.screens`.
 
 Passed step locators only establish presence at their own step. Verified
 absence comes only from passed `absentElement` Checkpoint conditions. A Baseline does

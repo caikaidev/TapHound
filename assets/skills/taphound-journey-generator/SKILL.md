@@ -440,8 +440,7 @@ and final Replay remains the only completion gate.
    Finalize resolves the Context from the session's stored snapshot
    (written at `generation start`, integrity-bound to the session's
    `contextHash`), so unrelated source edits after start cannot scrap the
-   session; live Context drift is reported to stderr as a warning. Pass
-   `--context` only for legacy sessions created without a stored snapshot.
+   session; live Context drift is reported to stderr as a warning.
 
 2. Wait for durable completion, then read the detached job's `outputPath`
    returned by the start command:
@@ -476,11 +475,7 @@ and final Replay remains the only completion gate.
    its sidecar bindings (project, config, and `contextSelection` module
    hashes, plus the Brief content hash when `sourceBrief` is bound) against
    the live project. `--strict` exits `1` when any Journey
-   is stale, invalid, or missing its sidecar — suitable for CI. Sidecars
-   published before `contextSelection` was recorded classify as `stale`
-   with reason `meta-legacy`; re-running `generation finalize` on the
-   original session with the same `--output` re-exports the sidecar with
-   the field. A bound Brief that changed or disappeared reports
+   is stale, invalid, or missing its sidecar — suitable for CI. A bound Brief that changed or disappeared reports
    `brief-drift` or `brief-missing` respectively.
 
 5. Promote the replay-verified Journey into a durable asset when it should

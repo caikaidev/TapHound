@@ -407,6 +407,9 @@ structured `DETACHED_PROCESS_CRASHED` result instead of leaving empty output.
 
 `FileSystemGenerationSessionStore` owns `.taphound/build/generations` and is the
 authoritative persistence boundary for generation state and immutable evidence.
+Its lock (`SessionLock`), state transition rules, and filesystem primitives
+live beside it in `src/adapters/filesystem/generation-store/`; the
+`generation` CLI subcommands are grouped under `src/cli/commands/generation/`.
 It creates the ephemeral build subtree and `.taphound/.gitignore` on demand. Its
 revision checks, locking, atomic renames, path validation, recovery state, and
 core-identity invariants are part of the protocol; do not bypass them with

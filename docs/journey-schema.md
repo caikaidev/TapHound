@@ -289,7 +289,9 @@ image picker, or file picker. A bridge step can run in two replay modes:
   manually.
 - `escapedPackageName`: filled by Core during generation. Records the package
   that the foreground escaped to. Required when `flow` or `externalSteps` is
-  present. Present in committed Journey steps but not in proposals.
+  present. Present in committed Journey steps but not in proposals. Replay
+  fails with `EXTERNAL_PACKAGE_MISMATCH` when the trigger escapes to a
+  different package than the one recorded.
 
 ### External Steps
 

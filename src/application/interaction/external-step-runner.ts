@@ -389,3 +389,164 @@ export async function pollForegroundPackage(input: {
   }
   return { status: "timeout" };
 }
+
+export interface BridgeRunDependencies {
+  adb: Pick<AdbPort, "foregroundComponent">;
+  clock: Clock;
+  actionExecutor: ActionExecutor;
+  externalSteps: ExternalStepRunner;
+  idleWaiter: IdleWaiter;
+  idle: IdleConfig;
+  packageName: string;
+  deviceSerial: string;
+}
+
+export interface BridgeRunInput {
+  trigger: { step: JourneyStep; target: ActionTarget };
+  escapeTimeoutMs: number;
+  returnTimeoutMs: number;
+  /** Engine policy for the escaped package; a failure stops the bridge. */
+  acceptEscape: (escapedPackageName: string) => ExternalStepFailure | undefined;
+  /** External steps to run inside the escaped app, if any. */
+  externalSteps: (
+    escapedPackageName: string
+  ) => Promise<readonly ExternalStep[] | undefined>;
+  signal?: AbortSignal | undefined;
+}
+
+export interface BridgeTiming {
+  actionMs: number;
+  waitMs: number;
+}
+
+export type BridgeOutcome =
+  | {
+      status: "returned";
+      escapedPackageName: string;
+      externalSteps?: readonly ExternalStep[] | undefined;
+      idle: Extract<IdleResult, { status: "stable" }>;
+      timing: BridgeTiming;
+    }
+  | ({
+      status: "failed";
+      idle?: Extract<IdleResult, { status: "timeout" }> | undefined;
+      timing: BridgeTiming;
+    } & ExternalStepFailure)
+  | { status: "cancelled"; timing: BridgeTiming };
+
+/**
+ * The single bridge step flow for Replay and Generation: trigger, escape,
+ * policy check, external steps, return, and settle.
+ */
+export class BridgeRunner {
+  public constructor(private readonly dependencies: BridgeRunDependencies) {}
+
+  public async run(input: BridgeRunInput): Promise<BridgeOutcome> {
+    const { clock } = this.dependencies;
+    const timing: BridgeTiming = { actionMs: 0, waitMs: 0 };
+    const failed = (
+      failure: ExternalStepFailure,
+      idle?: Extract<IdleResult, { status: "timeout" }>
+    ): BridgeOutcome => ({
+      status: "failed",
+      ...failure,
+      ...(idle === undefined ? {} : { idle }),
+      timing
+    });
+    const cancelledOutcome = (): BridgeOutcome => ({ status: "cancelled", timing });
+
+    const actionStartedAt = clock.now();
+    const action = await this.dependencies.actionExecutor.execute(
+      input.trigger.step,
+      input.trigger.target,
+      input.signal
+    );
+    timing.actionMs = clock.now() - actionStartedAt;
+    if (input.signal?.aborted === true) return cancelledOutcome();
+    if (action.status === "failed") {
+      return failed({ code: action.code, message: action.message });
+    }
+
+    const waitStartedAt = clock.now();
+    const escaped = await pollForegroundPackage({
+      adb: this.dependencies.adb,
+      clock,
+      packageName: this.dependencies.packageName,
+      deviceSerial: this.dependencies.deviceSerial,
+      until: (packageName) => packageName !== this.dependencies.packageName,
+      timeoutMs: input.escapeTimeoutMs,
+      signal: input.signal
+    });
+    timing.waitMs += clock.now() - waitStartedAt;
+    if (escaped.status === "cancelled") return cancelledOutcome();
+    if (escaped.status === "timeout") {
+      return failed({
+        code: "BRIDGE_NO_ESCAPE",
+        message: "Bridge trigger did not cause a package escape"
+      });
+    }
+    const rejected = input.acceptEscape(escaped.packageName);
+    if (rejected !== undefined) return failed(rejected);
+
+    const externalSteps = await input.externalSteps(escaped.packageName);
+    if (externalSteps !== undefined) {
+      const external = await this.dependencies.externalSteps.run(
+        externalSteps,
+        escaped.packageName,
+        input.signal
+      );
+      if (external.status === "cancelled") return cancelledOutcome();
+      if (external.status === "failed") {
+        return failed({
+          code: external.code,
+          message: external.message,
+          ...(external.details === undefined ? {} : { details: external.details })
+        });
+      }
+    }
+
+    const returnStartedAt = clock.now();
+    const returned = await pollForegroundPackage({
+      adb: this.dependencies.adb,
+      clock,
+      packageName: this.dependencies.packageName,
+      deviceSerial: this.dependencies.deviceSerial,
+      until: (packageName) => packageName === this.dependencies.packageName,
+      timeoutMs: input.returnTimeoutMs,
+      signal: input.signal
+    });
+    timing.waitMs += clock.now() - returnStartedAt;
+    if (returned.status === "cancelled") return cancelledOutcome();
+    if (returned.status === "timeout") {
+      return failed({
+        code: "BRIDGE_NOT_RETURNED",
+        message: "Foreground did not return to target package within the timeout"
+      });
+    }
+
+    const idleStartedAt = clock.now();
+    const idle = await this.dependencies.idleWaiter.waitUntilIdle(
+      this.dependencies.idle,
+      input.signal
+    );
+    timing.waitMs += clock.now() - idleStartedAt;
+    if (idle.status === "cancelled") return cancelledOutcome();
+    if (idle.status === "timeout") {
+      return failed({
+        code: idle.code,
+        message: withIdleAdvice(
+          "Layout did not become stable after bridge return",
+          idle
+        ),
+        details: idleTimeoutDetails(idle)
+      }, idle);
+    }
+    return {
+      status: "returned",
+      escapedPackageName: escaped.packageName,
+      ...(externalSteps === undefined ? {} : { externalSteps }),
+      idle,
+      timing
+    };
+  }
+}

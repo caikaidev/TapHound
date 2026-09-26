@@ -64,9 +64,9 @@ import { logcatStopFailed } from "../collector/logcat-stop.js";
 import { ActionExecutor, type ActionTarget } from "../interaction/action-executor.js";
 import { ScrollToExecutor } from "../interaction/scroll-to-executor.js";
 import {
+  BridgeRunner,
   ExternalStepRunner,
-  idleTimeoutDetails,
-  pollForegroundPackage
+  idleTimeoutDetails
 } from "../interaction/external-step-runner.js";
 import { resolveLocator } from "../locator/locator-resolver.js";
 import {
@@ -923,24 +923,57 @@ export class GenerationStepExecutor {
           provisional,
           preAction.viewport
         );
-        const triggerClick = JourneyStepSchema.parse({
-          action: "click",
-          locator: provisional.triggerLocator,
-          activity: {
-            before: provisional.activity.before,
-            after: provisional.activity.before
-          }
+        const scenario = provisional.scenario;
+        const bridge = await new BridgeRunner({
+          adb: this.boundViews().adb,
+          clock: this.dependencies.clock,
+          actionExecutor,
+          externalSteps: this.externalStepRunner(session),
+          idleWaiter,
+          idle: this.dependencies.idle,
+          packageName: session.target.packageName,
+          deviceSerial: session.target.deviceSerial
+        }).run({
+          trigger: {
+            step: JourneyStepSchema.parse({
+              action: "click",
+              locator: provisional.triggerLocator,
+              activity: {
+                before: provisional.activity.before,
+                after: provisional.activity.before
+              }
+            }),
+            target: triggerTarget
+          },
+          escapeTimeoutMs: provisional.escapeTimeoutMs ?? 3000,
+          returnTimeoutMs: provisional.returnTimeoutMs,
+          acceptEscape: (escapedPackageName) => {
+            if (
+              isSystemScenario(scenario)
+              && !isKnownSystemPackage(scenario, escapedPackageName)
+            ) {
+              fail(
+                "SCENARIO_PACKAGE_MISMATCH",
+                `Escaped package "${escapedPackageName}" is not a known ${scenario} package`
+              );
+            }
+            return undefined;
+          },
+          externalSteps: (escapedPackageName) => (
+            proposedFlow === undefined
+              ? Promise.resolve(undefined)
+              : this.resolveExternalFlow(
+                  session,
+                  proposedFlow,
+                  escapedPackageName,
+                  input.signal
+                )
+          ),
+          signal: input.signal
         });
-        const actionStartedAt = this.dependencies.clock.now();
-        const action = await actionExecutor.execute(
-          triggerClick,
-          triggerTarget,
-          input.signal
-        );
-        timing.actionExecutionMs = (
-          this.dependencies.clock.now() - actionStartedAt
-        );
-        if (isCancelled(input.signal)) {
+        timing.actionExecutionMs = bridge.timing.actionMs;
+        timing.idleWaitMs = bridge.timing.waitMs;
+        if (bridge.status === "cancelled") {
           outcome = {
             status: "cancelled",
             failure: {
@@ -948,87 +981,12 @@ export class GenerationStepExecutor {
               message: "Step was cancelled"
             }
           };
-        } else if (action.status === "failed") {
-          fail(action.code, action.message);
-        }
-        if (outcome === undefined) {
-          throwIfCancelled(input.signal);
-          const escapeStartedAt = this.dependencies.clock.now();
-          const escapedPackageName = await this.detectBridgeEscape(
-            session,
-            input.signal,
-            provisional.escapeTimeoutMs ?? 3000
-          );
-          timing.idleWaitMs = (
-            this.dependencies.clock.now() - escapeStartedAt
-          );
-          if (isSystemScenario(provisional.scenario)) {
-            if (
-              !isKnownSystemPackage(
-                provisional.scenario,
-                escapedPackageName
-              )
-            ) {
-              fail(
-                "SCENARIO_PACKAGE_MISMATCH",
-                `Escaped package "${escapedPackageName}" is not a known ${
-                  provisional.scenario
-                } package`
-              );
-            }
-          }
-          bridgeEscapedPackageName = escapedPackageName;
-        }
-        if (outcome === undefined && proposedFlow !== undefined) {
-          throwIfCancelled(input.signal);
-          const flowResult = await this.resolveAndExecuteExternalFlow(
-            session,
-            proposedFlow,
-            bridgeEscapedPackageName as string,
-            input.signal
-          );
-          bridgeExternalSteps = flowResult;
-        }
-        if (outcome === undefined) {
-          throwIfCancelled(input.signal);
-          const returnStartedAt = this.dependencies.clock.now();
-          await this.waitForBridgeReturn(
-            session,
-            input.signal,
-            provisional.returnTimeoutMs
-          );
-          timing.idleWaitMs += (
-            this.dependencies.clock.now() - returnStartedAt
-          );
-          throwIfCancelled(input.signal);
-          const idleStartedAt = this.dependencies.clock.now();
-          const idle = await idleWaiter.waitUntilIdle(
-            this.dependencies.idle,
-            input.signal
-          );
-          timing.idleWaitMs += (
-            this.dependencies.clock.now() - idleStartedAt
-          );
-          if (idle.status === "cancelled") {
-            outcome = {
-              status: "cancelled",
-              failure: {
-                code: "RECOVERY_REQUIRED",
-                message: "Step was cancelled"
-              }
-            };
-          } else if (idle.status === "timeout") {
-            fail(
-              idle.code,
-              withIdleAdvice(
-                "Layout did not become stable after bridge return",
-                idle
-              ),
-              idleTimeoutDetails(idle)
-            );
-          } else {
-            stableLayout = idle.layout;
-          }
+        } else if (bridge.status === "failed") {
+          fail(bridge.code, bridge.message, bridge.details);
+        } else {
+          bridgeEscapedPackageName = bridge.escapedPackageName;
+          bridgeExternalSteps = bridge.externalSteps;
+          stableLayout = bridge.idle.layout;
         }
       } else {
         const target = requireTarget(
@@ -1662,55 +1620,8 @@ export class GenerationStepExecutor {
     );
   }
 
-  private async detectBridgeEscape(
-    session: GenerationSession,
-    signal: AbortSignal | undefined,
-    timeoutMs: number
-  ): Promise<string> {
-    const escaped = await pollForegroundPackage({
-      adb: this.boundViews().adb,
-      clock: this.dependencies.clock,
-      packageName: session.target.packageName,
-      deviceSerial: session.target.deviceSerial,
-      until: (packageName) => packageName !== session.target.packageName,
-      timeoutMs,
-      signal
-    });
-    if (escaped.status === "cancelled") {
-      throw new StepCancelledError("Bridge escape detection was cancelled");
-    }
-    if (escaped.status === "timeout") {
-      fail("BRIDGE_NO_ESCAPE", "Trigger did not cause a package escape");
-    }
-    return escaped.packageName;
-  }
-
-  private async waitForBridgeReturn(
-    session: GenerationSession,
-    signal: AbortSignal | undefined,
-    timeoutMs: number
-  ): Promise<void> {
-    const returned = await pollForegroundPackage({
-      adb: this.boundViews().adb,
-      clock: this.dependencies.clock,
-      packageName: session.target.packageName,
-      deviceSerial: session.target.deviceSerial,
-      until: (packageName) => packageName === session.target.packageName,
-      timeoutMs,
-      signal
-    });
-    if (returned.status === "cancelled") {
-      throw new StepCancelledError("Bridge return wait was cancelled");
-    }
-    if (returned.status === "timeout") {
-      fail(
-        "BRIDGE_NOT_RETURNED",
-        "Foreground did not return to target package within the timeout"
-      );
-    }
-  }
-
-  private async resolveAndExecuteExternalFlow(
+  /** Resolves and validates the bound External Flow for the escaped app. */
+  private async resolveExternalFlow(
     session: GenerationSession,
     flowName: string,
     escapedPackageName: string,
@@ -1774,17 +1685,6 @@ export class GenerationStepExecutor {
           }"`
         );
       }
-    }
-    const outcome = await this.externalStepRunner(session).run(
-      resolution.flow.steps,
-      escapedPackageName,
-      signal
-    );
-    if (outcome.status === "cancelled") {
-      throw new StepCancelledError("External Flow was cancelled");
-    }
-    if (outcome.status === "failed") {
-      fail(outcome.code, outcome.message, outcome.details);
     }
     return resolution.flow.steps;
   }

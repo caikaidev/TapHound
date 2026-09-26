@@ -3,7 +3,7 @@ import {
   appProcessPids,
   primaryAppPid
 } from "../../domain/app-process.js";
-import type { JourneyStep } from "../../domain/journey.js";
+import type { ExternalStep, JourneyStep } from "../../domain/journey.js";
 import type { LayoutElement } from "../../domain/layout.js";
 import type { DisplayViewport } from "../../domain/geometry.js";
 import type {
@@ -31,15 +31,19 @@ import { ActionExecutor, type ActionTarget } from "../interaction/action-executo
 import { FallbackResolver } from "../interaction/fallback-resolver.js";
 import { ScrollToExecutor } from "../interaction/scroll-to-executor.js";
 import {
-  ExternalStepRunner,
-  pollForegroundPackage
+  BridgeRunner,
+  ExternalStepRunner
 } from "../interaction/external-step-runner.js";
 import { resolveLocator } from "../locator/locator-resolver.js";
 import {
   ExpectationEvaluator,
   type ExpectationObservationInput
 } from "../assertion/expectation-evaluator.js";
-import { IdleWaiter, type IdleConfig } from "../wait/idle-waiter.js";
+import {
+  IdleWaiter,
+  type IdleConfig,
+  type IdleResult
+} from "../wait/idle-waiter.js";
 import { deviceIdentityResolver } from "../wait/idle-profiles.js";
 import { withIdleAdvice } from "../wait/idle-advice.js";
 import {
@@ -508,19 +512,11 @@ export class StepRunner {
             stepPath(index, "layout-diff.json"),
             scroll.idle.lastDiff
           );
-          report.idle = {
+          report.idle = idleStepReport({
+            ...scroll.idle,
             status: "timeout",
-            polls: scroll.idle.polls,
-            durationMs: scroll.idle.durationMs,
-            samplingDurationMs: scroll.idle.samplingDurationMs,
-            strategy: scroll.idle.strategy,
-            ...(scroll.idle.backend === undefined
-              ? {}
-              : { backendId: scroll.idle.backend }),
-            fallbackUsed: scroll.idle.fallbackUsed,
-            frameActivityDetected: scroll.idle.frameActivityDetected,
-            lastDiff: [...scroll.idle.lastDiff]
-          };
+            code: "IDLE_TIMEOUT"
+          });
         }
         return fail(scroll.code, scroll.message);
       }
@@ -588,122 +584,58 @@ export class StepRunner {
           return fail("ACTIVITY_BEFORE_MISMATCH", errorMessage(error));
         }
       }
-      const triggerClick = {
-        action: "click" as const,
-        locator: step.triggerLocator,
-        activity: {
-          before: step.activity.before,
-          after: step.activity.before
-        }
-      };
-      const triggerAction = await this.actionExecutor.execute(
-        triggerClick,
-        triggerTarget,
-        signal
-      );
-      if (triggerAction.status === "failed") {
-        return fail(triggerAction.code, triggerAction.message);
-      }
-      const escaped = await pollForegroundPackage({
+      const recordedEscape = step.escapedPackageName;
+      const bridge = await new BridgeRunner({
         adb: this.options.adb,
         clock: this.options.clock,
+        actionExecutor: this.actionExecutor,
+        externalSteps: this.externalStepRunner(index),
+        idleWaiter: this.idleWaiter,
+        idle: this.options.idle,
         packageName: this.options.packageName,
-        deviceSerial: this.options.deviceSerial,
-        until: (packageName) => packageName !== this.options.packageName,
-        timeoutMs: step.escapeTimeoutMs ?? 3000,
+        deviceSerial: this.options.deviceSerial
+      }).run({
+        trigger: {
+          step: {
+            action: "click",
+            locator: step.triggerLocator,
+            activity: {
+              before: step.activity.before,
+              after: step.activity.before
+            }
+          },
+          target: triggerTarget
+        },
+        escapeTimeoutMs: step.escapeTimeoutMs ?? 3000,
+        returnTimeoutMs: step.returnTimeoutMs,
+        // Replay must reach the same external app the Journey recorded.
+        acceptEscape: (escapedPackageName) => (
+          recordedEscape === undefined || escapedPackageName === recordedEscape
+            ? undefined
+            : {
+                code: "EXTERNAL_PACKAGE_MISMATCH",
+                message: `Bridge escaped to "${escapedPackageName}", but the Journey recorded "${recordedEscape}"`
+              }
+        ),
+        externalSteps: (): Promise<readonly ExternalStep[] | undefined> => (
+          Promise.resolve(step.externalSteps)
+        ),
         signal
       });
-      if (escaped.status === "cancelled") {
+      if (bridge.status === "cancelled") {
         return finish("cancelled");
       }
-      if (escaped.status === "timeout") {
-        return fail(
-          "BRIDGE_NO_ESCAPE",
-          "Bridge trigger did not cause a package escape during replay"
-        );
-      }
-      if (step.externalSteps !== undefined) {
-        if (step.escapedPackageName === undefined) {
-          return fail(
-            "ACTION_FAILED",
-            "Bridge auto replay requires escapedPackageName"
+      if (bridge.status === "failed") {
+        if (bridge.idle !== undefined) {
+          report.idle = idleStepReport(bridge.idle);
+          await this.options.artifacts.writeJson(
+            stepPath(index, "layout-diff.json"),
+            bridge.idle.lastDiff
           );
         }
-        const external = await this.externalStepRunner(index).run(
-          step.externalSteps,
-          step.escapedPackageName,
-          signal
-        );
-        if (external.status === "cancelled") {
-          return finish("cancelled");
-        }
-        if (external.status === "failed") {
-          return fail(external.code, external.message);
-        }
+        return fail(bridge.code, bridge.message);
       }
-      const returned = await pollForegroundPackage({
-        adb: this.options.adb,
-        clock: this.options.clock,
-        packageName: this.options.packageName,
-        deviceSerial: this.options.deviceSerial,
-        until: (packageName) => packageName === this.options.packageName,
-        timeoutMs: step.returnTimeoutMs,
-        signal
-      });
-      if (returned.status === "cancelled") {
-        return finish("cancelled");
-      }
-      if (returned.status === "timeout") {
-        return fail(
-          "BRIDGE_NOT_RETURNED",
-          "Foreground did not return to target package within the timeout"
-        );
-      }
-      const idle = await this.idleWaiter.waitUntilIdle(this.options.idle, signal);
-      report.idle = idle.status === "timeout"
-        ? {
-            status: "timeout",
-            polls: idle.polls,
-            durationMs: idle.durationMs,
-            samplingDurationMs: idle.samplingDurationMs,
-            strategy: idle.strategy,
-            ...(idle.backend === undefined ? {} : { backendId: idle.backend }),
-            fallbackUsed: idle.fallbackUsed,
-            frameActivityDetected: idle.frameActivityDetected,
-            lastDiff: [...idle.lastDiff]
-          }
-        : {
-            status: idle.status,
-            polls: idle.polls,
-            durationMs: idle.durationMs,
-            ...(idle.status !== "stable"
-              ? {}
-              : {
-                  samplingDurationMs: idle.samplingDurationMs,
-                  ...(idle.backend === undefined
-                    ? {}
-                    : { backendId: idle.backend }),
-                  strategy: idle.strategy,
-                  fallbackUsed: idle.fallbackUsed,
-                  frameActivityDetected: idle.frameActivityDetected
-                })
-          };
-      if (idle.status === "cancelled") {
-        return finish("cancelled");
-      }
-      if (idle.status === "timeout") {
-        await this.options.artifacts.writeJson(
-          stepPath(index, "layout-diff.json"),
-          idle.lastDiff
-        );
-        return fail(
-          idle.code,
-          withIdleAdvice(
-            "Layout did not become stable after bridge return",
-            idle
-          )
-        );
-      }
+      report.idle = idleStepReport(bridge.idle);
     } else if (
       step.action === "wait"
       && step.until !== undefined
@@ -1131,34 +1063,7 @@ export class StepRunner {
       }
 
       const idle = await this.idleWaiter.waitUntilIdle(this.options.idle, signal);
-      report.idle = idle.status === "timeout"
-        ? {
-            status: "timeout",
-            polls: idle.polls,
-            durationMs: idle.durationMs,
-            samplingDurationMs: idle.samplingDurationMs,
-            strategy: idle.strategy,
-            ...(idle.backend === undefined ? {} : { backendId: idle.backend }),
-            fallbackUsed: idle.fallbackUsed,
-            frameActivityDetected: idle.frameActivityDetected,
-            lastDiff: [...idle.lastDiff]
-          }
-        : {
-            status: idle.status,
-            polls: idle.polls,
-            durationMs: idle.durationMs,
-            ...(idle.status !== "stable"
-              ? {}
-              : {
-                  samplingDurationMs: idle.samplingDurationMs,
-                  ...(idle.backend === undefined
-                    ? {}
-                    : { backendId: idle.backend }),
-                  strategy: idle.strategy,
-                  fallbackUsed: idle.fallbackUsed,
-                  frameActivityDetected: idle.frameActivityDetected
-                })
-          };
+      report.idle = idleStepReport(idle);
       if (idle.status === "cancelled") {
         return finish("cancelled");
       }
@@ -1414,6 +1319,39 @@ export class StepRunner {
       }
     });
   }
+}
+
+
+function idleStepReport(idle: IdleResult): NonNullable<StepReport["idle"]> {
+  if (idle.status === "cancelled") {
+    return {
+      status: "cancelled",
+      polls: idle.polls,
+      durationMs: idle.durationMs
+    };
+  }
+  return idle.status === "timeout"
+    ? {
+        status: "timeout",
+        polls: idle.polls,
+        durationMs: idle.durationMs,
+        samplingDurationMs: idle.samplingDurationMs,
+        strategy: idle.strategy,
+        ...(idle.backend === undefined ? {} : { backendId: idle.backend }),
+        fallbackUsed: idle.fallbackUsed,
+        frameActivityDetected: idle.frameActivityDetected,
+        lastDiff: [...idle.lastDiff]
+      }
+    : {
+        status: "stable",
+        polls: idle.polls,
+        durationMs: idle.durationMs,
+        samplingDurationMs: idle.samplingDurationMs,
+        ...(idle.backend === undefined ? {} : { backendId: idle.backend }),
+        strategy: idle.strategy,
+        fallbackUsed: idle.fallbackUsed,
+        frameActivityDetected: idle.frameActivityDetected
+      };
 }
 
 function errorMessage(error: unknown): string {

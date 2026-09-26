@@ -63,6 +63,10 @@ artifacts must be regenerated.
   `scrollTo` swipes re-check the escaped package and Activity before each
   mutation. Cancelling a bridge escape wait no longer reports
   `BRIDGE_NO_ESCAPE`.
+- Replay verifies that a bridge escapes to the Journey's recorded
+  `escapedPackageName` and fails with `EXTERNAL_PACKAGE_MISMATCH` otherwise,
+  instead of accepting any foreground change. Replay and Generation now share
+  one bridge implementation (`BridgeRunner`).
 
 ### Fixed (compatibility cleanup)
 

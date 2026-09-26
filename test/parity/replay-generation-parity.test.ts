@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { demoApp, scenarios } from "../harness/demo-app.js";
+import type { JourneyStep } from "../../src/domain/journey.js";
 import {
   createParityProject,
   finalizeGeneration,
@@ -54,6 +55,26 @@ describe("Replay ↔ Generation parity on a simulated device", () => {
       };
     }, SCENARIO_TIMEOUT_MS);
   }
+
+  it("fails Replay when the bridge escapes to a different app than recorded", async () => {
+    const camera = scenarios.find((scenario) => scenario.name.startsWith("camera"));
+    const step = camera?.journey.steps[0];
+    if (camera === undefined || step?.action !== "bridge") {
+      throw new Error("camera bridge scenario is missing");
+    }
+    const recordedElsewhere: JourneyStep = {
+      ...step,
+      escapedPackageName: "com.vendor.camera"
+    };
+    const replay = await runReplay(demoApp, project, {
+      ...camera.journey,
+      steps: [recordedElsewhere]
+    });
+
+    expect(replay.outcomes.map((outcome) => outcome.outcome))
+      .toEqual(["EXTERNAL_PACKAGE_MISMATCH"]);
+    expect(replay.stepCalls[0]?.tap).toBe(1);
+  }, SCENARIO_TIMEOUT_MS);
 
   it("pins per-step device calls for both engines", async () => {
     await expect(`${JSON.stringify(deviceCalls, null, 2)}\n`)

@@ -247,6 +247,13 @@ failure. Final screenshot and Logcat collection still run; collection failures
 become secondary errors instead of replacing the primary failure.
 `ReportWriter` and `ArtifactStore` publish each completed run atomically.
 
+Replay and Generation run bridge steps through one shared implementation
+(`BridgeRunner` and `ExternalStepRunner` in
+`src/application/interaction/external-step-runner.ts`): trigger, escape
+detection, escaped-package policy, external steps, return wait, and settle.
+Replay requires the escaped package to equal the step's recorded
+`escapedPackageName` (`EXTERNAL_PACKAGE_MISMATCH` otherwise); Generation
+checks the scenario's known system packages (`SCENARIO_PACKAGE_MISMATCH`).
 For `bridge` steps with `replayMode: "auto"`, `StepRunner` executes the inline
 `externalSteps` between escape detection and return wait: each external step
 resolves a `resourceId`-only locator (no annotated fallback), executes the

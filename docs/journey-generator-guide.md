@@ -1,5 +1,10 @@
 # TapHound Journey Generator Usage Guide
 
+A walkthrough for people running the generation protocol by hand or reviewing
+what an agent does. Agents follow the `taphound-journey-generator` Skill
+(`assets/skills/taphound-journey-generator/SKILL.md`); `<skill>` below is that installed Skill
+directory.
+
 This guide describes how to use an AI agent (Droid, Claude Code, Cursor,
 etc.) to drive TapHound's generation protocol for end-to-end testing on
 a real Android device.
@@ -38,7 +43,7 @@ Skill's GUIDE).
 
 An external Workflow may bind one project-relative
 `taphound-journey-brief.md` as `journeyBrief: {path, sha256}`. Read
-`prompts/consume-journey-brief.md` before using it. The Brief carries one
+`assets/skills/taphound-journey-generator/prompts/consume-journey-brief.md` before using it. The Brief carries one
 Case's Goal, preconditions, expected Journey, assertions, implementation hints,
 constraints, and evidence references. Its frontmatter `schemaVersion` is `2`:
 the Brief additionally requires `State Transition Map` and `Capability Notes`.
@@ -175,7 +180,7 @@ taphound journey list-flows \
   --json
 ```
 
-Read `prompts/select-flow.md`. Choose the deepest `status: \"valid\"` Flow
+Read `assets/skills/taphound-journey-generator/prompts/select-flow.md`. Choose the deepest `status: \"valid\"` Flow
 whose `exitActivity` is a prerequisite for the Goal. For a Goal inside chat
 detail, prefer `chat/open-thread` over `core/launch-home` when both are
 valid. Never select only because a filename contains a Goal keyword.
@@ -337,7 +342,7 @@ around the failure with absolute coordinates or screenshot guessing.
 
 ### 3.5 Step 3 — AI Generates Next Proposed Step
 
-The AI agent reads `prompts/generate-step.md` and is given:
+The AI agent reads `assets/skills/taphound-journey-generator/prompts/generate-step.md` and is given:
 
 - **Goal**: the user's test scenario description
 - **Project Context Index** and the selected module shard summaries
@@ -572,7 +577,7 @@ when the post-action snapshot capture was unavailable, then continue to
 Step 3 -> Step 4.
 
 The AI agent checks whether the Goal is complete before each step (reads
-`prompts/check-completion.md`). If complete, it breaks out of the loop.
+`assets/skills/taphound-journey-generator/prompts/check-completion.md`). If complete, it breaks out of the loop.
 
 **Loop limit**: default maximum 30 steps. If exceeded, stop and report
 incomplete.
@@ -1019,7 +1024,7 @@ Each Goal is an independent generation session and does not affect others.
 
 ## 6. Failure Troubleshooting
 
-### 7.1 generation step Failures
+### 6.1 generation step Failures
 
 | failure.code | Meaning | AI agent response |
 |--------------|---------|-------------------|
@@ -1050,7 +1055,7 @@ Each Goal is an independent generation session and does not affect others.
 | `RECOVERY_REQUIRED` | Session entered recovery state | Inspect status and ask before explicit retry |
 | `APP_LAUNCH_FAILED` | No-Base-Flow startup could not reach the configured app process and Activity | Check installation, launch Activity, and device state, then start a new session |
 
-### 7.2 generation finalize Failures
+### 6.2 generation finalize Failures
 
 | failure.code | Meaning | Action |
 |--------------|---------|--------|
@@ -1059,7 +1064,7 @@ Each Goal is an independent generation session and does not affect others.
 | `ACTIVITY_*_MISMATCH` | Activity mismatch | Check step's activity.before |
 | `EXPORT_FAILED` | Export failed | Can retry finalize directly (no re-replay) |
 
-### 7.3 View Session State
+### 6.3 View Session State
 
 ```bash
 taphound generation status \

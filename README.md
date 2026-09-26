@@ -82,7 +82,7 @@ taphound init --agent claude,codex,cursor,droid
 ## Documentation
 
 - [Journey protocol](https://github.com/caikaidev/TapHound/blob/main/docs/journey-schema.md) · [Configuration reference](https://github.com/caikaidev/TapHound/blob/main/docs/config-schema.md) · [Report schema](https://github.com/caikaidev/TapHound/blob/main/docs/report-schema.md)
-- [Agent integration](https://github.com/caikaidev/TapHound/blob/main/docs/agent-integration.md) · [Journey Generator guide](https://github.com/caikaidev/TapHound/blob/main/assets/skills/taphound-journey-generator/GUIDE.md)
+- [Agent integration](https://github.com/caikaidev/TapHound/blob/main/docs/agent-integration.md) · [Journey Generator guide](https://github.com/caikaidev/TapHound/blob/main/docs/journey-generator-guide.md)
 - [Acceptance Contracts](https://github.com/caikaidev/TapHound/blob/main/docs/contract-schema.md) · [Baselines & regression](https://github.com/caikaidev/TapHound/blob/main/docs/checkpoint-regression.md) · [Failure classification](https://github.com/caikaidev/TapHound/blob/main/docs/failure-classification.md)
 - [Semantic Anchors](https://github.com/caikaidev/TapHound/blob/main/docs/semantic-anchor.md)
 - [Runtime backends](https://github.com/caikaidev/TapHound/blob/main/docs/architecture/runtime-backend.md) · [Local development & testing](https://github.com/caikaidev/TapHound/blob/main/docs/local-testing.md)

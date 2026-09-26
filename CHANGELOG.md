@@ -27,6 +27,12 @@
 
 ### Changed
 
+- The Journey Generator Skill ships a shorter `SKILL.md` (mid-session
+  corrections and cross-app bridges moved to `references/`) and no longer
+  installs `GUIDE.md`, which moved to `docs/journey-generator-guide.md`. It
+  now states that generation proposals always target a `locator`; Knowledge
+  Anchors apply to hand-authored Journeys and Contracts replayed by `verify`.
+
 - The `AdbPort` bridge over the Runtime Backend SPI is removed. `align`'s
   camera probe, the generation app preparer, and `doctor`'s install check
   now borrow a session like every other device consumer (closing it when

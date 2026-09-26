@@ -83,6 +83,13 @@ npm run brand:render
 git diff --exit-code -- assets/brand/png
 ```
 
+Releases are cut by pushing a `v<version>` tag matching `package.json`;
+`.github/workflows/release.yml` reruns the gate, publishes to npm through
+Trusted Publishing under the version's dist-tag (`dev` for `-dev.N`), and
+creates the GitHub Release from that version's `CHANGELOG.md` section (see
+`docs/releasing.md`). `npm test` fails when the package version has no
+CHANGELOG section.
+
 Real-device acceptance is opt-in and separate from the normal suite. Build first,
 then provide Android SDK, ADB, Android CLI, an online device, and the already
 installed demo APK:

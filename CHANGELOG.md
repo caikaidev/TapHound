@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+
+- Tag-driven releases: pushing `v<version>` runs `.github/workflows/release.yml`,
+  which publishes to npm with provenance through Trusted Publishing under the
+  version's dist-tag and creates the GitHub Release from this changelog (see
+  `docs/releasing.md`).
+
 ### Performance
 
 - Replay of a generated Journey skips foreground and process checks that

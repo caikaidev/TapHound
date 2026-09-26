@@ -12,7 +12,7 @@ TapHound does not build or install APKs. The target package must already be
 installed before recording, generation, or verification.
 
 `taphound init` scans `assets/skills/` and installs every skill directory
-containing a `SKILL.md`. Four skills ship with TapHound:
+containing a `SKILL.md`. Five skills ship with TapHound:
 
 - `taphound-journey-generator` drives one deterministic Journey generation session.
   Requirement analysis, planning, coding, build/install, multi-Case
@@ -46,6 +46,14 @@ containing a `SKILL.md`. Four skills ship with TapHound:
   proves the same exact observables (frozen-observable conformance, not Core
   Baseline equivalence). It ships the manifest JSON Schema rendered from
   `src/domain/workflow-manifest.ts` (`npm run skills:schemas`).
+
+- `taphound-flash` is a standalone smoke check that needs only adb and
+  Node.js: its zero-dependency `scripts/flash.mjs` runs a short JSON plan
+  (tap, type, back, wait, expect, expectActivity) against the installed app
+  with TapHound's locator rules (exact match, ambiguity fails, taps land on
+  the matched element's point) and prints one JSON result. It never counts
+  as evidence; `test/skills/flash.test.ts` drives it with a stateful fake
+  adb (`test/fixtures/bin/fake-adb.mjs`).
 
 The Journey Skill may consume one optional project-relative
 `taphound-journey-brief.md` through a `journeyBrief: {path, sha256}` binding.

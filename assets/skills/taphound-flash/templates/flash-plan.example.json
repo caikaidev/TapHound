@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "packageName": "dev.taphound.demo",
+  "activity": ".MainActivity",
+  "steps": [
+    { "action": "tap", "target": { "id": "open_search" } },
+    { "action": "expectActivity", "activity": ".SearchActivity" },
+    { "action": "tap", "target": { "id": "search_input" } },
+    { "action": "type", "text": "hello world" },
+    { "action": "tap", "target": { "id": "submit_search" } },
+    { "action": "expect", "target": { "desc": "submitted query=hello world" } },
+    { "action": "back" },
+    { "action": "expectActivity", "activity": ".MainActivity" }
+  ]
+}

@@ -7,6 +7,24 @@ only**. Core does not analyze requirements, build/install apps, manage
 multi-Case decisions, or invoke a model. No Workflow reads or writes a
 generation staging bundle.
 
+## Where each Skill fits in an AI coding workflow
+
+AI coding agents change code faster than people can review it. TapHound's
+Skills give each stage of that loop a proportionate check:
+
+1. **Before coding**: classify the change (see Development scenarios) and,
+   for a preserve Case, capture pre-change evidence with
+   `taphound-verify-change`.
+2. **While coding**: after each build and install, run a `taphound-flash`
+   plan over the touched path. Seconds, adb only, no TapHound CLI; a smoke
+   check, never evidence.
+3. **Before calling it done**: `taphound-verify-change` proves the Case
+   (Contract `pass` or Baseline `equivalent`), generating a Journey with
+   `taphound-journey-brief-author` and `taphound-journey-generator` when
+   none exists.
+4. **Many Cases**: `taphound-case-suite` schedules them one at a time with a
+   durable ledger.
+
 ## Durable multi-Case Journey suites
 
 `taphound-case-suite` is the orchestration layer above the one-Case Brief

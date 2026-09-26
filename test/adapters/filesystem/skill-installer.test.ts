@@ -24,6 +24,7 @@ describe("FileSystemSkillInstaller", () => {
 
     expect([...names].sort()).toEqual([
       "taphound-case-suite",
+      "taphound-flash",
       "taphound-journey-brief-author",
       "taphound-journey-generator",
       "taphound-verify-change"
@@ -45,6 +46,25 @@ describe("FileSystemSkillInstaller", () => {
       expect(await readFile(
         join(destination, "scripts", "ledger.mjs"), "utf8"
       )).toContain("CASE_SUITE_REVISION_CONFLICT");
+    } finally {
+      await rm(target, { recursive: true, force: true });
+    }
+  });
+
+  it("installs the standalone flash Skill with its script and example plan", async () => {
+    const installer = new FileSystemSkillInstaller();
+    const target = await mkdtemp(join(tmpdir(), "taphound-flash-skill-"));
+    try {
+      const destination = join(target, "taphound-flash");
+      await installer.installTo("taphound-flash", destination);
+      const content = await readFile(join(destination, "SKILL.md"), "utf8");
+      expect(content).toContain("scripts/flash.mjs run");
+      expect(content).toContain("taphound-verify-change");
+      // Flash runs without the TapHound CLI.
+      expect(content).not.toMatch(/`taphound [a-z]/);
+      expect(await readdir(join(destination, "scripts"))).toContain("flash.mjs");
+      expect(await readdir(join(destination, "templates")))
+        .toContain("flash-plan.example.json");
     } finally {
       await rm(target, { recursive: true, force: true });
     }

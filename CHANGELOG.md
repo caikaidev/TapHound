@@ -4,6 +4,13 @@
 
 ### Added
 
+- `taphound-flash`, a standalone smoke-check Skill for right after an AI
+  coding change. It needs only adb and Node.js 18+: `scripts/flash.mjs run
+  <plan.json>` cold-launches the installed app, runs a short plan of taps,
+  typing, and `expect` checks with TapHound's locator rules, wakes the
+  screen, and reports one JSON result with a screenshot, UI dump, and crash
+  log on failure. It is explicitly not verification evidence.
+
 - Tag-driven releases: pushing `v<version>` runs `.github/workflows/release.yml`,
   which publishes to npm with provenance through Trusted Publishing under the
   version's dist-tag and creates the GitHub Release from this changelog (see

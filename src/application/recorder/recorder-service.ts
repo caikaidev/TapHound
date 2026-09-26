@@ -28,6 +28,7 @@ import type {
   RecorderPromptPort
 } from "../../ports/recorder-prompt.js";
 import { ActionExecutor, type ActionTarget } from "../interaction/action-executor.js";
+import { pollForegroundPackage } from "../interaction/external-step-runner.js";
 import { resolveLocator } from "../locator/locator-resolver.js";
 import { launchFailure } from "../runtime/launch-failure.js";
 import { ProcessWaiter } from "../runtime/process-waiter.js";
@@ -925,24 +926,16 @@ export class RecorderService {
     input: RecordInput,
     views: RuntimeSessionPortViews
   ): Promise<string | null> {
-    const deadline = this.dependencies.clock.now() + 3000;
-    while (this.dependencies.clock.now() < deadline) {
-      if (input.signal?.aborted === true) return null;
-      const foreground = await views.adb.foregroundComponent(
-        identity
-      );
-      if (foreground.packageName !== input.config.run.packageName) {
-        return foreground.packageName;
-      }
-      await this.dependencies.clock.sleep(
-        Math.min(
-          500,
-          Math.max(0, deadline - this.dependencies.clock.now())
-        ),
-        input.signal
-      );
-    }
-    return null;
+    const escaped = await pollForegroundPackage({
+      adb: views.adb,
+      clock: this.dependencies.clock,
+      packageName: identity.packageName,
+      deviceSerial: identity.deviceSerial,
+      until: (packageName) => packageName !== input.config.run.packageName,
+      timeoutMs: 3000,
+      signal: input.signal
+    });
+    return escaped.status === "matched" ? escaped.packageName : null;
   }
 
   private async pollBridgeReturn(
@@ -951,23 +944,15 @@ export class RecorderService {
     timeoutMs: number,
     views: RuntimeSessionPortViews
   ): Promise<boolean> {
-    const deadline = this.dependencies.clock.now() + timeoutMs;
-    while (this.dependencies.clock.now() < deadline) {
-      if (input.signal?.aborted === true) return false;
-      const foreground = await views.adb.foregroundComponent(
-        identity
-      );
-      if (foreground.packageName === input.config.run.packageName) {
-        return true;
-      }
-      await this.dependencies.clock.sleep(
-        Math.min(
-          500,
-          Math.max(0, deadline - this.dependencies.clock.now())
-        ),
-        input.signal
-      );
-    }
-    return false;
+    const returned = await pollForegroundPackage({
+      adb: views.adb,
+      clock: this.dependencies.clock,
+      packageName: identity.packageName,
+      deviceSerial: identity.deviceSerial,
+      until: (packageName) => packageName === input.config.run.packageName,
+      timeoutMs,
+      signal: input.signal
+    });
+    return returned.status === "matched";
   }
 }

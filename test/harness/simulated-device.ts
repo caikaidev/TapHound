@@ -46,6 +46,8 @@ import type {
  */
 
 export interface SimulatedScreen {
+  /** Defaults to the app under test; another package models an escape (camera, picker). */
+  packageName?: string | undefined;
   activity: string;
   layout: readonly LayoutElement[];
   /** Logcat messages (tag, message) the app writes when entering the screen. */
@@ -152,6 +154,8 @@ export class SimulatedDevice implements RuntimeBackend {
   public readonly timeline: string[] = [];
 
   private screen: string | undefined;
+  /** The app under test keeps its process while another package is foreground. */
+  private running = false;
   private pid = 4000;
   private logSequence = 0;
   private readonly logListeners = new Set<(line: string) => void>();
@@ -226,7 +230,10 @@ export class SimulatedDevice implements RuntimeBackend {
     const screen = this.current();
     return screen === undefined
       ? { packageName: LAUNCHER_PACKAGE, activity: LAUNCHER_ACTIVITY }
-      : { packageName: this.app.packageName, activity: screen.activity };
+      : {
+          packageName: screen.packageName ?? this.app.packageName,
+          activity: screen.activity
+        };
   }
 
   private snapshot(): UiSnapshot {
@@ -286,12 +293,14 @@ export class SimulatedDevice implements RuntimeBackend {
       launchApp: (options: RuntimeLaunchOptions): Promise<CommandResult> => {
         query("launchApp")(options);
         this.pid += 1;
+        this.running = true;
         this.enter(this.app.startScreen);
         return Promise.resolve(ok());
       },
       forceStop: (app: RuntimeAppQuery): Promise<CommandResult> => {
         query("forceStop")(app);
         this.screen = undefined;
+        this.running = false;
         return Promise.resolve(ok());
       },
       currentActivity: (app: RuntimeAppQuery): Promise<string> => {
@@ -312,9 +321,9 @@ export class SimulatedDevice implements RuntimeBackend {
       },
       appProcesses: (app: RuntimeAppQuery): Promise<readonly AppProcess[]> => {
         query("appProcesses")(app);
-        return Promise.resolve(this.screen === undefined
-          ? []
-          : [{ pid: this.pid, name: this.app.packageName }]);
+        return Promise.resolve(this.running
+          ? [{ pid: this.pid, name: this.app.packageName }]
+          : []);
       },
       windowTopology: (app: RuntimeAppQuery): Promise<WindowTopology> => {
         query("windowTopology")(app);

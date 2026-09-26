@@ -1,5 +1,6 @@
 import type { LayoutElement } from "../../src/domain/layout.js";
 import type { Journey, JourneyStep } from "../../src/domain/journey.js";
+import type { ExternalStep } from "../../src/domain/external-flow.js";
 import type { SimulatedApp } from "./simulated-device.js";
 
 /**
@@ -11,6 +12,44 @@ import type { SimulatedApp } from "./simulated-device.js";
 export const DEMO_PACKAGE = "dev.taphound.demo";
 export const MAIN = `${DEMO_PACKAGE}.MainActivity`;
 export const SEARCH = `${DEMO_PACKAGE}.SearchActivity`;
+export const CAMERA_PACKAGE = "com.android.camera";
+export const CAMERA = `${CAMERA_PACKAGE}.CameraActivity`;
+export const CAMERA_FLOW = "camera/photo-capture";
+
+/**
+ * The project External Flow the parity harness installs. Its first step
+ * asserts that the video banner is gone (`absent`) after switching to photo
+ * mode, then presses the shutter, which returns to the app under test.
+ */
+export const cameraFlowSteps: ExternalStep[] = [
+  {
+    action: "click",
+    locator: { resourceId: "mode_photo" },
+    expectedActivity: CAMERA,
+    expect: {
+      type: "element",
+      locator: { resourceId: "video_banner" },
+      absent: true,
+      timeoutMs: 500
+    }
+  },
+  {
+    action: "click",
+    locator: { resourceId: "shutter_button" },
+    expectedActivity: CAMERA
+  }
+];
+
+export const cameraFlow = {
+  version: 1,
+  kind: "externalFlow",
+  name: CAMERA_FLOW,
+  description: "Take one photo with the system camera",
+  escapedPackageName: CAMERA_PACKAGE,
+  expectedEscapeActivity: CAMERA,
+  includes: [],
+  steps: cameraFlowSteps
+};
 
 function root(
   id: string,
@@ -65,7 +104,47 @@ export const demoApp: SimulatedApp = {
     main: {
       activity: MAIN,
       layout: root("main_root", [
-        button("open_search", "open_search", "Search", 300)
+        button("open_search", "open_search", "Search", 300),
+        button("take_photo", "take_photo", "Photo", 500)
+      ])
+    },
+    photoAttached: {
+      activity: MAIN,
+      layout: root("main_root", [
+        button("open_search", "open_search", "Search", 300),
+        button("take_photo", "take_photo", "Photo", 500),
+        {
+          id: "photo_preview",
+          resourceId: "photo_preview",
+          contentDescription: "photo attached",
+          enabled: true,
+          bounds: { left: 100, top: 700, right: 980, bottom: 900 },
+          children: []
+        }
+      ])
+    },
+    cameraVideo: {
+      packageName: CAMERA_PACKAGE,
+      activity: CAMERA,
+      layout: root("camera_root", [
+        button("mode_photo", "mode_photo", "Photo", 100),
+        {
+          id: "video_banner",
+          resourceId: "video_banner",
+          text: "Video mode",
+          enabled: true,
+          bounds: { left: 100, top: 300, right: 980, bottom: 360 },
+          children: []
+        },
+        button("shutter_button", "shutter_button", "Shutter", 1600)
+      ])
+    },
+    cameraPhoto: {
+      packageName: CAMERA_PACKAGE,
+      activity: CAMERA,
+      layout: root("camera_root", [
+        button("mode_photo", "mode_photo", "Photo", 100),
+        button("shutter_button", "shutter_button", "Shutter", 1600)
       ])
     },
     search: {
@@ -106,6 +185,9 @@ export const demoApp: SimulatedApp = {
     },
     { from: "searchTyped", on: { action: "tap", elementId: "submit_search" }, to: "searchSubmitted" },
     { from: "search", on: { action: "back" }, to: "main" },
+    { from: "main", on: { action: "tap", elementId: "take_photo" }, to: "cameraVideo" },
+    { from: "cameraVideo", on: { action: "tap", elementId: "mode_photo" }, to: "cameraPhoto" },
+    { from: "cameraPhoto", on: { action: "tap", elementId: "shutter_button" }, to: "photoAttached" },
     { from: "searchFocused", on: { action: "back" }, to: "main" }
   ]
 };
@@ -155,7 +237,29 @@ export interface ParityScenario {
   expected: readonly string[];
 }
 
+const takePhoto: JourneyStep = {
+  action: "bridge",
+  scenario: "photoCapture",
+  description: "Attach a photo from the system camera",
+  triggerLocator: { resourceId: "take_photo" },
+  escapedPackageName: CAMERA_PACKAGE,
+  returnTimeoutMs: 2000,
+  externalSteps: cameraFlowSteps,
+  replayMode: "auto",
+  activity: { before: MAIN, after: MAIN },
+  expect: {
+    type: "element",
+    locator: { contentDescription: "photo attached" },
+    timeoutMs: 500
+  }
+};
+
 export const scenarios: readonly ParityScenario[] = [
+  {
+    name: "camera bridge through an External Flow",
+    journey: journey("camera", [takePhoto]),
+    expected: ["passed"]
+  },
   {
     name: "search happy path",
     journey: journey("search", [openSearch, focusField, typeQuery, submitQuery]),

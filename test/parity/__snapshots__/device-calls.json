@@ -1,4 +1,30 @@
 {
+  "camera bridge through an External Flow": {
+    "replay": [
+      {
+        "appProcesses": 1,
+        "currentActivity": 2,
+        "foregroundComponent": 4,
+        "stabilitySample": 6,
+        "tap": 3,
+        "uiCapture": 5
+      }
+    ],
+    "generation": [
+      {
+        "appProcesses": 9,
+        "captureScreenshot": 2,
+        "foregroundComponent": 14,
+        "openSession": 3,
+        "openUiSnapshots": 2,
+        "stabilitySample": 8,
+        "startLogcat": 1,
+        "tap": 3,
+        "uiCapture": 5,
+        "windowTopology": 4
+      }
+    ]
+  },
   "search happy path": {
     "replay": [
       {

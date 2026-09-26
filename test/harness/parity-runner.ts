@@ -1,6 +1,6 @@
-import { cp, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -14,7 +14,12 @@ import {
 import type { Journey, JourneyStep } from "../../src/domain/journey.js";
 import type { ProposalBinding, ProposedStep } from "../../src/domain/proposed-step.js";
 import type { RuntimeSnapshot } from "../../src/domain/runtime-snapshot.js";
-import { CONFIG_PATH, CONTEXT_INDEX_PATH } from "../../src/domain/workspace.js";
+import {
+  CONFIG_PATH,
+  CONTEXT_INDEX_PATH,
+  EXTERNAL_FLOWS_DIR
+} from "../../src/domain/workspace.js";
+import { CAMERA_FLOW, cameraFlow } from "./demo-app.js";
 import { FakeClock } from "../fakes/fake-clock.js";
 import {
   SIMULATED_SERIAL,
@@ -76,6 +81,9 @@ export async function createParityProject(): Promise<ParityProject> {
     join(root, CONFIG_PATH),
     `${JSON.stringify(PARITY_CONFIG, null, 2)}\n`
   );
+  const flowPath = join(root, EXTERNAL_FLOWS_DIR, `${CAMERA_FLOW}.json`);
+  await mkdir(dirname(flowPath), { recursive: true });
+  await writeFile(flowPath, `${JSON.stringify(cameraFlow, null, 2)}\n`);
   return {
     root: await realpath(root),
     dispose: () => rm(scratch, { recursive: true, force: true })
@@ -150,7 +158,24 @@ export async function runReplay(
   return { outcomes, stepCalls };
 }
 
+/**
+ * The proposal an agent submits for a Journey step: Core fills the after
+ * Activity, and an auto bridge is proposed through its bound External Flow.
+ */
 function toProposal(step: JourneyStep, binding: ProposalBinding): ProposedStep {
+  if (step.action === "bridge") {
+    return {
+      action: "bridge",
+      scenario: step.scenario,
+      description: step.description,
+      triggerLocator: step.triggerLocator,
+      returnTimeoutMs: step.returnTimeoutMs,
+      flow: CAMERA_FLOW,
+      ...(step.expect === undefined ? {} : { expect: step.expect }),
+      activity: { before: step.activity.before },
+      binding
+    };
+  }
   return {
     ...step,
     activity: { before: step.activity.before },
@@ -181,12 +206,24 @@ export async function runGeneration(
     projectRoot: project.root,
     config: PARITY_CONFIG
   });
+  const resolver = deps.externalFlowResolver;
+  if (resolver === undefined) throw new Error("External Flow resolver unavailable");
+  const camera = await resolver.resolve({
+    projectRoot: project.root,
+    name: CAMERA_FLOW
+  });
   const session = await deps.generationStarter.start({
     projectRoot: project.root,
     config: PARITY_CONFIG,
     context: loaded.context,
     project: described,
-    deviceSerial: SIMULATED_SERIAL
+    deviceSerial: SIMULATED_SERIAL,
+    externalFlows: [{
+      name: CAMERA_FLOW,
+      flowSha256: camera.flowSha256,
+      escapedPackageName: camera.flow.escapedPackageName,
+      stepCount: camera.stepCount
+    }]
   });
   const runtime = deps.generationRuntime?.({
     projectRoot: project.root,

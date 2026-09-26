@@ -56,6 +56,13 @@ artifacts must be regenerated.
   `LOCATOR_AMBIGUOUS` like Replay does (and as the Journey Skill documents)
   instead of mapping every Locator failure to `ACTION_UNSUPPORTED`. Found by
   the new Replay ↔ Generation parity harness.
+- Replay now runs External Flow steps with the same implementation as
+  Generation (`ExternalStepRunner`): an `absent` element expectation or an
+  element predicate inside an External Flow no longer fails Replay (and
+  therefore finalization) after passing during generation, and external
+  `scrollTo` swipes re-check the escaped package and Activity before each
+  mutation. Cancelling a bridge escape wait no longer reports
+  `BRIDGE_NO_ESCAPE`.
 
 ### Fixed (compatibility cleanup)
 

@@ -3,10 +3,7 @@ import {
   appProcessPids,
   primaryAppPid
 } from "../../domain/app-process.js";
-import type {
-  ExternalStep,
-  JourneyStep
-} from "../../domain/journey.js";
+import type { JourneyStep } from "../../domain/journey.js";
 import type { LayoutElement } from "../../domain/layout.js";
 import type { DisplayViewport } from "../../domain/geometry.js";
 import type {
@@ -33,6 +30,10 @@ import type { LogcatEventWindow } from "../../domain/logcat-event.js";
 import { ActionExecutor, type ActionTarget } from "../interaction/action-executor.js";
 import { FallbackResolver } from "../interaction/fallback-resolver.js";
 import { ScrollToExecutor } from "../interaction/scroll-to-executor.js";
+import {
+  ExternalStepRunner,
+  pollForegroundPackage
+} from "../interaction/external-step-runner.js";
 import { resolveLocator } from "../locator/locator-resolver.js";
 import {
   ExpectationEvaluator,
@@ -603,41 +604,60 @@ export class StepRunner {
       if (triggerAction.status === "failed") {
         return fail(triggerAction.code, triggerAction.message);
       }
-      const escaped = await this.pollBridgeEscape(
-        signal,
-        step.escapeTimeoutMs ?? 3000
-      );
-      if (escaped === null) {
+      const escaped = await pollForegroundPackage({
+        adb: this.options.adb,
+        clock: this.options.clock,
+        packageName: this.options.packageName,
+        deviceSerial: this.options.deviceSerial,
+        until: (packageName) => packageName !== this.options.packageName,
+        timeoutMs: step.escapeTimeoutMs ?? 3000,
+        signal
+      });
+      if (escaped.status === "cancelled") {
+        return finish("cancelled");
+      }
+      if (escaped.status === "timeout") {
         return fail(
           "BRIDGE_NO_ESCAPE",
           "Bridge trigger did not cause a package escape during replay"
         );
       }
       if (step.externalSteps !== undefined) {
-        const externalFailure = await this.executeExternalStepsForReplay(
-          step,
-          index,
-          signal
-        );
-        if (externalFailure !== null) {
-          return fail(externalFailure.code, externalFailure.message);
-        }
-      }
-      try {
-        await this.pollBridgeReturn(signal, step.returnTimeoutMs);
-      } catch (error) {
-        if (
-          error !== null
-          && typeof error === "object"
-          && "code" in error
-          && error.code === "BRIDGE_NOT_RETURNED"
-        ) {
+        if (step.escapedPackageName === undefined) {
           return fail(
-            "BRIDGE_NOT_RETURNED",
-            "Foreground did not return to target package within the timeout"
+            "ACTION_FAILED",
+            "Bridge auto replay requires escapedPackageName"
           );
         }
-        throw error;
+        const external = await this.externalStepRunner(index).run(
+          step.externalSteps,
+          step.escapedPackageName,
+          signal
+        );
+        if (external.status === "cancelled") {
+          return finish("cancelled");
+        }
+        if (external.status === "failed") {
+          return fail(external.code, external.message);
+        }
+      }
+      const returned = await pollForegroundPackage({
+        adb: this.options.adb,
+        clock: this.options.clock,
+        packageName: this.options.packageName,
+        deviceSerial: this.options.deviceSerial,
+        until: (packageName) => packageName === this.options.packageName,
+        timeoutMs: step.returnTimeoutMs,
+        signal
+      });
+      if (returned.status === "cancelled") {
+        return finish("cancelled");
+      }
+      if (returned.status === "timeout") {
+        return fail(
+          "BRIDGE_NOT_RETURNED",
+          "Foreground did not return to target package within the timeout"
+        );
       }
       const idle = await this.idleWaiter.waitUntilIdle(this.options.idle, signal);
       report.idle = idle.status === "timeout"
@@ -1359,311 +1379,43 @@ export class StepRunner {
     return next;
   }
 
-  private async executeExternalStepsForReplay(
-    step: Extract<JourneyStep, { action: "bridge" }>,
-    index: number,
-    signal: AbortSignal | undefined
-  ): Promise<{ code: FailureCode; message: string } | null> {
-    const escapedPackageName = step.escapedPackageName;
-    if (escapedPackageName === undefined) {
-      return {
-        code: "ACTION_FAILED",
-        message: "Bridge auto replay requires escapedPackageName"
-      };
-    }
-    if (step.externalSteps === undefined) {
-      return null;
-    }
-    const externalIdleWaiter = new IdleWaiter(
-      this.options.uiStability,
-      this.options.clock,
-      this.options.deviceSerial,
-      escapedPackageName
-    );
-    for (const [i, externalStep] of step.externalSteps.entries()) {
-      if (signal?.aborted === true) return null;
-
-      const externalIdentity = {
-        packageName: escapedPackageName,
-        deviceSerial: this.options.deviceSerial,
-        ...(signal === undefined ? {} : { signal }),
-        timeoutMs: 5000
-      };
-      const foreground = await this.options.adb.foregroundComponent(
-        externalIdentity
-      );
-      if (foreground.packageName !== escapedPackageName) {
-        return {
-          code: "EXTERNAL_PACKAGE_MISMATCH",
-          message: `External app foreground changed during replay: expected "${escapedPackageName}", got "${foreground.packageName}"`
-        };
-      }
-      if (foreground.activity !== externalStep.expectedActivity) {
-        return {
-          code: "EXTERNAL_ACTIVITY_MISMATCH",
-          message: `External Activity mismatch during replay: expected "${externalStep.expectedActivity}", got "${foreground.activity}"`
-        };
-      }
-
-      const layout = await this.captureLayout(
-        "locate",
-        this.options.idle.timeoutMs,
+  private externalStepRunner(stepIndex: number): ExternalStepRunner {
+    return new ExternalStepRunner({
+      adb: this.options.adb,
+      actionExecutor: this.actionExecutor,
+      uiSnapshotProvider: this.options.uiSnapshotProvider,
+      captureLayout: (reason, timeoutMs, signal) => this.captureLayout(
+        reason,
+        timeoutMs,
         signal
-      );
-
-      if (externalStep.action === "scrollTo") {
-        const journeyStep = externalStepToJourneyStepForReplay(externalStep) as Extract<
-          JourneyStep,
-          { action: "scrollTo" }
-        >;
-        const externalScrollToExecutor = new ScrollToExecutor({
-          uiSnapshotProvider: this.options.uiSnapshotProvider,
-          actionExecutor: this.actionExecutor,
-          idleWaiter: externalIdleWaiter,
+      ),
+      createIdleWaiter: (packageName: string): IdleWaiter => new IdleWaiter(
+        this.options.uiStability,
+        this.options.clock,
+        this.options.deviceSerial,
+        packageName,
+        deviceIdentityResolver(this.options.adb, {
+          packageName,
           deviceSerial: this.options.deviceSerial,
-          idle: this.options.idle,
-          viewport: (): DisplayViewport | undefined => this.currentViewport,
-          requireLiveContainerCapability: true
-        });
-        const scroll = await externalScrollToExecutor.execute(
-          journeyStep,
-          signal,
-          layout
-        );
-        if (scroll.status === "cancelled") {
-          return null;
-        }
-        if (scroll.status === "failed") {
-          return {
-            code: scroll.code,
-            message: scroll.message
-          };
-        }
-      } else {
-        const journeyStep = externalStepToJourneyStepForReplay(externalStep);
-        let target: ActionTarget | undefined;
-        if (
-          externalStep.action === "click"
-          || externalStep.action === "longClick"
-          || externalStep.action === "swipe"
-        ) {
-          const resolution = resolveLocator(layout, externalStep.locator, {
-            viewport: this.currentViewport,
-            ...(externalStep.action === "click"
-              ? { requiredCapability: "clickable" as const }
-              : {}),
-            ...(externalStep.action === "longClick"
-              ? { requiredCapability: "longClickable" as const }
-              : {})
-          });
-          if (resolution.status !== "found") {
-            return {
-              code: resolution.code,
-              message: resolution.message
-            };
-          }
-          if (
-            externalStep.action === "click"
-            && resolution.element.clickable !== true
-          ) {
-            return {
-              code: "ACTION_FAILED",
-              message: "External click target is not clickable during replay"
-            };
-          }
-          if (
-            externalStep.action === "longClick"
-            && resolution.element.longClickable !== true
-          ) {
-            return {
-              code: "ACTION_FAILED",
-              message: "External longClick target is not longClickable during replay"
-            };
-          }
-          if (
-            externalStep.action === "swipe"
-            && (
-              resolution.element.scrollable !== true
-              || resolution.element.bounds === undefined
-            )
-          ) {
-            return {
-              code: "ACTION_FAILED",
-              message: "External swipe target lacks scrollable bounds during replay"
-            };
-          }
-          target = {
-            point: resolution.point,
-            ...(resolution.element.bounds === undefined
-              ? {}
-              : { bounds: resolution.element.bounds })
-          };
-        }
-        const action = await this.actionExecutor.execute(
-          journeyStep,
-          target,
-          signal
-        );
-        if (action.status === "failed") {
-          return {
-            code: action.code,
-            message: action.message
-          };
-        }
-      }
-
-      const idle = await externalIdleWaiter.waitUntilIdle(
-        this.options.idle,
-        signal
-      );
-      if (idle.status === "cancelled") {
-        return null;
-      }
-      if (idle.status === "timeout") {
+          timeoutMs: this.options.idle.timeoutMs
+        })
+      ),
+      idle: this.options.idle,
+      viewport: (): DisplayViewport | undefined => this.currentViewport,
+      deviceSerial: this.options.deviceSerial,
+      onIdleTimeout: async (externalIndex, idle): Promise<void> => {
         await this.options.artifacts.writeJson(
           stepPath(
-            index,
-            `external-${String(i + 1).padStart(3, "0")}-layout-diff.json`
+            stepIndex,
+            `external-${String(externalIndex + 1).padStart(3, "0")}-layout-diff.json`
           ),
           idle.lastDiff
         );
-        return {
-          code: idle.code,
-          message: withIdleAdvice(
-            "External app layout did not become stable after step during replay",
-            idle
-          )
-        };
       }
-
-      if (externalStep.expect !== undefined) {
-        const expectFailure = await this.evaluateExternalExpectForReplay(
-          externalStep,
-          escapedPackageName,
-          signal
-        );
-        if (expectFailure !== null) {
-          return expectFailure;
-        }
-      }
-    }
-    return null;
-  }
-
-  private async evaluateExternalExpectForReplay(
-    step: ExternalStep,
-    escapedPackageName: string,
-    signal: AbortSignal | undefined
-  ): Promise<{ code: FailureCode; message: string } | null> {
-    const expect = step.expect;
-    if (expect === undefined) return null;
-    const identity = {
-      packageName: escapedPackageName,
-      deviceSerial: this.options.deviceSerial,
-      ...(signal === undefined ? {} : { signal }),
-      timeoutMs: expect.timeoutMs
-    };
-    if (expect.type === "activity") {
-      const expectedPackage = expect.packageName ?? escapedPackageName;
-      const foreground = await this.options.adb.foregroundComponent({
-        ...identity,
-        packageName: expectedPackage
-      });
-      if (foreground.activity !== expect.value) {
-        return {
-          code: "EXTERNAL_STEP_FAILED",
-          message: `External expect Activity mismatch during replay: expected "${expect.value}", got "${foreground.activity}"`
-        };
-      }
-    } else if (expect.type === "element") {
-      const layout = await this.captureLayout(
-        "expect",
-        expect.timeoutMs,
-        signal
-      );
-      const resolution = resolveLocator(layout, expect.locator, {
-        requireEnabled: false
-      });
-      if (resolution.status !== "found") {
-        return {
-          code: "EXTERNAL_STEP_FAILED",
-          message: `External expect element not found during replay: ${resolution.message}`
-        };
-      }
-    } else {
-      return {
-        code: "EXTERNAL_STEP_FAILED",
-        message: "logcat expectations are not supported for external steps during replay"
-      };
-    }
-    return null;
-  }
-
-  private async pollBridgeEscape(
-    signal: AbortSignal | undefined,
-    timeoutMs: number
-  ): Promise<string | null> {
-    const deadline = this.options.clock.now() + timeoutMs;
-    while (this.options.clock.now() < deadline) {
-      if (signal?.aborted === true) return null;
-      const foreground = await this.options.adb.foregroundComponent(
-        this.identity(signal)
-      );
-      if (foreground.packageName !== this.options.packageName) {
-        return foreground.packageName;
-      }
-      await this.options.clock.sleep(
-        Math.min(
-          500,
-          Math.max(0, deadline - this.options.clock.now())
-        ),
-        signal
-      );
-    }
-    return null;
-  }
-
-  private async pollBridgeReturn(
-    signal: AbortSignal | undefined,
-    timeoutMs: number
-  ): Promise<void> {
-    const deadline = this.options.clock.now() + timeoutMs;
-    while (this.options.clock.now() < deadline) {
-      if (signal?.aborted === true) return;
-      const foreground = await this.options.adb.foregroundComponent(
-        this.identity(signal)
-      );
-      if (foreground.packageName === this.options.packageName) {
-        return;
-      }
-      await this.options.clock.sleep(
-        Math.min(
-          500,
-          Math.max(0, deadline - this.options.clock.now())
-        ),
-        signal
-      );
-    }
-    throw Object.assign(
-      new Error(
-        "Foreground did not return to target package within the timeout"
-      ),
-      { code: "BRIDGE_NOT_RETURNED" }
-    );
+    });
   }
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function externalStepToJourneyStepForReplay(step: ExternalStep): JourneyStep {
-  const { expectedActivity, ...rest } = step;
-  return {
-    ...rest,
-    activity: {
-      before: expectedActivity,
-      after: expectedActivity
-    }
-  };
 }

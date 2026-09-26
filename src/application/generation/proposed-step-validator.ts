@@ -35,6 +35,22 @@ function rejectCapability(message: string): never {
   throw new GenerationOperationError("ACTION_UNSUPPORTED", message);
 }
 
+/**
+ * Report the same Locator verdict Replay would: an unknown or ambiguous
+ * target is a Locator failure, not an unsupported action.
+ */
+function rejectResolution(
+  resolution: Extract<ReturnType<typeof resolveLocator>, { status: "failed" }>
+): never {
+  if (
+    resolution.code === "LOCATOR_NOT_FOUND"
+    || resolution.code === "LOCATOR_AMBIGUOUS"
+  ) {
+    throw new GenerationOperationError(resolution.code, resolution.message);
+  }
+  rejectCapability(resolution.message);
+}
+
 function requireUniqueTarget(
   snapshot: RuntimeSnapshot,
   locator: Locator,
@@ -52,7 +68,7 @@ function requireUniqueTarget(
     capabilityKey === undefined ? {} : { requiredCapability: capabilityKey }
   );
   if (resolved.status !== "found") {
-    rejectCapability(resolved.message);
+    rejectResolution(resolved);
   }
   if (!capability(resolved.element)) {
     rejectCapability(
@@ -150,7 +166,10 @@ function validateAction(
       { requireEnabled: false }
     );
     if (target.status === "failed" && target.code === "LOCATOR_AMBIGUOUS") {
-      rejectCapability(`scrollTo target is ambiguous: ${target.message}`);
+      throw new GenerationOperationError(
+        "LOCATOR_AMBIGUOUS",
+        `scrollTo target is ambiguous: ${target.message}`
+      );
     }
     return;
   }

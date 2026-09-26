@@ -162,6 +162,8 @@ describe("generation error contract", () => {
       "IDLE_TIMEOUT",
       "WINDOW_HIERARCHY_INCOMPLETE",
       "ACTION_UNSUPPORTED",
+      "LOCATOR_NOT_FOUND",
+      "LOCATOR_AMBIGUOUS",
       "RISK_CONFIRMATION_REQUIRED",
       "ACTION_FORBIDDEN",
       "EXPECT_UNSUPPORTED",

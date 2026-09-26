@@ -1,7 +1,14 @@
 import { normalizeActivity } from "../../domain/activity.js";
 import type { TapHoundConfig } from "../../domain/config.js";
-import type { AdbPort } from "../../ports/adb.js";
 import type { Clock } from "../../ports/clock.js";
+import {
+  withRuntimeSession,
+  type RuntimeSessionOpener
+} from "../../ports/runtime-backend.js";
+import type {
+  RuntimeSessionPortViews,
+  RuntimeSessionPortViewsFactory
+} from "../../ports/runtime-session-ports.js";
 import { launchFailure } from "../runtime/launch-failure.js";
 import { ProcessWaiter } from "../runtime/process-waiter.js";
 
@@ -35,20 +42,40 @@ function commandFailure(result: {
         : `App reset exited with code ${String(result.exitCode)}`);
 }
 
+export interface GenerationAppPreparerDependencies {
+  sessions: RuntimeSessionOpener;
+  sessionPorts: RuntimeSessionPortViewsFactory;
+  clock: Clock;
+}
+
 export class GenerationAppPreparer {
   public constructor(
-    private readonly adb: AdbPort,
-    private readonly clock: Clock
+    private readonly dependencies: GenerationAppPreparerDependencies
   ) {}
 
-  public async prepare(input: GenerationAppPreparationInput): Promise<void> {
+  public prepare(input: GenerationAppPreparationInput): Promise<void> {
+    return withRuntimeSession(
+      this.dependencies.sessions,
+      input.deviceSerial,
+      input.signal,
+      (session) => this.coldLaunch(
+        this.dependencies.sessionPorts(session).adb,
+        input
+      )
+    );
+  }
+
+  private async coldLaunch(
+    adb: RuntimeSessionPortViews["adb"],
+    input: GenerationAppPreparationInput
+  ): Promise<void> {
     const identity = {
       packageName: input.config.run.packageName,
       deviceSerial: input.deviceSerial,
       timeoutMs: input.config.idle.timeoutMs,
       ...(input.signal === undefined ? {} : { signal: input.signal })
     };
-    const stopped = await this.adb.forceStop(identity);
+    const stopped = await adb.forceStop(identity);
     const stopError = commandFailure(stopped);
     if (stopError !== undefined) {
       throw new Error(stopError);
@@ -58,7 +85,7 @@ export class GenerationAppPreparer {
       input.config.run.packageName,
       input.config.run.activity
     );
-    const launched = await this.adb.launchActivity({
+    const launched = await adb.launchActivity({
       ...identity,
       activity
     });
@@ -67,7 +94,7 @@ export class GenerationAppPreparer {
       throw new Error(launchError);
     }
 
-    const process = await new ProcessWaiter(this.adb, this.clock).wait({
+    const process = await new ProcessWaiter(adb, this.dependencies.clock).wait({
       ...identity,
       pollIntervalMs: input.config.idle.pollIntervalMs
     });

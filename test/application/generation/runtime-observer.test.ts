@@ -405,7 +405,8 @@ describe("RuntimeObserver", () => {
       idle,
       undefined,
       "com.example.app",
-      expect.anything()
+      expect.anything(),
+      test.adb
     );
   });
 
@@ -425,7 +426,7 @@ describe("RuntimeObserver", () => {
     await test.observer.observe({ generationId: "generation-1", idle });
 
     expect(test.waitUntilIdle).toHaveBeenCalledWith(
-      "emulator-5554", idle, undefined, "com.example.app", provider
+      "emulator-5554", idle, undefined, "com.example.app", provider, test.adb
     );
   });
 
@@ -461,7 +462,8 @@ describe("RuntimeObserver", () => {
       },
       undefined,
       "com.example.app",
-      expect.anything()
+      expect.anything(),
+      test.adb
     );
   });
 

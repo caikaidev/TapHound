@@ -20,6 +20,11 @@
 
 ### Changed
 
+- The `AdbPort` bridge over the Runtime Backend SPI is removed. `align`'s
+  camera probe, the generation app preparer, and `doctor`'s install check
+  now borrow a session like every other device consumer (closing it when
+  done instead of caching one per serial for the process lifetime), and idle
+  device profiles read the device identity from the observing session.
 - The Recorder records a bridge through the same `BridgeRunner` as Replay and
   Generation, and runs each chosen External Step through `ExternalStepRunner`
   before recording it: a step is recorded only if it executes the way Replay

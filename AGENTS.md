@@ -134,9 +134,10 @@ Device work flows through the Runtime Backend SPI
 serial-bound `RuntimeSession`s. `AdbRuntimeBackend`
 (`src/adapters/runtime/`) composes the existing ADB/Android CLI adapters
 without reimplementation; `FakeRuntimeBackend` serves unit tests; `MobileMcpRuntimeBackend` (`src/adapters/runtime/mobile-mcp/`) runs
-device work through the Mobile MCP server over stdio. Application
-services still accept the `AdbPort` interface: the composition root bridges it
-over the SPI via `RuntimeBackendAdbBridge`, so backend selection is a wiring
+device work through the Mobile MCP server over stdio. Every device
+consumer borrows a session through the `RuntimeSessionOpener` port
+(`withRuntimeSession` always closes it) and hands its `AdbPort`-shaped helpers
+the serial-bound `runtimeSessionPortViews`, so backend selection is a wiring
 and config change only. `openSession` performs no device I/O; layout snapshot
 providers open lazily through `session.openUiSnapshots()`. Capability-gated
 members (`annotatedScreens`, `startActivityByIntent`) are `undefined` when
@@ -156,8 +157,9 @@ closed; `observe`, `verify`, `record`, and `generation` borrow a session per
 run through the `RuntimeSessionOpener` port (the Level 1 session-first
 services; `VerifyRuntime` feeds its unchanged `AdbPort`-shaped helpers
 through the `RuntimeSessionPortViewsFactory` port, and `RecorderService`,
-`RuntimeObserver`, and `GenerationStepExecutor` follow the same pattern),
-while `align` still routes through the bridge; `doctor` is fully adapted.
+`RuntimeObserver`, `GenerationStepExecutor`, `GenerationAppPreparer`, and
+`align`'s camera probe follow the same pattern); `doctor` and `align` list
+devices through `RuntimeBackend.listDevices`.
 See `docs/architecture/runtime-backend.md` for the SPI contract, adoption
 roadmap, and Mobile MCP flip checklist.
 

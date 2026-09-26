@@ -12,12 +12,10 @@ import { fileURLToPath } from "node:url";
 
 import { AdbAdapter } from "../adapters/adb/adb-adapter.js";
 import { AdbRuntimeBackend } from "../adapters/runtime/adb-runtime-backend.js";
-import { RuntimeBackendAdbBridge } from "../adapters/runtime/runtime-backend-adb-bridge.js";
 import { SharedSessionRuntimeBackend } from "../adapters/runtime/shared-session-runtime-backend.js";
 import {
   SessionBackedScreenshotAdapter,
-  SessionBackedUiSnapshotProviderFactory,
-  SessionBackedUiStabilityAdapter
+  SessionBackedUiSnapshotProviderFactory
 } from "../adapters/runtime/session-backed-ports.js";
 import { runtimeSessionPortViews } from "../adapters/runtime/session-adb-view.js";
 import { MobileMcpRuntimeBackend } from "../adapters/runtime/mobile-mcp/mobile-mcp-runtime-backend.js";
@@ -188,9 +186,10 @@ import type {
   ChangeSet
 } from "../domain/impact.js";
 import type { Journey } from "../domain/journey.js";
-import type {
-  RuntimeBackend,
-  RuntimeSessionOpener
+import {
+  withRuntimeSession,
+  type RuntimeBackend,
+  type RuntimeSessionOpener
 } from "../ports/runtime-backend.js";
 import type { ScreenshotPort } from "../ports/screenshot.js";
 import type { UiSnapshotProviderFactory } from "../ports/ui-snapshot.js";
@@ -434,34 +433,27 @@ export function createProductionDependencies(
   const clock = options.clock ?? new SystemClock();
   const now = (): number => clock.now();
   const permissionCaptureTimeoutMs = 10_000;
-  let adb: AdbPort;
-  let sessions: RuntimeSessionOpener;
+  let backend: RuntimeBackend;
   let screenshots: ScreenshotPort;
-  let uiStability: UiStabilityProbe;
   let uiSnapshots: UiSnapshotProviderFactory;
   let sharedBackend: SharedSessionRuntimeBackend | undefined;
   if (options.runtimeBackend !== undefined) {
-    const backend = options.runtimeBackend;
-    sessions = backend;
-    adb = new RuntimeBackendAdbBridge({ backend });
+    backend = options.runtimeBackend;
     screenshots = new SessionBackedScreenshotAdapter(backend);
-    uiStability = new SessionBackedUiStabilityAdapter(backend);
     uiSnapshots = new CachedUiSnapshotProviderFactory(
       new SessionBackedUiSnapshotProviderFactory(backend),
       now
     );
   } else if (backendId === "mobile-mcp") {
-    const backend = new SharedSessionRuntimeBackend(
+    const shared = new SharedSessionRuntimeBackend(
       new MobileMcpRuntimeBackend({
         createTools: options.mobileMcpToolsFactory
           ?? ((): MobileMcpTools => new McpToolClient())
       })
     );
-    sharedBackend = backend;
-    sessions = backend;
-    adb = new RuntimeBackendAdbBridge({ backend });
+    sharedBackend = shared;
+    backend = shared;
     screenshots = new SessionBackedScreenshotAdapter(backend);
-    uiStability = new SessionBackedUiStabilityAdapter(backend);
     uiSnapshots = new CachedUiSnapshotProviderFactory(
       new SessionBackedUiSnapshotProviderFactory(backend),
       now
@@ -484,25 +476,41 @@ export function createProductionDependencies(
       uiStability: androidCli,
       uiSnapshots: autoSnapshots
     });
-    sessions = adbBackend;
-    adb = new RuntimeBackendAdbBridge({ backend: adbBackend });
+    backend = adbBackend;
     screenshots = androidCli;
-    uiStability = androidCli;
     uiSnapshots = autoSnapshots;
   }
+  const sessions: RuntimeSessionOpener = backend;
+  // Device-wide probes (listing, install state) borrow a session per call.
+  const devices: Pick<AdbPort, "devices" | "isInstalled"> = {
+    devices: (signal) => backend.listDevices(signal),
+    isInstalled: (identity) => withRuntimeSession(
+      backend,
+      identity.deviceSerial,
+      identity.signal,
+      (session) => session.isInstalled({
+        packageName: identity.packageName,
+        ...(identity.signal === undefined ? {} : { signal: identity.signal }),
+        ...(identity.timeoutMs === undefined
+          ? {}
+          : { timeoutMs: identity.timeoutMs })
+      })
+    )
+  };
   const waitUntilIdle = (
     deviceSerial: string,
     config: Parameters<IdleWaiter["waitUntilIdle"]>[0],
-    signal?: AbortSignal,
-    packageName?: string,
-    stability?: UiStabilityProbe
+    signal: AbortSignal | undefined,
+    packageName: string,
+    stability: UiStabilityProbe,
+    device: Pick<AdbPort, "deviceIdentity">
   ): ReturnType<IdleWaiter["waitUntilIdle"]> => new IdleWaiter(
-    stability ?? uiStability,
+    stability,
     clock,
     deviceSerial,
     packageName,
-    deviceIdentityResolver(adb, {
-      packageName: packageName ?? "unknown",
+    deviceIdentityResolver(device, {
+      packageName,
       deviceSerial,
       timeoutMs: config.timeoutMs
     })
@@ -666,7 +674,7 @@ export function createProductionDependencies(
       : { close: (): Promise<void> => sharedBackend.close() }),
     doctor: new DoctorService({
       runner,
-      adb,
+      adb: devices,
       nodeVersion: process.version,
       runtimeBackendId: backendId,
       checkAndroidPermissions: async (
@@ -784,9 +792,10 @@ export function createProductionDependencies(
     }),
     initPrompt: new InquirerInitPrompt(),
     align: new AlignService({
-      adb,
+      adb: devices,
       probe: new CameraProbeAdapter({
-        adb,
+        sessions,
+        sessionPorts: runtimeSessionPortViews,
         uiSnapshots,
         now: () => Date.now(),
         sleep: async (ms: number): Promise<void> => {
@@ -829,7 +838,11 @@ export function createProductionDependencies(
         Awaited<ReturnType<GenerationStarter["start"]>>
       > => new GenerationStarter({
         contextValidator,
-        appPreparer: new GenerationAppPreparer(adb, clock),
+        appPreparer: new GenerationAppPreparer({
+              sessions,
+              sessionPorts: runtimeSessionPortViews,
+              clock
+            }),
         uiSnapshots,
         store: generationStoreFactory(input.projectRoot),
         now: (): Date => new Date(),
@@ -1008,7 +1021,11 @@ export function createProductionDependencies(
             store,
             observer,
             verifyRuntime,
-            appPreparer: new GenerationAppPreparer(adb, clock)
+            appPreparer: new GenerationAppPreparer({
+              sessions,
+              sessionPorts: runtimeSessionPortViews,
+              clock
+            })
           }).replace(input)
         )
       };

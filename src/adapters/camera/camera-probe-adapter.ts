@@ -2,6 +2,11 @@ import type { ForegroundComponent } from "../../domain/activity.js";
 import type { Point } from "../../domain/geometry.js";
 import type { LayoutElement } from "../../domain/layout.js";
 import type { AdbPort, AppIdentity } from "../../ports/adb.js";
+import {
+  withRuntimeSession,
+  type RuntimeSessionOpener
+} from "../../ports/runtime-backend.js";
+import type { RuntimeSessionPortViewsFactory } from "../../ports/runtime-session-ports.js";
 import type { UiSnapshotProviderFactory } from "../../ports/ui-snapshot.js";
 import type {
   CameraProbeInput,
@@ -34,7 +39,8 @@ const RESOLVER_KEYWORDS = ["resolver", "chooser"];
 const AOSP_CAMERA_PACKAGES = ["com.android.camera", "com.android.camera2"];
 
 export interface CameraProbeAdapterDeps {
-  adb: AdbPort;
+  sessions: RuntimeSessionOpener;
+  sessionPorts: RuntimeSessionPortViewsFactory;
   uiSnapshots: UiSnapshotProviderFactory;
   now: () => number;
   sleep: (ms: number) => Promise<void>;
@@ -189,7 +195,19 @@ function deviceIdentity(deviceSerial: string, signal?: AbortSignal): AppIdentity
 export class CameraProbeAdapter implements CameraProbePort {
   public constructor(private readonly deps: CameraProbeAdapterDeps) {}
 
-  public async probe(input: CameraProbeInput): Promise<CameraProbeResult> {
+  public probe(input: CameraProbeInput): Promise<CameraProbeResult> {
+    return withRuntimeSession(
+      this.deps.sessions,
+      input.deviceSerial,
+      input.signal,
+      (session) => this.probeWith(this.deps.sessionPorts(session).adb, input)
+    );
+  }
+
+  private async probeWith(
+    adb: AdbPort,
+    input: CameraProbeInput
+  ): Promise<CameraProbeResult> {
     const { deviceSerial, signal } = input;
     let cameraPackage: string | undefined;
     const uiSnapshotProvider = await this.deps.uiSnapshots.open({
@@ -199,22 +217,22 @@ export class CameraProbeAdapter implements CameraProbePort {
     });
 
     try {
-      let preForeground = await this.deps.adb.foregroundComponent(
+      let preForeground = await adb.foregroundComponent(
         deviceIdentity(deviceSerial, signal)
       );
       if (isAospCameraPackage(preForeground.packageName)
         || isResolverOrChooser(preForeground.packageName)) {
-        await this.deps.adb.forceStop({
+        await adb.forceStop({
           packageName: preForeground.packageName,
           deviceSerial,
           ...(signal === undefined ? {} : { signal })
         });
-        preForeground = await this.deps.adb.foregroundComponent(
+        preForeground = await adb.foregroundComponent(
           deviceIdentity(deviceSerial, signal)
         );
       }
 
-      const startResult = await this.deps.adb.startActivityByIntent({
+      const startResult = await adb.startActivityByIntent({
         action: IMAGE_CAPTURE_ACTION,
         deviceSerial,
         ...(signal === undefined ? {} : { signal })
@@ -230,7 +248,7 @@ export class CameraProbeAdapter implements CameraProbePort {
       const deadline = this.deps.now() + CAMERA_FOREGROUND_TIMEOUT_MS;
       let current: ForegroundComponent = preForeground;
       while (this.deps.now() < deadline) {
-        current = await this.deps.adb.foregroundComponent(
+        current = await adb.foregroundComponent(
           deviceIdentity(deviceSerial, signal)
         );
         if (isResolverOrChooser(current.packageName)) {
@@ -264,6 +282,7 @@ export class CameraProbeAdapter implements CameraProbePort {
         ...(signal === undefined ? {} : { signal })
       })).roots;
       const preShutterForeground = await this.waitForStableForeground(
+        adb,
         deviceSerial,
         signal
       );
@@ -303,7 +322,7 @@ export class CameraProbeAdapter implements CameraProbePort {
         );
       }
 
-      await this.deps.adb.tap(
+      await adb.tap(
         centerOf(shutterElement),
         deviceSerial,
         signal
@@ -321,6 +340,7 @@ export class CameraProbeAdapter implements CameraProbePort {
         ...(signal === undefined ? {} : { signal })
       })).roots;
       const postShutterForeground = await this.waitForStableForeground(
+        adb,
         deviceSerial,
         signal
       );
@@ -381,7 +401,7 @@ export class CameraProbeAdapter implements CameraProbePort {
       }
       if (cameraPackage !== undefined) {
         try {
-          await this.deps.adb.forceStop({
+          await adb.forceStop({
             packageName: cameraPackage,
             deviceSerial,
             ...(signal === undefined ? {} : { signal })
@@ -394,13 +414,14 @@ export class CameraProbeAdapter implements CameraProbePort {
   }
 
   private async waitForStableForeground(
+    adb: AdbPort,
     deviceSerial: string,
     signal?: AbortSignal
   ): Promise<ForegroundComponent> {
     const deadline = this.deps.now() + CAMERA_FOREGROUND_TIMEOUT_MS;
     let previous: ForegroundComponent | undefined;
     while (this.deps.now() < deadline) {
-      const current = await this.deps.adb.foregroundComponent(
+      const current = await adb.foregroundComponent(
         deviceIdentity(deviceSerial, signal)
       );
       if (

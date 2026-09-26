@@ -86,9 +86,11 @@ export interface RuntimeObserverDependencies {
   waitUntilIdle?: (
     deviceSerial: string,
     config: IdleConfig,
-    signal?: AbortSignal,
-    packageName?: string,
-    stability?: UiStabilityProbe
+    signal: AbortSignal | undefined,
+    packageName: string,
+    stability: UiStabilityProbe,
+    /** The observed session's device, for idle device profiles. */
+    device: Pick<AdbPort, "deviceIdentity">
   ) => Promise<IdleResult>;
   now: () => Date;
   createAttemptId: () => string;
@@ -263,7 +265,8 @@ export class RuntimeObserver {
           idle,
           input.signal,
           current.target.packageName,
-          uiStabilityProbe(uiSnapshotProvider, views.uiStability)
+          uiStabilityProbe(uiSnapshotProvider, views.uiStability),
+          views.adb
         );
         if (idleResult.status !== "stable") {
           throw new GenerationOperationError(

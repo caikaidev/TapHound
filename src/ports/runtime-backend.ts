@@ -140,3 +140,21 @@ export interface RuntimeBackend {
  * shared or replaced without exposing the full backend interface.
  */
 export type RuntimeSessionOpener = Pick<RuntimeBackend, "openSession">;
+
+/** Borrows one session for `use` and always closes it. */
+export async function withRuntimeSession<T>(
+  sessions: RuntimeSessionOpener,
+  deviceSerial: string,
+  signal: AbortSignal | undefined,
+  use: (session: RuntimeSession) => Promise<T>
+): Promise<T> {
+  const session = await sessions.openSession({
+    deviceSerial,
+    ...(signal === undefined ? {} : { signal })
+  });
+  try {
+    return await use(session);
+  } finally {
+    await session.close();
+  }
+}

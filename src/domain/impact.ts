@@ -69,7 +69,6 @@ export const ImpactSetSchema = z.strictObject({
   affectedFeatures: z.array(z.string().trim().min(1)),
   affectedScreens: z.array(KnowledgeIdSchema),
   affectedAnchors: z.array(KnowledgeIdSchema),
-  affectedTransitions: z.array(KnowledgeIdSchema),
   selectedJourneys: z.strictObject({
     p0: z.array(JourneySelectionSchema),
     p1: z.array(JourneySelectionSchema),

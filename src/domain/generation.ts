@@ -14,12 +14,6 @@ import {
   type ProposedStep
 } from "./proposed-step.js";
 import { RuntimeSnapshotSchema } from "./runtime-snapshot.js";
-import {
-  GoalSpecSchema,
-  RoutePlanSchema,
-  hashGoalSpec,
-  type GoalSpec
-} from "./route.js";
 
 export const GENERATION_ERROR_CODES = [
   "CONFIG_INVALID",
@@ -28,15 +22,7 @@ export const GENERATION_ERROR_CODES = [
   "BRIEF_INVALID",
   "KNOWLEDGE_INVALID",
   "KNOWLEDGE_STALE",
-  "SCREEN_UNKNOWN",
-  "SCREEN_AMBIGUOUS",
-  "NO_ROUTE",
-  "TARGET_UNKNOWN",
-  "ROUTE_LIMIT_EXCEEDED",
-  "ANCHOR_UNKNOWN",
   "ANCHOR_AMBIGUOUS",
-  "PARAMETER_MISSING",
-  "REPLAN_BUDGET_EXHAUSTED",
   "FLOW_INVALID",
   "FLOW_REPLAY_FAILED",
   "APP_LAUNCH_FAILED",
@@ -55,6 +41,8 @@ export const GENERATION_ERROR_CODES = [
   "IDLE_TIMEOUT",
   "WINDOW_HIERARCHY_INCOMPLETE",
   "ACTION_UNSUPPORTED",
+  "LOCATOR_NOT_FOUND",
+  "LOCATOR_AMBIGUOUS",
   "RISK_CONFIRMATION_REQUIRED",
   "ACTION_FORBIDDEN",
   "EXPECT_UNSUPPORTED",
@@ -247,49 +235,6 @@ const PublicationSchema = z.discriminatedUnion("status", [
   })
 ]);
 
-export const GenerationPlanningSchema = z.strictObject({
-  knowledgeHash: Sha256Schema,
-  goalHash: Sha256Schema,
-  goal: GoalSpecSchema,
-  currentScreen: z.string().trim().min(1).nullable(),
-  currentRoute: RoutePlanSchema.nullable(),
-  replansUsed: z.number().int().nonnegative(),
-  maxReplans: z.number().int().nonnegative(),
-  maxSteps: z.number().int().positive()
-}).superRefine((planning, context) => {
-  if (
-    planning.maxReplans !== planning.goal.limits.maxReplans
-    || planning.maxSteps !== planning.goal.limits.maxSteps
-  ) {
-    context.addIssue({
-      code: "custom",
-      path: ["goal", "limits"],
-      message: "Planning limits must match the bound Goal"
-    });
-  }
-  if (planning.goalHash !== hashGoalSpec(planning.goal)) {
-    context.addIssue({
-      code: "custom",
-      path: ["goalHash"],
-      message: "Goal hash must match the canonical bound Goal"
-    });
-  }
-  if (
-    planning.currentRoute !== null
-    && (
-      planning.currentRoute.goalId !== planning.goal.id
-      || planning.currentRoute.knowledgeHash !== planning.knowledgeHash
-      || planning.currentRoute.startScreen !== planning.currentScreen
-    )
-  ) {
-    context.addIssue({
-      code: "custom",
-      path: ["currentRoute"],
-      message: "Current Route must match the planning binding and current Screen"
-    });
-  }
-});
-
 const GenerationSessionFields = {
   id: GenerationSessionIdSchema,
   revision: NonnegativeSafeIntegerSchema,
@@ -299,7 +244,7 @@ const GenerationSessionFields = {
     configHash: Sha256Schema,
     contextHash: Sha256Schema,
     snapshotHash: Sha256Schema.nullable(),
-    uiBackend: UiBackendDescriptorSchema.optional()
+    uiBackend: UiBackendDescriptorSchema
   }),
   target: z.strictObject({
     packageName: z.string().regex(
@@ -314,31 +259,20 @@ const GenerationSessionFields = {
   variables: GenerationVariablesSchema,
   baseFlow: GenerationBaseFlowSchema.optional(),
   sourceBrief: GenerationSourceBriefSchema.optional(),
-  externalFlows: z.array(GenerationExternalFlowBindingSchema).default([]),
+  externalFlows: z.array(GenerationExternalFlowBindingSchema),
   candidateSteps: z.array(JourneyStepSchema),
   candidateSources: z.array(GenerationStepSourceSchema),
   inFlight: GenerationInFlightSchema.nullable(),
   pendingConfirmation: PendingConfirmationSchema.nullable(),
   verification: VerificationSchema,
-  verificationHistory: z.array(VerificationHistoryEntrySchema).optional(),
+  verificationHistory: z.array(VerificationHistoryEntrySchema),
   publication: PublicationSchema
 };
 
 export const GenerationSessionSchema = z.strictObject({
-  version: z.union([z.literal(1), z.literal(2)]),
-  ...GenerationSessionFields,
-  planning: GenerationPlanningSchema.optional()
+  version: z.literal(1),
+  ...GenerationSessionFields
 }).superRefine((session, context) => {
-  if (
-    (session.version === 1 && session.planning !== undefined)
-    || (session.version === 2 && session.planning === undefined)
-  ) {
-    context.addIssue({
-      code: "custom",
-      path: ["planning"],
-      message: "Generation session v2 requires planning and v1 forbids it"
-    });
-  }
   if (session.candidateSources.length !== session.candidateSteps.length) {
     context.addIssue({
       code: "custom",
@@ -456,7 +390,6 @@ export type GenerationInFlight = z.infer<typeof GenerationInFlightSchema>;
 export type ConfirmationReason = z.infer<typeof ConfirmationReasonSchema>;
 export type PendingConfirmation = z.infer<typeof PendingConfirmationSchema>;
 export type GenerationSession = z.infer<typeof GenerationSessionSchema>;
-export type GenerationPlanning = z.infer<typeof GenerationPlanningSchema>;
 
 export function isGenerationConfirmationExpired(
   challenge: PendingConfirmation,
@@ -535,20 +468,19 @@ export const GenerationMetaSchema = z.strictObject({
   }).optional(),
   generationId: GenerationSessionIdSchema,
   journeyPath: ProjectRelativePathSchema,
-  journeySha256: Sha256Schema.optional(),
+  journeySha256: Sha256Schema,
   bindings: z.strictObject({
     projectHash: Sha256Schema,
     configHash: Sha256Schema,
     contextHash: Sha256Schema,
-    knowledgeHash: Sha256Schema.optional(),
-    uiBackend: UiBackendDescriptorSchema.optional()
+    uiBackend: UiBackendDescriptorSchema
   }),
   replayPolicy: z.strictObject({
     generatedReplayPolicy: z.boolean(),
     requireFocusedInput: z.boolean(),
     idle: IdlePolicySchema
-  }).optional(),
-  contextSelection: ContextSelectionSchema.optional(),
+  }),
+  contextSelection: ContextSelectionSchema,
   verification: z.strictObject({
     reportPath: BundleRelativePathSchema,
     reportSha256: Sha256Schema,
@@ -557,7 +489,7 @@ export const GenerationMetaSchema = z.strictObject({
   }),
   baseFlow: GenerationBaseFlowSchema.optional(),
   sourceBrief: GenerationSourceBriefSchema.optional(),
-  externalFlows: z.array(GenerationExternalFlowBindingSchema).default([]),
+  externalFlows: z.array(GenerationExternalFlowBindingSchema),
   manualOverrideStepIndexes: z.array(z.number().int().nonnegative())
 }).superRefine((meta, context) => {
   if (meta.status === "verified" && meta.promotion !== undefined) {
@@ -643,13 +575,6 @@ export interface GenerationCoreIdentity {
   variables: GenerationSession["variables"];
   baseFlow?: NonNullable<GenerationSession["baseFlow"]> | undefined;
   externalFlows: GenerationSession["externalFlows"];
-  planningBinding?: {
-    knowledgeHash: string;
-    goalHash: string;
-    goal: GoalSpec;
-    maxReplans: number;
-    maxSteps: number;
-  } | undefined;
 }
 
 export function generationCoreIdentity(
@@ -661,26 +586,13 @@ export function generationCoreIdentity(
       projectHash: session.bindings.projectHash,
       configHash: session.bindings.configHash,
       contextHash: session.bindings.contextHash,
-      ...(session.bindings.uiBackend === undefined
-        ? {}
-        : { uiBackend: session.bindings.uiBackend })
+      uiBackend: session.bindings.uiBackend
     },
     target: session.target,
     contextSelection: session.contextSelection,
     variables: session.variables,
     ...(session.baseFlow === undefined ? {} : { baseFlow: session.baseFlow }),
-    externalFlows: session.externalFlows,
-    ...(session.version === 1 || session.planning === undefined
-      ? {}
-      : {
-          planningBinding: {
-            knowledgeHash: session.planning.knowledgeHash,
-            goalHash: session.planning.goalHash,
-            goal: session.planning.goal,
-            maxReplans: session.planning.maxReplans,
-            maxSteps: session.planning.maxSteps
-          }
-        })
+    externalFlows: session.externalFlows
   };
 }
 

@@ -1,5 +1,9 @@
 # Coding Agent 的 Android 自验证工作流
 
+> **状态：历史设计文档。** 本文基于提交 `94167aa` 时的代码分析，用于记录设计动机。当前实现以
+> [Workflow Skills](./workflow-skills.md) 为准：Accept 与 Preserve 已合并为
+> `taphound-verify-change`，编码过程中的冒烟检查由 `taphound-flash` 负责。
+
 > 本文档第 3 节的现状判断已对源码逐条核对（基线提交 `94167aa`），关键结论附代码位置。
 > 实施拆解见 [自验证工作流实施计划](./plans/2026-09-14-coding-agent-self-verification-implementation.md)。
 
@@ -171,7 +175,7 @@ compare 的实际门禁比“只校验 Journey 哈希”更弱，等价语义也
 
 **已完成**
 
-- `taphound impact` 和 `verify --diff` 将 Git ChangeSet 映射为受影响模块、Feature、Screen、Anchor、Transition 和 P0/P1/P2 Journey 集合。
+- `taphound impact` 和 `verify --diff` 将 Git ChangeSet 映射为受影响模块、Feature、Screen、Anchor 和 P0/P1/P2 Journey 集合。
 - ImpactSet 绑定 Context 和 Knowledge 哈希，适合在大型项目中选择最小验证集。
 
 **缺口**
@@ -287,7 +291,7 @@ taphound generation finalize \
 - **独立重放必须与 finalize 的 Replay 策略等价**：使用 meta 中持久化的 replay 策略
   （`generatedReplayPolicy`、`requireFocusedInput`）和 idle 策略，而不是默认的宽松策略。
   策略不可复现时结果为 `inconclusive`，不得记为 `pass`（见 §5.3）。
-- 绑定记录必须包含 `knowledgeHash`。`knowledge evolve` 会在生成期改写 Registry，
+- 绑定记录必须包含 `knowledgeHash`。Knowledge 被编辑并 `knowledge rehash` 后哈希会变化，
   Contract 的 `screen` / `anchor` 断言依赖它，缺少该绑定则断言不可复现。
 - 通过 `VerifyRuntime` 再次 force-stop、冷启动并执行：
 
@@ -595,14 +599,14 @@ Checkpoint 的 `screen` 条件依赖 Knowledge 解析能力，失败关闭行为
 - 修掉 `locatorToKey` 的占位键碰撞；
 - `evidenceSha256` 要么绑定稳定的元素语义证据，要么删除（不要对人类可读消息取哈希）；
 - 若 `absent` 事实短期内无法从 passed 报告中产生，就在文档中显式声明该能力缺失，
-  等 Checkpoint 接入后由 `absentElements` 提供。
+  等 Checkpoint 接入后由 `allOf` 中的 `absentElement` 条件提供。
 
 ### 5.5 区分实现变化和测试资产变化
 
 Workflow 在任务开始和结束时分别记录两类 diff：
 
 - **实现变化**：App 源码、资源、Manifest、构建配置和会影响运行行为的依赖。
-- **验证资产变化**：`.taphound/context`、`journeys`、`contracts`、`baselines`、`knowledge`、`flows` 和 `playbooks`。
+- **验证资产变化**：`.taphound/context`、`journeys`、`contracts`、`baselines`、`knowledge` 和 `flows`。
 
 处理规则：
 

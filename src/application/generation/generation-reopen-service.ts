@@ -53,7 +53,7 @@ export class GenerationReopenService {
       revision: current.revision + 1,
       verification: { status: "notRun" },
       verificationHistory: [
-        ...(current.verificationHistory ?? []),
+        ...current.verificationHistory,
         {
           failedRevision: current.revision,
           reopenedAt: this.dependencies.now().toISOString(),

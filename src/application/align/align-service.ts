@@ -22,7 +22,7 @@ export class AlignError extends Error {
 }
 
 export interface AlignServiceDeps {
-  adb: AdbPort;
+  adb: Pick<AdbPort, "devices">;
   probe: CameraProbePort;
   prompt: AlignPromptPort;
   registry: ExternalFlowRegistry;

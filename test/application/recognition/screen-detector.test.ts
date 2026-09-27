@@ -6,9 +6,10 @@ import type {
   ScreenDefinition
 } from "../../../src/domain/knowledge.js";
 import type { RuntimeSnapshot } from "../../../src/domain/runtime-snapshot.js";
+import { TEST_SNAPSHOT_UI } from "../../fakes/ui-backend.js";
 
 const snapshot: RuntimeSnapshot = {
-  version: 1,
+  version: 2,
   generationId: "generation-1",
   baseRevision: 1,
   deviceSerial: "emulator-5554",
@@ -23,7 +24,8 @@ const snapshot: RuntimeSnapshot = {
     text: "Inbox",
     enabled: true,
     children: []
-  }]
+  }],
+  ...TEST_SNAPSHOT_UI
 };
 
 const anchors: AnchorDefinition[] = [

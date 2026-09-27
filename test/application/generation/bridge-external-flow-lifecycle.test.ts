@@ -59,6 +59,7 @@ import type { AnnotatedScreenResolverPort } from "../../../src/ports/annotated-s
 import type { UiStabilityProbe } from "../../../src/ports/ui-stability.js";
 import type { UiSnapshotProvider } from "../../../src/ports/ui-snapshot.js";
 import { contextSelection } from "../../fixtures/project-context.js";
+import { TEST_SNAPSHOT_UI } from "../../fakes/ui-backend.js";
 
 const roots: string[] = [];
 
@@ -402,9 +403,6 @@ async function createBridgeFixture(): Promise<BridgeFixture> {
 
   const finalizer = new GenerationFinalizer({
     store,
-    contextValidator: {
-      validate: vi.fn(() => Promise.resolve({ status: "valid" as const }))
-    },
     verifyRuntime: { verify },
     publisher,
     generateAttemptId: (): string => "verification-attempt"
@@ -427,7 +425,7 @@ async function createBridgeFixture(): Promise<BridgeFixture> {
 
 function buildSnapshotFromSession(session: GenerationSession): RuntimeSnapshot {
   return {
-    version: 1,
+    version: 2,
     generationId: session.id,
     baseRevision: session.revision,
     deviceSerial: session.target.deviceSerial,
@@ -437,7 +435,8 @@ function buildSnapshotFromSession(session: GenerationSession): RuntimeSnapshot {
     pid: 42,
     capturedAt: "2026-07-22T12:00:01.000Z",
     layout: [triggerElement],
-    windowHierarchy: expectedWindowHierarchy
+    windowHierarchy: expectedWindowHierarchy,
+    ...TEST_SNAPSHOT_UI
   };
 }
 

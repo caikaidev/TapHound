@@ -4,7 +4,7 @@
   "goal": "Submitting the demo query shows the result and uniquely logs the structured event",
   "journey": {
     "path": ".taphound/journeys/acceptance-event.json",
-    "sha256": "123f1526fd0f80db8a404907344301771c6b23541cac1555d39b8360f273e267"
+    "sha256": "0466e63d97d034de0b3f22043718552f936e3972ca037e07570dcb5220923d8c"
   },
   "preconditions": [{ "kind": "installed" }],
   "assertions": [{

@@ -131,7 +131,7 @@ export class BaselineService {
       );
     }
     if (
-      (baseline.requiredEvidence?.screens ?? baseline.screens.length > 0)
+      baseline.requiredEvidence.screens
       && (report.screens?.length ?? 0) === 0
     ) {
       throw new BaselineError(

@@ -1,9 +1,15 @@
 import { normalizeActivity } from "../../domain/activity.js";
 import type { TapHoundConfig } from "../../domain/config.js";
-import type { AdbPort } from "../../ports/adb.js";
 import type { Clock } from "../../ports/clock.js";
-import { launchFailure } from "../runtime/launch-failure.js";
-import { ProcessWaiter } from "../runtime/process-waiter.js";
+import {
+  withRuntimeSession,
+  type RuntimeSessionOpener
+} from "../../ports/runtime-backend.js";
+import type {
+  RuntimeSessionPortViews,
+  RuntimeSessionPortViewsFactory
+} from "../../ports/runtime-session-ports.js";
+import { coldLaunchApp } from "../runtime/cold-launch.js";
 
 export interface GenerationAppPreparationInput {
   config: TapHoundConfig;
@@ -11,72 +17,49 @@ export interface GenerationAppPreparationInput {
   signal?: AbortSignal | undefined;
 }
 
-function commandFailure(result: {
-  exitCode: number | null;
-  stderr: string;
-  timedOut: boolean;
-  cancelled: boolean;
-  spawnError?: string | undefined;
-}): string | undefined {
-  if (
-    result.exitCode === 0
-    && !result.timedOut
-    && !result.cancelled
-    && result.spawnError === undefined
-  ) {
-    return undefined;
-  }
-  return result.stderr.trim()
-    || result.spawnError
-    || (result.cancelled
-      ? "App reset was cancelled"
-      : result.timedOut
-        ? "App reset timed out"
-        : `App reset exited with code ${String(result.exitCode)}`);
+export interface GenerationAppPreparerDependencies {
+  sessions: RuntimeSessionOpener;
+  sessionPorts: RuntimeSessionPortViewsFactory;
+  clock: Clock;
 }
 
 export class GenerationAppPreparer {
   public constructor(
-    private readonly adb: AdbPort,
-    private readonly clock: Clock
+    private readonly dependencies: GenerationAppPreparerDependencies
   ) {}
 
-  public async prepare(input: GenerationAppPreparationInput): Promise<void> {
-    const identity = {
-      packageName: input.config.run.packageName,
-      deviceSerial: input.deviceSerial,
-      timeoutMs: input.config.idle.timeoutMs,
-      ...(input.signal === undefined ? {} : { signal: input.signal })
-    };
-    const stopped = await this.adb.forceStop(identity);
-    const stopError = commandFailure(stopped);
-    if (stopError !== undefined) {
-      throw new Error(stopError);
-    }
-
-    const activity = normalizeActivity(
-      input.config.run.packageName,
-      input.config.run.activity
+  public prepare(input: GenerationAppPreparationInput): Promise<void> {
+    return withRuntimeSession(
+      this.dependencies.sessions,
+      input.deviceSerial,
+      input.signal,
+      (session) => this.coldLaunch(
+        this.dependencies.sessionPorts(session).adb,
+        input
+      )
     );
-    const launched = await this.adb.launchActivity({
-      ...identity,
-      activity
-    });
-    const launchError = launchFailure(launched);
-    if (launchError !== undefined) {
-      throw new Error(launchError);
-    }
+  }
 
-    const process = await new ProcessWaiter(this.adb, this.clock).wait({
-      ...identity,
-      pollIntervalMs: input.config.idle.pollIntervalMs
+  private async coldLaunch(
+    adb: RuntimeSessionPortViews["adb"],
+    input: GenerationAppPreparationInput
+  ): Promise<void> {
+    const launched = await coldLaunchApp(adb, this.dependencies.clock, {
+      packageName: input.config.run.packageName,
+      activity: normalizeActivity(
+        input.config.run.packageName,
+        input.config.run.activity
+      ),
+      deviceSerial: input.deviceSerial,
+      pollIntervalMs: input.config.idle.pollIntervalMs,
+      timeoutMs: input.config.idle.timeoutMs,
+      signal: input.signal
     });
-    if (process.status !== "ready") {
-      throw new Error(
-        process.status === "cancelled"
-          ? "App process readiness was cancelled"
-          : "App process readiness timed out"
-      );
+    if (launched.status === "cancelled") {
+      throw new Error("App launch was cancelled");
+    }
+    if (launched.status === "failed") {
+      throw new Error(launched.message);
     }
   }
 }

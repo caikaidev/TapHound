@@ -125,4 +125,19 @@ describe("resolveIdlePolicy", () => {
     });
     await expect(resolve()).resolves.toBeUndefined();
   });
+
+  it("memoizes a resolved identity but retries a failed lookup", async () => {
+    const deviceIdentity = vi.fn<() => Promise<DeviceIdentity>>()
+      .mockRejectedValueOnce(new Error("adb down"))
+      .mockResolvedValue(identity);
+    const resolve = deviceIdentityResolver({ deviceIdentity }, {
+      packageName: "com.example.app",
+      deviceSerial: "emulator-5554"
+    });
+
+    await expect(resolve()).resolves.toBeUndefined();
+    await expect(resolve()).resolves.toEqual(identity);
+    await expect(resolve()).resolves.toEqual(identity);
+    expect(deviceIdentity).toHaveBeenCalledTimes(2);
+  });
 });

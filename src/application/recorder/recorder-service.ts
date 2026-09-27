@@ -12,6 +12,7 @@ import {
   type Journey,
   type JourneyStep
 } from "../../domain/journey.js";
+import type { DisplayViewport } from "../../domain/geometry.js";
 import type { LayoutElement, Locator } from "../../domain/layout.js";
 import type { AppIdentity } from "../../ports/adb.js";
 import type { Clock } from "../../ports/clock.js";
@@ -28,9 +29,13 @@ import type {
   RecorderPromptPort
 } from "../../ports/recorder-prompt.js";
 import { ActionExecutor, type ActionTarget } from "../interaction/action-executor.js";
+import {
+  BridgeRunner,
+  ExternalStepRunner,
+  type ExternalDriveOutcome
+} from "../interaction/external-step-runner.js";
 import { resolveLocator } from "../locator/locator-resolver.js";
-import { launchFailure } from "../runtime/launch-failure.js";
-import { ProcessWaiter } from "../runtime/process-waiter.js";
+import { coldLaunchApp } from "../runtime/cold-launch.js";
 import { IdleWaiter } from "../wait/idle-waiter.js";
 import { deviceIdentityResolver } from "../wait/idle-profiles.js";
 import {
@@ -85,14 +90,13 @@ type ActionDraft =
       durationMs: number;
     };
 
+/** How long the Recorder waits for a bridge trigger to leave the app. */
+const BRIDGE_ESCAPE_TIMEOUT_MS = 3000;
+
 type BridgeRecordResult =
   | { status: "recorded"; step: JourneyStep }
   | { status: "skipped" }
   | { status: "failed"; message: string }
-  | { status: "cancelled" };
-
-type ExternalStepsResult =
-  | { status: "recorded"; steps: ExternalStep[] }
   | { status: "cancelled" };
 
 function failedCommand(result: {
@@ -105,13 +109,6 @@ function failedCommand(result: {
     || result.timedOut
     || result.cancelled
     || result.spawnError !== undefined;
-}
-
-function commandMessage(
-  result: { stderr: string; spawnError?: string | undefined },
-  fallback: string
-): string {
-  return result.stderr.trim() || result.spawnError || fallback;
 }
 
 function annotatedPath(outputPath: string): string {
@@ -166,48 +163,22 @@ export class RecorderService {
         message: `Package ${input.config.run.packageName} is not installed on ${input.deviceSerial}`
       };
     }
-    const stopped = await views.adb.forceStop(identity);
-    if (failedCommand(stopped)) {
-      return {
-        status: "failed",
-        stepsRecorded: 0,
-        message: commandMessage(stopped, "App reset failed")
-      };
-    }
-    const launchError = launchFailure(
-      await views.adb.launchActivity({
-        packageName: input.config.run.packageName,
-        activity: launchActivity,
-        deviceSerial: input.deviceSerial,
-        ...(input.signal === undefined ? {} : { signal: input.signal }),
-        timeoutMs: input.config.idle.timeoutMs
-      })
-    );
-    if (launchError !== undefined) {
-      return {
-        status: "failed",
-        stepsRecorded: 0,
-        message: launchError
-      };
-    }
-    const processReadiness = await new ProcessWaiter(
-      views.adb,
-      this.dependencies.clock
-    ).wait({
+    const launched = await coldLaunchApp(views.adb, this.dependencies.clock, {
       packageName: input.config.run.packageName,
+      activity: launchActivity,
       deviceSerial: input.deviceSerial,
       pollIntervalMs: input.config.idle.pollIntervalMs,
       timeoutMs: input.config.idle.timeoutMs,
-      ...(input.signal === undefined ? {} : { signal: input.signal })
+      signal: input.signal
     });
-    if (processReadiness.status === "cancelled") {
+    if (launched.status === "cancelled") {
       return { status: "cancelled", stepsRecorded: 0 };
     }
-    if (processReadiness.status === "timeout") {
+    if (launched.status === "failed") {
       return {
         status: "failed",
         stepsRecorded: 0,
-        message: "App process was not found after launch"
+        message: launched.message
       };
     }
 
@@ -611,79 +582,87 @@ export class RecorderService {
         return { status: "skipped" };
       }
 
+      const trigger = actionTarget(triggerTarget);
+      if (trigger === undefined) {
+        await this.dependencies.prompt.notifyFailure(
+          "Selected trigger element has no executable geometry"
+        );
+        return { status: "skipped" };
+      }
+
       const before = normalizeActivity(
         input.config.run.packageName,
         await views.adb.currentActivity(identity)
       );
-
       const executor = new ActionExecutor(
         views.adb,
         input.deviceSerial,
         (): void => uiSnapshotProvider.invalidate?.("beforeAction")
       );
-      const triggerClick: Extract<JourneyStep, { action: "click" }> = {
-        action: "click",
-        locator: triggerTarget.locator,
-        activity: { before, after: before }
-      };
-      const triggerExecution = await executor.execute(
-        triggerClick,
-        actionTarget(triggerTarget),
-        input.signal
-      );
-      if (triggerExecution.status === "failed") {
-        await this.dependencies.prompt.notifyFailure(triggerExecution.message);
-        return { status: "skipped" };
-      }
-
-      const escapedPackageName = await this.pollBridgeEscape(identity, input, views);
-      if (escapedPackageName === null) {
-        await this.dependencies.prompt.notifyBridgeNoEscape();
-        return { status: "skipped" };
-      }
-      await this.dependencies.prompt.notifyExternalEscape(escapedPackageName);
-
-      const externalResult = await this.recordExternalSteps(
+      const externalSteps = this.externalStepRunner(
         input,
-        escapedPackageName,
         uiSnapshotProvider,
-        views
+        views,
+        executor
       );
-      if (externalResult.status === "cancelled") {
+      // Set once the trigger escaped: a failure before that left the app
+      // where it was, so the person can simply choose again.
+      const progress = { escaped: false };
+      const bridge = await new BridgeRunner({
+        adb: views.adb,
+        clock: this.dependencies.clock,
+        actionExecutor: executor,
+        externalSteps,
+        idleWaiter: this.idleWaiter(input, views, input.config.run.packageName),
+        idle: input.config.idle,
+        packageName: input.config.run.packageName,
+        deviceSerial: input.deviceSerial
+      }).run({
+        trigger: {
+          step: {
+            action: "click",
+            locator: triggerTarget.locator,
+            activity: { before, after: before }
+          },
+          target: trigger
+        },
+        escapeTimeoutMs: BRIDGE_ESCAPE_TIMEOUT_MS,
+        returnTimeoutMs,
+        // The Recorder records whichever app the trigger opened.
+        acceptEscape: (): undefined => {
+          progress.escaped = true;
+          return undefined;
+        },
+        external: {
+          kind: "drive",
+          drive: async (escapedPackageName) => {
+            await this.dependencies.prompt.notifyExternalEscape(escapedPackageName);
+            return this.recordExternalSteps(
+              input,
+              escapedPackageName,
+              uiSnapshotProvider,
+              views,
+              externalSteps
+            );
+          }
+        },
+        signal: input.signal
+      });
+      if (bridge.status === "cancelled") {
         return { status: "cancelled" };
       }
-      const externalSteps = externalResult.steps;
-
-      const returned = await this.pollBridgeReturn(identity, input, returnTimeoutMs, views);
-      if (!returned) {
-        return {
-          status: "failed",
-          message: "Foreground did not return to target package within the timeout"
-        };
+      if (bridge.status === "failed") {
+        if (progress.escaped) {
+          return { status: "failed", message: bridge.message };
+        }
+        if (bridge.code === "BRIDGE_NO_ESCAPE") {
+          await this.dependencies.prompt.notifyBridgeNoEscape();
+        } else {
+          await this.dependencies.prompt.notifyFailure(bridge.message);
+        }
+        return { status: "skipped" };
       }
       await this.dependencies.prompt.notifyExternalReturn();
-
-      const idleWaiter = new IdleWaiter(
-        views.uiStability,
-        this.dependencies.clock,
-        input.deviceSerial,
-        input.config.run.packageName,
-        deviceIdentityResolver(views.adb, {
-          packageName: input.config.run.packageName,
-          deviceSerial: input.deviceSerial,
-          timeoutMs: input.config.idle.timeoutMs
-        })
-      );
-      const idle = await idleWaiter.waitUntilIdle(input.config.idle, input.signal);
-      if (idle.status === "cancelled") {
-        return { status: "cancelled" };
-      }
-      if (idle.status === "timeout") {
-        return {
-          status: "failed",
-          message: "Layout did not become stable before timeout"
-        };
-      }
 
       const processes = await views.adb.appProcesses(identity);
       if (primaryAppPid(processes, input.config.run.packageName) === null) {
@@ -692,20 +671,18 @@ export class RecorderService {
           message: "App process crashed after the recorded Action"
         };
       }
-
       const after = normalizeActivity(
         input.config.run.packageName,
         await views.adb.currentActivity(identity)
       );
-
       const bridgeStep = JourneyStepSchema.parse({
         action: "bridge",
         scenario,
         description,
         triggerLocator: triggerTarget.locator,
-        escapedPackageName,
+        escapedPackageName: bridge.escapedPackageName,
         returnTimeoutMs,
-        externalSteps,
+        externalSteps: bridge.externalSteps ?? [],
         replayMode: "auto",
         activity: { before, after }
       });
@@ -718,12 +695,19 @@ export class RecorderService {
     }
   }
 
+  /**
+   * Records External Steps one chosen step at a time. Each step (except
+   * `scrollTo`, which the person already scrolled while choosing it) runs
+   * through the same ExternalStepRunner Replay uses, so only a step that
+   * replays is recorded. Leaving the escaped app ends the list.
+   */
   private async recordExternalSteps(
     input: RecordInput,
     escapedPackageName: string,
     uiSnapshotProvider: UiSnapshotProvider,
-    views: RuntimeSessionPortViews
-  ): Promise<ExternalStepsResult> {
+    views: RuntimeSessionPortViews,
+    runner: ExternalStepRunner
+  ): Promise<ExternalDriveOutcome> {
     const externalSteps: ExternalStep[] = [];
     const externalIdentity: AppIdentity = {
       packageName: escapedPackageName,
@@ -731,44 +715,22 @@ export class RecorderService {
       ...(input.signal === undefined ? {} : { signal: input.signal }),
       timeoutMs: input.config.idle.timeoutMs
     };
-    const externalIdleWaiter = new IdleWaiter(
-      views.uiStability,
-      this.dependencies.clock,
-      input.deviceSerial,
-      escapedPackageName,
-      deviceIdentityResolver(views.adb, {
-        packageName: escapedPackageName,
-        deviceSerial: input.deviceSerial,
-        timeoutMs: input.config.idle.timeoutMs
-      })
-    );
-    const executor = new ActionExecutor(
-      views.adb,
-      input.deviceSerial,
-      (): void => uiSnapshotProvider.invalidate?.("beforeAction")
-    );
 
     for (;;) {
       const action = await this.dependencies.prompt.selectExternalStepAction();
       if (action === "finishExternal") {
         break;
       }
-
-      const foreground = await views.adb.foregroundComponent(
-        externalIdentity
-      );
+      const foreground = await views.adb.foregroundComponent(externalIdentity);
       if (foreground.packageName !== escapedPackageName) {
         break;
       }
-      const expectedActivity = foreground.activity;
-
       const layout = (await uiSnapshotProvider.capture({
         reason: "locate",
         freshness: "sameMutationEpoch",
         ...(input.signal === undefined ? {} : { signal: input.signal }),
         timeoutMs: input.config.idle.timeoutMs
       })).roots;
-
       const prepared = await this.prepareExternalStep(
         action,
         layout,
@@ -780,49 +742,87 @@ export class RecorderService {
       if (prepared === undefined) {
         continue;
       }
-
-      if (action !== "scrollTo") {
-        const execution = await executor.execute(
-          prepared.draft as JourneyStep,
-          actionTarget(prepared.target),
-          input.signal
-        );
-        if (execution.status === "failed") {
-          await this.dependencies.prompt.notifyFailure(execution.message);
-          continue;
-        }
-
-        const postForeground = await views.adb.foregroundComponent(
-          externalIdentity
-        );
-        if (postForeground.packageName !== escapedPackageName) {
-          externalSteps.push(
-            this.buildExternalStep(prepared.draft, expectedActivity)
-          );
-          break;
-        }
-
-        const idle = await externalIdleWaiter.waitUntilIdle(
-          input.config.idle,
-          input.signal
-        );
-        if (idle.status === "cancelled") {
-          return { status: "cancelled" };
-        }
-        if (idle.status === "timeout") {
-          await this.dependencies.prompt.notifyFailure(
-            "External app layout did not become stable before timeout"
-          );
-          break;
-        }
+      const step = this.buildExternalStep(prepared.draft, foreground.activity);
+      if (step.action === "scrollTo") {
+        externalSteps.push(step);
+        continue;
       }
-
-      externalSteps.push(
-        this.buildExternalStep(prepared.draft, expectedActivity)
-      );
+      const outcome = await runner.run([step], escapedPackageName, input.signal);
+      if (outcome.status === "cancelled") {
+        return { status: "cancelled" };
+      }
+      if (outcome.status === "failed") {
+        // The action ran but the app never settled: the device is no longer
+        // in a state the recorded steps describe.
+        if (outcome.code === "IDLE_TIMEOUT") {
+          return {
+            status: "failed",
+            code: outcome.code,
+            message: outcome.message
+          };
+        }
+        await this.dependencies.prompt.notifyFailure(outcome.message);
+        continue;
+      }
+      externalSteps.push(step);
+      const after = await views.adb.foregroundComponent(externalIdentity);
+      if (after.packageName !== escapedPackageName) {
+        break;
+      }
     }
+    return { status: "driven", steps: externalSteps };
+  }
 
-    return { status: "recorded", steps: externalSteps };
+  private externalStepRunner(
+    input: RecordInput,
+    uiSnapshotProvider: UiSnapshotProvider,
+    views: RuntimeSessionPortViews,
+    actionExecutor: ActionExecutor
+  ): ExternalStepRunner {
+    let viewport: DisplayViewport | undefined;
+    return new ExternalStepRunner({
+      adb: views.adb,
+      actionExecutor,
+      uiSnapshotProvider,
+      captureLayout: async (
+        reason,
+        timeoutMs,
+        signal
+      ): Promise<readonly LayoutElement[]> => {
+        const snapshot = await uiSnapshotProvider.capture({
+          reason,
+          freshness: "sameMutationEpoch",
+          timeoutMs,
+          ...(signal === undefined ? {} : { signal })
+        });
+        viewport = snapshot.viewport;
+        return snapshot.roots;
+      },
+      createIdleWaiter: (packageName): IdleWaiter => (
+        this.idleWaiter(input, views, packageName)
+      ),
+      idle: input.config.idle,
+      viewport: (): DisplayViewport | undefined => viewport,
+      deviceSerial: input.deviceSerial
+    });
+  }
+
+  private idleWaiter(
+    input: RecordInput,
+    views: RuntimeSessionPortViews,
+    packageName: string
+  ): IdleWaiter {
+    return new IdleWaiter(
+      views.uiStability,
+      this.dependencies.clock,
+      input.deviceSerial,
+      packageName,
+      deviceIdentityResolver(views.adb, {
+        packageName,
+        deviceSerial: input.deviceSerial,
+        timeoutMs: input.config.idle.timeoutMs
+      })
+    );
   }
 
   private async prepareExternalStep(
@@ -918,56 +918,5 @@ export class RecorderService {
       ...draft,
       expectedActivity
     });
-  }
-
-  private async pollBridgeEscape(
-    identity: AppIdentity,
-    input: RecordInput,
-    views: RuntimeSessionPortViews
-  ): Promise<string | null> {
-    const deadline = this.dependencies.clock.now() + 3000;
-    while (this.dependencies.clock.now() < deadline) {
-      if (input.signal?.aborted === true) return null;
-      const foreground = await views.adb.foregroundComponent(
-        identity
-      );
-      if (foreground.packageName !== input.config.run.packageName) {
-        return foreground.packageName;
-      }
-      await this.dependencies.clock.sleep(
-        Math.min(
-          500,
-          Math.max(0, deadline - this.dependencies.clock.now())
-        ),
-        input.signal
-      );
-    }
-    return null;
-  }
-
-  private async pollBridgeReturn(
-    identity: AppIdentity,
-    input: RecordInput,
-    timeoutMs: number,
-    views: RuntimeSessionPortViews
-  ): Promise<boolean> {
-    const deadline = this.dependencies.clock.now() + timeoutMs;
-    while (this.dependencies.clock.now() < deadline) {
-      if (input.signal?.aborted === true) return false;
-      const foreground = await views.adb.foregroundComponent(
-        identity
-      );
-      if (foreground.packageName === input.config.run.packageName) {
-        return true;
-      }
-      await this.dependencies.clock.sleep(
-        Math.min(
-          500,
-          Math.max(0, deadline - this.dependencies.clock.now())
-        ),
-        input.signal
-      );
-    }
-    return false;
   }
 }

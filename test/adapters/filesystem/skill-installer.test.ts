@@ -23,11 +23,11 @@ describe("FileSystemSkillInstaller", () => {
     const names = await installer.listSkillNames();
 
     expect([...names].sort()).toEqual([
-      "taphound-accept",
       "taphound-case-suite",
+      "taphound-flash",
       "taphound-journey-brief-author",
       "taphound-journey-generator",
-      "taphound-preserve"
+      "taphound-verify-change"
     ]);
   });
 
@@ -51,34 +51,59 @@ describe("FileSystemSkillInstaller", () => {
     }
   });
 
-  it("installs both public-CLI-only Workflow Skills", async () => {
+  it("installs the standalone flash Skill with its script and example plan", async () => {
+    const installer = new FileSystemSkillInstaller();
+    const target = await mkdtemp(join(tmpdir(), "taphound-flash-skill-"));
+    try {
+      const destination = join(target, "taphound-flash");
+      await installer.installTo("taphound-flash", destination);
+      const content = await readFile(join(destination, "SKILL.md"), "utf8");
+      expect(content).toContain("scripts/flash.mjs run");
+      expect(content).toContain("taphound-verify-change");
+      // Flash runs without the TapHound CLI.
+      expect(content).not.toMatch(/`taphound [a-z]/);
+      expect(await readdir(join(destination, "scripts"))).toContain("flash.mjs");
+      expect(await readdir(join(destination, "templates")))
+        .toContain("flash-plan.example.json");
+    } finally {
+      await rm(target, { recursive: true, force: true });
+    }
+  });
+
+  it("installs the public-CLI-only change verification Workflow Skill", async () => {
     const installer = new FileSystemSkillInstaller();
     const target = await mkdtemp(join(tmpdir(), "taphound-workflow-skills-"));
     try {
-      for (const name of ["taphound-accept", "taphound-preserve"]) {
-        const destination = join(target, name);
-        await installer.installTo(name, destination);
-        const content = await readFile(join(destination, "SKILL.md"), "utf8");
-        expect(content).toContain("workflowManifestPath(caseId)");
-        expect(content).toContain("PAUSED");
-        expect(content).toContain("taphound verify");
-        expect(content).not.toContain("FileSystemGenerationSessionStore");
-        if (name === "taphound-accept") {
-          expect(content).toContain(
-            "taphound contract --project <project> --contract <path> --json"
-          );
-          expect(content).not.toContain("taphound contract validate");
-        } else {
-          expect(content).toContain("scripts/handoff.mjs");
-          const helper = await readFile(join(destination, "scripts", "handoff.mjs"), "utf8");
-          expect(helper).toContain('status: "PAUSED"');
-          const refactor = await readFile(
-            join(destination, "scripts", "ui-refactor.mjs"), "utf8"
-          );
-          expect(refactor).toContain("frozen observables");
-          expect(content).toContain("Large UI refactor");
-        }
-      }
+      const destination = join(target, "taphound-verify-change");
+      await installer.installTo("taphound-verify-change", destination);
+      const content = await readFile(join(destination, "SKILL.md"), "utf8");
+      expect(content).toContain(".taphound/build/workflows/<caseId>/manifest.json");
+      expect(content).toContain("schemas/workflow-manifest.schema.json");
+      expect(content).toContain("PAUSED");
+      expect(content).toContain("taphound verify");
+      // Installed Skills cannot rely on TapHound's source tree.
+      expect(content).not.toMatch(/src\/(domain|application|adapters)\//);
+      expect(content).not.toContain("FileSystemGenerationSessionStore");
+
+      const accept = await readFile(
+        join(destination, "references", "accept.md"), "utf8"
+      );
+      expect(accept).toContain(
+        "taphound contract --project <project> --contract <path> --json"
+      );
+      expect(accept).not.toContain("taphound contract validate");
+
+      const preserve = await readFile(
+        join(destination, "references", "preserve.md"), "utf8"
+      );
+      expect(preserve).toContain("scripts/handoff.mjs");
+      expect(preserve).toContain("Large UI refactor");
+      expect(await readFile(join(destination, "scripts", "handoff.mjs"), "utf8"))
+        .toContain('status: "PAUSED"');
+      expect(await readFile(join(destination, "scripts", "ui-refactor.mjs"), "utf8"))
+        .toContain("frozen observables");
+      expect(await readdir(join(destination, "schemas")))
+        .toContain("workflow-manifest.schema.json");
     } finally {
       await rm(target, { recursive: true, force: true });
     }

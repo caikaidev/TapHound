@@ -15,7 +15,12 @@ import {
 import {
   locatorEvidenceForElement
 } from "../../domain/locator-evidence.js";
+import {
+  resolveActionTarget,
+  type TargetedAction
+} from "../interaction/action-target.js";
 import { resolveLocator } from "../locator/locator-resolver.js";
+import { hasExactlyOneEnabledFocusedElement } from "./focused-input.js";
 import { GenerationOperationError } from "./generation-starter.js";
 
 export interface ProposedStepValidationInput {
@@ -24,42 +29,44 @@ export interface ProposedStepValidationInput {
   proposal: ProposedStep;
 }
 
-function flatten(elements: readonly LayoutElement[]): LayoutElement[] {
-  return elements.flatMap((element) => [
-    element,
-    ...flatten(element.children)
-  ]);
-}
-
 function rejectCapability(message: string): never {
   throw new GenerationOperationError("ACTION_UNSUPPORTED", message);
 }
 
-function requireUniqueTarget(
+/**
+ * Report the same Locator verdict Replay would: an unknown or ambiguous
+ * target is a Locator failure, not an unsupported action.
+ */
+function rejectResolution(
+  resolution: Extract<ReturnType<typeof resolveLocator>, { status: "failed" }>
+): never {
+  if (
+    resolution.code === "LOCATOR_NOT_FOUND"
+    || resolution.code === "LOCATOR_AMBIGUOUS"
+  ) {
+    throw new GenerationOperationError(resolution.code, resolution.message);
+  }
+  rejectCapability(resolution.message);
+}
+
+/**
+ * Reject a proposal whose target Replay could not act on, using the action
+ * capability rules both engines share.
+ */
+function requireActionTarget(
   snapshot: RuntimeSnapshot,
-  locator: Locator,
-  capability: (element: LayoutElement) => boolean,
-  capabilityName: string
-): LayoutElement {
-  const capabilityKey = capabilityName === "clickable"
-    ? "clickable"
-    : capabilityName === "longClickable"
-      ? "longClickable"
-      : undefined;
-  const resolved = resolveLocator(
+  action: TargetedAction,
+  locator: Locator
+): void {
+  const resolved = resolveActionTarget(
     snapshot.layout,
+    action,
     locator,
-    capabilityKey === undefined ? {} : { requiredCapability: capabilityKey }
+    undefined
   );
   if (resolved.status !== "found") {
-    rejectCapability(resolved.message);
+    rejectResolution(resolved);
   }
-  if (!capability(resolved.element)) {
-    rejectCapability(
-      `Layout target lacks required ${capabilityName} capability`
-    );
-  }
-  return resolved.element;
 }
 
 function validateBinding(
@@ -108,57 +115,31 @@ function validateAction(
   snapshot: RuntimeSnapshot,
   proposal: ProposedStep
 ): void {
-  if (proposal.action === "click") {
-    requireUniqueTarget(
-      snapshot,
-      proposal.locator,
-      (element) => element.clickable === true,
-      "clickable"
-    );
-    return;
-  }
-  if (proposal.action === "longClick") {
-    requireUniqueTarget(
-      snapshot,
-      proposal.locator,
-      (element) => element.longClickable === true,
-      "longClickable"
-    );
-    return;
-  }
-  if (proposal.action === "swipe") {
-    requireUniqueTarget(
-      snapshot,
-      proposal.locator,
-      (element) => element.scrollable === true
-        && element.bounds !== undefined,
-      "scrollable bounds"
-    );
+  if (
+    proposal.action === "click"
+    || proposal.action === "longClick"
+    || proposal.action === "swipe"
+  ) {
+    requireActionTarget(snapshot, proposal.action, proposal.locator);
     return;
   }
   if (proposal.action === "scrollTo") {
-    requireUniqueTarget(
-      snapshot,
-      proposal.container,
-      (element) => element.scrollable === true
-        && element.bounds !== undefined,
-      "scrollable container bounds"
-    );
+    requireActionTarget(snapshot, "swipe", proposal.container);
     const target = resolveLocator(
       snapshot.layout,
       proposal.locator,
       { requireEnabled: false }
     );
     if (target.status === "failed" && target.code === "LOCATOR_AMBIGUOUS") {
-      rejectCapability(`scrollTo target is ambiguous: ${target.message}`);
+      throw new GenerationOperationError(
+        "LOCATOR_AMBIGUOUS",
+        `scrollTo target is ambiguous: ${target.message}`
+      );
     }
     return;
   }
   if (proposal.action === "inputText") {
-    const focused = flatten(snapshot.layout).filter(
-      (element) => element.enabled && element.focused === true
-    );
-    if (focused.length !== 1) {
+    if (!hasExactlyOneEnabledFocusedElement(snapshot.layout)) {
       rejectCapability(
         "inputText requires exactly one enabled focused visible Layout element"
       );
@@ -166,12 +147,7 @@ function validateAction(
     return;
   }
   if (proposal.action === "bridge") {
-    requireUniqueTarget(
-      snapshot,
-      proposal.triggerLocator,
-      (element) => element.clickable === true,
-      "clickable"
-    );
+    requireActionTarget(snapshot, "click", proposal.triggerLocator);
     return;
   }
 }

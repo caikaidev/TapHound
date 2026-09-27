@@ -146,9 +146,11 @@ export class AdbAdapter implements AdbPort {
       }
       return result.stdout.trim();
     };
-    const manufacturer = await property("ro.product.manufacturer");
-    const model = await property("ro.product.model");
-    const sdk = await property("ro.build.version.sdk");
+    const [manufacturer, model, sdk] = await Promise.all([
+      property("ro.product.manufacturer"),
+      property("ro.product.model"),
+      property("ro.build.version.sdk")
+    ]);
     const sdkLevel = Number(sdk);
     if (
       manufacturer.length === 0

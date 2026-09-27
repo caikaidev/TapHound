@@ -87,7 +87,12 @@ describe("JourneySchema", () => {
       id: "after-wait",
       name: "After wait",
       stepIndex: 0,
-      expect: { visibleElements: [{ resourceId: "search" }] }
+      expect: {
+        allOf: [
+          { kind: "visibleElement", locator: { resourceId: "search" } }
+        ],
+        timeoutMs: 100
+      }
     };
     const parsed = JourneySchema.parse({ ...base, checkpoints: [checkpoint] });
     expect(parsed.checkpoints).toMatchObject([{ id: "after-wait", stepIndex: 0 }]);

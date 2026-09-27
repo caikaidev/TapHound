@@ -43,41 +43,13 @@ export const CheckpointAllOfConditionSchema = z.discriminatedUnion("kind", [
 ]);
 
 export const CheckpointExpectSchema = z.strictObject({
-  activity: z.string().trim().min(1).optional(),
-  screen: KnowledgeIdSchema.optional(),
-  visibleElements: z.array(LocatorSchema).default([]),
-  absentElements: z.array(LocatorSchema).default([]),
-  allOf: z.array(CheckpointAllOfConditionSchema).min(1).optional(),
-  timeoutMs: z.number().int().positive().max(60000).optional()
+  allOf: z.array(CheckpointAllOfConditionSchema).min(1),
+  timeoutMs: z.number().int().positive().max(60000)
 }).superRefine((expect, context) => {
   checkBindingReferences(expect, context, []);
-  const hasLegacy = expect.activity !== undefined
-    || expect.screen !== undefined
-    || expect.visibleElements.length > 0
-    || expect.absentElements.length > 0;
-  if (expect.allOf === undefined && !hasLegacy) {
-    context.addIssue({
-      code: "custom",
-      message: "A Checkpoint expectation needs at least one condition"
-    });
-  }
-  if (expect.allOf !== undefined && (hasLegacy || expect.timeoutMs === undefined)) {
-    context.addIssue({
-      code: "custom",
-      path: ["allOf"],
-      message: "allOf needs a shared timeoutMs and cannot mix with legacy conditions"
-    });
-  }
-  if (expect.allOf === undefined && expect.timeoutMs !== undefined) {
-    context.addIssue({
-      code: "custom",
-      path: ["timeoutMs"],
-      message: "timeoutMs is only supported with allOf"
-    });
-  }
   const keys = new Set<string>();
   const kinds = new Set<string>();
-  for (const [index, condition] of (expect.allOf ?? []).entries()) {
+  for (const [index, condition] of expect.allOf.entries()) {
     if (condition.kind === "logcatEvent" && condition.expect.capture !== undefined) {
       context.addIssue({
         code: "custom", path: ["allOf", index, "expect", "capture"],
@@ -123,8 +95,8 @@ export const CheckpointDefinitionSchema = z.strictObject({
 export const BaselineElementFactSchema = z.strictObject({
   locator: LocatorSchema.optional(),
   anchorId: KnowledgeIdSchema.optional(),
-  stepIndex: z.number().int().nonnegative().optional(),
-  kind: z.enum(["present", "absent"]),
+  stepIndex: z.number().int().nonnegative(),
+  kind: z.literal("present"),
   matchedBy: z.enum([
     "resourceId",
     "text",
@@ -204,7 +176,7 @@ export const BaselineSchema = z.strictObject({
   checkpoints: z.array(BaselineCheckpointFactSchema).optional(),
   requiredEvidence: z.strictObject({
     screens: z.boolean()
-  }).optional(),
+  }),
   sourceReportPath: z.string().trim().min(1)
 }).superRefine((baseline, context) => {
   if (
@@ -220,7 +192,7 @@ export const BaselineSchema = z.strictObject({
     });
   }
   if (
-    baseline.requiredEvidence?.screens === false
+    !baseline.requiredEvidence.screens
     && baseline.screens.length > 0
   ) {
     context.addIssue({
@@ -243,7 +215,7 @@ export const BaselineSchema = z.strictObject({
   const elementKeys = new Set<string>();
   for (const [index, fact] of baseline.elements.entries()) {
     const key = JSON.stringify([
-      fact.stepIndex ?? null,
+      fact.stepIndex,
       fact.anchorId ?? null,
       fact.locator ?? null
     ]);

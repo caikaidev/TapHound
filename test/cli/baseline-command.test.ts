@@ -6,7 +6,6 @@ import type { CliDependencies, TextOutput } from "../../src/cli/dependencies.js"
 import type { Baseline } from "../../src/domain/checkpoint.js";
 import type { RegressionCompareResult } from "../../src/domain/checkpoint.js";
 import { fakeWorkspaceLayout } from "../fakes/workspace-layout.js";
-import { defaultLocalTargets } from "../fakes/local-targets.js";
 import { runtimeConfig, runtimeJourney } from "../fakes/runtime-fixture.js";
 
 class BufferOutput implements TextOutput {
@@ -29,8 +28,9 @@ const baseline: Baseline = {
     before: "com.example.app.MainActivity",
     after: "com.example.app.SearchActivity"
   }],
-  elements: [{ locator: { resourceId: "search" }, kind: "present" }],
+  elements: [{ locator: { resourceId: "search" }, stepIndex: 0, kind: "present" }],
   screens: [{ screen: "search", status: "matched" }],
+  requiredEvidence: { screens: true },
   sourceReportPath: "/project/.taphound/build/runs/run-1/report.json"
 };
 
@@ -74,7 +74,6 @@ function baseDependencies(exitCodes: number[]): CliDependencies {
     generationStarter: { start: vi.fn() },
     runtimeObserver: { observe: vi.fn() },
     workspaceLayout: fakeWorkspaceLayout(),
-    localTargets: defaultLocalTargets(),
     readFile: vi.fn(() => Promise.resolve(Buffer.alloc(0))),
     readJson: vi.fn((path: string) => Promise.resolve(
       path.includes("journey") ? runtimeJourney : runtimeConfig

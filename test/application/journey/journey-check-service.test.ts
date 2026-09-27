@@ -13,6 +13,7 @@ import {
   contextSelection,
   projectContextIndex
 } from "../../fixtures/project-context.js";
+import { TEST_REPLAY_POLICY, TEST_UI_BACKEND } from "../../fakes/ui-backend.js";
 
 const project: ProjectDescription = {
   projectRoot: "/project",
@@ -84,7 +85,8 @@ function metaJson(overrides: {
     bindings: {
       projectHash: overrides.projectHash ?? projectHash,
       configHash: overrides.configHash ?? configHash,
-      contextHash: "c".repeat(64)
+      contextHash: "c".repeat(64),
+      uiBackend: TEST_UI_BACKEND
     },
     ...(overrides.contextSelection === null
       ? {}
@@ -98,7 +100,11 @@ function metaJson(overrides: {
       runId: "verify-run",
       runs: 1
     },
-    manualOverrideStepIndexes: []
+    manualOverrideStepIndexes: [],
+    journeySha256: "e".repeat(64),
+    replayPolicy: TEST_REPLAY_POLICY,
+    contextSelection,
+    externalFlows: []
   })}\n`;
 }
 
@@ -195,22 +201,6 @@ describe("JourneyCheckService", () => {
       "project-hash",
       "config-hash"
     ]);
-  });
-
-  it("reports legacy metas without a Context selection as stale", async () => {
-    const result = await check({
-      journeys: {
-        ".taphound/journeys/search.json": `${JSON.stringify(runtimeJourney)}\n`
-      },
-      metas: {
-        ".taphound/journeys/search.json": metaJson({
-          contextSelection: null
-        })
-      }
-    });
-
-    expect(result.entries[0]?.status).toBe("stale");
-    expect(result.entries[0]?.reasons).toEqual(["meta-legacy"]);
   });
 
   it("attributes drifted and missing Context modules per Journey", async () => {
@@ -415,20 +405,4 @@ describe("JourneyCheckService", () => {
     expect(result.entries[0]?.lifecycle).toBe("stale");
   });
 
-  it("skips Brief drift checks on local target workspaces", async () => {
-    const result = await check({
-      journeys: {
-        ".taphound/journeys/search.json": `${JSON.stringify(runtimeJourney)}\n`
-      },
-      metas: {
-        ".taphound/journeys/search.json": metaJson({
-          sourceBrief: { path: "docs/cases/search-brief.md", sha256: "0".repeat(64) }
-        })
-      }
-    }, "/workspace");
-
-    expect(result.entries[0]?.status).toBe("fresh");
-    expect(result.entries[0]?.reasons).toEqual([]);
-    expect(result.entries[0]?.lifecycle).toBe("verified");
-  });
 });

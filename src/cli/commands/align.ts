@@ -23,7 +23,7 @@ import {
   writeJson,
   writeLine
 } from "../output.js";
-import { assertNoLegacyWorkspace } from "../workspace-guard.js";
+import { prepareWorkspace } from "../workspace-guard.js";
 
 interface AlignCameraOptions {
   project: string;
@@ -76,7 +76,7 @@ export function createAlignCommand(dependencies: CliDependencies): Command {
             await dependencies.readJson(resolve(options.project, options.config))
           );
           assertArtifactDirectory(options.project, config.artifactsDir);
-          await assertNoLegacyWorkspace(dependencies, options.project);
+          await prepareWorkspace(dependencies, options.project);
         } catch (error) {
           const output = failureOutput(2, "CONFIG_INVALID", errorMessage(error));
           if (options.json === true) {

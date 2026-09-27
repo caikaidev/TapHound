@@ -18,23 +18,19 @@ import type {
 export interface ImpactResolverDependencies {
   loadContext: (input: {
     projectRoot: string;
-    workspaceRoot?: string | undefined;
   }) => Promise<{
     context: ResolvedProjectContext;
     modules: ProjectContextModule[];
   }>;
   loadKnowledge: (input: {
     projectRoot: string;
-    workspaceRoot?: string | undefined;
     packageName: string;
   }) => Promise<LoadedKnowledgeBundle>;
   listJourneyPaths: (input: {
     projectRoot: string;
-    workspaceRoot?: string | undefined;
   }) => Promise<readonly string[]>;
   readJourney: (input: {
     projectRoot: string;
-    workspaceRoot?: string | undefined;
     path: string;
   }) => Promise<Journey | null>;
 }
@@ -102,25 +98,20 @@ export class ImpactResolver {
 
   public readonly resolve = async (input: {
     projectRoot: string;
-    workspaceRoot?: string | undefined;
     packageName: string;
     changeSet: ChangeSet;
   }): Promise<ImpactSet> => {
     const { projectRoot, packageName, changeSet } = input;
-    const workspaceRoot = input.workspaceRoot;
     const [context, knowledge, journeyPaths] = await Promise.all([
       this.dependencies.loadContext({
-        projectRoot,
-        ...(workspaceRoot === undefined ? {} : { workspaceRoot })
+        projectRoot
       }),
       this.dependencies.loadKnowledge({
         projectRoot,
-        packageName,
-        ...(workspaceRoot === undefined ? {} : { workspaceRoot })
+        packageName
       }),
       this.dependencies.listJourneyPaths({
-        projectRoot,
-        ...(workspaceRoot === undefined ? {} : { workspaceRoot })
+        projectRoot
       })
     ]);
     const contextModules = context.modules;
@@ -157,19 +148,6 @@ export class ImpactResolver {
         .map((screen) => screen.id)
     );
     const affectedScreensSet = new Set(affectedScreens);
-    const affectedTransitions = unique(
-      knowledge.transitions
-        .filter((transition) => (
-          (transition.sourceFiles ?? []).some((path) => changedPathSet.has(path))
-          || affectedScreensSet.has(transition.fromScreen)
-          || affectedScreensSet.has(transition.toScreen)
-          || (
-            "anchorId" in transition.action
-            && affectedAnchorsSet.has(transition.action.anchorId)
-          )
-        ))
-        .map((transition) => transition.id)
-    );
 
     const affectedModulesSet = new Set(affectedModules);
     const affectedFeatures = unique(
@@ -185,7 +163,6 @@ export class ImpactResolver {
     for (const path of journeyPaths) {
       const journey = await this.dependencies.readJourney({
         projectRoot,
-        ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
         path
       });
       if (journey === null) {
@@ -254,7 +231,6 @@ export class ImpactResolver {
       affectedFeatures,
       affectedScreens,
       affectedAnchors,
-      affectedTransitions,
       selectedJourneys: { p0, p1, p2 },
       skippedJourneys: skipped,
       provenance: {

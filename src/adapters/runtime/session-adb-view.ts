@@ -46,10 +46,10 @@ function launchOptions(options: LaunchActivityOptions): RuntimeLaunchOptions {
 }
 
 /**
- * One borrowed `RuntimeSession` exposed as the legacy `AdbPort`. Unlike the
- * `RuntimeBackendAdbBridge`, the view holds a single already-opened session:
- * the serial in every call must match the session's bound serial and device
- * discovery is not available. Level 1 session-first orchestrators feed their
+ * One borrowed `RuntimeSession` exposed as the legacy `AdbPort`. The view
+ * holds a single already-opened session: the serial in every call must match
+ * the session's bound serial, and device discovery belongs to
+ * `RuntimeBackend.listDevices`. Level 1 session-first orchestrators feed their
  * `AdbPort`-shaped helpers through this view until Level 2 retypes them.
  */
 export class RuntimeSessionAdbView implements AdbPort {

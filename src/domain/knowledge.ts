@@ -158,76 +158,6 @@ export const ScreenDefinitionSchema = z.strictObject({
   }
 });
 
-const TransitionActionSchema = z.discriminatedUnion("action", [
-  z.strictObject({
-    action: z.literal("click"),
-    anchorId: KnowledgeIdSchema
-  }),
-  z.strictObject({
-    action: z.literal("longClick"),
-    anchorId: KnowledgeIdSchema,
-    durationMs: z.number().int().positive().default(800)
-  }),
-  z.strictObject({
-    action: z.literal("inputText"),
-    parameter: KnowledgeIdSchema
-  }),
-  z.strictObject({
-    action: z.literal("swipe"),
-    anchorId: KnowledgeIdSchema,
-    direction: z.enum(["up", "down", "left", "right"]),
-    distancePercent: z.number().positive().max(1).default(0.6),
-    durationMs: z.number().int().positive().default(300)
-  }),
-  z.strictObject({
-    action: z.literal("scrollTo"),
-    anchorId: KnowledgeIdSchema,
-    containerAnchorId: KnowledgeIdSchema,
-    direction: z.enum(["up", "down", "left", "right"]),
-    maxSwipes: z.number().int().positive().max(30).default(20),
-    distancePercent: z.number().positive().max(1).default(0.6),
-    durationMs: z.number().int().positive().default(300)
-  }),
-  z.strictObject({ action: z.literal("back") }),
-  z.strictObject({ action: z.literal("wait") })
-]);
-
-export const TransitionDefinitionSchema = z.strictObject({
-  version: z.literal(1),
-  id: KnowledgeIdSchema,
-  status: KnowledgeStatusSchema,
-  fromScreen: KnowledgeIdSchema,
-  toScreen: KnowledgeIdSchema,
-  semantic: KnowledgeIdSchema,
-  action: TransitionActionSchema,
-  verification: z.strictObject({
-    targetScreen: KnowledgeIdSchema,
-    timeoutMs: z.number().int().positive()
-  }),
-  sourceFiles: KnowledgeSourceFilesSchema.optional(),
-  observations: z.strictObject({
-    attempts: z.number().int().nonnegative(),
-    successes: z.number().int().nonnegative(),
-    recoveryCost: z.number().nonnegative()
-  }).superRefine((observations, context) => {
-    if (observations.successes > observations.attempts) {
-      context.addIssue({
-        code: "custom",
-        path: ["successes"],
-        message: "Transition successes cannot exceed attempts"
-      });
-    }
-  }).default({ attempts: 0, successes: 0, recoveryCost: 0 })
-}).superRefine((transition, context) => {
-  if (transition.verification.targetScreen !== transition.toScreen) {
-    context.addIssue({
-      code: "custom",
-      path: ["verification", "targetScreen"],
-      message: "Transition verification must target toScreen"
-    });
-  }
-});
-
 export const KnowledgeReferenceSchema = z.strictObject({
   id: KnowledgeIdSchema,
   path: ProjectRelativePathSchema,
@@ -240,13 +170,11 @@ export const KnowledgeBundleIndexSchema = z.strictObject({
   packageName: QualifiedNameSchema,
   revision: z.number().int().nonnegative(),
   anchors: z.array(KnowledgeReferenceSchema),
-  screens: z.array(KnowledgeReferenceSchema).min(1),
-  transitions: z.array(KnowledgeReferenceSchema)
+  screens: z.array(KnowledgeReferenceSchema).min(1)
 }).superRefine((bundle, context) => {
   for (const [field, references] of [
     ["anchors", bundle.anchors],
-    ["screens", bundle.screens],
-    ["transitions", bundle.transitions]
+    ["screens", bundle.screens]
   ] as const) {
     const ids = new Set<string>();
     const paths = new Set<string>();
@@ -277,7 +205,6 @@ export type AnchorCandidate = z.infer<typeof AnchorCandidateSchema>;
 export type AnchorDefinition = z.infer<typeof AnchorDefinitionSchema>;
 export type StatePredicate = z.infer<typeof StatePredicateSchema>;
 export type ScreenDefinition = z.infer<typeof ScreenDefinitionSchema>;
-export type TransitionDefinition = z.infer<typeof TransitionDefinitionSchema>;
 export type KnowledgeBundleIndex = z.infer<typeof KnowledgeBundleIndexSchema>;
 
 function canonicalize(value: unknown): unknown {

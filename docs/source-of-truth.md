@@ -58,15 +58,15 @@ The recorded review entry always carries `baseVerdict`, `baseReason`,
 
 ## Deterministic escalation gates
 
-*When* a run is escalated to a lower-trust layer is decided by an explicit,
-ordered Escalation Policy in the Playbook (`docs/playbook.md`). The
-`EscalationPolicyEvaluator` is pure and maps only collected verdict/reason
-facts to rules — no model call is allowed before the rule fires. This is the
-Core guarantee behind "when AI is invoked must itself be deterministic".
+*When* a run is escalated to a lower-trust reviewer is decided by the external
+Workflow, never by Core. Core's guarantee is on the way back in: reviewer
+findings enter only through `contract review`, which may escalate
+`pass` / `inconclusive` to `needsReview` but never rewrites a deterministic
+`fail` / `invalid`.
 
 ## Deterministic coverage
 
 A mature TapHound should maximize deterministic verification and minimize
-reliance on AI judging. The benchmark treats `needsReview` for a
+reliance on AI judging. The False-Done Benchmark developer tool treats `needsReview` for a
 false-done case as `detected` (the harness flagged it for a human), and
 `pass` as `missed` — the only unacceptable outcome.

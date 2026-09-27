@@ -30,7 +30,6 @@ export type JourneyCheckReason =
   | "journey-path-mismatch"
   | "project-hash"
   | "config-hash"
-  | "meta-legacy"
   | "module-drift"
   | "module-missing"
   | "brief-drift"
@@ -81,7 +80,6 @@ export class JourneyCheckError extends Error {
 
 export interface JourneyCheckInput {
   projectRoot: string;
-  workspaceRoot?: string | undefined;
   config: TapHoundConfig;
   project: ProjectDescription;
   bundle: ProjectContext;
@@ -141,8 +139,7 @@ export class JourneyCheckService {
     input: JourneyCheckInput
   ): Promise<JourneyCheckResult> => {
     const paths = await this.dependencies.store.listJourneyPaths(
-      input.projectRoot,
-      input.workspaceRoot
+      input.projectRoot
     );
     const projectHash = hashGenerationBinding(input.project);
     const configHash = hashGenerationBinding(input.config);
@@ -153,7 +150,6 @@ export class JourneyCheckService {
     for (const journeyPath of paths) {
       entries.push(await this.checkJourney({
         projectRoot: input.projectRoot,
-        workspaceRoot: input.workspaceRoot,
         journeyPath,
         projectHash,
         configHash,
@@ -165,7 +161,6 @@ export class JourneyCheckService {
 
   private readonly checkJourney = async (input: {
     projectRoot: string;
-    workspaceRoot?: string | undefined;
     journeyPath: string;
     projectHash: string;
     configHash: string;
@@ -190,10 +185,7 @@ export class JourneyCheckService {
     try {
       bytes = await this.dependencies.store.read({
         projectRoot: input.projectRoot,
-        relativePath: input.journeyPath,
-        ...(input.workspaceRoot === undefined
-          ? {}
-          : { workspaceRoot: input.workspaceRoot })
+        relativePath: input.journeyPath
       });
     } catch (error) {
       return entry(
@@ -216,10 +208,7 @@ export class JourneyCheckService {
     try {
       metaBytes = await this.dependencies.store.readJourneyMeta({
         projectRoot: input.projectRoot,
-        journeyPath: input.journeyPath,
-        ...(input.workspaceRoot === undefined
-          ? {}
-          : { workspaceRoot: input.workspaceRoot })
+        journeyPath: input.journeyPath
       });
     } catch (error) {
       return entry(
@@ -253,28 +242,21 @@ export class JourneyCheckService {
     if (meta.bindings.configHash !== input.configHash) {
       reasons.push("config-hash");
     }
-    if (meta.contextSelection === undefined) {
-      reasons.push("meta-legacy");
-    } else {
-      for (const module of meta.contextSelection.modules) {
-        const reference = input.modulesById.get(module.id);
-        if (reference === undefined) {
-          driftedModules.push({ id: module.id, reason: "missing" });
-        } else if (reference.sha256 !== module.sha256) {
-          driftedModules.push({ id: module.id, reason: "sha256" });
-        }
-      }
-      if (driftedModules.some((module) => module.reason === "sha256")) {
-        reasons.push("module-drift");
-      }
-      if (driftedModules.some((module) => module.reason === "missing")) {
-        reasons.push("module-missing");
+    for (const module of meta.contextSelection.modules) {
+      const reference = input.modulesById.get(module.id);
+      if (reference === undefined) {
+        driftedModules.push({ id: module.id, reason: "missing" });
+      } else if (reference.sha256 !== module.sha256) {
+        driftedModules.push({ id: module.id, reason: "sha256" });
       }
     }
-    if (
-      meta.sourceBrief !== undefined
-      && input.workspaceRoot === undefined
-    ) {
+    if (driftedModules.some((module) => module.reason === "sha256")) {
+      reasons.push("module-drift");
+    }
+    if (driftedModules.some((module) => module.reason === "missing")) {
+      reasons.push("module-missing");
+    }
+    if (meta.sourceBrief !== undefined) {
       reasons.push(...await this.briefDriftReason(
         input.projectRoot,
         meta.sourceBrief

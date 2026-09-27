@@ -1,0 +1,295 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "number",
+      "const": 1
+    },
+    "case": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "path": {
+          "type": "string",
+          "enum": [
+            "accept",
+            "preserve"
+          ]
+        },
+        "requirement": {
+          "type": "object",
+          "properties": {
+            "sourceRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "summarySha256": {
+              "type": "string",
+              "pattern": "^[a-f\\d]{64}$"
+            }
+          },
+          "required": [
+            "sourceRef",
+            "summarySha256"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "id",
+        "path",
+        "requirement"
+      ],
+      "additionalProperties": false
+    },
+    "diffs": {
+      "type": "object",
+      "properties": {
+        "implementation": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f\\d]{64}$"
+            }
+          },
+          "required": [
+            "path",
+            "sha256"
+          ],
+          "additionalProperties": false
+        },
+        "verificationAssets": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f\\d]{64}$"
+            }
+          },
+          "required": [
+            "path",
+            "sha256"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "implementation",
+        "verificationAssets"
+      ],
+      "additionalProperties": false
+    },
+    "bindings": {
+      "type": "object",
+      "properties": {
+        "journeySha256": {
+          "type": "string",
+          "pattern": "^[a-f\\d]{64}$"
+        },
+        "contractSha256": {
+          "type": "string",
+          "pattern": "^[a-f\\d]{64}$"
+        },
+        "knowledgeHash": {
+          "type": "string",
+          "pattern": "^[a-f\\d]{64}$"
+        },
+        "replayPolicy": {
+          "type": "object",
+          "properties": {
+            "metaPath": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f\\d]{64}$"
+            },
+            "strict": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "metaPath",
+            "sha256",
+            "strict"
+          ],
+          "additionalProperties": false
+        },
+        "diffScope": {
+          "type": "object",
+          "properties": {
+            "used": {
+              "type": "boolean"
+            },
+            "base": {
+              "type": "string",
+              "minLength": 1
+            },
+            "head": {
+              "type": "string",
+              "minLength": 1
+            },
+            "tiers": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "p0",
+                  "p1",
+                  "p2"
+                ]
+              }
+            }
+          },
+          "required": [
+            "used",
+            "tiers"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "journeySha256",
+        "diffScope"
+      ],
+      "additionalProperties": false
+    },
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "argv": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "exitCode": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "jsonResultPath": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "argv",
+          "exitCode",
+          "jsonResultPath"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "properties": {
+        "beforeReportPath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reportPath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "verdictPath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "baselinePath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "compareResultPath": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "outcome": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "const": "accept"
+            },
+            "verdict": {
+              "type": "string",
+              "enum": [
+                "pass",
+                "fail",
+                "inconclusive",
+                "needsReview",
+                "invalid"
+              ]
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "const": "preserve"
+            },
+            "equivalent": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "PASS",
+        "FAIL",
+        "PAUSED"
+      ]
+    },
+    "pauseReason": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": [
+    "version",
+    "case",
+    "diffs",
+    "bindings",
+    "commands",
+    "evidence",
+    "outcome",
+    "status"
+  ],
+  "additionalProperties": false
+}

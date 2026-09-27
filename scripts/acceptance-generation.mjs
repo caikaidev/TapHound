@@ -285,7 +285,6 @@ const finalizeOutput = runCli([
   "generation", "finalize",
   "--project", demoRoot,
   "--session", generationId,
-  "--context", contextPath,
   "--output", ".taphound/journeys/generated-search.json",
   ...deviceArgs,
   "--json"

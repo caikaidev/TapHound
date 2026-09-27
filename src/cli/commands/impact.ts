@@ -22,19 +22,7 @@ interface ImpactOptions {
   config: string;
   base: string;
   head?: string | undefined;
-  target?: string | undefined;
-  targets?: string | undefined;
   json?: boolean | undefined;
-}
-
-function targetsHome(
-  dependencies: CliDependencies,
-  explicit: string | undefined
-): string {
-  if (explicit !== undefined) {
-    return resolve(dependencies.cwd(), explicit);
-  }
-  return dependencies.localTargets.targetsHome();
 }
 
 function summarize(impact: ImpactSet): string {
@@ -44,7 +32,6 @@ function summarize(impact: ImpactSet): string {
     `affected features: ${impact.affectedFeatures.join(", ") || "(none)"}`,
     `affected screens: ${impact.affectedScreens.join(", ") || "(none)"}`,
     `affected anchors: ${impact.affectedAnchors.join(", ") || "(none)"}`,
-    `affected transitions: ${impact.affectedTransitions.join(", ") || "(none)"}`,
     "[P0]",
     ...impact.selectedJourneys.p0.map((entry) => `  ${entry.id} — ${entry.reason}`),
     "[P1]",
@@ -79,9 +66,7 @@ export function createImpactCommand(dependencies: CliDependencies): Command {
     .option("--project <path>", "Android project root", dependencies.cwd())
     .option("--config <path>", "TapHound config path", CONFIG_PATH)
     .option("--base <ref>", "Base Git ref", "origin/main")
-    .option("--head <ref>", "Head Git ref (defaults to HEAD, or WORKTREE with --target)")
-    .option("--target <id>", "Registered local target id")
-    .option("--targets <path>", "Targets workspace base path")
+    .option("--head <ref>", "Head Git ref, or WORKTREE for uncommitted changes", "HEAD")
     .option("--json", "Emit one machine-readable JSON value")
     .action(async (options: ImpactOptions): Promise<void> => {
       try {
@@ -91,60 +76,19 @@ export function createImpactCommand(dependencies: CliDependencies): Command {
         ) {
           throw new Error("TapHound impact is not configured");
         }
-        const head = options.head
-          ?? (options.target === undefined ? "HEAD" : "WORKTREE");
-
-        let changeSet;
-        let impact;
-        let resolvedTarget;
-        let config;
-        if (options.target !== undefined) {
-          const id = options.target;
-          const home = targetsHome(dependencies, options.targets);
-          resolvedTarget = await dependencies.localTargets
-            .targetResolver(home).resolve(id);
-          const loaded = await dependencies.localTargets.configStore
-            .loadTargets(home);
-          const entry = loaded.targets[resolvedTarget.id];
-          if (entry === undefined) {
-            throw new Error(`Local target "${resolvedTarget.id}" is not registered`);
-          }
-          config = TapHoundConfigSchema.parse(
-            dependencies.localTargets.localTargetService(home)
-              .configForTarget({
-                entry,
-                resolvedPath: resolvedTarget.resolvedPath,
-                workspaceRoot: resolvedTarget.workspaceRoot
-              })
-          );
-          const gitRoot = resolvedTarget.project.gitRoot ?? resolvedTarget.resolvedPath;
-          changeSet = await dependencies.gitDiff.diff({
-            projectRoot: gitRoot,
-            base: options.base,
-            head
-          });
-          impact = await dependencies.impact.resolve({
-            projectRoot: resolvedTarget.resolvedPath,
-            workspaceRoot: resolvedTarget.workspaceRoot,
-            packageName: config.run.packageName,
-            changeSet
-          });
-        } else {
-          const rawConfig = await dependencies.readJson(
-            resolve(options.project, options.config)
-          );
-          config = TapHoundConfigSchema.parse(rawConfig);
-          changeSet = await dependencies.gitDiff.diff({
-            projectRoot: options.project,
-            base: options.base,
-            head
-          });
-          impact = await dependencies.impact.resolve({
-            projectRoot: options.project,
-            packageName: config.run.packageName,
-            changeSet
-          });
-        }
+        const config = TapHoundConfigSchema.parse(await dependencies.readJson(
+          resolve(options.project, options.config)
+        ));
+        const changeSet = await dependencies.gitDiff.diff({
+          projectRoot: options.project,
+          base: options.base,
+          head: options.head ?? "HEAD"
+        });
+        const impact = await dependencies.impact.resolve({
+          projectRoot: options.project,
+          packageName: config.run.packageName,
+          changeSet
+        });
         if (options.json === true) {
           writeJson(dependencies.stdout, impact);
         } else {

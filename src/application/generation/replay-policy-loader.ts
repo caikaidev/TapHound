@@ -30,9 +30,8 @@ export async function loadPublishedReplayPolicy(input: {
     const meta = GenerationMetaSchema.parse(await input.readJson(metaPath));
     if (
       resolve(input.projectRoot, meta.journeyPath) !== resolve(input.journeyPath)
-      || meta.journeySha256 === undefined
       || meta.journeySha256 !== hashJourney(input.journey)
-      || !meta.replayPolicy?.generatedReplayPolicy
+      || !meta.replayPolicy.generatedReplayPolicy
       || !meta.replayPolicy.requireFocusedInput
     ) {
       throw new ReplayPolicyUnavailableError(

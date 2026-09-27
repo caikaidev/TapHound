@@ -23,6 +23,7 @@ const validBaseline: Baseline = {
   }],
   elements: [{
     locator: { resourceId: "search" },
+    stepIndex: 0,
     kind: "present",
     matchedBy: "resourceId"
   }],
@@ -30,6 +31,7 @@ const validBaseline: Baseline = {
     screen: "search",
     status: "matched"
   }],
+  requiredEvidence: { screens: true },
   sourceReportPath: "/runs/run-1/report.json"
 };
 
@@ -39,9 +41,11 @@ const validCheckpoint: CheckpointDefinition = {
   name: "Search results visible",
   stepIndex: 3,
   expect: {
-    activity: "com.example.app.SearchActivity",
-    visibleElements: [{ resourceId: "results" }],
-    absentElements: []
+    allOf: [
+      { kind: "activity", expected: "com.example.app.SearchActivity" },
+      { kind: "visibleElement", locator: { resourceId: "results" } }
+    ],
+    timeoutMs: 100
   },
   status: "inferred"
 };
@@ -176,19 +180,10 @@ describe("CheckpointDefinitionSchema", () => {
   });
   it("accepts a checkpoint with an activity expectation", () => {
     const parsed = CheckpointDefinitionSchema.parse(validCheckpoint);
-    expect(parsed.expect.activity).toBe("com.example.app.SearchActivity");
-    expect(parsed.expect.visibleElements).toHaveLength(1);
-  });
-
-  it("defaults expect arrays to empty", () => {
-    const parsed = CheckpointDefinitionSchema.parse({
-      version: 1,
-      id: "screen-only",
-      name: "On search screen",
-      expect: { screen: "search" }
+    expect(parsed.expect.allOf).toContainEqual({
+      kind: "activity",
+      expected: "com.example.app.SearchActivity"
     });
-    expect(parsed.expect.visibleElements).toEqual([]);
-    expect(parsed.expect.absentElements).toEqual([]);
   });
 
   it("rejects an empty expectation", () => {

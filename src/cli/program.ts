@@ -13,12 +13,7 @@ import { createVerifyCommand } from "./commands/verify.js";
 import { createContractCommand } from "./commands/contract.js";
 import { createAlignCommand } from "./commands/align.js";
 import { createImpactCommand } from "./commands/impact.js";
-import { createVerifyChangesCommand } from "./commands/verify-changes.js";
-import { createUiCacheCommand } from "./commands/ui-cache.js";
 import { createKnowledgeCommand } from "./commands/knowledge.js";
-import { createBenchmarkCommand } from "./commands/benchmark.js";
-import { createLocalCommand } from "./commands/local.js";
-import { createPlaybookCommand } from "./commands/playbook.js";
 import { createBaselineCommand } from "./commands/baseline.js";
 import { createFailureCommand } from "./commands/failure.js";
 import {
@@ -65,14 +60,9 @@ export function createProgram(
     .addCommand(configureOutput(createJourneyCommand(dependencies)))
     .addCommand(configureOutput(createGenerationCommand(dependencies)))
     .addCommand(configureOutput(createKnowledgeCommand(dependencies)))
-    .addCommand(configureOutput(createBenchmarkCommand(dependencies)))
-    .addCommand(configureOutput(createPlaybookCommand(dependencies)))
     .addCommand(configureOutput(createBaselineCommand(dependencies)))
     .addCommand(configureOutput(createFailureCommand(dependencies)))
-    .addCommand(configureOutput(createLocalCommand(dependencies)))
     .addCommand(configureOutput(createInitCommand(dependencies)))
     .addCommand(configureOutput(createAlignCommand(dependencies)))
-    .addCommand(configureOutput(createImpactCommand(dependencies)))
-    .addCommand(configureOutput(createVerifyChangesCommand(dependencies)))
-    .addCommand(configureOutput(createUiCacheCommand(dependencies)));
+    .addCommand(configureOutput(createImpactCommand(dependencies)));
 }

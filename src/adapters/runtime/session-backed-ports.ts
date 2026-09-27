@@ -1,10 +1,7 @@
 import type { Point } from "../../domain/geometry.js";
 import type { AnnotatedScreenResolverPort } from "../../ports/annotated-screen-resolver.js";
 import type { CommandResult } from "../../ports/process-runner.js";
-import type {
-  RuntimeSession,
-  RuntimeSessionOpener
-} from "../../ports/runtime-backend.js";
+import type { RuntimeSessionOpener } from "../../ports/runtime-backend.js";
 import { runtimeCapabilityMissing } from "../../ports/runtime-capability.js";
 import type { ScreenshotOptions, ScreenshotPort } from "../../ports/screenshot.js";
 import type {
@@ -12,11 +9,6 @@ import type {
   UiSnapshotProvider,
   UiSnapshotProviderFactory
 } from "../../ports/ui-snapshot.js";
-import type {
-  UiStabilityProbe,
-  UiStabilitySampleOptions,
-  UiStabilitySampleResult
-} from "../../ports/ui-stability.js";
 
 export class SessionBackedScreenshotAdapter implements ScreenshotPort {
   public constructor(private readonly sessions: RuntimeSessionOpener) {}
@@ -33,30 +25,6 @@ export class SessionBackedScreenshotAdapter implements ScreenshotPort {
         ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs })
       })
     ));
-  }
-}
-
-export class SessionBackedUiStabilityAdapter implements UiStabilityProbe {
-  private readonly resolved = new Map<string, RuntimeSession>();
-
-  public constructor(private readonly sessions: RuntimeSessionOpener) {}
-
-  public reset(): void {
-    for (const session of this.resolved.values()) {
-      session.uiStability.reset();
-    }
-  }
-
-  public sample(
-    options: UiStabilitySampleOptions
-  ): Promise<UiStabilitySampleResult> {
-    return this.sessions.openSession({
-      deviceSerial: options.deviceSerial,
-      ...(options.signal === undefined ? {} : { signal: options.signal })
-    }).then((session): Promise<UiStabilitySampleResult> => {
-      this.resolved.set(options.deviceSerial, session);
-      return session.uiStability.sample(options);
-    });
   }
 }
 

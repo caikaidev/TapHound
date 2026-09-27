@@ -3,10 +3,7 @@ import {
   appProcessPids,
   primaryAppPid
 } from "../../domain/app-process.js";
-import type {
-  ExternalStep,
-  JourneyStep
-} from "../../domain/journey.js";
+import type { ExternalStep, JourneyStep } from "../../domain/journey.js";
 import type { LayoutElement } from "../../domain/layout.js";
 import type { DisplayViewport } from "../../domain/geometry.js";
 import type {
@@ -33,12 +30,29 @@ import type { LogcatEventWindow } from "../../domain/logcat-event.js";
 import { ActionExecutor, type ActionTarget } from "../interaction/action-executor.js";
 import { FallbackResolver } from "../interaction/fallback-resolver.js";
 import { ScrollToExecutor } from "../interaction/scroll-to-executor.js";
-import { resolveLocator } from "../locator/locator-resolver.js";
+import {
+  BridgeRunner,
+  ExternalStepRunner
+} from "../interaction/external-step-runner.js";
+import {
+  resolveLocator,
+  type LocatorResolution
+} from "../locator/locator-resolver.js";
+import { resolveActionTarget } from "../interaction/action-target.js";
 import {
   ExpectationEvaluator,
   type ExpectationObservationInput
 } from "../assertion/expectation-evaluator.js";
-import { IdleWaiter, type IdleConfig } from "../wait/idle-waiter.js";
+import {
+  GuardedExpectationObservations,
+  settledExpectationForeground,
+  type GuardedExpectationProbe
+} from "../assertion/guarded-expectation.js";
+import {
+  IdleWaiter,
+  type IdleConfig,
+  type IdleResult
+} from "../wait/idle-waiter.js";
 import { deviceIdentityResolver } from "../wait/idle-profiles.js";
 import { withIdleAdvice } from "../wait/idle-advice.js";
 import {
@@ -118,7 +132,10 @@ export class StepRunner {
     this.actionExecutor = new ActionExecutor(
       options.adb,
       options.deviceSerial,
-      (): void => options.uiSnapshotProvider.invalidate?.("beforeAction")
+      (): void => {
+        this.advanceDeviceEpoch();
+        options.uiSnapshotProvider.invalidate?.("beforeAction");
+      }
     );
     this.fallbackResolver = new FallbackResolver(
       options.screenshots,
@@ -182,12 +199,33 @@ export class StepRunner {
     timeoutMs: this.options.idle.timeoutMs
   });
 
+  /**
+   * Device facts observed since the last Layout capture, device mutation, or
+   * completed action. Within one epoch nothing TapHound did could have
+   * changed them, so a repeated check observes nothing new: every capture
+   * still gets a check after it, and every mutation a check before it.
+   */
+  private deviceEpoch = 0;
+  private foregroundProof:
+    | { packageName: string; activity: string; epoch: number }
+    | undefined;
+  private pidProof: { pid: number | null; epoch: number } | undefined;
+
+  private advanceDeviceEpoch(): void {
+    this.deviceEpoch += 1;
+  }
+
   private readonly primaryPid = async (
     identity: AppIdentity
   ): Promise<number | null> => {
+    if (this.pidProof?.epoch === this.deviceEpoch) {
+      return this.pidProof.pid;
+    }
     const processes = await this.options.adb.appProcesses(identity);
     this.options.logcat.scopeToPids(appProcessPids(processes));
-    return primaryAppPid(processes, this.options.packageName);
+    const pid = primaryAppPid(processes, this.options.packageName);
+    this.pidProof = { pid, epoch: this.deviceEpoch };
+    return pid;
   };
 
   private async generatedForeground(
@@ -195,6 +233,14 @@ export class StepRunner {
     code: "ACTIVITY_BEFORE_MISMATCH" | "ACTIVITY_AFTER_MISMATCH",
     signal?: AbortSignal
   ): Promise<{ packageName: string; activity: string }> {
+    const proof = this.foregroundProof;
+    if (
+      proof?.epoch === this.deviceEpoch
+      && proof.packageName === this.options.packageName
+      && proof.activity === expectedActivity
+    ) {
+      return { packageName: proof.packageName, activity: proof.activity };
+    }
     const foreground = await this.options.adb.foregroundComponent(
       this.identity(signal)
     );
@@ -208,6 +254,7 @@ export class StepRunner {
         }/${foreground.activity}`
       ), { code });
     }
+    this.foregroundProof = { ...foreground, epoch: this.deviceEpoch };
     return foreground;
   }
 
@@ -233,6 +280,7 @@ export class StepRunner {
     signal?: AbortSignal,
     freshness: CaptureUiSnapshotOptions["freshness"] = "sameMutationEpoch"
   ): Promise<readonly LayoutElement[]> {
+    this.advanceDeviceEpoch();
     const snapshot = await this.options.uiSnapshotProvider.capture({
       reason,
       freshness,
@@ -243,83 +291,64 @@ export class StepRunner {
     return snapshot.roots;
   }
 
-  private async observeExpectedActivity(
-    expectedActivity: string | undefined,
-    expectedPid: number,
-    input: ExpectationObservationInput
-  ): Promise<
-    | { status: "observed"; activity: string }
-    | { status: "failed"; message: string }
-  > {
-    const deadline = this.options.clock.now() + input.timeoutMs;
-    const identity = (): ReturnType<StepRunner["identity"]> => ({
-      packageName: this.options.packageName,
-      deviceSerial: this.options.deviceSerial,
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-      timeoutMs: Math.max(1, deadline - this.options.clock.now())
-    });
-    const foreground = await this.options.adb.foregroundComponent(identity());
-    if (
-      foreground.packageName !== this.options.packageName
-      || (
-        expectedActivity !== undefined
-        && foreground.activity !== expectedActivity
-      )
-    ) {
-      return {
-        status: "failed",
-        message: `Generated Expect foreground changed to ${
-          foreground.packageName
-        }/${foreground.activity}`
-      };
-    }
-    const pid = await this.primaryPid(identity());
-    if (pid !== expectedPid) {
-      return {
-        status: "failed",
-        message: `Generated Expect process changed from ${
-          String(expectedPid)
-        } to ${String(pid)}`
-      };
-    }
-    return { status: "observed", activity: foreground.activity };
-  }
-
-  private async observeExpectedLayout(
+  /**
+   * Generated Replay observes Expect under the process identity it replays:
+   * every observation re-checks the foreground package and primary PID, and
+   * a Layout is re-checked after capture at the post-action Activity.
+   */
+  private expectationProbe(
     expectedActivity: string,
-    expectedPid: number,
-    input: ExpectationObservationInput
-  ): Promise<
-    | {
-      status: "observed";
-      layout: readonly LayoutElement[];
-    }
-    | { status: "failed"; message: string }
-  > {
-    const deadline = this.options.clock.now() + input.timeoutMs;
-    const observationInput = (): ExpectationObservationInput => ({
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-      timeoutMs: Math.max(1, deadline - this.options.clock.now())
-    });
-    const before = await this.observeExpectedActivity(
-      expectedActivity,
-      expectedPid,
-      observationInput()
-    );
-    if (before.status === "failed") return before;
-    const layout = await this.captureLayout(
-      "expect",
-      observationInput().timeoutMs,
-      input.signal
-    );
-    const after = await this.observeExpectedActivity(
-      expectedActivity,
-      expectedPid,
-      observationInput()
-    );
-    return after.status === "failed"
-      ? after
-      : { status: "observed", layout };
+    expectedPid: number
+  ): GuardedExpectationProbe<{ layout: readonly LayoutElement[] }> {
+    const guard = async (
+      activity: string | undefined,
+      input: ExpectationObservationInput,
+      deadline: number
+    ): Promise<string> => {
+      // Expect watches the app change on its own over time: never reuse an
+      // earlier observation.
+      this.advanceDeviceEpoch();
+      const identity = (): ReturnType<StepRunner["identity"]> => ({
+        packageName: this.options.packageName,
+        deviceSerial: this.options.deviceSerial,
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+        timeoutMs: Math.max(1, deadline - this.options.clock.now())
+      });
+      const foreground = await this.options.adb.foregroundComponent(identity());
+      if (
+        foreground.packageName !== this.options.packageName
+        || (activity !== undefined && foreground.activity !== activity)
+      ) {
+        throw new Error(`Generated Expect foreground changed to ${
+          foreground.packageName
+        }/${foreground.activity}`);
+      }
+      const pid = await this.primaryPid(identity());
+      if (pid !== expectedPid) {
+        throw new Error(`Generated Expect process changed from ${
+          String(expectedPid)
+        } to ${String(pid)}`);
+      }
+      return foreground.activity;
+    };
+    return {
+      activity: (input): Promise<string> => guard(
+        undefined,
+        input,
+        this.options.clock.now() + input.timeoutMs
+      ),
+      layout: async (input): Promise<{ layout: readonly LayoutElement[] }> => {
+        const deadline = this.options.clock.now() + input.timeoutMs;
+        await guard(expectedActivity, input, deadline);
+        const layout = await this.captureLayout(
+          "expect",
+          Math.max(1, deadline - this.options.clock.now()),
+          input.signal
+        );
+        await guard(expectedActivity, input, deadline);
+        return { layout };
+      }
+    };
   }
 
   private async captureGeneratedLayout(
@@ -479,6 +508,9 @@ export class StepRunner {
     const generatedPid = this.options.generatedReplayPolicy === true
       ? await this.primaryPid(identity)
       : undefined;
+    // The stable post-action Layout; generated Replay's first element Expect
+    // observation reuses it after the post-action identity checks.
+    let settledLayout: readonly LayoutElement[] | undefined;
     if (
       this.options.generatedReplayPolicy === true
       && generatedPid === null
@@ -507,19 +539,11 @@ export class StepRunner {
             stepPath(index, "layout-diff.json"),
             scroll.idle.lastDiff
           );
-          report.idle = {
+          report.idle = idleStepReport({
+            ...scroll.idle,
             status: "timeout",
-            polls: scroll.idle.polls,
-            durationMs: scroll.idle.durationMs,
-            samplingDurationMs: scroll.idle.samplingDurationMs,
-            strategy: scroll.idle.strategy,
-            ...(scroll.idle.backend === undefined
-              ? {}
-              : { backendId: scroll.idle.backend }),
-            fallbackUsed: scroll.idle.fallbackUsed,
-            frameActivityDetected: scroll.idle.frameActivityDetected,
-            lastDiff: [...scroll.idle.lastDiff]
-          };
+            code: "IDLE_TIMEOUT"
+          });
         }
         return fail(scroll.code, scroll.message);
       }
@@ -587,103 +611,62 @@ export class StepRunner {
           return fail("ACTIVITY_BEFORE_MISMATCH", errorMessage(error));
         }
       }
-      const triggerClick = {
-        action: "click" as const,
-        locator: step.triggerLocator,
-        activity: {
-          before: step.activity.before,
-          after: step.activity.before
-        }
-      };
-      const triggerAction = await this.actionExecutor.execute(
-        triggerClick,
-        triggerTarget,
+      const recordedEscape = step.escapedPackageName;
+      const bridge = await new BridgeRunner({
+        adb: this.options.adb,
+        clock: this.options.clock,
+        actionExecutor: this.actionExecutor,
+        externalSteps: this.externalStepRunner(index),
+        idleWaiter: this.idleWaiter,
+        idle: this.options.idle,
+        packageName: this.options.packageName,
+        deviceSerial: this.options.deviceSerial
+      }).run({
+        trigger: {
+          step: {
+            action: "click",
+            locator: step.triggerLocator,
+            activity: {
+              before: step.activity.before,
+              after: step.activity.before
+            }
+          },
+          target: triggerTarget
+        },
+        escapeTimeoutMs: step.escapeTimeoutMs ?? 3000,
+        returnTimeoutMs: step.returnTimeoutMs,
+        // Replay must reach the same external app the Journey recorded.
+        acceptEscape: (escapedPackageName) => (
+          recordedEscape === undefined || escapedPackageName === recordedEscape
+            ? undefined
+            : {
+                code: "EXTERNAL_PACKAGE_MISMATCH",
+                message: `Bridge escaped to "${escapedPackageName}", but the Journey recorded "${recordedEscape}"`
+              }
+        ),
+        external: {
+          kind: "steps",
+          steps: (): Promise<readonly ExternalStep[] | undefined> => (
+            Promise.resolve(step.externalSteps)
+          )
+        },
         signal
-      );
-      if (triggerAction.status === "failed") {
-        return fail(triggerAction.code, triggerAction.message);
-      }
-      const escaped = await this.pollBridgeEscape(
-        signal,
-        step.escapeTimeoutMs ?? 3000
-      );
-      if (escaped === null) {
-        return fail(
-          "BRIDGE_NO_ESCAPE",
-          "Bridge trigger did not cause a package escape during replay"
-        );
-      }
-      if (step.externalSteps !== undefined) {
-        const externalFailure = await this.executeExternalStepsForReplay(
-          step,
-          index,
-          signal
-        );
-        if (externalFailure !== null) {
-          return fail(externalFailure.code, externalFailure.message);
-        }
-      }
-      try {
-        await this.pollBridgeReturn(signal, step.returnTimeoutMs);
-      } catch (error) {
-        if (
-          error !== null
-          && typeof error === "object"
-          && "code" in error
-          && error.code === "BRIDGE_NOT_RETURNED"
-        ) {
-          return fail(
-            "BRIDGE_NOT_RETURNED",
-            "Foreground did not return to target package within the timeout"
-          );
-        }
-        throw error;
-      }
-      const idle = await this.idleWaiter.waitUntilIdle(this.options.idle, signal);
-      report.idle = idle.status === "timeout"
-        ? {
-            status: "timeout",
-            polls: idle.polls,
-            durationMs: idle.durationMs,
-            samplingDurationMs: idle.samplingDurationMs,
-            strategy: idle.strategy,
-            ...(idle.backend === undefined ? {} : { backendId: idle.backend }),
-            fallbackUsed: idle.fallbackUsed,
-            frameActivityDetected: idle.frameActivityDetected,
-            lastDiff: [...idle.lastDiff]
-          }
-        : {
-            status: idle.status,
-            polls: idle.polls,
-            durationMs: idle.durationMs,
-            ...(idle.status !== "stable"
-              ? {}
-              : {
-                  samplingDurationMs: idle.samplingDurationMs,
-                  ...(idle.backend === undefined
-                    ? {}
-                    : { backendId: idle.backend }),
-                  strategy: idle.strategy,
-                  fallbackUsed: idle.fallbackUsed,
-                  frameActivityDetected: idle.frameActivityDetected
-                })
-          };
-      if (idle.status === "cancelled") {
+      });
+      if (bridge.status === "cancelled") {
         return finish("cancelled");
       }
-      if (idle.status === "timeout") {
-        await this.options.artifacts.writeJson(
-          stepPath(index, "layout-diff.json"),
-          idle.lastDiff
-        );
-        return fail(
-          idle.code,
-          withIdleAdvice(
-            "Layout did not become stable after bridge return",
-            idle
-          )
-        );
+      if (bridge.status === "failed") {
+        if (bridge.idle !== undefined) {
+          report.idle = idleStepReport(bridge.idle);
+          await this.options.artifacts.writeJson(
+            stepPath(index, "layout-diff.json"),
+            bridge.idle.lastDiff
+          );
+        }
+        return fail(bridge.code, bridge.message);
       }
+      report.idle = idleStepReport(bridge.idle);
+      settledLayout = bridge.idle.layout;
     } else if (
       step.action === "wait"
       && step.until !== undefined
@@ -870,9 +853,25 @@ export class StepRunner {
             "Step has no runtime locator fallback"
           );
         }
-        let resolution = resolveLocator(layout, step.locator, {
-          viewport: this.currentViewport
-        });
+        const locator = step.locator;
+        const action = step.action;
+        // Generated Replay targets exactly as Generation did; a recorded
+        // Journey keeps the Recorder's element-center semantics.
+        const locate = (): LocatorResolution => {
+          if (this.options.generatedReplayPolicy !== true) {
+            return resolveLocator(layout, locator, {
+              viewport: this.currentViewport
+            });
+          }
+          const resolved = resolveActionTarget(
+            layout,
+            action,
+            locator,
+            this.currentViewport
+          );
+          return resolved.status === "found" ? resolved.located : resolved;
+        };
+        let resolution = locate();
         const locatorDeadline = this.options.clock.now()
           + this.options.idle.timeoutMs;
         while (
@@ -918,9 +917,7 @@ export class StepRunner {
             }
             throw error;
           }
-          resolution = resolveLocator(layout, step.locator, {
-            viewport: this.currentViewport
-          });
+          resolution = locate();
         }
         if (resolution.status === "found") {
           target = {
@@ -1051,6 +1048,7 @@ export class StepRunner {
             `Knowledge anchor ${step.anchor} resolved to an element without bounds`
           );
         }
+        this.advanceDeviceEpoch();
         const tapped = await this.options.adb.tap(
           anchorResolution.point,
           this.options.deviceSerial,
@@ -1111,34 +1109,7 @@ export class StepRunner {
       }
 
       const idle = await this.idleWaiter.waitUntilIdle(this.options.idle, signal);
-      report.idle = idle.status === "timeout"
-        ? {
-            status: "timeout",
-            polls: idle.polls,
-            durationMs: idle.durationMs,
-            samplingDurationMs: idle.samplingDurationMs,
-            strategy: idle.strategy,
-            ...(idle.backend === undefined ? {} : { backendId: idle.backend }),
-            fallbackUsed: idle.fallbackUsed,
-            frameActivityDetected: idle.frameActivityDetected,
-            lastDiff: [...idle.lastDiff]
-          }
-        : {
-            status: idle.status,
-            polls: idle.polls,
-            durationMs: idle.durationMs,
-            ...(idle.status !== "stable"
-              ? {}
-              : {
-                  samplingDurationMs: idle.samplingDurationMs,
-                  ...(idle.backend === undefined
-                    ? {}
-                    : { backendId: idle.backend }),
-                  strategy: idle.strategy,
-                  fallbackUsed: idle.fallbackUsed,
-                  frameActivityDetected: idle.frameActivityDetected
-                })
-          };
+      report.idle = idleStepReport(idle);
       if (idle.status === "cancelled") {
         return finish("cancelled");
       }
@@ -1152,8 +1123,11 @@ export class StepRunner {
           withIdleAdvice("Layout did not become stable before timeout", idle)
         );
       }
+      settledLayout = idle.layout;
     }
 
+    // Whatever the step did (including a plain wait) may have changed the app.
+    this.advanceDeviceEpoch();
     const pid = await this.primaryPid(identity);
     if (pid === null) {
       return fail("APP_CRASHED", "App process is no longer running");
@@ -1199,6 +1173,12 @@ export class StepRunner {
     }
 
     if (step.expect !== undefined) {
+      const observations = generatedPid === undefined || generatedPid === null
+        ? undefined
+        : new GuardedExpectationObservations(
+            this.expectationProbe(step.activity.after, generatedPid),
+            settledLayout === undefined ? undefined : { layout: settledLayout }
+          );
       const expectation = await this.expectationEvaluator.evaluate(
         step.expect,
         {
@@ -1213,25 +1193,10 @@ export class StepRunner {
             : { markers: this.options.markers })
         },
         signal,
-        generatedPid === undefined || generatedPid === null
-          ? {}
-          : {
-              activity: (input): ReturnType<
-                StepRunner["observeExpectedActivity"]
-              > => this.observeExpectedActivity(
-                undefined,
-                generatedPid,
-                input
-              ),
-              layout: (input): ReturnType<
-                StepRunner["observeExpectedLayout"]
-              > => this.observeExpectedLayout(
-                step.activity.after,
-                generatedPid,
-                input
-              )
-            }
+        observations?.boundary() ?? {}
       );
+      // Time passed while Expect waited; later checks must observe again.
+      this.advanceDeviceEpoch();
       if (expectation.status === "cancelled") {
         report.expectation = {
           type: expectation.type,
@@ -1259,13 +1224,14 @@ export class StepRunner {
       if (expectation.status === "failed") {
         return fail(expectation.code, expectation.message);
       }
-      if (this.options.generatedReplayPolicy === true) {
-        const expectedActivity = step.expect.type === "activity"
-          ? step.expect.value
-          : step.activity.after;
+      const settled = settledExpectationForeground(
+        step.expect,
+        step.activity.after
+      );
+      if (this.options.generatedReplayPolicy === true && !settled.proven) {
         try {
           await this.assertGeneratedForeground(
-            expectedActivity,
+            settled.activity,
             "ACTIVITY_AFTER_MISMATCH",
             signal
           );
@@ -1359,311 +1325,76 @@ export class StepRunner {
     return next;
   }
 
-  private async executeExternalStepsForReplay(
-    step: Extract<JourneyStep, { action: "bridge" }>,
-    index: number,
-    signal: AbortSignal | undefined
-  ): Promise<{ code: FailureCode; message: string } | null> {
-    const escapedPackageName = step.escapedPackageName;
-    if (escapedPackageName === undefined) {
-      return {
-        code: "ACTION_FAILED",
-        message: "Bridge auto replay requires escapedPackageName"
-      };
-    }
-    if (step.externalSteps === undefined) {
-      return null;
-    }
-    const externalIdleWaiter = new IdleWaiter(
-      this.options.uiStability,
-      this.options.clock,
-      this.options.deviceSerial,
-      escapedPackageName
-    );
-    for (const [i, externalStep] of step.externalSteps.entries()) {
-      if (signal?.aborted === true) return null;
-
-      const externalIdentity = {
-        packageName: escapedPackageName,
-        deviceSerial: this.options.deviceSerial,
-        ...(signal === undefined ? {} : { signal }),
-        timeoutMs: 5000
-      };
-      const foreground = await this.options.adb.foregroundComponent(
-        externalIdentity
-      );
-      if (foreground.packageName !== escapedPackageName) {
-        return {
-          code: "EXTERNAL_PACKAGE_MISMATCH",
-          message: `External app foreground changed during replay: expected "${escapedPackageName}", got "${foreground.packageName}"`
-        };
-      }
-      if (foreground.activity !== externalStep.expectedActivity) {
-        return {
-          code: "EXTERNAL_ACTIVITY_MISMATCH",
-          message: `External Activity mismatch during replay: expected "${externalStep.expectedActivity}", got "${foreground.activity}"`
-        };
-      }
-
-      const layout = await this.captureLayout(
-        "locate",
-        this.options.idle.timeoutMs,
+  private externalStepRunner(stepIndex: number): ExternalStepRunner {
+    return new ExternalStepRunner({
+      adb: this.options.adb,
+      actionExecutor: this.actionExecutor,
+      uiSnapshotProvider: this.options.uiSnapshotProvider,
+      captureLayout: (reason, timeoutMs, signal) => this.captureLayout(
+        reason,
+        timeoutMs,
         signal
-      );
-
-      if (externalStep.action === "scrollTo") {
-        const journeyStep = externalStepToJourneyStepForReplay(externalStep) as Extract<
-          JourneyStep,
-          { action: "scrollTo" }
-        >;
-        const externalScrollToExecutor = new ScrollToExecutor({
-          uiSnapshotProvider: this.options.uiSnapshotProvider,
-          actionExecutor: this.actionExecutor,
-          idleWaiter: externalIdleWaiter,
+      ),
+      createIdleWaiter: (packageName: string): IdleWaiter => new IdleWaiter(
+        this.options.uiStability,
+        this.options.clock,
+        this.options.deviceSerial,
+        packageName,
+        deviceIdentityResolver(this.options.adb, {
+          packageName,
           deviceSerial: this.options.deviceSerial,
-          idle: this.options.idle,
-          viewport: (): DisplayViewport | undefined => this.currentViewport,
-          requireLiveContainerCapability: true
-        });
-        const scroll = await externalScrollToExecutor.execute(
-          journeyStep,
-          signal,
-          layout
-        );
-        if (scroll.status === "cancelled") {
-          return null;
-        }
-        if (scroll.status === "failed") {
-          return {
-            code: scroll.code,
-            message: scroll.message
-          };
-        }
-      } else {
-        const journeyStep = externalStepToJourneyStepForReplay(externalStep);
-        let target: ActionTarget | undefined;
-        if (
-          externalStep.action === "click"
-          || externalStep.action === "longClick"
-          || externalStep.action === "swipe"
-        ) {
-          const resolution = resolveLocator(layout, externalStep.locator, {
-            viewport: this.currentViewport,
-            ...(externalStep.action === "click"
-              ? { requiredCapability: "clickable" as const }
-              : {}),
-            ...(externalStep.action === "longClick"
-              ? { requiredCapability: "longClickable" as const }
-              : {})
-          });
-          if (resolution.status !== "found") {
-            return {
-              code: resolution.code,
-              message: resolution.message
-            };
-          }
-          if (
-            externalStep.action === "click"
-            && resolution.element.clickable !== true
-          ) {
-            return {
-              code: "ACTION_FAILED",
-              message: "External click target is not clickable during replay"
-            };
-          }
-          if (
-            externalStep.action === "longClick"
-            && resolution.element.longClickable !== true
-          ) {
-            return {
-              code: "ACTION_FAILED",
-              message: "External longClick target is not longClickable during replay"
-            };
-          }
-          if (
-            externalStep.action === "swipe"
-            && (
-              resolution.element.scrollable !== true
-              || resolution.element.bounds === undefined
-            )
-          ) {
-            return {
-              code: "ACTION_FAILED",
-              message: "External swipe target lacks scrollable bounds during replay"
-            };
-          }
-          target = {
-            point: resolution.point,
-            ...(resolution.element.bounds === undefined
-              ? {}
-              : { bounds: resolution.element.bounds })
-          };
-        }
-        const action = await this.actionExecutor.execute(
-          journeyStep,
-          target,
-          signal
-        );
-        if (action.status === "failed") {
-          return {
-            code: action.code,
-            message: action.message
-          };
-        }
-      }
-
-      const idle = await externalIdleWaiter.waitUntilIdle(
-        this.options.idle,
-        signal
-      );
-      if (idle.status === "cancelled") {
-        return null;
-      }
-      if (idle.status === "timeout") {
+          timeoutMs: this.options.idle.timeoutMs
+        })
+      ),
+      idle: this.options.idle,
+      viewport: (): DisplayViewport | undefined => this.currentViewport,
+      deviceSerial: this.options.deviceSerial,
+      onIdleTimeout: async (externalIndex, idle): Promise<void> => {
         await this.options.artifacts.writeJson(
           stepPath(
-            index,
-            `external-${String(i + 1).padStart(3, "0")}-layout-diff.json`
+            stepIndex,
+            `external-${String(externalIndex + 1).padStart(3, "0")}-layout-diff.json`
           ),
           idle.lastDiff
         );
-        return {
-          code: idle.code,
-          message: withIdleAdvice(
-            "External app layout did not become stable after step during replay",
-            idle
-          )
-        };
       }
-
-      if (externalStep.expect !== undefined) {
-        const expectFailure = await this.evaluateExternalExpectForReplay(
-          externalStep,
-          escapedPackageName,
-          signal
-        );
-        if (expectFailure !== null) {
-          return expectFailure;
-        }
-      }
-    }
-    return null;
+    });
   }
+}
 
-  private async evaluateExternalExpectForReplay(
-    step: ExternalStep,
-    escapedPackageName: string,
-    signal: AbortSignal | undefined
-  ): Promise<{ code: FailureCode; message: string } | null> {
-    const expect = step.expect;
-    if (expect === undefined) return null;
-    const identity = {
-      packageName: escapedPackageName,
-      deviceSerial: this.options.deviceSerial,
-      ...(signal === undefined ? {} : { signal }),
-      timeoutMs: expect.timeoutMs
+
+function idleStepReport(idle: IdleResult): NonNullable<StepReport["idle"]> {
+  if (idle.status === "cancelled") {
+    return {
+      status: "cancelled",
+      polls: idle.polls,
+      durationMs: idle.durationMs
     };
-    if (expect.type === "activity") {
-      const expectedPackage = expect.packageName ?? escapedPackageName;
-      const foreground = await this.options.adb.foregroundComponent({
-        ...identity,
-        packageName: expectedPackage
-      });
-      if (foreground.activity !== expect.value) {
-        return {
-          code: "EXTERNAL_STEP_FAILED",
-          message: `External expect Activity mismatch during replay: expected "${expect.value}", got "${foreground.activity}"`
-        };
+  }
+  return idle.status === "timeout"
+    ? {
+        status: "timeout",
+        polls: idle.polls,
+        durationMs: idle.durationMs,
+        samplingDurationMs: idle.samplingDurationMs,
+        strategy: idle.strategy,
+        ...(idle.backend === undefined ? {} : { backendId: idle.backend }),
+        fallbackUsed: idle.fallbackUsed,
+        frameActivityDetected: idle.frameActivityDetected,
+        lastDiff: [...idle.lastDiff]
       }
-    } else if (expect.type === "element") {
-      const layout = await this.captureLayout(
-        "expect",
-        expect.timeoutMs,
-        signal
-      );
-      const resolution = resolveLocator(layout, expect.locator, {
-        requireEnabled: false
-      });
-      if (resolution.status !== "found") {
-        return {
-          code: "EXTERNAL_STEP_FAILED",
-          message: `External expect element not found during replay: ${resolution.message}`
-        };
-      }
-    } else {
-      return {
-        code: "EXTERNAL_STEP_FAILED",
-        message: "logcat expectations are not supported for external steps during replay"
+    : {
+        status: "stable",
+        polls: idle.polls,
+        durationMs: idle.durationMs,
+        samplingDurationMs: idle.samplingDurationMs,
+        ...(idle.backend === undefined ? {} : { backendId: idle.backend }),
+        strategy: idle.strategy,
+        fallbackUsed: idle.fallbackUsed,
+        frameActivityDetected: idle.frameActivityDetected
       };
-    }
-    return null;
-  }
-
-  private async pollBridgeEscape(
-    signal: AbortSignal | undefined,
-    timeoutMs: number
-  ): Promise<string | null> {
-    const deadline = this.options.clock.now() + timeoutMs;
-    while (this.options.clock.now() < deadline) {
-      if (signal?.aborted === true) return null;
-      const foreground = await this.options.adb.foregroundComponent(
-        this.identity(signal)
-      );
-      if (foreground.packageName !== this.options.packageName) {
-        return foreground.packageName;
-      }
-      await this.options.clock.sleep(
-        Math.min(
-          500,
-          Math.max(0, deadline - this.options.clock.now())
-        ),
-        signal
-      );
-    }
-    return null;
-  }
-
-  private async pollBridgeReturn(
-    signal: AbortSignal | undefined,
-    timeoutMs: number
-  ): Promise<void> {
-    const deadline = this.options.clock.now() + timeoutMs;
-    while (this.options.clock.now() < deadline) {
-      if (signal?.aborted === true) return;
-      const foreground = await this.options.adb.foregroundComponent(
-        this.identity(signal)
-      );
-      if (foreground.packageName === this.options.packageName) {
-        return;
-      }
-      await this.options.clock.sleep(
-        Math.min(
-          500,
-          Math.max(0, deadline - this.options.clock.now())
-        ),
-        signal
-      );
-    }
-    throw Object.assign(
-      new Error(
-        "Foreground did not return to target package within the timeout"
-      ),
-      { code: "BRIDGE_NOT_RETURNED" }
-    );
-  }
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function externalStepToJourneyStepForReplay(step: ExternalStep): JourneyStep {
-  const { expectedActivity, ...rest } = step;
-  return {
-    ...rest,
-    activity: {
-      before: expectedActivity,
-      after: expectedActivity
-    }
-  };
 }

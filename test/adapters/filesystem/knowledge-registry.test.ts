@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   mkdir,
   mkdtemp,
@@ -50,110 +49,81 @@ const screen = {
   predicates: []
 };
 
+async function writeDocument(
+  root: string,
+  kind: "anchors" | "screens",
+  name: string,
+  value: unknown
+): Promise<string> {
+  const directory = join(root, ".taphound", "knowledge", kind);
+  await mkdir(directory, { recursive: true });
+  const path = join(directory, name);
+  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`);
+  return path;
+}
+
 describe("FileSystemKnowledgeRegistry", () => {
-  it("writes, hashes, and reloads a committed Registry", async () => {
+  it("indexes authored documents, hashes them, and reloads the Registry", async () => {
     const root = await projectRoot();
+    await writeDocument(root, "anchors", "home-activity.json", anchor);
+    await writeDocument(root, "screens", "home.json", screen);
     const registry = new FileSystemKnowledgeRegistry();
 
-    const written = await registry.writePromoted({
-      projectRoot: root,
-      packageName: "com.example.app",
-      anchors: [anchor],
-      screens: [screen],
-      transitions: []
-    });
+    const rehashed = await registry.rehash(root, "com.example.app");
     const loaded = await registry.load(root);
 
-    expect(written).toMatchObject({
+    expect(rehashed).toMatchObject({
       indexPath: ".taphound/knowledge/index.json",
-      revision: 1
+      revision: 1,
+      changed: true,
+      anchors: 1,
+      screens: 1
     });
-    expect(loaded.knowledgeHash).toBe(written.knowledgeHash);
-    expect(loaded.screens).toEqual([screen]);
-  });
-
-  it("detects document drift and rejects stale promotion", async () => {
-    const root = await projectRoot();
-    const registry = new FileSystemKnowledgeRegistry();
-    const written = await registry.writePromoted({
-      projectRoot: root,
-      packageName: "com.example.app",
-      anchors: [anchor],
-      screens: [screen],
-      transitions: []
-    });
-    const anchorPath = join(
-      root,
-      ".taphound/knowledge/anchors/home-activity.json"
-    );
-    const bytes = await readFile(anchorPath, "utf8");
-    await writeFile(anchorPath, `${bytes}\n`);
-
-    await expect(registry.load(root)).rejects.toThrow(/stale/);
-    await expect(registry.writePromoted({
-      projectRoot: root,
-      packageName: "com.example.app",
-      expectedKnowledgeHash: written.knowledgeHash,
-      anchors: [anchor],
-      screens: [screen],
-      transitions: []
-    })).rejects.toThrow(/stale/);
-  });
-
-  it("loads knowledge from the workspace root when provided", async () => {
-    const app = await projectRoot();
-    const workspace = await projectRoot();
-    const registry = new FileSystemKnowledgeRegistry();
-    const anchorBytes = Buffer.from(`${JSON.stringify(anchor, null, 2)}\n`);
-    const screenBytes = Buffer.from(`${JSON.stringify(screen, null, 2)}\n`);
-    await mkdir(join(workspace, "knowledge", "anchors"), { recursive: true });
-    await mkdir(join(workspace, "knowledge", "screens"), { recursive: true });
-    await writeFile(
-      join(workspace, "knowledge", "anchors", "home-activity.json"),
-      anchorBytes
-    );
-    await writeFile(
-      join(workspace, "knowledge", "screens", "home.json"),
-      screenBytes
-    );
-    const sha256 = (value: Buffer): string => (
-      createHash("sha256").update(value).digest("hex")
-    );
-    await writeFile(join(workspace, "knowledge", "index.json"),
-      `${JSON.stringify({
-        version: 1,
-        packageName: "com.example.app",
-        revision: 1,
-        anchors: [{
-          id: "home-activity",
-          path: ".taphound/knowledge/anchors/home-activity.json",
-          sha256: sha256(anchorBytes),
-          status: "inferred"
-        }],
-        screens: [{
-          id: "home",
-          path: ".taphound/knowledge/screens/home.json",
-          sha256: sha256(screenBytes),
-          status: "inferred"
-        }],
-        transitions: []
-      }, null, 2)}\n`
-    );
-
-    const loaded = await registry.load(app, workspace);
-
-    expect(loaded.screens).toEqual([screen]);
+    expect(loaded.knowledgeHash).toBe(rehashed.knowledgeHash);
     expect(loaded.anchors).toEqual([anchor]);
+    expect(loaded.screens).toEqual([screen]);
   });
 
-  it("rejects unresolved cross-references before writing", async () => {
+  it("keeps the revision for an unchanged rehash and bumps it after an edit", async () => {
     const root = await projectRoot();
-    await expect(new FileSystemKnowledgeRegistry().writePromoted({
-      projectRoot: root,
-      packageName: "com.example.app",
-      anchors: [],
-      screens: [screen],
-      transitions: []
-    })).rejects.toThrow(/unknown Anchor/);
+    const anchorPath = await writeDocument(
+      root,
+      "anchors",
+      "home-activity.json",
+      anchor
+    );
+    await writeDocument(root, "screens", "home.json", screen);
+    const registry = new FileSystemKnowledgeRegistry();
+    const first = await registry.rehash(root, "com.example.app");
+
+    await expect(registry.rehash(root, "com.example.app")).resolves
+      .toMatchObject({ revision: 1, changed: false, knowledgeHash: first.knowledgeHash });
+
+    await writeFile(anchorPath, `${await readFile(anchorPath, "utf8")}\n`);
+    await expect(registry.load(root)).rejects.toThrow(/stale/);
+    const second = await registry.rehash(root, "com.example.app");
+    expect(second).toMatchObject({ revision: 2, changed: true });
+    expect(second.knowledgeHash).not.toBe(first.knowledgeHash);
+    await expect(registry.load(root)).resolves.toMatchObject({
+      knowledgeHash: second.knowledgeHash
+    });
+  });
+
+  it("rejects unresolved cross-references, misnamed documents, and package changes", async () => {
+    const root = await projectRoot();
+    const registry = new FileSystemKnowledgeRegistry();
+    await writeDocument(root, "screens", "home.json", screen);
+    await expect(registry.rehash(root, "com.example.app"))
+      .rejects.toThrow(/unknown Anchor/);
+
+    await writeDocument(root, "anchors", "wrong-name.json", anchor);
+    await expect(registry.rehash(root, "com.example.app"))
+      .rejects.toThrow(/must be named home-activity\.json/);
+
+    await rm(join(root, ".taphound/knowledge/anchors/wrong-name.json"));
+    await writeDocument(root, "anchors", "home-activity.json", anchor);
+    await registry.rehash(root, "com.example.app");
+    await expect(registry.rehash(root, "com.example.other"))
+      .rejects.toThrow(/does not match configured package/);
   });
 });

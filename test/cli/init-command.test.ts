@@ -11,7 +11,6 @@ import {
   InitPromptCancelledError
 } from "../../src/ports/init-prompt.js";
 import { fakeWorkspaceLayout } from "../fakes/workspace-layout.js";
-import { defaultLocalTargets } from "../fakes/local-targets.js";
 
 class BufferOutput implements TextOutput {
   public value = "";
@@ -109,7 +108,6 @@ function harness(
       observe: vi.fn(() => Promise.reject(new Error("unused")))
     },
     workspaceLayout: fakeWorkspaceLayout(),
-    localTargets: defaultLocalTargets(),
     readFile: vi.fn(() => Promise.resolve(Buffer.alloc(0))),
     readJson: vi.fn(() => Promise.reject(new Error("unused"))),
     cwd: () => "/project",

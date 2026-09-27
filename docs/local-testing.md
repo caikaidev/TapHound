@@ -63,7 +63,7 @@ After building, you can inspect the CLI directly:
 node dist/cli/main.js --help
 ```
 
-The first line should be `Usage: taphound`, and it should list `doctor`, `record`, `verify`, `contract`, `observe`, `project`, `context`, `journey`, `generation`, `knowledge`, `benchmark`, `init`, `align`, `impact`, `verify-changes`, and `ui-cache`.
+The first line should be `Usage: taphound`, and it should list `doctor`, `record`, `verify`, `contract`, `observe`, `project`, `context`, `journey`, `generation`, `knowledge`, `baseline`, `failure`, `init`, `align`, and `impact`.
 
 ## 3. Test the npm Tarball
 
@@ -79,9 +79,8 @@ npm pack --json \
 shasum -a 256 "$TARBALL"
 ```
 
-Record the digest, size, shasum, integrity, and entryCount from `npm pack --json`
-in the audit for the exact release candidate. Do not compare the current tarball
-against the historical `dev.1` audit. Any difference between machines means
+Keep the digest, size, shasum, integrity, and entryCount from `npm pack --json`
+with the release candidate's notes. Any difference between machines means
 you must redo the install smoke in this section.
 
 Install the exact tarball into a temporary directory:
@@ -96,7 +95,7 @@ npm install \
 test ! -e "/private/tmp/taphound-install-smoke/node_modules/.bin/$(printf 'a\160r')"
 ```
 
-Both the help command and the last negative check should exit 0. npm 11 does not run `prepublishOnly` for `npm publish <tgz>`, so the full source quality gate and the exact-tarball smoke are both independent required steps before publishing.
+Both the help command and the last negative check should exit 0. npm 11 does not run `prepublishOnly` for `npm publish <tgz>`, so the full source quality gate and the exact-tarball smoke are both independent required steps before pushing a release tag (see [Releasing](releasing.md)).
 
 ## 4. Check the Android Environment
 
@@ -150,6 +149,17 @@ TAPHOUND_ACCEPTANCE_DEVICE=1 npm run acceptance:generation
 ```
 
 Both entries are explicit opt-in; passing the normal test suite is not evidence that real-device Replay or Generation acceptance passed. You must run `npm run build` first.
+
+The standalone `taphound-flash` Skill needs no build. Check it against the
+installed demo on an unlocked device with its example plan:
+
+```bash
+node assets/skills/taphound-flash/scripts/flash.mjs run \
+  assets/skills/taphound-flash/templates/flash-plan.example.json
+```
+
+It prints one JSON result; `status: "passed"` with exit code 0 means every
+step passed.
 
 For P3 structured Logcat and shared-Checkpoint acceptance, rebuild and
 reinstall the demo APK from this checkout, then verify the separate
@@ -219,17 +229,6 @@ closed if the provider is unavailable:
 
 Set `cacheEnabled` to `false` for cache-equivalence tests. Authoritative
 evidence and post-mutation reads remain fresh in both modes.
-
-The optional persistent screen/flow index is non-authoritative and lives at
-`.taphound/build/cache/ui/`. It stores only resource-ID contracts, semantic
-hashes, and Flow verification receipts; it never stores page source, page
-text, screenshots, or reusable tap coordinates. Inspect or remove it without
-affecting Journeys, reports, or generation evidence:
-
-```bash
-node dist/cli/main.js ui-cache status --project examples/taphound-android-demo --json
-node dist/cli/main.js ui-cache clear --project examples/taphound-android-demo --yes --json
-```
 
 When Appium is explicitly configured, start its local loopback server before
 running `doctor`; doctor reports the detected Appium server/UiAutomator2 driver

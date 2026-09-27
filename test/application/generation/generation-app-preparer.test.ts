@@ -6,6 +6,8 @@ import {
 import type { TapHoundConfig } from "../../../src/domain/config.js";
 import type { AdbPort } from "../../../src/ports/adb.js";
 import type { CommandResult } from "../../../src/ports/process-runner.js";
+import type { RuntimeSession } from "../../../src/ports/runtime-backend.js";
+import type { RuntimeSessionPortViews } from "../../../src/ports/runtime-session-ports.js";
 import { FakeClock } from "../../fakes/fake-clock.js";
 
 const config: TapHoundConfig = {
@@ -53,13 +55,53 @@ function adb(overrides: Partial<AdbPort> = {}): AdbPort {
   } as unknown as AdbPort;
 }
 
+/** A preparer that borrows one session per launch over the given device. */
+function preparer(
+  device: AdbPort,
+  closed: string[] = []
+): GenerationAppPreparer {
+  return new GenerationAppPreparer({
+    sessions: {
+      openSession: ({ deviceSerial }): Promise<RuntimeSession> => (
+        Promise.resolve({
+          deviceSerial,
+          close: (): Promise<void> => {
+            closed.push(deviceSerial);
+            return Promise.resolve();
+          }
+        } as unknown as RuntimeSession)
+      )
+    },
+    sessionPorts: (): RuntimeSessionPortViews => (
+      { adb: device } as unknown as RuntimeSessionPortViews
+    ),
+    clock: new FakeClock()
+  });
+}
+
 describe("GenerationAppPreparer", () => {
+  it("closes the borrowed session even when the launch fails", async () => {
+    const closed: string[] = [];
+    const service = preparer(adb({
+      launchActivity: vi.fn(() => Promise.resolve(commandResult({
+        exitCode: 1,
+        stderr: "activity missing"
+      })))
+    }), closed);
+
+    await expect(service.prepare({
+      config,
+      deviceSerial: "emulator-5554"
+    })).rejects.toThrow("activity missing");
+    expect(closed).toEqual(["emulator-5554"]);
+  });
+
   it("accepts a cold launch that redirects from Splash to Home", async () => {
     const currentActivity = vi.fn(() => Promise.resolve(
       "com.example.app.HomeActivity"
     ));
     const device = adb({ currentActivity });
-    const service = new GenerationAppPreparer(device, new FakeClock());
+    const service = preparer(device);
 
     await expect(service.prepare({
       config: {
@@ -85,13 +127,13 @@ describe("GenerationAppPreparer", () => {
 
   it("fails before launch when force-stop fails", async () => {
     const launchActivity = vi.fn(() => Promise.resolve(commandResult()));
-    const service = new GenerationAppPreparer(adb({
+    const service = preparer(adb({
       forceStop: vi.fn(() => Promise.resolve(commandResult({
         exitCode: 1,
         stderr: "reset denied"
       }))),
       launchActivity
-    }), new FakeClock());
+    }));
 
     await expect(service.prepare({
       config,
@@ -101,12 +143,12 @@ describe("GenerationAppPreparer", () => {
   });
 
   it("reports launch command failures", async () => {
-    const service = new GenerationAppPreparer(adb({
+    const service = preparer(adb({
       launchActivity: vi.fn(() => Promise.resolve(commandResult({
         exitCode: 1,
         stderr: "activity missing"
       })))
-    }), new FakeClock());
+    }));
 
     await expect(service.prepare({
       config,
@@ -118,15 +160,15 @@ describe("GenerationAppPreparer", () => {
     const currentActivity = vi.fn(() => Promise.resolve(
       "com.example.app.HomeActivity"
     ));
-    const service = new GenerationAppPreparer(adb({
+    const service = preparer(adb({
       appProcesses: vi.fn(() => Promise.resolve([])),
       currentActivity
-    }), new FakeClock());
+    }));
 
     await expect(service.prepare({
       config,
       deviceSerial: "emulator-5554"
-    })).rejects.toThrow("App process readiness timed out");
+    })).rejects.toThrow("App process was not found after launch");
     expect(currentActivity).not.toHaveBeenCalled();
   });
 });

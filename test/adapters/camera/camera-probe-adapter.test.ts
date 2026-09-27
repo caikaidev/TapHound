@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { CameraProbeAdapter } from "../../../src/adapters/camera/camera-probe-adapter.js";
+import {
+  CameraProbeAdapter,
+  type CameraProbeAdapterDeps
+} from "../../../src/adapters/camera/camera-probe-adapter.js";
+import type { RuntimeSession } from "../../../src/ports/runtime-backend.js";
+import type { RuntimeSessionPortViews } from "../../../src/ports/runtime-session-ports.js";
 import type { Point } from "../../../src/domain/geometry.js";
 import type {
   AdbPort,
@@ -144,6 +149,24 @@ const shutterLayout: LayoutElement[] = [
   element({ resourceId: "com.android.camera:id/shutter_button", contentDescription: "快门按钮" })
 ];
 
+/** Serves one fake device through the Runtime session SPI. */
+function sessionFor(device: AdbPort): Pick<
+  CameraProbeAdapterDeps,
+  "sessions" | "sessionPorts"
+> {
+  return {
+    sessions: {
+      openSession: ({ deviceSerial }): Promise<RuntimeSession> => Promise.resolve({
+        deviceSerial,
+        close: (): Promise<void> => Promise.resolve()
+      } as unknown as RuntimeSession)
+    },
+    sessionPorts: (): RuntimeSessionPortViews => (
+      { adb: device } as unknown as RuntimeSessionPortViews
+    )
+  };
+}
+
 describe("CameraProbeAdapter", () => {
   it("discovers shutter and confirm for a 3-step camera", async () => {
     const fake: FakeAdb = {
@@ -174,7 +197,7 @@ describe("CameraProbeAdapter", () => {
     const clock = makeFakeClock();
 
     const probe = new CameraProbeAdapter({
-      adb,
+      ...sessionFor(adb),
       uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
       now: clock.now,
       sleep: clock.sleep
@@ -210,7 +233,7 @@ describe("CameraProbeAdapter", () => {
     const clock = makeFakeClock();
 
     const probe = new CameraProbeAdapter({
-      adb,
+      ...sessionFor(adb),
       uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
       now: clock.now,
       sleep: clock.sleep
@@ -257,7 +280,7 @@ describe("CameraProbeAdapter", () => {
     const clock = makeFakeClock();
 
     const probe = new CameraProbeAdapter({
-      adb,
+      ...sessionFor(adb),
       uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
       now: clock.now,
       sleep: clock.sleep
@@ -299,7 +322,7 @@ describe("CameraProbeAdapter", () => {
     const clock = makeFakeClock();
 
     const probe = new CameraProbeAdapter({
-      adb,
+      ...sessionFor(adb),
       uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
       now: clock.now,
       sleep: clock.sleep
@@ -344,7 +367,7 @@ describe("CameraProbeAdapter", () => {
     const clock = makeFakeClock();
 
     const probe = new CameraProbeAdapter({
-      adb,
+      ...sessionFor(adb),
       uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
       now: clock.now,
       sleep: clock.sleep
@@ -391,7 +414,7 @@ describe("CameraProbeAdapter", () => {
     const clock = makeFakeClock();
 
     const probe = new CameraProbeAdapter({
-      adb,
+      ...sessionFor(adb),
       uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
       now: clock.now,
       sleep: clock.sleep
@@ -422,7 +445,7 @@ describe("CameraProbeAdapter", () => {
     const clock = makeFakeClock();
 
     const probe = new CameraProbeAdapter({
-      adb,
+      ...sessionFor(adb),
       uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
       now: clock.now,
       sleep: clock.sleep
@@ -447,7 +470,7 @@ describe("CameraProbeAdapter", () => {
     const clock = makeFakeClock();
 
     const probe = new CameraProbeAdapter({
-      adb,
+      ...sessionFor(adb),
       uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
       now: clock.now,
       sleep: clock.sleep
@@ -478,7 +501,7 @@ describe("CameraProbeAdapter", () => {
     const clock = makeFakeClock();
 
     const probe = new CameraProbeAdapter({
-      adb,
+      ...sessionFor(adb),
       uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
       now: clock.now,
       sleep: clock.sleep
@@ -508,7 +531,7 @@ describe("CameraProbeAdapter", () => {
     const clock = makeFakeClock();
 
     const probe = new CameraProbeAdapter({
-      adb,
+      ...sessionFor(adb),
       uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
       now: clock.now,
       sleep: clock.sleep
@@ -540,7 +563,7 @@ describe("CameraProbeAdapter", () => {
     const clock = makeFakeClock();
 
     const probe = new CameraProbeAdapter({
-      adb,
+      ...sessionFor(adb),
       uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
       now: clock.now,
       sleep: clock.sleep
@@ -573,7 +596,7 @@ describe("CameraProbeAdapter", () => {
     const clock = makeFakeClock();
 
     const probe = new CameraProbeAdapter({
-      adb,
+      ...sessionFor(adb),
       uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
       now: clock.now,
       sleep: clock.sleep
@@ -604,7 +627,7 @@ describe("CameraProbeAdapter", () => {
     const clock = makeFakeClock();
 
     const probe = new CameraProbeAdapter({
-      adb,
+      ...sessionFor(adb),
       uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
       now: clock.now,
       sleep: clock.sleep
@@ -635,7 +658,7 @@ describe("CameraProbeAdapter", () => {
     const clock = makeFakeClock();
 
     const probe = new CameraProbeAdapter({
-      adb,
+      ...sessionFor(adb),
       uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
       now: clock.now,
       sleep: clock.sleep
@@ -666,7 +689,7 @@ describe("CameraProbeAdapter", () => {
     const clock = makeFakeClock();
 
     const probe = new CameraProbeAdapter({
-      adb,
+      ...sessionFor(adb),
       uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
       now: clock.now,
       sleep: clock.sleep
@@ -702,7 +725,7 @@ describe("CameraProbeAdapter", () => {
     const clock = makeFakeClock();
 
     const probe = new CameraProbeAdapter({
-      adb,
+      ...sessionFor(adb),
       uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
       now: clock.now,
       sleep: clock.sleep
@@ -735,7 +758,7 @@ describe("CameraProbeAdapter", () => {
     const clock = makeFakeClock();
 
     const probe = new CameraProbeAdapter({
-      adb,
+      ...sessionFor(adb),
       uiSnapshots: uiSnapshotFactory(uiSnapshotProviderFromLayout(androidCli.layout, "DEVICE1")),
       now: clock.now,
       sleep: clock.sleep

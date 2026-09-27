@@ -13,13 +13,14 @@ import {
   hashGenerationConfirmationEvidence,
   verificationPhaseLabel
 } from "../../src/domain/generation.js";
-import { hashGoalSpec } from "../../src/domain/route.js";
+import { TEST_REPLAY_POLICY, TEST_SNAPSHOT_UI, TEST_UI_BACKEND } from "../fakes/ui-backend.js";
 
 const hashes = {
   projectHash: "d".repeat(64),
   configHash: "e".repeat(64),
   contextHash: "a".repeat(64),
-  snapshotHash: null
+  snapshotHash: null,
+  uiBackend: TEST_UI_BACKEND
 };
 
 const variables = {
@@ -66,7 +67,7 @@ describe("generation confirmation evidence", () => {
         activity: { before: "com.example.app.MainActivity" }
       },
       snapshot: {
-        version: 1 as const,
+        version: 2 as const,
         generationId: "generation-1",
         baseRevision: 1,
         deviceSerial: "emulator-5554",
@@ -75,7 +76,8 @@ describe("generation confirmation evidence", () => {
         activity: "com.example.app.MainActivity",
         pid: 42,
         capturedAt: "2026-07-22T12:00:00.000Z",
-        layout: []
+        layout: [],
+        ...TEST_SNAPSHOT_UI
       },
       source: "planner" as const
     };
@@ -126,6 +128,7 @@ function validSession(): unknown {
     inFlight: null,
     pendingConfirmation: null,
     verification: { status: "notRun" },
+    verificationHistory: [],
     publication: { status: "notRun" },
     externalFlows: []
   };
@@ -140,15 +143,7 @@ describe("generation error contract", () => {
       "BRIEF_INVALID",
       "KNOWLEDGE_INVALID",
       "KNOWLEDGE_STALE",
-      "SCREEN_UNKNOWN",
-      "SCREEN_AMBIGUOUS",
-      "NO_ROUTE",
-      "TARGET_UNKNOWN",
-      "ROUTE_LIMIT_EXCEEDED",
-      "ANCHOR_UNKNOWN",
       "ANCHOR_AMBIGUOUS",
-      "PARAMETER_MISSING",
-      "REPLAN_BUDGET_EXHAUSTED",
       "FLOW_INVALID",
       "FLOW_REPLAY_FAILED",
       "APP_LAUNCH_FAILED",
@@ -167,6 +162,8 @@ describe("generation error contract", () => {
       "IDLE_TIMEOUT",
       "WINDOW_HIERARCHY_INCOMPLETE",
       "ACTION_UNSUPPORTED",
+      "LOCATOR_NOT_FOUND",
+      "LOCATOR_AMBIGUOUS",
       "RISK_CONFIRMATION_REQUIRED",
       "ACTION_FORBIDDEN",
       "EXPECT_UNSUPPORTED",
@@ -179,75 +176,62 @@ describe("generation error contract", () => {
   });
 });
 
-describe("generation planning sessions", () => {
-  it("reads legacy v1 sessions and requires planning only for v2", () => {
+describe("generation session versions", () => {
+  it("accepts v1 sessions and rejects removed planning sessions", () => {
     expect(GenerationSessionSchema.parse(validSession())).toMatchObject({
       version: 1
     });
-    const goal = {
-      version: 1 as const,
-      id: "open-detail",
-      targetScreen: "detail",
-      parameters: {},
-      limits: { maxSteps: 5, maxReplans: 2 }
-    };
-    const v2 = {
-      ...(validSession() as object),
-      version: 2,
-      planning: {
-        knowledgeHash: "1".repeat(64),
-        goalHash: hashGoalSpec(goal),
-        goal,
-        currentScreen: null,
-        currentRoute: null,
-        replansUsed: 0,
-        maxReplans: 2,
-        maxSteps: 5
-      }
-    };
-    expect(GenerationSessionSchema.parse(v2)).toMatchObject({ version: 2 });
     expect(() => GenerationSessionSchema.parse({
       ...(validSession() as object),
       version: 2
-    })).toThrow(/requires planning/);
+    })).toThrow();
   });
 });
 
 describe("generation finalization evidence schemas", () => {
-  it("accepts old meta and validates optional Replay policy and Knowledge binding", () => {
-    const legacy = {
+  it("requires the Journey hash, UI backend, Replay policy, and Context selection", () => {
+    const meta = {
       version: 1,
       status: "verified",
       generationId: "generation-1",
       journeyPath: ".taphound/journeys/generated.json",
+      journeySha256: "e".repeat(64),
       bindings: {
         projectHash: "a".repeat(64),
         configHash: "b".repeat(64),
-        contextHash: "c".repeat(64)
+        contextHash: "c".repeat(64),
+        uiBackend: TEST_UI_BACKEND
       },
+      replayPolicy: TEST_REPLAY_POLICY,
+      contextSelection,
       verification: {
         reportPath: "verification/report.json",
         reportSha256: "d".repeat(64),
         runId: "verify-run",
         runs: 1
       },
-      manualOverrideStepIndexes: []
+      manualOverrideStepIndexes: [],
+      externalFlows: []
     };
-    expect(GenerationMetaSchema.parse(legacy).replayPolicy).toBeUndefined();
-    const current = {
-      ...legacy,
-      journeySha256: "e".repeat(64),
-      bindings: { ...legacy.bindings, knowledgeHash: "f".repeat(64) },
-      replayPolicy: {
-        generatedReplayPolicy: true,
-        requireFocusedInput: true,
-        idle: { strategy: "hybrid", pollIntervalMs: 100, stablePolls: 2, timeoutMs: 5000 }
-      }
-    };
-    expect(GenerationMetaSchema.parse(current)).toMatchObject(current);
+    expect(GenerationMetaSchema.parse(meta)).toMatchObject(meta);
+    for (const field of [
+      "journeySha256",
+      "replayPolicy",
+      "contextSelection",
+      "externalFlows"
+    ] as const) {
+      expect(GenerationMetaSchema.safeParse({
+        ...meta,
+        [field]: undefined
+      }).success).toBe(false);
+    }
+    expect(GenerationMetaSchema.safeParse({
+      ...meta,
+      bindings: { ...meta.bindings, knowledgeHash: "f".repeat(64) }
+    }).success).toBe(false);
     expect(() => GenerationMetaSchema.parse({
-      ...current,
-      replayPolicy: { ...current.replayPolicy, unexpected: true }
+      ...meta,
+      replayPolicy: { ...meta.replayPolicy, unexpected: true }
     })).toThrow();
   });
   it("parses aligned strict verified meta and provenance", () => {    expect(GenerationMetaSchema.parse({
@@ -258,7 +242,8 @@ describe("generation finalization evidence schemas", () => {
       bindings: {
         projectHash: "a".repeat(64),
         configHash: "b".repeat(64),
-        contextHash: "c".repeat(64)
+        contextHash: "c".repeat(64),
+        uiBackend: TEST_UI_BACKEND
       },
       verification: {
         reportPath: "verification/report.json",
@@ -274,7 +259,11 @@ describe("generation finalization evidence schemas", () => {
         verificationRunId: "base-run",
         stepCount: 1
       },
-      manualOverrideStepIndexes: [1]
+      manualOverrideStepIndexes: [1],
+      journeySha256: "e".repeat(64),
+      replayPolicy: TEST_REPLAY_POLICY,
+      contextSelection,
+      externalFlows: []
     })).toMatchObject({ status: "verified" });
     expect(GenerationReportSchema.parse({
       version: 1,
@@ -296,7 +285,8 @@ describe("generation finalization evidence schemas", () => {
       bindings: {
         projectHash: "a".repeat(64),
         configHash: "b".repeat(64),
-        contextHash: "c".repeat(64)
+        contextHash: "c".repeat(64),
+        uiBackend: TEST_UI_BACKEND
       },
       sourceBrief: {
         path: "docs/cases/search-brief.md",
@@ -308,7 +298,11 @@ describe("generation finalization evidence schemas", () => {
         runId: "verify-run",
         runs: 1
       },
-      manualOverrideStepIndexes: []
+      manualOverrideStepIndexes: [],
+      journeySha256: "e".repeat(64),
+      replayPolicy: TEST_REPLAY_POLICY,
+      contextSelection,
+      externalFlows: []
     };
     expect(GenerationMetaSchema.parse(meta).sourceBrief).toEqual({
       path: "docs/cases/search-brief.md",
@@ -337,7 +331,8 @@ describe("generation finalization evidence schemas", () => {
       bindings: {
         projectHash: "a".repeat(64),
         configHash: "b".repeat(64),
-        contextHash: "c".repeat(64)
+        contextHash: "c".repeat(64),
+        uiBackend: TEST_UI_BACKEND
       },
       verification: {
         reportPath: "verification/report.json",
@@ -345,7 +340,11 @@ describe("generation finalization evidence schemas", () => {
         runId: "verify-run",
         runs: 1
       },
-      manualOverrideStepIndexes: []
+      manualOverrideStepIndexes: [],
+      journeySha256: "e".repeat(64),
+      replayPolicy: TEST_REPLAY_POLICY,
+      contextSelection,
+      externalFlows: []
     };
     const promoted = GenerationMetaSchema.parse({
       ...meta,
@@ -384,7 +383,8 @@ describe("generation finalization evidence schemas", () => {
       bindings: {
         projectHash: "a".repeat(64),
         configHash: "b".repeat(64),
-        contextHash: "c".repeat(64)
+        contextHash: "c".repeat(64),
+        uiBackend: TEST_UI_BACKEND
       },
       contextSelection: {
         bundleVersion: 2,
@@ -405,15 +405,18 @@ describe("generation finalization evidence schemas", () => {
         runId: "verify-run",
         runs: 1
       },
-      manualOverrideStepIndexes: []
+      manualOverrideStepIndexes: [],
+      journeySha256: "e".repeat(64),
+      replayPolicy: TEST_REPLAY_POLICY,
+      externalFlows: []
     };
     expect(GenerationMetaSchema.parse(meta)).toMatchObject({
       contextSelection: { indexHash: "f".repeat(64) }
     });
-    expect(GenerationMetaSchema.parse({
+    expect(GenerationMetaSchema.safeParse({
       ...meta,
       contextSelection: undefined
-    }).contextSelection).toBeUndefined();
+    }).success).toBe(false);
     expect(() => GenerationMetaSchema.parse({
       ...meta,
       contextSelection: { ...meta.contextSelection, bundleVersion: 3 }
@@ -648,7 +651,8 @@ describe("GenerationSessionSchema", () => {
       bindings: {
         projectHash: "d".repeat(64),
         configHash: "e".repeat(64),
-        contextHash: "a".repeat(64)
+        contextHash: "a".repeat(64),
+        uiBackend: TEST_UI_BACKEND
       },
       target: session.target,
       contextSelection,

@@ -13,7 +13,7 @@ import {
   writeJson,
   writeLine
 } from "../output.js";
-import { assertNoLegacyWorkspace } from "../workspace-guard.js";
+import { prepareWorkspace } from "../workspace-guard.js";
 
 interface ClassifyOptions {
   project: string;
@@ -64,7 +64,7 @@ function createClassifyCommand(dependencies: CliDependencies): Command {
         return;
       }
       try {
-        await assertNoLegacyWorkspace(dependencies, options.project);
+        await prepareWorkspace(dependencies, options.project);
       } catch (error) {
         writeFailure(
           dependencies,

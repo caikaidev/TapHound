@@ -19,8 +19,7 @@ import type {
 import { projectRelativePath } from "../../shared/paths.js";
 import {
   assertProjectPathUnder,
-  CONTEXT_DIR,
-  TAPHOUND_DIR
+  CONTEXT_DIR
 } from "../../domain/workspace.js";
 import { compareStrings } from "../../shared/strings.js";
 import { assertShardIdentity } from "./shard-identity.js";
@@ -57,7 +56,6 @@ export interface LoadedContextIndex {
 
 export interface ContextLoadInput {
   projectRoot: string;
-  workspaceRoot?: string | undefined;
   contextPath: string;
   moduleIds?: string[] | undefined;
   allowIncomplete?: boolean | undefined;
@@ -256,34 +254,21 @@ export class ContextLoader {
     return { document, sha256: before.sha256 };
   };
 
-  private readonly contextRelativePath = (
-    workspaceRoot: string | undefined,
-    relativePath: string
-  ): string =>
-    workspaceRoot !== undefined && relativePath.startsWith(`${TAPHOUND_DIR}/`)
-      ? relativePath.slice(TAPHOUND_DIR.length + 1)
-      : relativePath;
-
   public readonly readIndex = async (input: {
     projectRoot: string;
-    workspaceRoot?: string | undefined;
     contextPath: string;
   }): Promise<LoadedContextIndex> => {
-    const contextRoot = input.workspaceRoot ?? input.projectRoot;
-    const contextPath = projectRelativePath(
+    const contextRoot = input.projectRoot;
+    const relativeContextPath = projectRelativePath(
       contextRoot,
       input.contextPath,
       (message) => new ContextLoadError("CONTEXT_INVALID", message)
-    );
-    const relativeContextPath = this.contextRelativePath(
-      input.workspaceRoot,
-      contextPath
     );
     try {
       assertProjectPathUnder(
         contextRoot,
         relativeContextPath,
-        input.workspaceRoot === undefined ? CONTEXT_DIR : "context",
+        CONTEXT_DIR,
         "Project Context"
       );
     } catch (error) {
@@ -328,15 +313,11 @@ export class ContextLoader {
       }
     }
 
-    const contextRoot = input.workspaceRoot ?? input.projectRoot;
     const modules: ProjectContextModule[] = [];
     for (const reference of references) {
       const loaded = await this.readStableDocument({
-        root: contextRoot,
-        relativePath: this.contextRelativePath(
-          input.workspaceRoot,
-          reference.contextPath
-        ),
+        root: input.projectRoot,
+        relativePath: reference.contextPath,
         label: "Context shard"
       });
       if (loaded.sha256 !== reference.sha256) {

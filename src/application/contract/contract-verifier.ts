@@ -15,7 +15,7 @@ import {
 import type { CheckpointDefinition } from "../../domain/checkpoint.js";
 import type { CheckpointReport, TapHoundReport } from "../../domain/report.js";
 import type { FailureCode } from "../../domain/failure.js";
-import type { RuntimeSnapshotV1 } from "../../domain/runtime-snapshot.js";
+import type { ScreenObservation } from "../recognition/screen-detector.js";
 import type { DeviceAssignment } from "../devices/resolve-device-assignments.js";
 import { resolveLocator } from "../locator/locator-resolver.js";
 import { ScreenDetector } from "../recognition/screen-detector.js";
@@ -31,7 +31,6 @@ import { ContractError, ContractLoader } from "./contract-loader.js";
 
 export interface ContractVerifyInput {
   projectRoot: string;
-  workspaceRoot?: string | undefined;
   config: TapHoundConfig;
   devices: DeviceAssignment[];
   toolVersions: Record<string, string>;
@@ -47,7 +46,6 @@ export interface ContractVerifierDependencies {
   verify: (input: VerifyInput) => Promise<VerifyResult>;
   loadKnowledge?: ((input: {
     projectRoot: string;
-    workspaceRoot?: string | undefined;
     packageName: string;
   }) => Promise<LoadedKnowledgeBundle>) | undefined;
   readText: (path: string) => Promise<string>;
@@ -113,24 +111,11 @@ function matchesCheckpoint(
   if (definition.stepIndex !== result.stepIndex) {
     return false;
   }
-  const expected = definition.expect.allOf?.map((condition) => [
+  const expected = definition.expect.allOf.map((condition) => [
     condition.kind,
     "locator" in condition ? condition.locator
       : "expect" in condition ? condition.expect : condition.expected
-  ]) ?? [
-    ...(definition.expect.activity === undefined ? [] : [
-      ["activity", definition.expect.activity]
-    ]),
-    ...(definition.expect.screen === undefined ? [] : [
-      ["screen", definition.expect.screen]
-    ]),
-    ...definition.expect.visibleElements.map((locator) => [
-      "visibleElement", locator
-    ]),
-    ...definition.expect.absentElements.map((locator) => [
-      "absentElement", locator
-    ])
-  ];
+  ]);
   return expected.length === result.conditions.length
     && result.conditions.every((condition, index) => {
       if (condition.kind === "logcatEvent" && condition.status === "passed"
@@ -215,7 +200,6 @@ export class ContractVerifier {
     try {
       loaded = await this.loader.load({
         projectRoot: input.projectRoot,
-        workspaceRoot: input.workspaceRoot,
         contractPath: input.contractPath
       });
     } catch (error) {
@@ -258,7 +242,6 @@ export class ContractVerifier {
       try {
         knowledge = await this.dependencies.loadKnowledge({
           projectRoot: input.projectRoot,
-          workspaceRoot: input.workspaceRoot,
           packageName: input.config.run.packageName
         });
       } catch (error) {
@@ -341,9 +324,6 @@ export class ContractVerifier {
         config: input.config,
         journey: loaded.journey,
         projectRoot: input.projectRoot,
-        ...(input.workspaceRoot === undefined
-          ? {}
-          : { workspaceRoot: input.workspaceRoot }),
         devices: input.devices,
         toolVersions: input.toolVersions,
         ...(input.generatedReplayPolicy === undefined
@@ -787,7 +767,7 @@ export class ContractVerifier {
     context: VerifyHookContext,
     packageName: string,
     timeoutMs: number
-  ): Promise<RuntimeSnapshotV1 | undefined> => {
+  ): Promise<ScreenObservation | undefined> => {
     let activity: string;
     try {
       activity = await context.adb.currentActivity({
@@ -799,15 +779,7 @@ export class ContractVerifier {
       return undefined;
     }
     return {
-      version: 1,
-      generationId: "contract",
-      baseRevision: 1,
-      deviceSerial: context.deviceSerial,
-      expectedPackageName: packageName,
-      foregroundPackageName: packageName,
       activity,
-      pid: null,
-      capturedAt: new Date(context.clock.now()).toISOString(),
       layout: [...context.snapshot.roots]
     };
   };

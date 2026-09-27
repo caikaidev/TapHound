@@ -356,6 +356,72 @@ describe("resolveLocator", () => {
     });
   });
 
+  it("touches the matched label, not the row center a child control covers", () => {
+    const row = element({
+      id: "row",
+      clickable: true,
+      bounds: { left: 0, top: 0, right: 1000, bottom: 200 },
+      children: [
+        element({
+          id: "label",
+          text: "Settings",
+          bounds: { left: 40, top: 50, right: 340, bottom: 150 }
+        }),
+        element({
+          id: "toggle",
+          clickable: true,
+          bounds: { left: 400, top: 50, right: 600, bottom: 150 }
+        })
+      ]
+    });
+
+    expect(resolveLocator([row], { text: "Settings" }, {
+      requiredCapability: "clickable"
+    })).toMatchObject({
+      status: "found",
+      element: { id: "row" },
+      point: { x: 190, y: 100 }
+    });
+  });
+
+  it("touches the capable ancestor center when the label lies outside it", () => {
+    const row = element({
+      id: "row",
+      clickable: true,
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+      children: [element({
+        id: "label",
+        text: "Overflowing",
+        bounds: { left: 200, top: 200, right: 300, bottom: 300 }
+      })]
+    });
+
+    expect(resolveLocator([row], { text: "Overflowing" }, {
+      requiredCapability: "clickable"
+    })).toMatchObject({ status: "found", point: { x: 50, y: 50 } });
+  });
+
+  it("reports a disabled capable ancestor instead of skipping past it", () => {
+    const root = element({
+      id: "outer",
+      clickable: true,
+      children: [element({
+        id: "inner",
+        clickable: true,
+        enabled: false,
+        children: [element({ id: "label", text: "Pay" })]
+      })]
+    });
+
+    expect(resolveLocator([root], { text: "Pay" }, {
+      requiredCapability: "clickable"
+    })).toMatchObject({
+      status: "failed",
+      code: "ACTION_FAILED",
+      message: "Layout element inner is disabled"
+    });
+  });
+
   it("does not promote to a non-clickable ancestor", () => {
     const root = element({
       id: "container",
@@ -455,5 +521,28 @@ describe("resolveLocator", () => {
       element: { id: "two" },
       matchedBy: "text"
     });
+  });
+
+  it("resolves indexed regex matches in document order across nesting", () => {
+    const roots = [element({
+      id: "root",
+      children: [
+        element({
+          id: "outer",
+          text: "row 1",
+          children: [element({ id: "inner", text: "row 2" })]
+        }),
+        element({ id: "sibling", text: "row 3" })
+      ]
+    })];
+
+    for (const [index, id] of ["outer", "inner", "sibling"].entries()) {
+      const resolution = resolveLocator(roots, {
+        text: "^row \\d$",
+        match: "regex",
+        index
+      });
+      expect(resolution).toMatchObject({ status: "found", element: { id } });
+    }
   });
 });

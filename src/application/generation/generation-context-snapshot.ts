@@ -19,7 +19,7 @@ export interface GenerationContextSnapshotDependencies {
 export const readGenerationContextSnapshot = async (
   dependencies: GenerationContextSnapshotDependencies,
   sessionId: string
-): Promise<ResolvedProjectContext | null> => {
+): Promise<ResolvedProjectContext> => {
   let bytes: Buffer;
   try {
     bytes = await dependencies.store.readEvidence(
@@ -31,7 +31,10 @@ export const readGenerationContextSnapshot = async (
       error instanceof GenerationSessionStoreError
       && error.code === "EVIDENCE_NOT_FOUND"
     ) {
-      return null;
+      throw new GenerationOperationError(
+        "CONTEXT_INVALID",
+        "Generation session has no stored context snapshot; start a new session"
+      );
     }
     throw error;
   }

@@ -733,6 +733,69 @@ describe("RecorderService", () => {
     expect(recorderPrompt.notifyExternalReturn).toHaveBeenCalled();
   });
 
+  it("fails the bridge when an external step leaves the app unsettled", async () => {
+    const runtime = runtimeFixture();
+    // The trigger opens the camera; the external click starts an animation
+    // that never settles, so the device no longer matches any recording.
+    let taps = 0;
+    vi.mocked(runtime.adb.tap).mockImplementation(() => {
+      taps += 1;
+      return Promise.resolve(commandResult());
+    });
+    vi.mocked(runtime.adb.foregroundComponent).mockImplementation(() => (
+      Promise.resolve(taps === 0
+        ? {
+            packageName: "com.example.app",
+            activity: "com.example.app.MainActivity"
+          }
+        : {
+            packageName: "com.android.camera",
+            activity: "com.android.camera.CameraActivity"
+          })
+    ));
+    vi.mocked(runtime.androidCli.sample).mockImplementation(() => (
+      Promise.resolve(taps >= 2 ? [{ changed: "text" }] : [])
+    ));
+    const recorderPrompt = prompt(["bridgeTrigger", "finish"]);
+    vi.mocked(recorderPrompt.selectExternalStepAction)
+      .mockResolvedValueOnce("click")
+      .mockResolvedValueOnce("finishExternal");
+    vi.mocked(recorderPrompt.selectBridgeScenario).mockResolvedValue("photoCapture");
+    vi.mocked(recorderPrompt.inputBridgeDescription).mockResolvedValue("Take a photo");
+    vi.mocked(recorderPrompt.inputBridgeReturnTimeoutMs).mockResolvedValue(30000);
+    const journeyWriter = writer();
+    const service = new RecorderService({
+      sessions: runtime.dependencies.sessions,
+      sessionPorts: runtime.dependencies.sessionPorts,
+      clock: runtime.dependencies.clock,
+      prompt: recorderPrompt,
+      journeyWriter
+    });
+
+    const result = await service.record({
+      config: {
+        ...runtimeConfig,
+        idle: {
+          strategy: "hybrid",
+          pollIntervalMs: 100,
+          stablePolls: 2,
+          timeoutMs: 500
+        }
+      },
+      projectRoot: "/project",
+      deviceSerial: "emulator-5554",
+      journeyName: "Unsettled camera",
+      outputPath: "/project/unsettled.json"
+    });
+
+    expect(result).toMatchObject({ status: "failed", stepsRecorded: 0 });
+    if (result.status !== "failed") throw new Error("Expected a failure");
+    expect(result.message).toContain("did not become stable");
+    expect(taps).toBe(2);
+    expect(recorderPrompt.selectExternalStepAction).toHaveBeenCalledOnce();
+    expect(journeyWriter.write).not.toHaveBeenCalled();
+  });
+
   it("skips the bridge step when the trigger does not cause a package escape", async () => {
     const runtime = runtimeFixture();
     vi.mocked(runtime.adb.foregroundComponent).mockResolvedValue({
@@ -946,27 +1009,27 @@ describe("RecorderService", () => {
 
   it("records an external back step that causes the app to return", async () => {
     const runtime = runtimeFixture();
-    vi.mocked(runtime.adb.foregroundComponent)
-      .mockResolvedValueOnce({
-        packageName: "com.example.app",
-        activity: "com.example.app.MainActivity"
-      })
-      .mockResolvedValueOnce({
-        packageName: "com.android.camera",
-        activity: "com.android.camera.CameraActivity"
-      })
-      .mockResolvedValueOnce({
-        packageName: "com.android.camera",
-        activity: "com.android.camera.CameraActivity"
-      })
-      .mockResolvedValueOnce({
-        packageName: "com.example.app",
-        activity: "com.example.app.MainActivity"
-      })
-      .mockResolvedValueOnce({
-        packageName: "com.example.app",
-        activity: "com.example.app.MainActivity"
-      });
+    // The trigger tap opens the camera; Back returns to the app.
+    let inCamera = false;
+    vi.mocked(runtime.adb.tap).mockImplementation(() => {
+      inCamera = true;
+      return Promise.resolve(commandResult());
+    });
+    vi.mocked(runtime.adb.back).mockImplementation(() => {
+      inCamera = false;
+      return Promise.resolve(commandResult());
+    });
+    vi.mocked(runtime.adb.foregroundComponent).mockImplementation(() => (
+      Promise.resolve(inCamera
+        ? {
+            packageName: "com.android.camera",
+            activity: "com.android.camera.CameraActivity"
+          }
+        : {
+            packageName: "com.example.app",
+            activity: "com.example.app.MainActivity"
+          })
+    ));
     vi.mocked(runtime.adb.currentActivity)
       .mockResolvedValueOnce("com.example.app.MainActivity")
       .mockResolvedValueOnce("com.example.app.MainActivity");

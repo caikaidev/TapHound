@@ -1,3 +1,4 @@
+import type { LogcatOptions } from "../../../src/ports/adb.js";
 import { describe, expect, it, vi } from "vitest";
 import {
   uiSnapshotProviderFromLayout
@@ -38,6 +39,7 @@ import { contextSelection } from "../../fixtures/project-context.js";
 import type { ExternalFlow } from "../../../src/domain/external-flow.js";
 import type { UiSnapshotProvider } from "../../../src/ports/ui-snapshot.js";
 import type { DisplayViewport } from "../../../src/domain/geometry.js";
+import { TEST_SNAPSHOT_UI, TEST_UI_BACKEND } from "../../fakes/ui-backend.js";
 
 const activity = "com.example.app.MainActivity";
 const afterActivity = "com.example.app.AfterActivity";
@@ -63,7 +65,7 @@ const target = {
 
 function snapshot(): RuntimeSnapshot {
   return {
-    version: 1,
+    version: 2,
     generationId: "generation-1",
     baseRevision: 2,
     deviceSerial: "emulator-5554",
@@ -72,7 +74,8 @@ function snapshot(): RuntimeSnapshot {
     activity,
     pid: 42,
     capturedAt: "2026-07-22T12:00:00.000Z",
-    layout: [target]
+    layout: [target],
+    ...TEST_SNAPSHOT_UI
   };
 }
 
@@ -115,7 +118,8 @@ function session(
       projectHash: "a".repeat(64),
       configHash: "b".repeat(64),
       contextHash: "c".repeat(64),
-      snapshotHash: hashRuntimeSnapshot(runtime)
+      snapshotHash: hashRuntimeSnapshot(runtime),
+      uiBackend: TEST_UI_BACKEND
     },
     target: {
       packageName: "com.example.app",
@@ -139,6 +143,8 @@ function session(
     pendingConfirmation: null,
     verification: { status: "notRun" },
     publication: { status: "notRun" },
+    verificationHistory: [],
+    externalFlows: [],
     ...overrides
   });
 }
@@ -200,15 +206,17 @@ function harness(
     completion: Promise.resolve(ok),
     stop: stopLogcat
   };
-  let foregroundCalls = 0;
+  // The app shows the before Activity until an action runs.
+  let acted = false;
+  const act = (): Promise<typeof ok> => {
+    acted = true;
+    return Promise.resolve(ok);
+  };
   const adb = {
-    foregroundComponent: vi.fn(() => {
-      foregroundCalls += 1;
-      return Promise.resolve({
-        packageName: "com.example.app",
-        activity: foregroundCalls <= 3 ? activity : afterActivity
-      });
-    }),
+    foregroundComponent: vi.fn(() => Promise.resolve({
+      packageName: "com.example.app",
+      activity: acted ? afterActivity : activity
+    })),
     currentActivity: vi.fn(() => Promise.resolve(afterActivity)),
     appProcesses: vi.fn(() => Promise.resolve([
       { pid: 42, name: "com.example.app" }
@@ -221,12 +229,12 @@ function harness(
     })),
     tap: vi.fn(() => {
       calls.push("action");
-      return Promise.resolve(ok);
+      return act();
     }),
-    longClick: vi.fn(() => Promise.resolve(ok)),
-    swipe: vi.fn(() => Promise.resolve(ok)),
-    back: vi.fn(() => Promise.resolve(ok)),
-    inputText: vi.fn(() => Promise.resolve(ok)),
+    longClick: vi.fn(act),
+    swipe: vi.fn(act),
+    back: vi.fn(act),
+    inputText: vi.fn(act),
     startLogcat: vi.fn(() => running)
   };
   const guard = vi.fn(() => {
@@ -428,7 +436,8 @@ describe("GenerationStepExecutor", () => {
     const openOptions = test.executorOpenUiSnapshots;
     expect(openOptions).toHaveBeenCalledOnce();
     expect(openOptions).toHaveBeenCalledWith({
-      timeoutMs: 10
+      timeoutMs: 10,
+      backend: "system-uiautomator"
     });
     expect(test.createFreshnessGuard).toHaveBeenCalledOnce();
     expect(test.guard).toHaveBeenCalledOnce();
@@ -458,7 +467,8 @@ describe("GenerationStepExecutor", () => {
     })).resolves.toMatchObject({ status: "succeeded" });
 
     expect(test.executorOpenUiSnapshots).toHaveBeenCalledWith({
-      timeoutMs: 30000
+      timeoutMs: 30000,
+      backend: "system-uiautomator"
     });
     expect(test.androidCli.layoutDiff).toHaveBeenCalledTimes(5);
   });
@@ -607,13 +617,22 @@ describe("GenerationStepExecutor", () => {
   });
 
   it("does not execute an action whose live geometry is outside the viewport", async () => {
-    const runtime = snapshot();
+    const runtime: RuntimeSnapshot = {
+      ...snapshot(),
+      viewport: {
+        width: 80,
+        height: 80,
+        rotation: 0,
+        coordinateSpace: "physicalDisplayPixels"
+      }
+    };
     const test = harness(session(runtime), () => "attempt-1", false, {
       width: 80,
       height: 80,
       rotation: 0,
       coordinateSpace: "physicalDisplayPixels"
     });
+    test.guard.mockResolvedValueOnce(runtime);
 
     const result = await test.execute({
       generationId: "generation-1",
@@ -1414,21 +1433,6 @@ describe("GenerationStepExecutor", () => {
     expect(test.current().candidateSteps).toHaveLength(1);
   });
 
-  it("captures the pre-action Layout when the freshness snapshot is legacy", async () => {
-    const runtime = snapshot();
-    const test = harness(session(runtime));
-
-    const result = await test.execute({
-      generationId: "generation-1",
-      proposal: proposal(runtime),
-      snapshot: runtime,
-      source: "planner"
-    });
-
-    expect(result.status).toBe("succeeded");
-    expect(test.androidCli.layout).toHaveBeenCalledTimes(2);
-  });
-
   it("settles an Element Expect on the post-action Layout without observing again", async () => {
     const runtime = snapshot();
     const test = harness(session(runtime));
@@ -1448,7 +1452,9 @@ describe("GenerationStepExecutor", () => {
     });
 
     expect(result).toMatchObject({ status: "succeeded" });
-    expect(test.androidCli.layout).toHaveBeenCalledTimes(2);
+    // The pre-action Layout reuses the freshness capture; only the
+    // post-action Layout is captured, and the Expect settles on it.
+    expect(test.androidCli.layout).toHaveBeenCalledOnce();
     expect(test.current().candidateSteps).toHaveLength(1);
   });
 
@@ -1611,59 +1617,11 @@ describe("GenerationStepExecutor", () => {
       test.adb.appProcesses.mockResolvedValueOnce([
         { pid: 99, name: "com.example.app" }
       ]);
-    }, "APP_CRASHED"],
-    ["Layout drift", (test: ReturnType<typeof harness>): void => {
-      test.androidCli.layout.mockResolvedValueOnce([{
-        ...target,
-        text: "Changed"
-      }]);
-    }, "SNAPSHOT_STALE"]
+    }, "APP_CRASHED"]
   ])("blocks action on post-begin %s", async (_name, mutate, code) => {
     const runtime = snapshot();
     const test = harness(session(runtime));
     mutate(test);
-
-    const result = await test.execute({
-      generationId: "generation-1",
-      proposal: proposal(runtime),
-      snapshot: runtime,
-      source: "planner"
-    });
-
-    expect(result).toMatchObject({ status: "failed", failure: { code } });
-    expect(test.adb.tap).not.toHaveBeenCalled();
-    expect(test.current().state).toBe("recoveryRequired");
-  });
-
-  it.each([
-    ["package", "PACKAGE_ESCAPE"],
-    ["Activity", "SNAPSHOT_STALE"],
-    ["PID", "APP_CRASHED"]
-  ])("blocks action when %s changes while Layout is pending", async (
-    identity,
-    code
-  ) => {
-    const runtime = snapshot();
-    const test = harness(session(runtime));
-    let layoutReturned = false;
-    test.adb.foregroundComponent.mockImplementation((() => Promise.resolve({
-      packageName: identity === "package" && layoutReturned
-        ? "com.android.systemui"
-        : "com.example.app",
-      activity: identity === "Activity" && layoutReturned
-        ? "com.example.app.OtherActivity"
-        : activity
-    })) as never);
-    test.adb.appProcesses.mockImplementation((() => Promise.resolve(
-      identity === "PID" && layoutReturned
-        ? [{ pid: 99, name: "com.example.app" }]
-        : [{ pid: 42, name: "com.example.app" }]
-    )) as never);
-    test.androidCli.layout.mockImplementationOnce((async () => {
-      await Promise.resolve();
-      layoutReturned = true;
-      return runtime.layout;
-    }) as never);
 
     const result = await test.execute({
       generationId: "generation-1",
@@ -1700,54 +1658,85 @@ describe("GenerationStepExecutor", () => {
     expect(test.current().state).toBe("recoveryRequired");
   });
 
-  it("rechecks identity after Expect passes", async () => {
+  it("rechecks identity after a Logcat Expect, which proves nothing about the screen", async () => {
     const runtime = snapshot();
     const test = harness(session(runtime));
-    test.adb.foregroundComponent
-      .mockResolvedValueOnce({
+    let emit: ((line: string) => void) | undefined;
+    test.adb.startLogcat.mockImplementation(((options: LogcatOptions) => {
+      emit = options.onStdoutLine;
+      return {
+        started: Promise.resolve(undefined),
+        completion: Promise.resolve(ok),
+        stop: test.stopLogcat
+      };
+    }) as never);
+    // The action logs "ready", then the app leaves for another Activity
+    // after the post-action observation but before the step completes.
+    let acted = false;
+    let postActionReads = 0;
+    test.adb.tap.mockImplementation((() => {
+      acted = true;
+      emit?.("09-26 12:00:01.000    42    42 I App: ready");
+      return Promise.resolve(ok);
+    }) as never);
+    test.adb.foregroundComponent.mockImplementation((() => {
+      if (acted) postActionReads += 1;
+      return Promise.resolve({
         packageName: "com.example.app",
-        activity
-      })
-      .mockResolvedValueOnce({
-        packageName: "com.example.app",
-        activity
-      })
-      .mockResolvedValueOnce({
-        packageName: "com.example.app",
-        activity: afterActivity
-      })
-      .mockResolvedValueOnce({
-        packageName: "com.example.app",
-        activity: afterActivity
-      })
-      .mockResolvedValueOnce({
-        packageName: "com.example.app",
-        activity: afterActivity
-      })
-      .mockResolvedValueOnce({
-        packageName: "com.example.app",
-        activity: "com.example.app.EscapedActivity"
+        activity: !acted
+          ? activity
+          : postActionReads === 1
+            ? afterActivity
+            : "com.example.app.EscapedActivity"
       });
-    const expected: ProposedStep = {
-      ...proposal(runtime),
-      expect: {
-        type: "activity",
-        value: afterActivity,
-        timeoutMs: 10
-      }
-    };
+    }) as never);
 
     const result = await test.execute({
       generationId: "generation-1",
-      proposal: expected,
+      proposal: {
+        ...proposal(runtime),
+        expect: {
+          type: "logcat",
+          tag: "App",
+          pattern: "ready",
+          match: "literal",
+          timeoutMs: 10
+        }
+      },
       snapshot: runtime,
       source: "planner"
     });
 
+    expect(test.adb.tap).toHaveBeenCalledOnce();
     expect(result).toMatchObject({
       status: "failed",
-      failure: { code: "SNAPSHOT_STALE" }
+      failure: {
+        code: "SNAPSHOT_STALE",
+        message: "Generation Activity changed unexpectedly"
+      }
     });
+  });
+
+  it("does not recheck identity after an Activity Expect already proved it", async () => {
+    const runtime = snapshot();
+    const test = harness(session(runtime));
+
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: {
+        ...proposal(runtime),
+        expect: { type: "activity", value: afterActivity, timeoutMs: 10 }
+      },
+      snapshot: runtime,
+      source: "planner"
+    });
+
+    expect(result.status).toBe("succeeded");
+    // Pre-action: the guarded read and the pre-mutation check. Post-action:
+    // the read before and after its own Layout capture (this idle backend
+    // settles without a Layout). The Expect: one guarded read, and nothing
+    // after it.
+    expect(test.adb.foregroundComponent).toHaveBeenCalledTimes(5);
   });
 
   it("lets an Activity Expect poll from checkpoint A to expected B", async () => {
@@ -2121,7 +2110,8 @@ describe("GenerationStepExecutor", () => {
       ...test.current(),
       bindings: {
         ...test.current().bindings,
-        snapshotHash: hashRuntimeSnapshot(retryRuntime)
+        snapshotHash: hashRuntimeSnapshot(retryRuntime),
+        uiBackend: TEST_UI_BACKEND
       }
     });
     test.guard.mockResolvedValueOnce(retryRuntime);
@@ -2368,7 +2358,7 @@ describe("GenerationStepExecutor", () => {
     test.androidCli.layout.mockImplementation((async () => {
       layoutCalls += 1;
       await Promise.resolve();
-      if (layoutCalls === 2) {
+      if (layoutCalls === 1) {
         escaped = true;
       }
       return layout;
@@ -2722,9 +2712,7 @@ describe("GenerationStepExecutor", () => {
       { packageName: "com.example.app", activity: afterActivity },
       { packageName: "com.example.app", activity: afterActivity }
     ]);
-    test.androidCli.layout
-      .mockResolvedValueOnce([target])
-      .mockResolvedValueOnce([externalTarget]);
+    test.androidCli.layout.mockResolvedValueOnce([externalTarget]);
 
     const result = await test.execute({
       generationId: "generation-1",
@@ -2921,9 +2909,7 @@ describe("GenerationStepExecutor", () => {
       { packageName: "com.android.camera", activity: cameraActivity },
       { packageName: "com.android.camera", activity: cameraActivity }
     ]);
-    test.androidCli.layout
-      .mockResolvedValueOnce([target])
-      .mockResolvedValueOnce([externalTarget]);
+    test.androidCli.layout.mockResolvedValueOnce([externalTarget]);
 
     const result = await test.execute({
       generationId: "generation-1",

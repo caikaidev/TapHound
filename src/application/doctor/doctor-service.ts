@@ -56,7 +56,8 @@ export interface DoctorRunInput {
 
 export interface DoctorDependencies {
   runner: ProcessRunner;
-  adb: AdbPort;
+  /** Device listing and the install probe; each probe borrows a session. */
+  adb: Pick<AdbPort, "devices" | "isInstalled">;
   nodeVersion: string;
   runtimeBackendId: RuntimeBackendId;
   checkAndroidPermissions: (

@@ -333,7 +333,7 @@ describe("ContractVerifier", () => {
       journey: { path: ".taphound/journeys/search.json", sha256 },
       requiredCheckpoints: ["search-event"]
     };
-    const eventCondition = journey.checkpoints?.[0]?.expect.allOf?.[1];
+    const eventCondition = journey.checkpoints?.[0]?.expect.allOf[1];
     if (eventCondition?.kind !== "logcatEvent") {
       throw new Error("Missing event Checkpoint fixture");
     }
@@ -397,7 +397,12 @@ describe("ContractVerifier", () => {
         id: "search-ready",
         name: "Search ready",
         stepIndex: 0,
-        expect: { absentElements: [{ resourceId: "loading" }] }
+        expect: {
+          allOf: [
+            { kind: "absentElement", locator: { resourceId: "loading" } }
+          ],
+          timeoutMs: 100
+        }
       }]
     };
     const contract = {
@@ -779,14 +784,12 @@ describe("ContractVerifier", () => {
           packageName: "com.example.app",
           revision: 1,
           anchors: [],
-          screens: [],
-          transitions: []
+          screens: []
         },
         indexSha256: "a".repeat(64),
         knowledgeHash: "b".repeat(64),
         anchors: [],
-        screens: [],
-        transitions: []
+        screens: []
       },
       readText: readTextStub({
         [JOURNEY_PATH]: JOURNEY_TEXT,

@@ -20,6 +20,7 @@ import {
   GenerationSessionStoreError
 } from "../../../src/ports/generation-session-store.js";
 import { resolvedProjectContext } from "../../fixtures/project-context.js";
+import { TEST_UI_BACKEND } from "../../fakes/ui-backend.js";
 
 const roots: string[] = [];
 
@@ -40,7 +41,8 @@ function session(contextHash: string): GenerationSession {
       projectHash: "0".repeat(64),
       configHash: "1".repeat(64),
       contextHash,
-      snapshotHash: null
+      snapshotHash: null,
+      uiBackend: TEST_UI_BACKEND
     },
     target: {
       packageName: "com.example.app",
@@ -60,7 +62,8 @@ function session(contextHash: string): GenerationSession {
     pendingConfirmation: null,
     verification: { status: "notRun" },
     publication: { status: "notRun" },
-    externalFlows: []
+    externalFlows: [],
+    verificationHistory: []
   };
 }
 
@@ -74,7 +77,7 @@ async function store(): Promise<{
 }
 
 describe("readGenerationContextSnapshot", () => {
-  it("returns null for legacy sessions without stored snapshot evidence", async () => {
+  it("rejects a session without stored snapshot evidence", async () => {
     const test = await store();
     await test.store.create(
       session(hashGenerationBinding(resolvedProjectContext))
@@ -82,7 +85,7 @@ describe("readGenerationContextSnapshot", () => {
 
     await expect(
       readGenerationContextSnapshot({ store: test.store }, "generation-1")
-    ).resolves.toBeNull();
+    ).rejects.toMatchObject({ code: "CONTEXT_INVALID" });
   });
 
   it("round-trips the persisted session context snapshot", async () => {

@@ -61,6 +61,7 @@ import type { AnnotatedScreenResolverPort } from "../../../src/ports/annotated-s
 import type { UiStabilityProbe } from "../../../src/ports/ui-stability.js";
 import type { UiSnapshotProvider } from "../../../src/ports/ui-snapshot.js";
 import { contextSelection } from "../../fixtures/project-context.js";
+import { TEST_SNAPSHOT_UI } from "../../fakes/ui-backend.js";
 
 const roots: string[] = [];
 
@@ -327,9 +328,6 @@ async function createLifecycleFixture(): Promise<LifecycleFixture> {
 
   const finalizer = new GenerationFinalizer({
     store,
-    contextValidator: {
-      validate: vi.fn(() => Promise.resolve({ status: "valid" as const }))
-    },
     verifyRuntime: { verify },
     publisher,
     generateAttemptId: (): string => "verification-attempt"
@@ -361,7 +359,7 @@ const expectedWindowHierarchy = assessWindowHierarchy(topologyMock, [layoutEleme
 
 function buildSnapshotFromSession(session: GenerationSession): RuntimeSnapshot {
   return {
-    version: 1,
+    version: 2,
     generationId: session.id,
     baseRevision: session.revision,
     deviceSerial: session.target.deviceSerial,
@@ -371,7 +369,8 @@ function buildSnapshotFromSession(session: GenerationSession): RuntimeSnapshot {
     pid: 42,
     capturedAt: "2026-07-22T12:00:01.000Z",
     layout: [layoutElement],
-    windowHierarchy: expectedWindowHierarchy
+    windowHierarchy: expectedWindowHierarchy,
+    ...TEST_SNAPSHOT_UI
   };
 }
 
@@ -494,6 +493,11 @@ function makeBackProposal(
     activity: { before: activity }
   };
 }
+
+// The full lifecycle writes through the durable session Store (fsync per
+// write). It takes ~10 s alone and exceeds the default budget when the
+// suite's parallel workers contend for fsync.
+const DURABLE_LIFECYCLE_TIMEOUT_MS = 120_000;
 
 describe("Generation lifecycle regression", () => {
   it("executes start → observe → click → back+confirmation → click → finalize with consistent revisions", async () => {
@@ -688,7 +692,7 @@ describe("Generation lifecycle regression", () => {
     const manifest = JSON.parse(manifestText) as { files: { path: string }[] };
     expect(manifest.files.map((f) => f.path)).toContain("verified/journey.json");
     expect(manifest.files.map((f) => f.path)).toContain("verification/report.json");
-  });
+  }, DURABLE_LIFECYCLE_TIMEOUT_MS);
 
   it("rejects finalize when verification report has fallbackUsed", async () => {
     const test = await createLifecycleFixture();
@@ -765,7 +769,7 @@ describe("Generation lifecycle regression", () => {
     });
 
     const staleSnapshot: RuntimeSnapshot = {
-      version: 1,
+      version: 2,
       generationId: "generation-core-id",
       baseRevision: 99,
       deviceSerial,
@@ -774,7 +778,8 @@ describe("Generation lifecycle regression", () => {
       activity,
       pid: 42,
       capturedAt: "2026-07-22T12:00:01.000Z",
-      layout: [layoutElement]
+      layout: [layoutElement],
+      ...TEST_SNAPSHOT_UI
     };
 
     const staleProposal: ProposedStep = {

@@ -3,13 +3,13 @@ import type {
   ScreenDefinition,
   StatePredicate
 } from "../../domain/knowledge.js";
-import type {
-  ScreenDetectionReceipt
-} from "../../domain/knowledge-receipt.js";
-import {
-  hashRuntimeSnapshot,
-  type RuntimeSnapshot
-} from "../../domain/runtime-snapshot.js";
+import type { RuntimeSnapshot } from "../../domain/runtime-snapshot.js";
+
+/** The runtime facts Screen detection reads; any live observation provides them. */
+export type ScreenObservation = Pick<
+  RuntimeSnapshot,
+  "activity" | "layout" | "windowHierarchy"
+>;
 import {
   resolveLocatorIdentity
 } from "../locator/locator-resolver.js";
@@ -20,7 +20,10 @@ export type AnchorMatchResult = {
   detail?: string | undefined;
 };
 
-export type ScreenDetectionResult = ScreenDetectionReceipt["result"];
+export type ScreenDetectionResult =
+  | { status: "matched"; screenId: string; evidence: AnchorMatchResult[] }
+  | { status: "ambiguous"; screenIds: string[]; evidence: AnchorMatchResult[] }
+  | { status: "unknown"; evidence: AnchorMatchResult[] };
 
 function matchesWindow(
   value: { title: string; packageName: string; type?: string | undefined },
@@ -35,7 +38,7 @@ function matchesWindow(
 }
 
 function matchAnchor(
-  snapshot: RuntimeSnapshot,
+  snapshot: ScreenObservation,
   anchor: AnchorDefinition
 ): AnchorMatchResult {
   switch (anchor.identity.kind) {
@@ -87,7 +90,7 @@ function matchAnchor(
 
 function predicateResult(
   predicate: StatePredicate,
-  snapshot: RuntimeSnapshot,
+  snapshot: ScreenObservation,
   evidence: ReadonlyMap<string, AnchorMatchResult>
 ): "match" | "noMatch" | "unknown" {
   if (predicate.kind === "activityIs") {
@@ -104,7 +107,7 @@ function predicateResult(
 
 function screenResult(
   screen: ScreenDefinition,
-  snapshot: RuntimeSnapshot,
+  snapshot: ScreenObservation,
   evidence: ReadonlyMap<string, AnchorMatchResult>
 ): "match" | "noMatch" | "unknown" {
   let unknown = false;
@@ -128,7 +131,7 @@ function screenResult(
 
 export class ScreenDetector {
   public readonly detect = (input: {
-    snapshot: RuntimeSnapshot;
+    snapshot: ScreenObservation;
     anchors: readonly AnchorDefinition[];
     screens: readonly ScreenDefinition[];
   }): ScreenDetectionResult => {
@@ -154,21 +157,4 @@ export class ScreenDetector {
     }
     return { status: "unknown", evidence };
   };
-
-  public readonly receipt = (input: {
-    id: string;
-    recordedAt: string;
-    knowledgeHash: string;
-    snapshot: RuntimeSnapshot;
-    anchors: readonly AnchorDefinition[];
-    screens: readonly ScreenDefinition[];
-  }): ScreenDetectionReceipt => ({
-    version: 1,
-    id: input.id,
-    kind: "screenDetection",
-    recordedAt: input.recordedAt,
-    knowledgeHash: input.knowledgeHash,
-    snapshotHash: hashRuntimeSnapshot(input.snapshot),
-    result: this.detect(input)
-  });
 }

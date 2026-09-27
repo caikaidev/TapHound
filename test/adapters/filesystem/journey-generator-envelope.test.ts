@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
+import { TEST_SNAPSHOT_UI } from "../../fakes/ui-backend.js";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const helper = join(
@@ -149,7 +150,7 @@ describe("journey-generator envelope helper", () => {
       version: 1,
       proposal: proposal(),
       snapshot: {
-        version: 1,
+        version: 2,
         generationId: "generation-1",
         baseRevision: 6,
         deviceSerial: "emulator-5554",
@@ -158,7 +159,8 @@ describe("journey-generator envelope helper", () => {
         activity: "com.example.app.MainActivity",
         pid: 1234,
         capturedAt: "2026-09-17T12:00:00.000Z",
-        layout: []
+        layout: [],
+        ...TEST_SNAPSHOT_UI
       }
     });
     const result = command("validate", "--input", input);

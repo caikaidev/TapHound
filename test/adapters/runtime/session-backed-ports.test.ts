@@ -10,8 +10,7 @@ import {
 import {
   FailClosedAnnotatedScreenResolver,
   SessionBackedScreenshotAdapter,
-  SessionBackedUiSnapshotProviderFactory,
-  SessionBackedUiStabilityAdapter
+  SessionBackedUiSnapshotProviderFactory
 } from "../../../src/adapters/runtime/session-backed-ports.js";
 import type { RuntimeSession } from "../../../src/ports/runtime-backend.js";
 import type {
@@ -92,31 +91,6 @@ describe("SessionBackedScreenshotAdapter", () => {
     await adapter.capture({ deviceSerial: "emulator-5554", outputPath: "/b.png" });
 
     expect(sessions).toHaveLength(1);
-  });
-});
-
-describe("SessionBackedUiStabilityAdapter", () => {
-  it("samples through the session for the requested serial", async () => {
-    const { backend, samples } = backendWithRecordingSessions();
-    const adapter = new SessionBackedUiStabilityAdapter(backend);
-
-    await adapter.sample({ deviceSerial: "emulator-5554" });
-
-    expect(samples).toHaveBeenCalledWith({ deviceSerial: "emulator-5554" });
-  });
-
-  it("resets every session that has been sampled", async () => {
-    const { backend, resets } = backendWithRecordingSessions();
-    const adapter = new SessionBackedUiStabilityAdapter(backend);
-
-    adapter.reset();
-    expect(resets).not.toHaveBeenCalled();
-
-    await adapter.sample({ deviceSerial: "emulator-5554" });
-    await adapter.sample({ deviceSerial: "emulator-5556" });
-    adapter.reset();
-
-    expect(resets).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -25,11 +25,6 @@ import type {
   GenerationSessionStore
 } from "../../ports/generation-session-store.js";
 import {
-  GoalSpecSchema,
-  hashGoalSpec,
-  type GoalSpec
-} from "../../domain/route.js";
-import {
   JourneySchema,
   type Journey,
   type JourneyStep
@@ -78,7 +73,6 @@ export interface GenerationExternalFlowInput {
 
 export interface GenerationStartInput {
   projectRoot: string;
-  workspaceRoot?: string | undefined;
   config: TapHoundConfig;
   context: ResolvedProjectContext;
   project: ProjectDescription;
@@ -94,10 +88,6 @@ export interface GenerationStartInput {
   } | undefined;
   externalFlows?: readonly GenerationExternalFlowInput[] | undefined;
   sourceBrief?: { path: string; sha256: string } | undefined;
-  planning?: {
-    knowledgeHash: string;
-    goal: GoalSpec;
-  } | undefined;
 }
 
 export interface GenerationStarterDependencies {
@@ -390,14 +380,8 @@ export class GenerationStarter {
 
     const generationId = this.dependencies.generateId();
     const runId = distinctId(generationId, this.dependencies.generateId);
-    const planning = input.planning === undefined
-      ? undefined
-      : {
-          knowledgeHash: input.planning.knowledgeHash,
-          goal: GoalSpecSchema.parse(input.planning.goal)
-        };
     const session = GenerationSessionSchema.parse({
-      version: planning === undefined ? 1 : 2,
+      version: 1,
       id: generationId,
       revision: 0,
       state: "active",
@@ -429,21 +413,7 @@ export class GenerationStarter {
       pendingConfirmation: null,
       verification: { status: "notRun" },
       verificationHistory: [],
-      publication: { status: "notRun" },
-      ...(planning === undefined
-        ? {}
-        : {
-            planning: {
-              knowledgeHash: planning.knowledgeHash,
-              goalHash: hashGoalSpec(planning.goal),
-              goal: planning.goal,
-              currentScreen: null,
-              currentRoute: null,
-              replansUsed: 0,
-              maxReplans: planning.goal.limits.maxReplans,
-              maxSteps: planning.goal.limits.maxSteps
-            }
-          })
+      publication: { status: "notRun" }
     });
 
     await this.dependencies.store.create(session);

@@ -1,6 +1,6 @@
 {
   "name": "taphound",
-  "version": "0.2.0-dev.9",
+  "version": "0.2.0-dev.10",
   "description": "Deterministic app journey recording and verification",
   "license": "Apache-2.0",
   "repository": {
@@ -39,8 +39,10 @@
     "acceptance:device": "node scripts/acceptance-device.mjs",
     "acceptance:generation": "node scripts/acceptance-generation.mjs",
     "acceptance:mobile-mcp": "node scripts/acceptance-mobile-mcp.mjs",
+    "bench:false-done": "tsc -p tsconfig.tools.json && node .build-tools/tools/false-done/main.js",
     "brand:render": "node scripts/render-brand-assets.mjs",
     "build": "node scripts/build.mjs",
+    "skills:schemas": "node scripts/render-skill-schemas.mjs",
     "coverage": "vitest run --coverage",
     "dev:setup": "node scripts/dev-setup.mjs",
     "lint": "eslint .",

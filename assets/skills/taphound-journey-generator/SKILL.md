@@ -28,24 +28,9 @@ time. External Workflow Skills may invoke it once per independent Case, but
 they own requirement analysis, planning, coding, build/install, multi-Case
 scheduling, completion gates, and diagnosis.
 
-For those external stages, Core offers deterministic support this Skill does
-not own and never bypasses:
-
-- `taphound verify --diff <ref>` — select and replay the minimal Journey set a
-  Git change affects (ImpactSet P0/P1/P2), one `overall` verdict.
-- `taphound failure classify --report <path>` — concise structured failure
-  contract for a repair loop (no log dump).
-- `taphound baseline capture` / `baseline compare` — behavior drift against a
-  known-good run.
-- `taphound knowledge feature-map --markdown` — low-token registry projection
-  for orientation.
-- `taphound contract` / `contract review` / `playbook validate` —
-  Acceptance Contract and Escalation Policy tooling.
-- `taphound local sync <id>` — copy project assets into a local target's
-  workspace before `--target` runs.
-
-This Skill's own contract remains unchanged: one Case Goal, one deterministic
-generation session, final Replay in `generation finalize`.
+Those stages may use `verify --diff`, `failure classify`, `baseline`, and
+`contract`; this Skill's contract stays one Case Goal, one deterministic
+generation session, and final Replay in `generation finalize`.
 
 Generation commands canonicalize a relative `--project` before binding it.
 Replay waits up to the bound idle timeout when an action locator is absent,
@@ -64,24 +49,18 @@ to run first; it never generates or repairs Context itself.
 
 ## Skill Directory
 
-All file references are relative to `assets/skills/taphound-journey-generator/`.
-The directory contains `prompts/` (Flow selection, step generation,
-completion check, Brief validation), `schemas/` (JSON Schemas for proposals,
-observe output, Flows, Journey sources), `templates/` (example files), and
-`scripts/envelope.mjs` (offline envelope validation plus binding auto-fill).
+All file references are relative to this Skill's directory. It contains
+`prompts/` (Flow selection, step generation, completion check, Brief
+validation), `references/` (mid-session corrections, cross-app bridge),
+`schemas/` (JSON Schemas for proposals, observe output, Flows, Journey
+sources), `templates/` (example files), and `scripts/envelope.mjs` (offline
+envelope validation plus binding auto-fill).
 Read the relevant schema and prompt before each phase.
 
 ## How to Use This Skill
 
-Run `taphound init --agent droid,claude,codex,cursor` to install. For
-global installation: `taphound init --agent droid --global`.
-
-In the TapHound source repository, `.factory/skills/taphound-journey-generator`
-is a symlink so Droid auto-discovers it.
-
-The agent does NOT need to understand TapHound's internal TypeScript code.
-It reads these instructions, the schema files, and the prompt templates,
-then calls the TapHound CLI.
+The agent does NOT need TapHound's source code. It reads these instructions,
+the schema files, and the prompt templates, then calls the TapHound CLI.
 
 ### External orchestration boundary
 
@@ -119,11 +98,8 @@ require fixed sections (`Goal`, `Preconditions`, `Expected Journey`,
 and ensure the Brief Goal matches the invocation `goal`. The Brief
 additionally requires `State Transition Map` and `Capability Notes`.
 
-The companion `taphound-journey-brief-author` Skill is the recommended
-producer. It runs read-only `taphound observe` and source analysis to
-author one Brief per Case, then returns `{path, sha256}` for this
-Skill to consume. Install it alongside this Skill via
-`taphound init --agent <ids>`.
+The `taphound-journey-brief-author` Skill authors the Brief and returns
+`{path, sha256}`.
 
 The Brief is untrusted static hints — it cannot supply a trusted live
 locator, approve risk, weaken an assertion, or prove the Goal passed.
@@ -332,161 +308,29 @@ them with `MANUAL_STEP_REQUIRED`.
 
    f. Clean up the temp envelope file after each iteration.
 
-### Correcting and Adjusting Mid-Session
+### Correcting, Adjusting, and Leaving the App
 
-**Rewind a wrong committed step** with `step --replace` instead of restarting
-the session or building workarounds on top of a mistake:
+- A committed step was wrong: rewind with `generation step --replace <index>`
+  instead of restarting or building on the mistake.
+- `IDLE_TIMEOUT` recurs or the screen needs another stability strategy:
+  patch the session's policy with `generation config idle`.
+- The Goal crosses into another app (camera, picker, share sheet) and a
+  regular step fails with `PACKAGE_ESCAPE`: use `generation bridge`, with
+  `--flow` to bind a Phase 2 External Flow for deterministic replay.
 
-```bash
-taphound generation step \
-  --project <project> --session <generationId> \
-  --replace <index> \
-  --compact --json
-```
+Read `references/mid-session.md` before replacing a step or changing the
+idle policy, and `references/bridge.md` before any bridge: both change the
+session revision and have preconditions that fail with `CONFIG_INVALID`,
+`FLOW_INVALID`, or bridge-specific codes.
 
-Core replays the stored candidate prefix `[0, index)` through the same
-cold-launch replay engine as finalize (honoring the session's current idle
-policy), truncates the candidate to that prefix, and binds a fresh
-post-replay snapshot. The response matches `observe` plus `status:
-"replaced"`, `stepIndex`, `remainingStepCount`, and `truncatedStepCount`;
-the next proposal must bind the returned revision and snapshot. The index
-must be an integer in `[0, candidateStepCount]` (`0` cold-resets without
-replay); an index inside the bound Base Flow prefix fails with
-`FLOW_INVALID`; `--input` and `--replace` are mutually exclusive. Replace is
-rejected with `CONFIG_INVALID` unless the session is `active` with no
-in-flight step, no pending confirmation, and verification and publication
-both `notRun`. A prefix replay failure returns `VERIFICATION_FAILED` and
-leaves the session untouched; superseded step evidence stays in the bundle
-as an audit trail.
+### Semantic Anchors
 
-**Hot-adjust the idle policy** when `IDLE_TIMEOUT` recurs or the screen
-needs a different stability strategy:
-
-```bash
-taphound generation config idle \
-  --project <project> --session <generationId> \
-  --strategy layoutDiff --timeout-ms 20000 \
-  --json
-```
-
-At least one of `--strategy`, `--poll-interval-ms`, `--stable-polls`,
-`--timeout-ms` is required; the patch merges onto the session's current
-policy and advances the session revision, so the next proposal must bind
-the new revision. Rejected with `CONFIG_INVALID` unless the session is
-`active` with no in-flight step, no pending confirmation, and verification
-and publication both `notRun`. Subsequent observe, step, and finalize replay
-honor the stored policy; `generation status` reports it as `idlePolicy`.
-
-### Cross-Application Bridge
-
-When the Goal requires a cross-app flow (system camera, image/file picker,
-share sheet), a regular `generation step` proposal fails with `PACKAGE_ESCAPE`.
-Use `generation bridge` instead. Core clicks the trigger, detects the escape,
-optionally executes a bound External Flow's steps inside the escaped package,
-waits for return, and captures the post-return snapshot.
-
-```bash
-taphound generation bridge \
-  --project <project> --session <generationId> \
-  --scenario photoCapture \
-  --trigger-locator '{"resourceId":"camera_button"}' \
-  --flow camera/photo-capture \
-  --return-timeout-ms 60000 --escape-timeout-ms 3000 \
-  --compact --json
-```
-
-**Auto bridge** (deterministic): pass `--flow <name>` to bind a Phase 2
-External Flow. The step commits with `replayMode: "auto"`. **Manual bridge**:
-omit `--flow`; commits with `replayMode: "manual"` (human operator required
-during finalize). Options: `--scenario` (`photoCapture`, `pickImage`,
-`pickFile` built-in, or `custom` with `--description`), `--trigger-locator`
-(inline JSON, must be clickable), `--return-timeout-ms`, `--escape-timeout-ms`
-(default 3000; no escape fails with `BRIDGE_NO_ESCAPE`).
-
-Bridge goes through risk confirmation like any step. Failure codes:
-`BRIDGE_NO_ESCAPE`, `SCENARIO_PACKAGE_MISMATCH`, `BRIDGE_NOT_RETURNED`,
-`EXTERNAL_FLOW_NOT_FOUND`, `EXTERNAL_FLOW_STALE`,
-`EXTERNAL_PACKAGE_MISMATCH`, `EXTERNAL_ACTIVITY_MISMATCH`,
-`EXTERNAL_STEP_FAILED`, `EXTERNAL_LOCATOR_STRICTNESS` (external steps require
-`resourceId`-only locators), `MANUAL_STEP_REQUIRED` (non-interactive finalize
-with manual replay — bind an External Flow or use a TTY).
-
-A successful bridge returns `nextBinding` and `nextSnapshotRef` like any step.
-
-### Knowledge-Planned Sessions (Goal-Bound Generation)
-
-When the project has a committed Knowledge Registry, a session can plan and
-execute known Transitions deterministically instead of agent-authored step
-proposals. See `docs/knowledge-planning.md` for the full protocol.
-
-1. Seed and inspect the Registry (fail-closed; bootstrap requires a fully
-   validated Context):
-   ```bash
-   taphound knowledge bootstrap --project <project> --json
-   taphound knowledge status --project <project> --json
-   ```
-2. Obtain a strict Goal Spec JSON (`version: 1`, `id`, `targetScreen`,
-   `parameters`, `limits.{maxSteps,maxReplans}`). Scaffold it from the
-   committed Registry instead of hand-writing (text mode prints the Goal
-   Spec alone, so it redirects directly to a file):
-   ```bash
-   taphound knowledge goal \
-     --project <project> \
-     --target <screenId> \
-     --parameter key=value \
-     --max-steps 10 --max-replans 2 \
-     > goal.json
-   ```
-   `--target` is validated against the committed Registry; natural-language
-   intent stays with the external agent. Then start a v2 session:
-   ```bash
-   taphound generation start ... --goal <goal.json>
-   ```
-   The session binds the Knowledge and Goal hashes immutably.
-3. Drive it with `generation next` (observe → recognize → route → resolve →
-   existing risk/confirmation flow) until `status: "goalReached"`, then
-   finalize normally. Final Replay never consults the planner.
-
-Offline dry run: `knowledge plan --goal <goal.json> --snapshot <snapshot.json>
---json` recognizes the Screen and computes the Route without device mutation.
-The `--snapshot` input must be a Core-owned RuntimeSnapshot from a generation
-session (the `snapshotRef` file). A plain `taphound observe --json` report is
-a device report, not a RuntimeSnapshot, and fails schema parsing.
-
-**Fixing `SCREEN_UNKNOWN` from conditional anchors.** Bootstrap promotes
-static Context evidence to required Screen anchors. Elements that render only
-conditionally (a clear button while a search field is empty, collapsible
-containers) then fail recognition at runtime even though the Activity anchors
-matched. Do not hand-edit `.taphound/knowledge/`. Capture the failing
-detection receipt (the error's `details.receiptPath`), build a promotion JSON
-that binds `expectedKnowledgeHash`, cites the receipt in `receiptIds`, moves
-only the proven-conditional anchor ids from `requiredAnchors` to
-`optionalAnchors`, and includes the complete `anchors`, `screens`, and
-`transitions` arrays (promotion replaces the Registry, it does not merge):
-
-```bash
-taphound knowledge promote --project <project> --input <promotion.json> --json
-```
-
-A promotion bumps the Registry revision and `knowledgeHash`; the current
-session keeps its old binding. Reach a natural stopping point, then start a
-new `--goal` session to continue planning under the promoted Registry.
-
-After knowledge-planned sessions and `benchmark run --engine knowledge`
-campaigns accumulate receipts under `.taphound/build/knowledge-receipts/`,
-fold the runtime evidence back into the Registry:
-
-```bash
-taphound knowledge evolve --project <project> --json
-```
-
-Only receipts bound to the current `knowledgeHash` are folded, so a batch
-can never double-count. `transitionVerification` receipts accumulate
-Transition observation counts (attempts, successes, recovery cost), and
-matched `screenDetection`/`anchorResolution` evidence upgrades `inferred`
-Screens, Anchors, and Transitions to `observed`; statuses never downgrade.
-A fold that changes nothing reports `status: "unchanged"` without writing.
-Run it after each campaign, then start new sessions under the evolved hash.
+Generation proposals always target a `locator`; Core binds it to the
+observed element. Knowledge Anchors (`.taphound/knowledge/`) are for
+hand-authored Journeys and Contracts that `verify` replays, not for
+`generation step`. After editing Knowledge documents, rebuild and validate
+the index with `taphound knowledge rehash --project <project> --json` and
+`taphound knowledge status --project <project> --json`.
 
 ## Phase 4: Finalize
 
@@ -503,8 +347,7 @@ Run it after each campaign, then start new sessions under the evolved hash.
    Finalize resolves the Context from the session's stored snapshot
    (written at `generation start`, integrity-bound to the session's
    `contextHash`), so unrelated source edits after start cannot scrap the
-   session; live Context drift is reported to stderr as a warning. Pass
-   `--context` only for legacy sessions created without a stored snapshot.
+   session; live Context drift is reported to stderr as a warning.
 
 2. Wait for durable completion, then read the detached job's `outputPath`
    returned by the start command:
@@ -539,11 +382,7 @@ Run it after each campaign, then start new sessions under the evolved hash.
    its sidecar bindings (project, config, and `contextSelection` module
    hashes, plus the Brief content hash when `sourceBrief` is bound) against
    the live project. `--strict` exits `1` when any Journey
-   is stale, invalid, or missing its sidecar — suitable for CI. Sidecars
-   published before `contextSelection` was recorded classify as `stale`
-   with reason `meta-legacy`; re-running `generation finalize` on the
-   original session with the same `--output` re-exports the sidecar with
-   the field. A bound Brief that changed or disappeared reports
+   is stale, invalid, or missing its sidecar — suitable for CI. A bound Brief that changed or disappeared reports
    `brief-drift` or `brief-missing` respectively.
 
 5. Promote the replay-verified Journey into a durable asset when it should
@@ -572,17 +411,11 @@ Run it after each campaign, then start new sessions under the evolved hash.
 | Context stale/invalid/missing | Stop, run `taphound-journey-brief-author` skill first |
 | Context validation fails   | Stop, run `taphound-journey-brief-author` skill first |
 | Step rejected              | Re-observe + re-generate (up to retryCount)     |
-| Committed step is wrong    | Rewind with `generation step --replace <index>` |
-| IDLE_TIMEOUT persists      | Hot-adjust via `generation config idle`         |
-| PACKAGE_ESCAPE             | Use `generation bridge` (`--flow` for auto)     |
-| Bridge failure             | Check trigger, scenario, timeout; retry or `custom` |
-| External flow stale/missing| Re-bind at `generation start --external-flow`   |
-| Manual step in non-TTY finalize | Bind External Flow (`--flow`) or use TTY   |
+| Wrong step, IDLE_TIMEOUT, PACKAGE_ESCAPE, bridge or External Flow failure, manual step in non-TTY finalize | See "Correcting, Adjusting, and Leaving the App" and its references |
 | Confirmation required      | Present to user, wait for approval              |
 | Recovery required          | Ask before retry; re-observe after              |
 | Config changed             | Start new session; only idle policy is hot-adjustable |
-| Knowledge `SCREEN_UNKNOWN` | Conditional anchors: receipt-backed `knowledge promote`, then a new `--goal` session |
-| `knowledge plan` rejects the snapshot | Pass a session `snapshotRef` file, not `observe --json` output |
+| Knowledge document stale  | Run `knowledge rehash`; it affects `verify`, not the session |
 | Max steps exceeded         | Stop, report incomplete Goal                    |
 | Finalize not verified      | Report failure detail, do not claim success     |
 | `journey promote` fails closed | Journey or report drifted from the verified bundle; re-finalize on the original session, then promote |
@@ -604,7 +437,6 @@ Run it after each campaign, then start new sessions under the evolved hash.
 - SHA-256 hashes are computed by Core. The agent NEVER computes hashes
   manually. Context hashes are maintained by the `taphound-journey-brief-author`
   Skill; this Skill consumes a validated Context.
-- The agent does NOT modify TapHound Core source code.
 - The agent does NOT use coordinates, visual guessing, or fallback.
 - Locator priority is fixed: `resourceId` > `text` > `contentDescription`.
 - Repeated elements use a deterministic `within` ancestor scope when
@@ -664,9 +496,5 @@ Run it after each campaign, then start new sessions under the evolved hash.
 - Source evidence drifts while you work (branch switches, concurrent edits).
   `generation start` fail-closes with `CONTEXT_STALE` naming one file. Run
   `context refresh` (add `--accept-source-changes`/`--prune-deleted` after
-  reviewing the named changes), re-run `knowledge bootstrap` if the Registry
-  must track the Context, then retry. Never pass
+  reviewing the named changes), then retry. Never pass
   `--allow-evidence-drift` to "save time".
-- A `knowledge promote` bumps the Registry `knowledgeHash`. Sessions bind
-  that hash at start, so planning verification after a promotion requires a
-  new `--goal` session; existing sessions keep their old binding by design.

@@ -416,7 +416,7 @@ export const JourneySchema = z.strictObject({
   }
   for (const [index, checkpoint] of (journey.checkpoints ?? []).entries()) {
     checkBindingReferences(checkpoint, context, [], ["checkpoints", index]);
-    for (const condition of checkpoint.expect.allOf ?? []) {
+    for (const condition of checkpoint.expect.allOf) {
       if (condition.kind === "logcatEvent" && condition.expect.capture !== undefined) {
         context.addIssue({
           code: "custom", path: ["checkpoints", index],
@@ -440,7 +440,7 @@ export const JourneySchema = z.strictObject({
     markerIndexes.set(step.markerId, index);
   }
   for (const [index, checkpoint] of (journey.checkpoints ?? []).entries()) {
-    for (const condition of checkpoint.expect.allOf ?? []) {
+    for (const condition of checkpoint.expect.allOf) {
       if (condition.kind !== "logcatEvent"
         || condition.expect.window.from !== "marker") {
         continue;

@@ -12,7 +12,8 @@ const QualifiedNameSchema = z.string().regex(
   "Value must be fully qualified"
 );
 
-const RuntimeSnapshotFields = {
+export const RuntimeSnapshotSchema = z.strictObject({
+  version: z.literal(2),
   generationId: z.string().trim().min(1),
   baseRevision: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   deviceSerial: z.string().trim().min(1),
@@ -23,30 +24,13 @@ const RuntimeSnapshotFields = {
   capturedAt: z.iso.datetime(),
   screenshotPath: z.string().trim().min(1).optional(),
   layout: z.array(LayoutElementSchema),
-  windowHierarchy: WindowHierarchySchema.optional()
-};
-
-export const RuntimeSnapshotV1Schema = z.strictObject({
-  version: z.literal(1),
-  ...RuntimeSnapshotFields
-});
-
-export const RuntimeSnapshotV2Schema = z.strictObject({
-  version: z.literal(2),
-  ...RuntimeSnapshotFields,
+  windowHierarchy: WindowHierarchySchema.optional(),
   uiBackend: UiBackendDescriptorSchema,
   uiObservationId: z.string().trim().min(1),
   uiCaptureDurationMs: z.number().nonnegative(),
   viewport: DisplayViewportSchema
 });
 
-export const RuntimeSnapshotSchema = z.discriminatedUnion("version", [
-  RuntimeSnapshotV1Schema,
-  RuntimeSnapshotV2Schema
-]);
-
-export type RuntimeSnapshotV1 = z.infer<typeof RuntimeSnapshotV1Schema>;
-export type RuntimeSnapshotV2 = z.infer<typeof RuntimeSnapshotV2Schema>;
 export type RuntimeSnapshot = z.infer<typeof RuntimeSnapshotSchema>;
 
 function canonicalize(value: unknown): unknown {
@@ -77,12 +61,8 @@ export function hashRuntimeSnapshot(snapshot: unknown): string {
     pid: parsed.pid,
     layout: parsed.layout,
     windowHierarchy: parsed.windowHierarchy,
-    ...(parsed.version === 1
-      ? {}
-      : {
-          uiBackend: parsed.uiBackend,
-          viewport: parsed.viewport
-        })
+    uiBackend: parsed.uiBackend,
+    viewport: parsed.viewport
   };
 
   return createHash("sha256")

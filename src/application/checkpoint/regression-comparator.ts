@@ -77,14 +77,6 @@ export const compareRegression = (
   input: RegressionCompareInput
 ): RegressionCompareResult => {
   BaselineSchema.parse(input.baseline);
-  if (input.baseline.elements.some(
-    (fact) => fact.stepIndex === undefined || fact.kind === "absent"
-  )) {
-    throw new BaselineError(
-      "BASELINE_INCOMPARABLE",
-      "Legacy element facts without a step or verified absence must be recaptured"
-    );
-  }
   if (input.baseline.screens.some((fact) => fact.status !== "matched")) {
     throw new BaselineError(
       "BASELINE_INCOMPARABLE",
@@ -123,12 +115,6 @@ export const compareRegression = (
   }
   for (const fact of input.baseline.elements) {
     const stepIndex = fact.stepIndex;
-    if (stepIndex === undefined) {
-      throw new BaselineError(
-        "BASELINE_INCOMPARABLE",
-        "Element fact has no step identity"
-      );
-    }
     const current = input.current.steps.find(
       (step) => step.index === stepIndex
     )?.locator;
@@ -143,7 +129,6 @@ export const compareRegression = (
     }
     if (
       current?.status !== "found"
-      || fact.kind !== "present"
       || elementIdentity({
         anchorId: current.anchorId,
         locator: current.requested

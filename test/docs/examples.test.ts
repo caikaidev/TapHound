@@ -282,16 +282,11 @@ describe("TapHound documentation examples", () => {
       "journey",
       "generation",
       "knowledge",
-      "benchmark",
-      "playbook",
       "baseline",
       "failure",
-      "local",
       "init",
       "align",
-      "impact",
-      "verify-changes",
-      "ui-cache"
+      "impact"
     ]);
     for (const doc of [readme, readmeZh]) {
       expect(doc).toContain("# TapHound");
@@ -424,15 +419,14 @@ describe("TapHound documentation examples", () => {
     expect(report).not.toMatch(/\bAPR\b|\bapr\b/);
   });
 
-  it("keeps local testing and machine handoff instructions discoverable", async () => {
+  it("keeps local testing and release instructions discoverable", async () => {
     const readme = await text("README.md");
     const readmeZh = await text("README.zh-CN.md");
     const testing = await text("docs/local-testing.md");
-    const todo = await text("TODO.md");
-
     for (const doc of [readme, readmeZh]) {
       expect(doc).toContain("docs/local-testing.md");
-      expect(doc).toContain("TODO.md");
+      expect(doc).toContain("docs/releasing.md");
+      expect(doc).not.toContain("TODO.md");
     }
     expect(testing).toContain("npm test");
     expect(testing).toContain("npm run acceptance:device");
@@ -459,8 +453,9 @@ describe("TapHound documentation examples", () => {
     ]) {
       expect(testing).toContain(`\`${command}\``);
     }
-    expect(todo).toContain("Post-Machine-Switch");
-    expect(todo).toContain("npm `dev` Pre-release");
+    const releasing = await text("docs/releasing.md");
+    expect(releasing).toContain("Trusted Publishing");
+    expect(releasing).toContain("git push origin v<version>");
   });
 
   it("ignores generated Node, TapHound, Android, and local environment files", async () => {

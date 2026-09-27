@@ -172,7 +172,7 @@ describe("built taphound observe process contract", () => {
     expect(result.stdout).toContain("layout");
   }, 15000);
 
-  it("does not require a legacy workspace guard (no .taphound/.gitignore required)", async () => {
+  it("stays read-only and does not create .taphound/.gitignore", async () => {
     const test = await fixture();
     const result = runObserve(test, {}, ["--json"]);
     expect(result.status).toBe(0);

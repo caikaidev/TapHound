@@ -52,6 +52,20 @@ export interface LocatorResolutionOptions {
   viewport?: DisplayViewport | undefined;
 }
 
+function pointWithin(
+  point: Point | undefined,
+  bounds: LayoutElement["bounds"]
+): Point | undefined {
+  return point !== undefined
+    && bounds !== undefined
+    && point.x >= bounds.left
+    && point.x < bounds.right
+    && point.y >= bounds.top
+    && point.y < bounds.bottom
+    ? point
+    : undefined;
+}
+
 function center(element: LayoutElement): Point | undefined {
   if (element.center !== undefined) {
     return element.center;
@@ -64,6 +78,22 @@ function center(element: LayoutElement): Point | undefined {
     x: Math.round((bounds.left + bounds.right) / 2),
     y: Math.round((bounds.top + bounds.bottom) / 2)
   };
+}
+
+const compiledPatterns = new Map<string, RegExp>();
+const MAX_COMPILED_PATTERNS = 256;
+
+/** Locator regexes are non-global, so a cached instance is stateless. */
+function compiledPattern(pattern: string): RegExp {
+  let compiled = compiledPatterns.get(pattern);
+  if (compiled === undefined) {
+    if (compiledPatterns.size >= MAX_COMPILED_PATTERNS) {
+      compiledPatterns.clear();
+    }
+    compiled = new RegExp(pattern);
+    compiledPatterns.set(pattern, compiled);
+  }
+  return compiled;
 }
 
 function fieldValueMatches(
@@ -81,7 +111,7 @@ function fieldValueMatches(
     return elementValue.startsWith(locatorValue);
   }
   if (match === "regex") {
-    return new RegExp(locatorValue).test(elementValue);
+    return compiledPattern(locatorValue).test(elementValue);
   }
   return elementValue === locatorValue;
 }
@@ -283,10 +313,12 @@ export function resolveLocator(
     options.requiredCapability !== undefined
     && element[options.requiredCapability] !== true
   ) {
+    // The nearest capable ancestor receives the touch; a disabled one
+    // swallows it, so it is reported instead of skipped.
     const ancestor = [...entry.ancestors].reverse().find(
-      (candidate) => candidate.enabled
-        && candidate[options.requiredCapability as "clickable" | "longClickable"]
-          === true
+      (candidate) => candidate[
+        options.requiredCapability as "clickable" | "longClickable"
+      ] === true
     );
     if (ancestor === undefined) {
       return {
@@ -304,7 +336,11 @@ export function resolveLocator(
       message: `Layout element ${element.id} is disabled`
     };
   }
-  const point = center(element);
+  // Touch the matched element itself: it dispatches to the capable ancestor,
+  // whose own center may be covered by an unrelated child control.
+  const point = element === entry.element
+    ? center(element)
+    : pointWithin(center(entry.element), element.bounds) ?? center(element);
   if (point === undefined) {
     return {
       status: "failed",

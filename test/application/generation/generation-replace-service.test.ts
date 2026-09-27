@@ -24,6 +24,7 @@ import type {
 import type { TapHoundConfig } from "../../../src/domain/config.js";
 import type { GenerationSession } from "../../../src/domain/generation.js";
 import { resolvedProjectContext } from "../../fixtures/project-context.js";
+import { TEST_SNAPSHOT_UI } from "../../fakes/ui-backend.js";
 
 const roots: string[] = [];
 
@@ -79,7 +80,7 @@ function observation(revision: number): RuntimeObservation {
       snapshotHash: "d".repeat(64)
     },
     snapshot: {
-      version: 1,
+      version: 2,
       generationId: "generation-1",
       baseRevision: revision,
       deviceSerial: "emulator-5554",
@@ -88,7 +89,8 @@ function observation(revision: number): RuntimeObservation {
       activity: "com.example.app.MainActivity",
       pid: 42,
       capturedAt: "2026-07-23T00:00:00.000Z",
-      layout: []
+      layout: [],
+      ...TEST_SNAPSHOT_UI
     },
     snapshotHash: "d".repeat(64),
     snapshotRef: "evidence://generation-1/snapshots/rev-4.json"
@@ -150,7 +152,8 @@ function session(overrides?: {
     pendingConfirmation: overrides?.pendingConfirmation ?? null,
     verification: overrides?.verification ?? { status: "notRun" },
     publication: overrides?.publication ?? { status: "notRun" },
-    externalFlows: []
+    externalFlows: [],
+    verificationHistory: []
   };
 }
 
@@ -438,40 +441,6 @@ describe("GenerationReplaceService.replace", () => {
     expect(test.verify).not.toHaveBeenCalled();
     expect(test.prepare).not.toHaveBeenCalled();
     expect(test.observe).not.toHaveBeenCalled();
-  });
-
-  it("rejects legacy sessions with evidence and no ui backend binding", async () => {
-    const root = await mkdtemp(join(tmpdir(), "taphound-replace-service-"));
-    roots.push(root);
-    const store = new FileSystemGenerationSessionStore(root);
-    const legacy = session();
-    await store.create({
-      ...legacy,
-      bindings: {
-        projectHash: legacy.bindings.projectHash,
-        configHash: legacy.bindings.configHash,
-        contextHash: legacy.bindings.contextHash,
-        snapshotHash: legacy.bindings.snapshotHash
-      }
-    });
-
-    const service = new GenerationReplaceService({
-      store,
-      observer: { observe: vi.fn<ObserveFunction>() },
-      verifyRuntime: { verify: vi.fn<VerifyFunction>() },
-      appPreparer: { prepare: vi.fn<PrepareFunction>() }
-    });
-
-    await expect(service.replace({
-      generationId: "generation-1",
-      stepIndex: 1,
-      projectRoot: root,
-      config,
-      toolVersions: {}
-    })).rejects.toMatchObject({
-      code: "CONFIG_INVALID",
-      message: /Legacy generation sessions/
-    });
   });
 
   it.each([

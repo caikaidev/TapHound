@@ -38,8 +38,7 @@ function bundle(candidates?: AnchorCandidate[]): LoadedKnowledgeBundle {
         sha256: "a".repeat(64),
         status: "observed"
       }],
-      screens: [],
-      transitions: []
+      screens: []
     },
     indexSha256: "0".repeat(64),
     knowledgeHash: "a".repeat(64),
@@ -54,8 +53,7 @@ function bundle(candidates?: AnchorCandidate[]): LoadedKnowledgeBundle {
       },
       ...(candidates === undefined ? {} : { candidates })
     }],
-    screens: [],
-    transitions: []
+    screens: []
   };
 }
 

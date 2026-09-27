@@ -84,8 +84,12 @@ function startupFailure(result: CommandResult): string {
         : `Logcat exited during startup with code ${String(result.exitCode)}`);
 }
 
+const COMPACT_THRESHOLD = 1024;
+
 export class LogcatCollector {
+  /** Live lines are `collected[head..]`; dropped lines are compacted lazily. */
   private readonly collected: LogcatLine[] = [];
+  private head = 0;
   private bufferedBytes = 0;
   private readonly droppedByPid = new Map<number | undefined, DroppedEvidence>();
   private readonly stderr: string[] = [];
@@ -118,13 +122,14 @@ export class LogcatCollector {
     this.collected.push(parsed);
     this.bufferedBytes += bytes;
     while (
-      this.collected.length > this.limits.maxLines
+      this.collected.length - this.head > this.limits.maxLines
       || this.bufferedBytes > this.limits.maxBytes
     ) {
-      const dropped = this.collected.shift();
+      const dropped = this.collected[this.head];
       if (dropped === undefined) {
         break;
       }
+      this.head += 1;
       const size = Buffer.byteLength(dropped.raw, "utf8") + 1;
       this.bufferedBytes -= size;
       const previous = this.droppedByPid.get(dropped.pid);
@@ -134,6 +139,19 @@ export class LogcatCollector {
         lastDroppedAt: dropped.receivedAt
       });
     }
+    // Array#shift is O(n); a saturated buffer would otherwise move every
+    // retained line on each append. Compaction is amortized O(1) per line.
+    if (
+      this.head >= COMPACT_THRESHOLD
+      && this.head * 2 >= this.collected.length
+    ) {
+      this.collected.splice(0, this.head);
+      this.head = 0;
+    }
+  }
+
+  private retained(): LogcatLine[] {
+    return this.head === 0 ? this.collected : this.collected.slice(this.head);
   }
 
   private addScopedPids(pids: readonly number[]): void {
@@ -216,14 +234,14 @@ export class LogcatCollector {
     if (this.scopedPids.size === 0) {
       return [];
     }
-    return this.collected.filter(
+    return this.retained().filter(
       (line) => line.pid !== undefined && this.scopedPids.has(line.pid)
     );
   }
 
   /** Includes unparsed lines as raw artifacts, within the declared buffer limit. */
   public rawLines(): readonly LogcatLine[] {
-    return this.collected.filter(
+    return this.retained().filter(
       (line) => line.pid === undefined || this.scopedPids.has(line.pid)
     );
   }

@@ -1,0 +1,83 @@
+name: Release
+
+# Pushing a tag vX.Y.Z[-pre.N] that equals package.json's version publishes
+# that version to npm and creates the matching GitHub Release. npm publishing
+# uses Trusted Publishing (OIDC): no npm token is stored in this repository.
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      dist-tag: ${{ steps.version.outputs.dist-tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - name: Match the tag to package.json
+        id: version
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match package.json version ${version}"
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "dist-tag=$(node scripts/release-notes.mjs dist-tag "${version}")" >> "$GITHUB_OUTPUT"
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build
+      - run: npm run brand:render
+      - run: git diff --exit-code -- assets/brand/png
+      - run: node dist/cli/main.js --help
+      - name: Check the release notes exist
+        run: node scripts/release-notes.mjs notes "${{ steps.version.outputs.version }}" > /dev/null
+      # Trusted Publishing needs npm 11.5.1 or newer.
+      - run: npm install -g npm@latest
+      # The gate above already ran; skip the prepublishOnly rerun.
+      - run: npm publish --provenance --ignore-scripts --tag "${{ steps.version.outputs.dist-tag }}"
+
+  github-release:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.publish.outputs.version }}
+          DIST_TAG: ${{ needs.publish.outputs.dist-tag }}
+        run: |
+          node scripts/release-notes.mjs notes "${VERSION}" > release-notes.md
+          prerelease=()
+          if [ "${DIST_TAG}" != "latest" ]; then prerelease=(--prerelease); fi
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file release-notes.md \
+            --verify-tag \
+            "${prerelease[@]}"

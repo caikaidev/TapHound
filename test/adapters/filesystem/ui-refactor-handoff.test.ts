@@ -13,9 +13,11 @@ import { GenerationMetaSchema } from "../../../src/domain/generation.js";
 import { JourneySchema } from "../../../src/domain/journey.js";
 import { hashJourney } from "../../../src/domain/report.js";
 import { validReport } from "../../fixtures/report.js";
+import { TEST_UI_BACKEND } from "../../fakes/ui-backend.js";
+import { contextSelection } from "../../fixtures/project-context.js";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-const helper = join(repo, "assets/skills/taphound-preserve/scripts/ui-refactor.mjs");
+const helper = join(repo, "assets/skills/taphound-verify-change/scripts/ui-refactor.mjs");
 const sha = (bytes: string): string => createHash("sha256").update(bytes).digest("hex");
 const paths: string[] = [];
 afterEach(async () => {
@@ -149,7 +151,8 @@ async function prepareFixture(): Promise<{
       bindings: {
         projectHash: "a".repeat(64),
         configHash: "b".repeat(64),
-        contextHash: "c".repeat(64)
+        contextHash: "c".repeat(64),
+        uiBackend: TEST_UI_BACKEND
       },
       verification: {
         reportPath: "verification/report.json", reportSha256: "d".repeat(64),
@@ -159,7 +162,9 @@ async function prepareFixture(): Promise<{
       replayPolicy: {
         generatedReplayPolicy: true, requireFocusedInput: true,
         idle: { strategy: "structural", pollIntervalMs: 200, stablePolls: 2, timeoutMs: 5000 }
-      }
+      },
+      contextSelection,
+      externalFlows: []
     });
   await put(beforeMeta, makeMeta(old, ".taphound/journeys/forward.json"));
   await put(afterJourney.replace(/\.json$/, ".meta.json"),

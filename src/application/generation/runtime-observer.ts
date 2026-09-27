@@ -4,7 +4,6 @@ import { primaryAppPid } from "../../domain/app-process.js";
 import {
   GenerationSessionIdSchema,
   GenerationSessionSchema,
-  type GenerationPlanning,
   type GenerationSession,
   type PendingConfirmation
 } from "../../domain/generation.js";
@@ -37,29 +36,20 @@ import type {
   GenerationSessionStore
 } from "../../ports/generation-session-store.js";
 import { GenerationOperationError } from "./generation-starter.js";
-import type { GenerationPlanningTiming } from "./generation-planner.js";
 import { closeUiSnapshotProvider } from "../ui/ui-snapshot-lifecycle.js";
 import { uiStabilityProbe } from "../ui/ui-stability-probe.js";
 
 export type RuntimeObservationBinding = ProposalBinding;
-
-export interface SnapshotPlanning {
-  planning: GenerationPlanning;
-  timing?: GenerationPlanningTiming | undefined;
-}
 
 export interface RuntimeObservation {
   binding: RuntimeObservationBinding;
   snapshot: RuntimeSnapshot;
   snapshotHash: string;
   snapshotRef: string;
-  planning?: GenerationPlanning | undefined;
-  planningTiming?: GenerationPlanningTiming | undefined;
 }
 
 export interface RuntimeObserveInput {
   generationId: string;
-  workspaceRoot?: string | undefined;
   idle?: IdleConfig | undefined;
   signal?: AbortSignal | undefined;
 }
@@ -96,19 +86,16 @@ export interface RuntimeObserverDependencies {
   waitUntilIdle?: (
     deviceSerial: string,
     config: IdleConfig,
-    signal?: AbortSignal,
-    packageName?: string,
-    stability?: UiStabilityProbe
+    signal: AbortSignal | undefined,
+    packageName: string,
+    stability: UiStabilityProbe,
+    /** The observed session's device, for idle device profiles. */
+    device: Pick<AdbPort, "deviceIdentity">
   ) => Promise<IdleResult>;
   now: () => Date;
   createAttemptId: () => string;
   uiCacheEnabled?: boolean | undefined;
   uiSnapshotTimeoutMs?: number | undefined;
-  planSnapshot?: (input: {
-    session: GenerationSession;
-    snapshot: RuntimeSnapshot;
-    verifyTransition: boolean;
-  }) => Promise<SnapshotPlanning> | SnapshotPlanning;
 }
 
 export interface SnapshotReobservationGuardDependencies {
@@ -245,9 +232,9 @@ export class RuntimeObserver {
     });
     try {
     const views = this.dependencies.sessionPorts(session);
-    const boundBackendSelection = current.bindings.uiBackend === undefined
-      ? undefined
-      : uiBackendIdAsSelection(current.bindings.uiBackend.id);
+    const boundBackendSelection = uiBackendIdAsSelection(
+      current.bindings.uiBackend.id
+    );
     const uiSnapshotProvider = await session.openUiSnapshots({
       timeoutMs: idle?.timeoutMs ?? 5000,
       ...(boundBackendSelection === undefined
@@ -260,26 +247,13 @@ export class RuntimeObserver {
     });
     let runtime: CollectedRuntimeState;
     try {
-      const bound = current.bindings.uiBackend;
       if (
-        bound !== undefined
-        && JSON.stringify(bound) !== JSON.stringify(uiSnapshotProvider.descriptor)
+        JSON.stringify(current.bindings.uiBackend)
+          !== JSON.stringify(uiSnapshotProvider.descriptor)
       ) {
         throw new GenerationOperationError(
           "CONFIG_INVALID",
           "Generation UI backend does not match the authoritative session"
-        );
-      }
-      if (
-        bound === undefined
-        && (
-          current.bindings.snapshotHash !== null
-          || current.candidateSteps.length !== 0
-        )
-      ) {
-        throw new GenerationOperationError(
-          "CONFIG_INVALID",
-          "Legacy generation with authoritative evidence has no UI backend binding"
         );
       }
       if (
@@ -291,7 +265,8 @@ export class RuntimeObserver {
           idle,
           input.signal,
           current.target.packageName,
-          uiStabilityProbe(uiSnapshotProvider, views.uiStability)
+          uiStabilityProbe(uiSnapshotProvider, views.uiStability),
+          views.adb
         );
         if (idleResult.status !== "stable") {
           throw new GenerationOperationError(
@@ -334,7 +309,7 @@ export class RuntimeObserver {
       await closeUiSnapshotProvider(uiSnapshotProvider);
     }
 
-    return await this.commit(current, runtime, false, views, input.signal);
+    return await this.commit(current, runtime, views, input.signal);
     } finally {
       await session.close();
     }
@@ -362,7 +337,7 @@ export class RuntimeObserver {
     });
     try {
       const views = this.dependencies.sessionPorts(session);
-      return await this.commit(current, input.runtime, true, views, input.signal);
+      return await this.commit(current, input.runtime, views, input.signal);
     } finally {
       await session.close();
     }
@@ -371,7 +346,6 @@ export class RuntimeObserver {
   private async commit(
     current: GenerationSession,
     runtime: CollectedRuntimeState,
-    verifyTransition: boolean,
     views: RuntimeSessionPortViews,
     signal?: AbortSignal
   ): Promise<RuntimeObservation> {
@@ -448,23 +422,6 @@ export class RuntimeObserver {
       snapshotPath,
       snapshot
     );
-    const planningResult = current.version === 2
-      ? await (async (): Promise<SnapshotPlanning> => {
-          if (this.dependencies.planSnapshot === undefined) {
-            throw new GenerationOperationError(
-              "KNOWLEDGE_INVALID",
-              "Planning-aware observation is not configured"
-            );
-          }
-          return this.dependencies.planSnapshot({
-            session: current,
-            snapshot,
-            verifyTransition
-          });
-        })()
-      : undefined;
-    const planning = planningResult?.planning;
-    const planningTiming = planningResult?.timing;
     const next = GenerationSessionSchema.parse({
       ...current,
       revision: baseRevision,
@@ -472,8 +429,7 @@ export class RuntimeObserver {
         ...current.bindings,
         snapshotHash,
         uiBackend: runtime.uiSnapshot.backend
-      },
-      ...(planning === undefined ? {} : { planning })
+      }
     });
     await this.dependencies.store.commitSnapshot(
       current.id,
@@ -493,9 +449,7 @@ export class RuntimeObserver {
       },
       snapshot,
       snapshotHash,
-      snapshotRef,
-      ...(planning === undefined ? {} : { planning }),
-      ...(planningTiming === undefined ? {} : { planningTiming })
+      snapshotRef
     };
   }
 }
@@ -543,8 +497,7 @@ export class SnapshotReobservationGuard {
         );
       }
       if (
-        session.bindings.uiBackend !== undefined
-        && JSON.stringify(session.bindings.uiBackend)
+        JSON.stringify(session.bindings.uiBackend)
           !== JSON.stringify(this.dependencies.uiSnapshotProvider.descriptor)
       ) {
         throw new GenerationOperationError(
@@ -562,7 +515,7 @@ const runtime = await collectRuntime(
         signal
       );
       const snapshot = RuntimeSnapshotSchema.parse({
-        version: session.bindings.uiBackend === undefined ? 1 : 2,
+        version: 2,
         generationId: session.id,
         baseRevision: binding.baseRevision,
         deviceSerial: session.target.deviceSerial,
@@ -574,14 +527,10 @@ const runtime = await collectRuntime(
         screenshotPath: "non-authoritative://runtime-reobservation",
         layout: runtime.layout,
         windowHierarchy: runtime.windowHierarchy,
-        ...(session.bindings.uiBackend === undefined
-          ? {}
-          : {
-              uiBackend: runtime.uiSnapshot.backend,
-              uiObservationId: runtime.uiSnapshot.observationId,
-              uiCaptureDurationMs: runtime.uiSnapshot.durationMs,
-              viewport: runtime.uiSnapshot.viewport
-            })
+        uiBackend: runtime.uiSnapshot.backend,
+        uiObservationId: runtime.uiSnapshot.observationId,
+        uiCaptureDurationMs: runtime.uiSnapshot.durationMs,
+        viewport: runtime.uiSnapshot.viewport
       });
       if (hashRuntimeSnapshot(snapshot) !== binding.snapshotHash) {
         // A targetless proposal (wait) does not consume the Layout, so a

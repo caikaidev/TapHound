@@ -7,11 +7,11 @@ import type { GenerationSession } from "../../../src/domain/generation.js";
 import type { ProposalBinding } from "../../../src/domain/proposed-step.js";
 import {
   hashRuntimeSnapshot,
-  type RuntimeSnapshot,
-  type RuntimeSnapshotV1
+  type RuntimeSnapshot
 } from "../../../src/domain/runtime-snapshot.js";
 import { contextSelection } from "../../fixtures/project-context.js";
 import { uiSnapshotProviderFromLayout } from "../../fakes/ui-snapshot.js";
+import { TEST_SNAPSHOT_UI, TEST_UI_BACKEND } from "../../fakes/ui-backend.js";
 
 const layout = [{
   id: "root",
@@ -22,10 +22,10 @@ const layout = [{
 }];
 
 function snapshot(
-  overrides: Partial<RuntimeSnapshotV1> = {}
+  overrides: Partial<RuntimeSnapshot> = {}
 ): RuntimeSnapshot {
   return {
-    version: 1,
+    version: 2,
     generationId: "generation-1",
     baseRevision: 1,
     deviceSerial: "emulator-5554",
@@ -48,6 +48,7 @@ function snapshot(
       diagnostics: [],
       recovery: []
     },
+    ...TEST_SNAPSHOT_UI,
     ...overrides
   };
 }
@@ -63,7 +64,8 @@ function session(overrides: Partial<GenerationSession> = {}): GenerationSession 
       projectHash: "d".repeat(64),
       configHash: "e".repeat(64),
       contextHash: "a".repeat(64),
-      snapshotHash: runtimeHash
+      snapshotHash: runtimeHash,
+      uiBackend: TEST_UI_BACKEND
     },
     target: {
       packageName: "com.example.app",
@@ -86,6 +88,7 @@ function session(overrides: Partial<GenerationSession> = {}): GenerationSession 
     inFlight: null,
     pendingConfirmation: null,
     verification: { status: "notRun" },
+    verificationHistory: [],
     publication: { status: "notRun" },
     externalFlows: [],
     ...overrides

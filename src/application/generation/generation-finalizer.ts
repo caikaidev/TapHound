@@ -23,7 +23,6 @@ import {
   type Journey
 } from "../../domain/journey.js";
 import {
-  ProjectRelativePathSchema,
   ResolvedProjectContextSchema,
   type ResolvedProjectContext
 } from "../../domain/project-context.js";
@@ -41,9 +40,6 @@ import {
   GenerationSessionStoreError,
   type GenerationSessionStore
 } from "../../ports/generation-session-store.js";
-import type {
-  ContextValidator
-} from "../context/context-validator.js";
 import type {
   ProjectDescription
 } from "../project/project-describer.js";
@@ -86,7 +82,7 @@ const VerificationReceiptSchema = z.strictObject({
     configHash: Sha256Schema,
     contextHash: Sha256Schema,
     snapshotHash: Sha256Schema.nullable(),
-    uiBackend: UiBackendDescriptorSchema.optional()
+    uiBackend: UiBackendDescriptorSchema
   }),
   tools: z.record(z.string(), z.string()),
   report: z.strictObject({
@@ -109,16 +105,7 @@ interface ExpectedVerification {
 }
 
 export const GenerationOutputPathSchema = JourneyOutputPathSchema;
-export const GenerationWorkspaceOutputPathSchema =
-  ProjectRelativePathSchema.refine(
-    (path) => path.startsWith("journeys/")
-      && path.endsWith(".json")
-      && !path.endsWith(".resolve.json")
-      && path.split("/").every(
-        (segment) => segment.length > 0 && segment !== "."
-      ),
-    "Generation workspace output must be a normalized JSON file under journeys"
-  );
+
 
 export type GenerationFinalizationStage =
   | "precondition"
@@ -144,15 +131,12 @@ export class GenerationFinalizationError extends Error {
 export interface GenerationFinalizeInput {
   generationId: string;
   projectRoot: string;
-  workspaceRoot?: string | undefined;
   config: TapHoundConfig;
   context: ResolvedProjectContext;
-  contextFromSnapshot?: boolean | undefined;
   project: ProjectDescription;
   outputPath: string;
   name?: string | undefined;
   deviceSerial: string;
-  allowEvidenceDrift?: boolean | undefined;
   manualReplay?: boolean | undefined;
   toolVersions: Record<string, string>;
   signal?: AbortSignal | undefined;
@@ -171,7 +155,6 @@ export interface GenerationFinalizerDependencies {
     | "writeTextEvidence"
     | "readEvidence"
   >;
-  contextValidator: Pick<ContextValidator, "validate">;
   verifyRuntime: Pick<VerifyRuntime, "verify">;
   publisher: GenerationPublisher;
   generateAttemptId: () => string;
@@ -277,11 +260,7 @@ export class GenerationFinalizer {
     const context = ResolvedProjectContextSchema.parse(input.context);
     const project = ProjectDescriptionSchema.parse(input.project);
     const canonicalProjectRoot = await realpath(input.projectRoot);
-    const outputPath = (
-      input.workspaceRoot === undefined
-        ? GenerationOutputPathSchema
-        : GenerationWorkspaceOutputPathSchema
-    ).parse(input.outputPath);
+    const outputPath = GenerationOutputPathSchema.parse(input.outputPath);
     const name = input.name === undefined
       ? derivedJourneyName(outputPath)
       : z.string().trim().min(1).parse(input.name);
@@ -311,7 +290,7 @@ export class GenerationFinalizer {
     let verificationReport: TapHoundReport | undefined;
 
     if (session.verification.status === "notRun") {
-      await this.revalidate(input, config, context, project, session);
+      this.revalidate(input, config, context, project, session);
       this.dependencies.progress?.("verification");
       const begun = await this.beginVerification(session);
       session = begun.session;
@@ -344,13 +323,9 @@ export class GenerationFinalizer {
               ? await this.reconcilePassedVerification(
                   session,
                   expected,
-                  () => this.revalidate(
-                    input,
-                    config,
-                    context,
-                    project,
-                    session
-                  )
+                  () => {
+                    this.revalidate(input, config, context, project, session);
+                  }
                 )
               : undefined;
           } catch (error) {
@@ -397,9 +372,6 @@ export class GenerationFinalizer {
           config: replayConfig,
           journey,
           projectRoot: canonicalProjectRoot,
-          ...(input.workspaceRoot === undefined
-            ? {}
-            : { workspaceRoot: input.workspaceRoot }),
           devices: [{
             role: journey.devices[0]?.role ?? DEFAULT_DEVICE_ROLE,
             deviceSerial: input.deviceSerial
@@ -415,7 +387,7 @@ export class GenerationFinalizer {
         } satisfies VerifyInput);
         await replayProgress.settled();
         replayed = true;
-        await this.revalidate(input, config, context, project, session);
+        this.revalidate(input, config, context, project, session);
         this.assertEligible(result, journey, expected);
         verificationReport = TapHoundReportSchema.parse(result.report);
         session = await this.persistPassedVerification(
@@ -464,13 +436,9 @@ export class GenerationFinalizer {
         reconciled = await this.reconcilePassedVerification(
           session,
           expected,
-          () => this.revalidate(
-            input,
-            config,
-            context,
-            project,
-            session
-          )
+          () => {
+            this.revalidate(input, config, context, project, session);
+          }
         );
       } catch (error) {
         await this.persistFailedVerification(session, error);
@@ -619,9 +587,6 @@ export class GenerationFinalizer {
       const exported = await this.dependencies.publisher.export({
         generationId: session.id,
         projectRoot: input.projectRoot,
-        ...(input.workspaceRoot === undefined
-          ? {}
-          : { workspaceRoot: input.workspaceRoot }),
         journeyPath: outputPath,
         journey,
         meta
@@ -763,32 +728,16 @@ export class GenerationFinalizer {
     }
   }
 
-  private async revalidate(
+  private revalidate(
     input: GenerationFinalizeInput,
     config: TapHoundConfig,
     context: ResolvedProjectContext,
     project: ProjectDescription,
     session: GenerationSession
-  ): Promise<void> {
+  ): void {
+    // The session's stored context snapshot is authoritative; the CLI only
+    // warns when the live project context has drifted from it.
     this.assertBindings(session, input, config, context, project);
-    if (input.contextFromSnapshot === true) {
-      return;
-    }
-    const result = await this.dependencies.contextValidator.validate({
-      context,
-      projectRoot: input.projectRoot,
-      config
-    });
-    if (
-      result.status !== "valid"
-      && !(result.status === "stale" && input.allowEvidenceDrift === true)
-    ) {
-      throw failure(
-        result.status === "stale" ? "CONTEXT_STALE" : "CONTEXT_INVALID",
-        "precondition",
-        result.reason.message
-      );
-    }
   }
 
   private async beginVerification(
@@ -915,10 +864,7 @@ export class GenerationFinalizer {
       || report.project.packageName !== expected.project.packageName
       || report.project.launchActivity !== expected.project.launchActivity
       || !singleDefaultDevice
-      || (
-        expected.bindings.uiBackend !== undefined
-        && !sameJson(reportUiBackend, expected.bindings.uiBackend)
-      )
+      || !sameJson(reportUiBackend, expected.bindings.uiBackend)
       || !sameJson(canonicalTools(report.environment.tools), expected.tools)
       || report.steps.length !== journey.steps.length
     ) {
@@ -1068,7 +1014,7 @@ export class GenerationFinalizer {
   private async reconcilePassedVerification(
     running: GenerationSession,
     expected: ExpectedVerification,
-    revalidateCurrent: () => Promise<void>
+    revalidateCurrent: () => void
   ): Promise<{ session: GenerationSession; report: TapHoundReport } | undefined> {
     if (running.verification.status !== "running") {
       return undefined;
@@ -1153,7 +1099,7 @@ export class GenerationFinalizer {
             error
           );
     }
-    await revalidateCurrent();
+    revalidateCurrent();
     return {
       session: await this.persistPassedVerification(running, report, expected),
       report
@@ -1334,12 +1280,7 @@ export class GenerationFinalizer {
         projectHash: session.bindings.projectHash,
         configHash: session.bindings.configHash,
         contextHash: session.bindings.contextHash,
-        ...(session.planning === undefined
-          ? {}
-          : { knowledgeHash: session.planning.knowledgeHash }),
-        ...(session.bindings.uiBackend === undefined
-          ? {}
-          : { uiBackend: session.bindings.uiBackend })
+        uiBackend: session.bindings.uiBackend
       },
       replayPolicy: {
         generatedReplayPolicy: true,
@@ -1359,6 +1300,7 @@ export class GenerationFinalizer {
       ...(session.sourceBrief === undefined
         ? {}
         : { sourceBrief: session.sourceBrief }),
+      externalFlows: session.externalFlows,
       manualOverrideStepIndexes: session.candidateSources.flatMap(
         (source, index) => source === "manualOverride" ? [index] : []
       )

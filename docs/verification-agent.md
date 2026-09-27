@@ -1,5 +1,10 @@
 # Independent Verification Agent (V0.7)
 
+> **Status: design, not shipped.** No Verification Agent Skill ships yet. The
+> shipped done-gate is `taphound-verify-change` (see
+> [Workflow Skills](workflow-skills.md)); this document records the stricter
+> context-isolated role it could grow into.
+
 Independent Verification is TapHound's first-class principle: the entity that
 decides "done" must not inherit the implementer's reasoning. TapHound Core
 stays deterministic and model-free; the Verification Agent is an
@@ -72,8 +77,8 @@ Constraints (enforced by the Skill, not by Core):
 **Verifier gets:**
 
 - Acceptance Contract (JSON) + its `contractSha256`
-- Project Knowledge / Feature Map projection (read-only — `taphound
-  knowledge feature-map --markdown`, see [`docs/feature-map.md`](./feature-map.md))
+- Project Knowledge Anchors and Screens (read-only — `.taphound/knowledge/`,
+  validated by `taphound knowledge status --json`)
 - TapHound Verdict JSON, `report.json`, `verdict.json`, screenshots, Logcat
 - Device access (through TapHound commands only)
 
@@ -93,7 +98,7 @@ Constraints (enforced by the Skill, not by Core):
 | `taphound failure classify --report <path> --json` | structured failure contract (§5 diagnosis) |
 | `taphound baseline compare --baseline <path> --report <path> --json` | behavior drift against a known-good run |
 | `docs/contract-schema.md` | Verdict/reason semantics |
-| `taphound benchmark false-done run/compare --json` | measurement (§6) |
+| `npm run bench:false-done -- run/compare` (TapHound repository dev tool) | measurement (§6) |
 | `.taphound/build/runs/<runId>/verdict.json` | immutable per-run evidence |
 
 No new Core API is required for V0.7; the Agent is pure orchestration over
@@ -125,13 +130,14 @@ Diagnosis never modifies code directly and never edits the Contract.
 Baseline-first, per `docs/false-done-benchmark.md`:
 
 ```bash
+# run from a TapHound checkout (repository-only developer tool)
 # baseline (current deterministic verification, no Agent)
-taphound benchmark false-done run --project <p> --json
+npm run bench:false-done -- run --project <p>
 # candidate (Agent-driven verification on the SAME pack + Knowledge revision)
-taphound benchmark false-done run --project <p> --json
+npm run bench:false-done -- run --project <p>
 # measure
-taphound benchmark false-done compare \
-  --baseline <baselineRunId> --candidate <candidateRunId> --json
+npm run bench:false-done -- compare \
+  --project <p> --baseline <baselineRunId> --candidate <candidateRunId>
 ```
 
 Judgment rules:
@@ -158,4 +164,4 @@ The V0.6 demo baseline is recorded in `docs/false-done-benchmark.md`
 4. Add Blind Verification (Phase A/B): run the verifier on a cold checkout
    before showing any code; diagnosis only after FAIL.
 5. Add Model Diversity when a second model is available; record model ids in
-   the run metadata (LLM counters field of `BenchmarkCaseResult`) for audit.
+   the False-Done run metadata for audit.

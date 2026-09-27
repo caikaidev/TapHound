@@ -12,12 +12,10 @@ import { fileURLToPath } from "node:url";
 
 import { AdbAdapter } from "../adapters/adb/adb-adapter.js";
 import { AdbRuntimeBackend } from "../adapters/runtime/adb-runtime-backend.js";
-import { RuntimeBackendAdbBridge } from "../adapters/runtime/runtime-backend-adb-bridge.js";
 import { SharedSessionRuntimeBackend } from "../adapters/runtime/shared-session-runtime-backend.js";
 import {
   SessionBackedScreenshotAdapter,
-  SessionBackedUiSnapshotProviderFactory,
-  SessionBackedUiStabilityAdapter
+  SessionBackedUiSnapshotProviderFactory
 } from "../adapters/runtime/session-backed-ports.js";
 import { runtimeSessionPortViews } from "../adapters/runtime/session-adb-view.js";
 import { MobileMcpRuntimeBackend } from "../adapters/runtime/mobile-mcp/mobile-mcp-runtime-backend.js";
@@ -45,21 +43,14 @@ import {
   CachedUiSnapshotProviderFactory
 } from "../application/ui/cached-ui-snapshot-provider.js";
 import { CameraProbeAdapter } from "../adapters/camera/camera-probe-adapter.js";
+import type { Clock } from "../ports/clock.js";
 import { SystemClock } from "../adapters/clock/system-clock.js";
 import { FileSystemArtifactStore } from "../adapters/filesystem/artifact-store.js";
 import { FileSystemContextDocumentWriter } from "../adapters/filesystem/context-document-writer.js";
 import { FileSystemGenerationMetaWriter } from "../adapters/filesystem/generation-meta-writer.js";
 import { FileSystemGenerationSessionStore } from "../adapters/filesystem/generation-session-store.js";
 import { FileSystemJourneyWriter } from "../adapters/filesystem/journey-writer.js";
-import { FileSystemUiCacheStore } from "../adapters/filesystem/ui-cache-store.js";
 import { FileSystemKnowledgeRegistry } from "../adapters/filesystem/knowledge-registry.js";
-import { FileSystemBenchmarkStore } from "../adapters/filesystem/benchmark-store.js";
-import { FileSystemFalseDoneStore } from "../adapters/filesystem/false-done-store.js";
-import type { BenchmarkStore } from "../ports/benchmark-store.js";
-import type { FalseDoneRunResult } from "../domain/false-done.js";
-import {
-  FileSystemKnowledgeReceiptStore
-} from "../adapters/filesystem/knowledge-receipt-store.js";
 import {
   FileSystemJourneyCompositionStore
 } from "../adapters/filesystem/journey-composition-store.js";
@@ -142,13 +133,11 @@ import type {
 import {
   GenerationStepExecutor
 } from "../application/generation/generation-step-executor.js";
-import { GenerationPlanner } from "../application/generation/generation-planner.js";
 import {
   RuntimeObserver,
   SnapshotReobservationGuard,
   type RuntimeObservation,
-  type RuntimeObserveInput,
-  type SnapshotPlanning
+  type RuntimeObserveInput
 } from "../application/generation/runtime-observer.js";
 import { InitService, type InitInput } from "../application/init/init-service.js";
 import { JourneyResolver } from "../application/journey/journey-resolver.js";
@@ -164,22 +153,6 @@ import {
   ImpactResolver
 } from "../application/impact/impact-resolver.js";
 import { NodeGitDiff } from "../adapters/git/node-git-diff.js";
-import {
-  KnowledgeReceiptRecorder
-} from "../application/knowledge/receipt-recorder.js";
-import {
-  KnowledgeBootstrapper
-} from "../application/knowledge/knowledge-bootstrapper.js";
-import {
-  KnowledgePromotionService
-} from "../application/knowledge/promotion-service.js";
-import {
-  KnowledgeEvolutionService,
-  type KnowledgeEvolutionResult
-} from "../application/knowledge/knowledge-evolver.js";
-import type {
-  ActionResolutionResult
-} from "../application/resolution/action-resolver.js";
 import { ProjectDescriber } from "../application/project/project-describer.js";
 import { RecorderService, type RecordInput, type RecordResult } from "../application/recorder/recorder-service.js";
 import { ReportWriter } from "../application/report/report-writer.js";
@@ -190,26 +163,15 @@ import {
 } from "../application/contract/contract-verifier.js";
 import { ContractLoader } from "../application/contract/contract-loader.js";
 import { ContractReviewMerger } from "../application/contract/contract-review.js";
-import { PlaybookValidator } from "../application/playbook/playbook-validator.js";
 import { BaselineService } from "../application/checkpoint/baseline-service.js";
 import { FailureClassifier } from "../application/diagnosis/failure-classifier.js";
 import type { ContractVerdictView } from "../domain/contract.js";
 import { TapHoundReportV4Schema } from "../domain/report.js";
 import type { FailureClassification } from "../domain/failure-classification.js";
-import {
-  FalseDoneRunner,
-  type FalseDoneRunInput,
-  type FalseDoneValidateOutput
-} from "../application/benchmark/false-done-runner.js";
 import { VerifyRuntime, type VerifyInput, type VerifyResult } from "../application/runtime/verify-runtime.js";
 import { IdleWaiter } from "../application/wait/idle-waiter.js";
 import { deviceIdentityResolver } from "../application/wait/idle-profiles.js";
 import type { TapHoundConfig } from "../domain/config.js";
-import {
-  createLocalTargets,
-  type LocalSyncPort,
-  type LocalTargets
-} from "./local-target-dependencies.js";
 import {
   resolveRuntimeBackendId,
   type RuntimeBackendChoice
@@ -224,22 +186,22 @@ import type {
   ChangeSet
 } from "../domain/impact.js";
 import type { Journey } from "../domain/journey.js";
-import type { RuntimeSessionOpener } from "../ports/runtime-backend.js";
+import {
+  withRuntimeSession,
+  type RuntimeBackend,
+  type RuntimeSessionOpener
+} from "../ports/runtime-backend.js";
 import type { ScreenshotPort } from "../ports/screenshot.js";
 import type { UiSnapshotProviderFactory } from "../ports/ui-snapshot.js";
 import type { UiStabilityProbe } from "../ports/ui-stability.js";
 import type { UiBackendSelection } from "../domain/ui-backend.js";
 import type { InitResult } from "../domain/init.js";
-import type { RuntimeSnapshot } from "../domain/runtime-snapshot.js";
-import type {
-  KnowledgePromotion,
-  KnowledgeReceipt
-} from "../domain/knowledge-receipt.js";
 import {
   verificationPhaseLabel,
   type GenerationSession
 } from "../domain/generation.js";
 import type { InitPromptPort } from "../ports/init-prompt.js";
+import type { RecorderPromptPort } from "../ports/recorder-prompt.js";
 import type {
   GenerationSessionStore
 } from "../ports/generation-session-store.js";
@@ -251,15 +213,12 @@ import type {
   JourneyCompositionStore
 } from "../ports/journey-composition-store.js";
 import type {
-  LoadedKnowledgeBundle,
-  WriteKnowledgeBundleResult
+  KnowledgeRehashResult,
+  LoadedKnowledgeBundle
 } from "../ports/knowledge-registry.js";
 import { isErrnoException } from "../shared/errors.js";
 import { readRuntimeBackendChoice } from "./runtime-selection.js";
-import {
-  CONTEXT_INDEX_PATH,
-  tapHoundPath
-} from "../domain/workspace.js";
+import { CONTEXT_INDEX_PATH } from "../domain/workspace.js";
 import { JourneySchema } from "../domain/journey.js";
 
 export interface TextOutput {
@@ -279,9 +238,7 @@ export interface GenerationCliRuntime {
   archive: (id: string) => Promise<GenerationSession>;
   list: () => Promise<readonly GenerationSession[]>;
   readSession: (id: string) => Promise<GenerationSession>;
-  readContextSnapshot: (
-    id: string
-  ) => Promise<ResolvedProjectContext | null>;
+  readContextSnapshot: (id: string) => Promise<ResolvedProjectContext>;
   assertConfigIdentity: (id: string) => Promise<void>;
   updateIdlePolicy: (
     id: string,
@@ -296,18 +253,10 @@ export interface GenerationCliRuntime {
     manualReplay?: boolean | undefined;
     signal?: AbortSignal | undefined;
   }) => Promise<GenerationReplaceResult>;
-  resolvePlannedAction?: ((input: {
-    session: GenerationSession;
-    snapshot: RuntimeSnapshot;
-  }) => Promise<ActionResolutionResult>) | undefined;
 }
-
-export type { LocalSyncPort, LocalTargets } from "./local-target-dependencies.js";
 
 export interface CliDependencies {
   signal?: AbortSignal | undefined;
-  localTargets: LocalTargets;
-  localSync?: LocalSyncPort | undefined;
   doctor: {
     run: (input?: DoctorRunInput) => Promise<DoctorReport>;
   };
@@ -321,7 +270,6 @@ export interface CliDependencies {
     verify: (input: ContractVerifyInput) => Promise<ContractVerifyResult>;
   } | undefined;
   contractLoader?: Pick<ContractLoader, "load"> | undefined;
-  playbookValidator?: Pick<PlaybookValidator, "validate"> | undefined;
   baselineService?: Pick<BaselineService, "captureFromReport" | "write" | "compare"> | undefined;
   failureClassifier?: {
     classify: (reportPath: string) => Promise<FailureClassification>;
@@ -364,7 +312,6 @@ export interface CliDependencies {
   generationRuntime?: (input: {
     projectRoot: string;
     config: TapHoundConfig;
-    workspaceRoot?: string | undefined;
   }) => GenerationCliRuntime;
   detachedProcess?: DetachedProcessLauncher | undefined;
   cliEntryPath?: string | undefined;
@@ -393,62 +340,21 @@ export interface CliDependencies {
   impact?: {
     resolve: (input: {
       projectRoot: string;
-      workspaceRoot?: string | undefined;
       packageName: string;
       changeSet: ChangeSet;
     }) => Promise<ImpactSet>;
   } | undefined;
   gitDiff?: GitDiffPort | undefined;
-  uiCache?: {
-    status: (projectRoot: string) => Promise<{
-      directory: string;
-      entries: number;
-      bytes: number;
-    }>;
-    clear: (projectRoot: string) => Promise<void>;
-  } | undefined;
   knowledge?: {
     load: (input: {
       projectRoot: string;
       packageName?: string | undefined;
       expectedKnowledgeHash?: string | undefined;
     }) => Promise<LoadedKnowledgeBundle>;
-    bootstrap: (input: {
+    rehash: (input: {
       projectRoot: string;
       packageName: string;
-      modules: Parameters<KnowledgeBootstrapper["bootstrap"]>[0]["modules"];
-      expectedKnowledgeHash?: string | undefined;
-    }) => Promise<WriteKnowledgeBundleResult>;
-    promote: (input: {
-      projectRoot: string;
-      packageName: string;
-      promotion: KnowledgePromotion;
-    }) => Promise<WriteKnowledgeBundleResult>;
-    evolve: (input: {
-      projectRoot: string;
-      packageName: string;
-      expectedKnowledgeHash?: string | undefined;
-    }) => Promise<KnowledgeEvolutionResult>;
-    listReceipts: (
-      projectRoot: string
-    ) => Promise<readonly KnowledgeReceipt[]>;
-  } | undefined;
-  benchmark?: {
-    store: BenchmarkStore;
-  } | undefined;
-  falseDone?: {
-    validate: (input: {
-      projectRoot: string;
-      caseIds?: readonly string[] | undefined;
-    }) => Promise<FalseDoneValidateOutput>;
-    run: (input: FalseDoneRunInput) => Promise<{
-      result: FalseDoneRunResult;
-      path: string;
-    }>;
-    readResult: (
-      projectRoot: string,
-      runId: string
-    ) => Promise<FalseDoneRunResult>;
+    }) => Promise<KnowledgeRehashResult>;
   } | undefined;
   readJson: (path: string) => Promise<unknown>;
   readFile: (path: string) => Promise<Buffer>;
@@ -461,11 +367,19 @@ export interface CliDependencies {
 
 export interface ProductionDependencyOptions {
   generationStoreFactory?: (
-    projectRoot: string,
-    workspaceRoot?: string  
+    projectRoot: string
   ) => GenerationSessionStore;
   runtimeBackendChoice?: RuntimeBackendChoice | undefined;
   mobileMcpToolsFactory?: (() => MobileMcpTools) | undefined;
+  /**
+   * Replaces the device backend while keeping every other production wire.
+   * Used by the simulated-device parity harness; the CLI never sets it.
+   */
+  runtimeBackend?: RuntimeBackend | undefined;
+  /** Single time source for waits, polling, and cache TTLs (tests inject a virtual clock). */
+  clock?: Clock | undefined;
+  /** Replaces the interactive Recorder prompt (the parity harness scripts it). */
+  recorderPrompt?: RecorderPromptPort | undefined;
 }
 
 function runId(): string {
@@ -476,12 +390,10 @@ export function loadKnowledgeResilient(
   load: (input: {
     projectRoot: string;
     packageName: string;
-    workspaceRoot?: string | undefined;
   }) => Promise<LoadedKnowledgeBundle>,
   input: {
     projectRoot: string;
     packageName: string;
-    workspaceRoot?: string | undefined;
   }
 ): Promise<LoadedKnowledgeBundle> {
   return load(input).catch((error: unknown) => {
@@ -498,14 +410,12 @@ export function loadKnowledgeResilient(
           packageName: input.packageName,
           revision: 0,
           anchors: [],
-          screens: [],
-          transitions: []
+          screens: []
         },
         indexSha256: "0".repeat(64),
         knowledgeHash: "0".repeat(64),
         anchors: [],
-        screens: [],
-        transitions: []
+        screens: []
       } satisfies LoadedKnowledgeBundle;
     }
     throw error;
@@ -520,27 +430,33 @@ export function createProductionDependencies(
     options.runtimeBackendChoice ?? readRuntimeBackendChoice(process.env)
   );
   const runner = new NodeProcessRunner();
+  const clock = options.clock ?? new SystemClock();
+  const now = (): number => clock.now();
   const permissionCaptureTimeoutMs = 10_000;
-  let adb: AdbPort;
-  let sessions: RuntimeSessionOpener;
+  let backend: RuntimeBackend;
   let screenshots: ScreenshotPort;
-  let uiStability: UiStabilityProbe;
   let uiSnapshots: UiSnapshotProviderFactory;
   let sharedBackend: SharedSessionRuntimeBackend | undefined;
-  if (backendId === "mobile-mcp") {
-    const backend = new SharedSessionRuntimeBackend(
+  if (options.runtimeBackend !== undefined) {
+    backend = options.runtimeBackend;
+    screenshots = new SessionBackedScreenshotAdapter(backend);
+    uiSnapshots = new CachedUiSnapshotProviderFactory(
+      new SessionBackedUiSnapshotProviderFactory(backend),
+      now
+    );
+  } else if (backendId === "mobile-mcp") {
+    const shared = new SharedSessionRuntimeBackend(
       new MobileMcpRuntimeBackend({
         createTools: options.mobileMcpToolsFactory
           ?? ((): MobileMcpTools => new McpToolClient())
       })
     );
-    sharedBackend = backend;
-    sessions = backend;
-    adb = new RuntimeBackendAdbBridge({ backend });
+    sharedBackend = shared;
+    backend = shared;
     screenshots = new SessionBackedScreenshotAdapter(backend);
-    uiStability = new SessionBackedUiStabilityAdapter(backend);
     uiSnapshots = new CachedUiSnapshotProviderFactory(
-      new SessionBackedUiSnapshotProviderFactory(backend)
+      new SessionBackedUiSnapshotProviderFactory(backend),
+      now
     );
   } else {
     const adbAdapter = new AdbAdapter(runner);
@@ -550,7 +466,8 @@ export function createProductionDependencies(
         new SystemUiAutomatorSnapshotProviderFactory(runner),
         new AndroidCliSnapshotProviderFactory(runner),
         new AppiumUiSnapshotProviderFactory(runner)
-      )
+      ),
+      now
     );
     const adbBackend = new AdbRuntimeBackend({
       adb: adbAdapter,
@@ -559,26 +476,41 @@ export function createProductionDependencies(
       uiStability: androidCli,
       uiSnapshots: autoSnapshots
     });
-    sessions = adbBackend;
-    adb = new RuntimeBackendAdbBridge({ backend: adbBackend });
+    backend = adbBackend;
     screenshots = androidCli;
-    uiStability = androidCli;
     uiSnapshots = autoSnapshots;
   }
-  const clock = new SystemClock();
+  const sessions: RuntimeSessionOpener = backend;
+  // Device-wide probes (listing, install state) borrow a session per call.
+  const devices: Pick<AdbPort, "devices" | "isInstalled"> = {
+    devices: (signal) => backend.listDevices(signal),
+    isInstalled: (identity) => withRuntimeSession(
+      backend,
+      identity.deviceSerial,
+      identity.signal,
+      (session) => session.isInstalled({
+        packageName: identity.packageName,
+        ...(identity.signal === undefined ? {} : { signal: identity.signal }),
+        ...(identity.timeoutMs === undefined
+          ? {}
+          : { timeoutMs: identity.timeoutMs })
+      })
+    )
+  };
   const waitUntilIdle = (
     deviceSerial: string,
     config: Parameters<IdleWaiter["waitUntilIdle"]>[0],
-    signal?: AbortSignal,
-    packageName?: string,
-    stability?: UiStabilityProbe
+    signal: AbortSignal | undefined,
+    packageName: string,
+    stability: UiStabilityProbe,
+    device: Pick<AdbPort, "deviceIdentity">
   ): ReturnType<IdleWaiter["waitUntilIdle"]> => new IdleWaiter(
-    stability ?? uiStability,
+    stability,
     clock,
     deviceSerial,
     packageName,
-    deviceIdentityResolver(adb, {
-      packageName: packageName ?? "unknown",
+    deviceIdentityResolver(device, {
+      packageName,
       deviceSerial,
       timeoutMs: config.timeoutMs
     })
@@ -587,16 +519,8 @@ export function createProductionDependencies(
     signal
   );
   const generationStoreFactory = options.generationStoreFactory
-    ?? ((
-      projectRoot: string,
-      workspaceRoot?: string  
-    ): GenerationSessionStore => (
-      new FileSystemGenerationSessionStore(
-        projectRoot,
-        workspaceRoot === undefined
-          ? {}
-          : { generationRoot: join(workspaceRoot, "generations") }
-      )
+    ?? ((projectRoot: string): GenerationSessionStore => (
+      new FileSystemGenerationSessionStore(projectRoot)
     ));
   const projectFiles = new NodeProjectFileInspector();
   const projectInventory = new NodeProjectInventoryInspector();
@@ -649,61 +573,12 @@ export function createProductionDependencies(
     registry: externalFlowRegistry
   });
   const knowledgeRegistry = new FileSystemKnowledgeRegistry();
-  const knowledgeReceiptStore = new FileSystemKnowledgeReceiptStore();
   const knowledgeLoader = new KnowledgeLoader(knowledgeRegistry);
-  const knowledgeReceiptRecorder = new KnowledgeReceiptRecorder(
-    knowledgeReceiptStore
-  );
-  const knowledgeBootstrapper = new KnowledgeBootstrapper(knowledgeRegistry);
-  const knowledgePromotion = new KnowledgePromotionService({
-    registry: knowledgeRegistry,
-    receipts: knowledgeReceiptStore
-  });
-  const knowledgeEvolution = new KnowledgeEvolutionService({
-    registry: knowledgeRegistry,
-    receipts: knowledgeReceiptStore
-  });
-  const benchmarkStore = new FileSystemBenchmarkStore();
-  const falseDoneStore = new FileSystemFalseDoneStore();
-  const falseDoneRunner = new FalseDoneRunner({
-    store: falseDoneStore,
-    installApk: async ({ deviceSerial, apkPath }): Promise<void> => {
-      const result = await runner.run({
-        executable: "adb",
-        args: ["-s", deviceSerial, "install", "-r", apkPath]
-      });
-      if (
-        result.exitCode !== 0
-        || result.spawnError !== undefined
-        || result.cancelled
-        || result.timedOut
-      ) {
-        throw new Error(
-          result.stderr.trim()
-            || result.spawnError
-            || result.stdout.trim()
-            || "adb install failed"
-        );
-      }
-    },
-    verifyContract: (input): Promise<ContractVerifyResult> => (
-      productionContractVerifier.verify(input)
-    ),
-    readText: (path: string): Promise<string> => readFile(path, "utf8"),
-    readBytes: async (path: string): Promise<Uint8Array> => (
-      new Uint8Array(await readFile(path))
-    ),
-    now: (): Date => new Date(),
-    createRunId: randomUUID
-  });
   const productionContractLoader = new ContractLoader({
     readText: (path: string): Promise<string> => readFile(path, "utf8")
   });
   const productionContractReview = new ContractReviewMerger({
     now: (): Date => new Date()
-  });
-  const productionPlaybookValidator = new PlaybookValidator({
-    readText: (path: string): Promise<string> => readFile(path, "utf8")
   });
   const productionBaselineService = new BaselineService({
     readText: (path: string): Promise<string> => readFile(path, "utf8"),
@@ -721,7 +596,7 @@ export function createProductionDependencies(
   const productionContractVerifier = new ContractVerifier({
     verify: (input): Promise<VerifyResult> => productionVerifyRuntime.verify(input),
     loadKnowledge: (input): Promise<LoadedKnowledgeBundle> => (
-      knowledgeRegistry.load(input.projectRoot, input.workspaceRoot)
+      knowledgeRegistry.load(input.projectRoot)
     ),
     readText: (path: string): Promise<string> => readFile(path, "utf8"),
     writeVerdict: async ({ reportPath, verdict }): Promise<void> => {
@@ -743,42 +618,30 @@ export function createProductionDependencies(
     reportWriter: new ReportWriter(),
     now: (): Date => new Date(),
     createRunId: runId,
-    anchorResolverFor: (
-      projectRoot: string,
-      workspaceRoot?: string
-    ): AnchorResolverPort => (
-      new KnowledgeAnchorResolver(knowledgeRegistry, projectRoot, workspaceRoot)
+    anchorResolverFor: (projectRoot: string): AnchorResolverPort => (
+      new KnowledgeAnchorResolver(knowledgeRegistry, projectRoot)
     ),
     loadKnowledge: (input): Promise<LoadedKnowledgeBundle> => (
-      knowledgeRegistry.load(input.projectRoot, input.workspaceRoot)
+      knowledgeRegistry.load(input.projectRoot)
     )
   });
   const gitDiff = new NodeGitDiff(runner);
   const impactResolver = new ImpactResolver({
     loadContext: async (input: {
       projectRoot: string;
-      workspaceRoot?: string | undefined;
     }): Promise<{
       context: ResolvedProjectContext;
       modules: ProjectContextModule[];
     }> => {
       const loaded = await contextLoader.load({
         projectRoot: input.projectRoot,
-        ...(input.workspaceRoot === undefined
-          ? {}
-          : { workspaceRoot: input.workspaceRoot }),
-        contextPath: tapHoundPath(
-          input.projectRoot,
-          input.workspaceRoot,
-          CONTEXT_INDEX_PATH
-        ),
+        contextPath: join(input.projectRoot, CONTEXT_INDEX_PATH),
         allowIncomplete: true
       });
       return { context: loaded.context, modules: loaded.modules };
     },
     loadKnowledge: (input: {
       projectRoot: string;
-      workspaceRoot?: string | undefined;
       packageName: string;
     }): Promise<LoadedKnowledgeBundle> => loadKnowledgeResilient(
       knowledgeLoader.load.bind(knowledgeLoader),
@@ -786,23 +649,15 @@ export function createProductionDependencies(
     ),
     listJourneyPaths: (input: {
       projectRoot: string;
-      workspaceRoot?: string | undefined;
     }): Promise<readonly string[]> => (
-      journeyCompositionStore.listJourneyPaths(
-        input.projectRoot,
-        input.workspaceRoot
-      )
+      journeyCompositionStore.listJourneyPaths(input.projectRoot)
     ),
     readJourney: async (input: {
       projectRoot: string;
-      workspaceRoot?: string | undefined;
       path: string;
     }): Promise<Journey | null> => {
       const bytes = await journeyCompositionStore.read({
         projectRoot: input.projectRoot,
-        ...(input.workspaceRoot === undefined
-          ? {}
-          : { workspaceRoot: input.workspaceRoot }),
         relativePath: input.path
       });
       try {
@@ -812,10 +667,6 @@ export function createProductionDependencies(
       }
     }
   });
-  const localTargets = createLocalTargets(
-    runner,
-    { now: (): Date => new Date() }
-  );
   return {
     ...(signal === undefined ? {} : { signal }),
     ...(sharedBackend === undefined
@@ -823,7 +674,7 @@ export function createProductionDependencies(
       : { close: (): Promise<void> => sharedBackend.close() }),
     doctor: new DoctorService({
       runner,
-      adb,
+      adb: devices,
       nodeVersion: process.version,
       runtimeBackendId: backendId,
       checkAndroidPermissions: async (
@@ -900,13 +751,12 @@ export function createProductionDependencies(
       sessions,
       sessionPorts: runtimeSessionPortViews,
       clock,
-      prompt: new InquirerRecorderPrompt(),
+      prompt: options.recorderPrompt ?? new InquirerRecorderPrompt(),
       journeyWriter: new FileSystemJourneyWriter()
     }),
       verifier: productionVerifyRuntime,
       contractLoader: productionContractLoader,
       contractVerifier: productionContractVerifier,
-      playbookValidator: productionPlaybookValidator,
       baselineService: productionBaselineService,
       failureClassifier: {
         classify: async (reportPath: string): Promise<FailureClassification> => {
@@ -942,9 +792,10 @@ export function createProductionDependencies(
     }),
     initPrompt: new InquirerInitPrompt(),
     align: new AlignService({
-      adb,
+      adb: devices,
       probe: new CameraProbeAdapter({
-        adb,
+        sessions,
+        sessionPorts: runtimeSessionPortViews,
         uiSnapshots,
         now: () => Date.now(),
         sleep: async (ms: number): Promise<void> => {
@@ -976,40 +827,10 @@ export function createProductionDependencies(
       resolve: (input): Promise<ImpactSet> => impactResolver.resolve(input)
     },
     gitDiff,
-    uiCache: {
-      status: async (projectRoot) => new FileSystemUiCacheStore(projectRoot).status(),
-      clear: async (projectRoot) => new FileSystemUiCacheStore(projectRoot).clear()
-    },
     knowledge: {
       load: (input): Promise<LoadedKnowledgeBundle> => knowledgeLoader.load(input),
-      bootstrap: (input): Promise<WriteKnowledgeBundleResult> => (
-        knowledgeBootstrapper.bootstrap(input)
-      ),
-      promote: (input): Promise<WriteKnowledgeBundleResult> => (
-        knowledgePromotion.promote(input)
-      ),
-      evolve: (input): Promise<KnowledgeEvolutionResult> => (
-        knowledgeEvolution.evolve(input)
-      ),
-      listReceipts: (projectRoot): Promise<readonly KnowledgeReceipt[]> => (
-        knowledgeReceiptStore.list(projectRoot)
-      )
-    },
-    benchmark: {
-      store: benchmarkStore
-    },
-    falseDone: {
-      validate: (input): Promise<FalseDoneValidateOutput> => (
-        falseDoneRunner.validate(input)
-      ),
-      run: (input): Promise<Awaited<ReturnType<FalseDoneRunner["run"]>>> => (
-        falseDoneRunner.run(input)
-      ),
-      readResult: (
-        projectRoot: string,
-        runId: string
-      ): Promise<FalseDoneRunResult> => (
-        falseDoneStore.readResult(projectRoot, runId)
+      rehash: (input): Promise<KnowledgeRehashResult> => (
+        knowledgeRegistry.rehash(input.projectRoot, input.packageName)
       )
     },
     generationStarter: {
@@ -1017,12 +838,13 @@ export function createProductionDependencies(
         Awaited<ReturnType<GenerationStarter["start"]>>
       > => new GenerationStarter({
         contextValidator,
-        appPreparer: new GenerationAppPreparer(adb, clock),
+        appPreparer: new GenerationAppPreparer({
+              sessions,
+              sessionPorts: runtimeSessionPortViews,
+              clock
+            }),
         uiSnapshots,
-        store: generationStoreFactory(
-          input.projectRoot,
-          input.workspaceRoot
-        ),
+        store: generationStoreFactory(input.projectRoot),
         now: (): Date => new Date(),
         generateId: randomUUID,
         randomBytes
@@ -1030,10 +852,10 @@ export function createProductionDependencies(
     },
     runtimeObserver: {
       observe: async (
-        { projectRoot, workspaceRoot, ...input }
+        { projectRoot, ...input }
       ): Promise<RuntimeObservation> => (
         new RuntimeObserver({
-          store: generationStoreFactory(projectRoot, workspaceRoot),
+          store: generationStoreFactory(projectRoot),
           sessions,
           sessionPorts: runtimeSessionPortViews,
           waitUntilIdle,
@@ -1044,20 +866,9 @@ export function createProductionDependencies(
     },
     generationRuntime: ({
       projectRoot,
-      config,
-      workspaceRoot
+      config
     }): GenerationCliRuntime => {
-      const store = generationStoreFactory(
-        projectRoot,
-        workspaceRoot
-      );
-      const planner = new GenerationPlanner({
-        projectRoot,
-        knowledge: knowledgeLoader,
-        receipts: knowledgeReceiptRecorder,
-        now: (): Date => new Date(),
-        createReceiptId: randomUUID
-      });
+      const store = generationStoreFactory(projectRoot);
       const prompt = new InquirerGenerationPrompt();
       const observer = new RuntimeObserver({
         store,
@@ -1067,19 +878,7 @@ export function createProductionDependencies(
         now: (): Date => new Date(),
         createAttemptId: randomUUID,
         uiCacheEnabled: config.ui?.cacheEnabled ?? true,
-        uiSnapshotTimeoutMs: config.ui?.snapshotTimeoutMs,
-        planSnapshot: async ({
-          session,
-          snapshot,
-          verifyTransition
-        }): Promise<SnapshotPlanning> => {
-          const result = await planner.planSnapshot(
-            session,
-            snapshot,
-            verifyTransition
-          );
-          return { planning: result.planning, timing: result.timing };
-        }
+        uiSnapshotTimeoutMs: config.ui?.snapshotTimeoutMs
       });
       const confirmation = new GenerationConfirmationService({
         store,
@@ -1141,16 +940,12 @@ export function createProductionDependencies(
         reportWriter: new ReportWriter(),
         now: (): Date => new Date(),
         createRunId: runId,
-        anchorResolverFor: (
-          projectRoot: string,
-          workspaceRoot?: string  
-        ): AnchorResolverPort => (
-          new KnowledgeAnchorResolver(knowledgeRegistry, projectRoot, workspaceRoot)
+        anchorResolverFor: (projectRoot: string): AnchorResolverPort => (
+          new KnowledgeAnchorResolver(knowledgeRegistry, projectRoot)
         )
       });
       const finalizer = new GenerationFinalizer({
         store,
-        contextValidator,
         verifyRuntime,
         publisher,
         generateAttemptId: randomUUID,
@@ -1199,7 +994,7 @@ export function createProductionDependencies(
         },
         list: (): Promise<readonly GenerationSession[]> => store.list(),
         readSession: (id): Promise<GenerationSession> => store.read(id),
-        readContextSnapshot: (id): Promise<ResolvedProjectContext | null> => (
+        readContextSnapshot: (id): Promise<ResolvedProjectContext> => (
           readGenerationContextSnapshot({ store }, id)
         ),
         assertConfigIdentity: async (id): Promise<void> => {
@@ -1226,23 +1021,13 @@ export function createProductionDependencies(
             store,
             observer,
             verifyRuntime,
-            appPreparer: new GenerationAppPreparer(adb, clock)
+            appPreparer: new GenerationAppPreparer({
+              sessions,
+              sessionPorts: runtimeSessionPortViews,
+              clock
+            })
           }).replace(input)
-        ),
-        resolvePlannedAction: async (input): Promise<ActionResolutionResult> => {
-          if (input.session.version !== 2 || input.session.planning === undefined) {
-            throw new GenerationOperationError(
-              "KNOWLEDGE_INVALID",
-              "Generation session has no planning binding"
-            );
-          }
-          const knowledge = await knowledgeLoader.load({
-            projectRoot,
-            packageName: input.session.target.packageName,
-            expectedKnowledgeHash: input.session.planning.knowledgeHash
-          });
-          return planner.resolveNext({ ...input, knowledge });
-        }
+        )
       };
     },
     detachedProcess: new NodeDetachedProcessLauncher(),
@@ -1250,8 +1035,6 @@ export function createProductionDependencies(
     ...(process.argv[1] === undefined
       ? {}
       : { cliEntryPath: process.argv[1] }),
-    localTargets,
-    localSync: localTargets.localSync,
     readJson: async (path): Promise<unknown> => JSON.parse(
       await readFile(path, "utf8")
     ) as unknown,

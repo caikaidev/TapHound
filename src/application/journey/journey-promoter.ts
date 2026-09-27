@@ -71,7 +71,6 @@ export class JourneyPromoter {
 
   public readonly promote = async (input: {
     projectRoot: string;
-    workspaceRoot?: string | undefined;
     journeyPath: string;
     reason: string;
     now: Date;
@@ -83,10 +82,7 @@ export class JourneyPromoter {
     try {
       journeyBytes = await this.dependencies.store.read({
         projectRoot: input.projectRoot,
-        relativePath: journeyPath,
-        ...(input.workspaceRoot === undefined
-          ? {}
-          : { workspaceRoot: input.workspaceRoot })
+        relativePath: journeyPath
       });
     } catch {
       throw new JourneyPromotionError(
@@ -106,10 +102,7 @@ export class JourneyPromoter {
 
     const metaBytes = await this.dependencies.store.readJourneyMeta({
       projectRoot: input.projectRoot,
-      journeyPath,
-      ...(input.workspaceRoot === undefined
-        ? {}
-        : { workspaceRoot: input.workspaceRoot })
+      journeyPath
     });
     if (metaBytes === null) {
       throw new JourneyPromotionError(

@@ -8,10 +8,10 @@ import type { LayoutElement } from "../../../src/domain/layout.js";
 import type { ProposedStep } from "../../../src/domain/proposed-step.js";
 import {
   hashRuntimeSnapshot,
-  type RuntimeSnapshot,
-  type RuntimeSnapshotV1
+  type RuntimeSnapshot
 } from "../../../src/domain/runtime-snapshot.js";
 import { contextSelection } from "../../fixtures/project-context.js";
+import { TEST_SNAPSHOT_UI, TEST_UI_BACKEND } from "../../fakes/ui-backend.js";
 
 const activity = "com.example.app.MainActivity";
 type ProposalDraft = ProposedStep extends infer Step
@@ -35,10 +35,10 @@ function element(
 
 function snapshot(
   layout: LayoutElement[],
-  overrides: Partial<RuntimeSnapshotV1> = {}
+  overrides: Partial<RuntimeSnapshot> = {}
 ): RuntimeSnapshot {
   return {
-    version: 1,
+    version: 2,
     generationId: "generation-1",
     baseRevision: 2,
     deviceSerial: "emulator-5554",
@@ -48,6 +48,7 @@ function snapshot(
     pid: 42,
     capturedAt: "2026-07-22T12:00:00.000Z",
     layout,
+    ...TEST_SNAPSHOT_UI,
     ...overrides
   };
 }
@@ -62,7 +63,8 @@ function session(runtime: RuntimeSnapshot): GenerationSession {
       projectHash: "a".repeat(64),
       configHash: "b".repeat(64),
       contextHash: "c".repeat(64),
-      snapshotHash: hashRuntimeSnapshot(runtime)
+      snapshotHash: hashRuntimeSnapshot(runtime),
+      uiBackend: TEST_UI_BACKEND
     },
     target: {
       packageName: "com.example.app",
@@ -86,7 +88,8 @@ function session(runtime: RuntimeSnapshot): GenerationSession {
     pendingConfirmation: null,
     verification: { status: "notRun" },
     publication: { status: "notRun" },
-    externalFlows: []
+    externalFlows: [],
+    verificationHistory: []
   };
 }
 

@@ -17,6 +17,8 @@ import { fileURLToPath } from "node:url";
 const NOTICE = "Smoke check only, not verification evidence: use taphound-verify-change to prove a change.";
 const DUMP_PATH = "/sdcard/taphound-flash.xml";
 const POLL_MS = 250;
+// Shell commands that change what the device shows.
+const MUTATIONS = new Set(["input", "am", "monkey", "wm"]);
 const TARGET_KEYS = ["id", "text", "desc"];
 const ACTIONS = {
   tap: ["target"],
@@ -149,9 +151,19 @@ class Device {
   constructor(serial, packageName) {
     this.serial = serial;
     this.packageName = packageName;
+    // The last settled UI dump, valid until the next device mutation or wait.
+    this.settled = undefined;
+  }
+
+  /** The settled dump once, then fresh dumps (it may be stale after a poll). */
+  async observe() {
+    const cached = this.settled;
+    this.settled = undefined;
+    return cached ?? this.dump();
   }
 
   run(args, options) {
+    if (args[0] === "shell" && MUTATIONS.has(args[1])) this.settled = undefined;
     return adb(["-s", this.serial, ...args], options);
   }
 
@@ -286,7 +298,10 @@ async function settle(device, timeoutMs) {
   for (;;) {
     await sleep(POLL_MS);
     const current = await device.dump();
-    if (current === previous) return current;
+    if (current === previous) {
+      device.settled = current;
+      return current;
+    }
     if (Date.now() >= deadline) {
       throw new FlashError("UNSETTLED", `The UI kept changing for ${timeoutMs} ms`);
     }
@@ -373,7 +388,7 @@ async function runStep(device, plan, step) {
   switch (step.action) {
     case "tap": {
       const node = await poll(timeoutMs, async () => {
-        const matches = findTarget(parseHierarchy(await device.dump()), step.target, plan.packageName);
+        const matches = findTarget(parseHierarchy(await device.observe()), step.target, plan.packageName);
         if (matches.length === 1) return { done: true, value: matches[0] };
         if (matches.length > 1) {
           throw new FlashError("TARGET_AMBIGUOUS", `${describe(step.target)} matches ${matches.length} elements`);
@@ -393,11 +408,12 @@ async function runStep(device, plan, step) {
       await device.shell(["input", "keyevent", "4"], "back");
       return "pressed back";
     case "wait":
+      device.settled = undefined;
       await sleep(step.ms);
       return `waited ${step.ms} ms`;
     case "expect":
       return poll(timeoutMs, async () => {
-        const matches = findTarget(parseHierarchy(await device.dump()), step.target, plan.packageName);
+        const matches = findTarget(parseHierarchy(await device.observe()), step.target, plan.packageName);
         if (step.absent) {
           return matches.length === 0
             ? { done: true, value: `${describe(step.target)} is absent` }

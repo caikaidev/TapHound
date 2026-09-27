@@ -113,6 +113,18 @@ describe("taphound-flash", () => {
     expect(run.device.taps).toEqual([[190, 1100]]);
   }, 60_000);
 
+  it("reuses the settled UI dump for the next target lookup", async () => {
+    const run = await flash(plan([{ action: "tap", target: { id: "open_search" } }]));
+
+    const launched = run.device.log.findIndex((entry) => entry.includes("am start"));
+    const tapped = run.device.log.findIndex((entry) => entry.includes("input tap"));
+    const dumps = run.device.log.slice(launched, tapped)
+      .filter((entry) => entry.includes("uiautomator dump"));
+    // Two identical dumps settle the launched app; the tap looks up its
+    // target in the second one instead of dumping again.
+    expect(dumps).toHaveLength(2);
+  }, 60_000);
+
   it("fails with evidence when a target never appears", async () => {
     const run = await flash(plan([{ action: "tap", target: { id: "missing" } }]));
 

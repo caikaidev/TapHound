@@ -34,6 +34,13 @@
 
 ### Changed
 
+- The READMEs describe TapHound as the check on AI-coded Android changes,
+  list the five current Skills, and link the Workflow Skills, capability,
+  `observe`, and releasing docs. `TODO.md` (a stale manual npm checklist) is
+  removed in favor of `docs/releasing.md`; `docs/agent-integration.md` lists
+  the shipped Skills, and the two self-verification design documents are
+  marked as history and design respectively.
+
 - `taphound-accept` and `taphound-preserve` are merged into
   `taphound-verify-change`, which classifies each change (new behavior with
   or without UI, refactor, UI toolkit migration, structural UI change) and

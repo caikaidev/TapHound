@@ -1,5 +1,10 @@
 # Independent Verification Agent (V0.7)
 
+> **Status: design, not shipped.** No Verification Agent Skill ships yet. The
+> shipped done-gate is `taphound-verify-change` (see
+> [Workflow Skills](workflow-skills.md)); this document records the stricter
+> context-isolated role it could grow into.
+
 Independent Verification is TapHound's first-class principle: the entity that
 decides "done" must not inherit the implementer's reasoning. TapHound Core
 stays deterministic and model-free; the Verification Agent is an

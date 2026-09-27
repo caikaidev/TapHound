@@ -6,10 +6,11 @@ pushed. The tag must equal `package.json`'s version (`v0.2.0-dev.11` for
 
 ## One-time setup (maintainer)
 
-1. On npmjs.com, open the `taphound` package settings and add a Trusted
-   Publisher: GitHub Actions, repository `caikaidev/TapHound`, workflow
-   `release.yml`. No npm token is stored in the repository; the workflow
-   authenticates through GitHub's OIDC token and publishes with provenance.
+1. Enable npm Trusted Publishing: on npmjs.com, open the `taphound`
+   package settings and add a Trusted Publisher for GitHub Actions,
+   repository `caikaidev/TapHound`, workflow `release.yml`. No npm token is
+   stored in the repository; the workflow authenticates through GitHub's
+   OIDC token and publishes with provenance.
 2. Decide what `latest` points to. A prerelease (`X.Y.Z-name.N`) is
    published under the `name` dist-tag (`dev` for `-dev.N`) and never moves
    `latest`; only a stable `X.Y.Z` release does. Move an existing `latest`

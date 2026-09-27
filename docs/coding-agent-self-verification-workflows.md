@@ -1,5 +1,9 @@
 # Coding Agent 的 Android 自验证工作流
 
+> **状态：历史设计文档。** 本文基于提交 `94167aa` 时的代码分析，用于记录设计动机。当前实现以
+> [Workflow Skills](./workflow-skills.md) 为准：Accept 与 Preserve 已合并为
+> `taphound-verify-change`，编码过程中的冒烟检查由 `taphound-flash` 负责。
+
 > 本文档第 3 节的现状判断已对源码逐条核对（基线提交 `94167aa`），关键结论附代码位置。
 > 实施拆解见 [自验证工作流实施计划](./plans/2026-09-14-coding-agent-self-verification-implementation.md)。
 

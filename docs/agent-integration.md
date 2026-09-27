@@ -30,10 +30,10 @@ JSON exitCode == process exit code
 - Non-JSON (human) mode writes summaries to **stdout** and errors to
   **stderr**, and sets the same exit code.
 
-`taphound init` installs the two bundled Skills
-(`taphound-journey-brief-author`, `taphound-journey-generator`) into
-`assets/skills/`; `generation observe`/`step` drive one deterministic
-generation session. bridge steps use External Flows; an escaped package that
+`taphound init --agent <ids>` installs the five bundled Skills from
+`assets/skills/` into each selected agent's Skill directory (see
+[Workflow Skills](workflow-skills.md)); `generation observe`/`step` drive one
+deterministic generation session. bridge steps use External Flows; an escaped package that
 never returns fails with `PACKAGE_ESCAPE` equivalent codes
 (`BRIDGE_NOT_RETURNED`). The whole surface is exercised by
 `verify --diff` against the project or a worktree, and
@@ -116,19 +116,19 @@ Journey is never rewritten to `pass` by a reviewer, semantic comparator, or
 multimodal layer (see `docs/source-of-truth.md`). Only `contract review`
 can escalate `pass`/`inconclusive` to `needsReview`.
 
-## Suggested Skill surface
+## Shipped Skills
 
-A TapHound Agent Skill ships the following public commands (external to Core):
+| Skill | Use it to | Device effects |
+|---|---|---|
+| `taphound-flash` | smoke-check the installed app while coding (adb and Node.js only, no TapHound CLI) | launches and drives the app; never evidence |
+| `taphound-verify-change` | prove a change before calling it done: accept new behavior (Contract `pass`) or preserve existing behavior (Baseline `equivalent`) | independent `verify` Replays |
+| `taphound-journey-brief-author` | maintain the Project Context and author one Journey Brief per Case | read-only (`observe`) |
+| `taphound-journey-generator` | turn a Case into a verified Journey through a generation session | drives the app during generation and finalize |
+| `taphound-case-suite` | run many Cases one at a time with a durable ledger | through the Skills it dispatches |
 
-| Command | Purpose |
-|---|---|
-| `taphound verify --diff <ref>` | verify the minimal set a change affects |
-| `taphound verify --contract <path>` | verify one task against its Acceptance Contract |
-| `taphound failure classify --report <path>` | structured failure contract |
-| `taphound baseline compare --baseline <path> --report <path>` | behavior regression check |
-
-The Skill never mutates device state or Knowledge; it reads CLI JSON output
-and orchestrates re-runs.
+`verify --diff`, `failure classify`, and `baseline compare` stay available to
+any orchestration, but only `taphound-verify-change`'s gate decides whether a
+change is done.
 
 ## Repairing generation replay
 

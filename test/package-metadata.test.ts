@@ -33,7 +33,8 @@ describe("TapHound package metadata", () => {
     expect(lock.packages?.[""]?.version).toBe(document.version);
     expect(document.description)
       .toBe("Deterministic app journey recording and verification");
-    expect(document.bin).toEqual({ taphound: "./dist/cli/main.js" });
+    // No leading "./": npm 12 treats it as invalid and drops the entry.
+    expect(document.bin).toEqual({ taphound: "dist/cli/main.js" });
     expect(document.bin).not.toHaveProperty(["a", "pr"].join(""));
   });
 

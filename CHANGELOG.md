@@ -1,8 +1,63 @@
 # Changelog
 
-## Unreleased
+## 0.2.0-dev.12 — 2026-09-28
+
+### Added
+
+- A local diagnostics journal and `taphound diagnose export`. Each command
+  appends a structured line (command path, passed flag names, exit code,
+  failure code, UI backend latency histogram and failures, Appium session
+  recoveries) to the Git-ignored `.taphound/build/log/events.jsonl`, only
+  where the build layout already exists. `diagnose export` writes a
+  redacted, strict-schema bundle with recent events and Replay summaries for
+  feedback: Activity, Journey, device, and run names become aliases, locator
+  values become salted digests, and paths, packages, serials, messages,
+  screenshots, hierarchies, and Logcat text are dropped. Opt out with
+  `TAPHOUND_DIAGNOSTICS=off`. See `docs/diagnostics.md`.
+
+- `verify --journey` writes a hash-bound process receipt (`receipt.json`)
+  beside the published report and prints `receiptPath` in its `--json`
+  output. The `taphound-verify-change` UI-refactor helper consumes this
+  receipt instead of one an Agent assembled by hand.
+
+### Changed
+
+- When the first step after cold launch cannot find its target
+  (`LOCATOR_NOT_FOUND`, `ANCHOR_NOT_FOUND`, `SCROLL_TARGET_NOT_FOUND`), the
+  failure message now says TapHound does not reset app data and points at
+  persisted app state, which is the usual cause there.
+
+- `UI_SNAPSHOT_FAILED` exits `3` (environment) instead of `1`, and a Replay
+  that stops on it or on `UI_BACKEND_UNAVAILABLE` reports status `error`, so
+  a Contract Verdict is `inconclusive` instead of `fail`. A UI backend that
+  cannot capture the screen is not evidence of a regression.
+
+- `verify` prints a warning on stderr, and `summary.txt` carries one, when a
+  run dropped Logcat lines. The report already recorded `logcatEvidence`, but
+  a passed run gave no visible sign of it.
+
+- The Journey generator's `envelope.mjs bind` names the accepted `--from`
+  shapes (unmodified `generation observe --json` or succeeded
+  `generation step --json` output) when the source is rejected.
+
+### Performance
+
+- With the Appium UI backend, `hybrid` idle waits now sample frame stats with
+  `dumpsys gfxinfo` instead of capturing a full Appium page source for every
+  frame poll. Once frames are silent, `hybrid` confirms with two structural
+  captures instead of `stablePolls` + 1. At the default `stablePolls: 3` an
+  idle wait on a static Appium screen drops from 7 page source captures to 2,
+  and on the system UIAutomator backend from 4 hierarchy dumps to 2.
 
 ### Fixed
+
+- The Appium backend recreates its UiAutomator2 session and retries a page
+  source read once when the read times out or Appium no longer knows the
+  session (HTTP 404). A degraded session previously failed the whole run on
+  its first slow read.
+- The UI-refactor `compare` helper expected exit code 4 in the receipt of a
+  deterministic failed Replay; `verify` exits 1 for such a failure, so a real
+  failed run was paused instead of reported as `FAIL`.
 
 - The `taphound` executable is declared as `dist/cli/main.js` instead of
   `./dist/cli/main.js`. npm 12 rejects the leading `./` at publish time

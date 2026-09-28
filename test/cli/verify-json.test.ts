@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { createProgram } from "../../src/cli/program.js";
@@ -285,6 +287,69 @@ describe("verify --json", () => {
       });
     expect(invalidCodes).toEqual([2]);
     expect(environmentCodes).toEqual([3]);
+  });
+
+  it("publishes a hash-bound process receipt beside the report", async () => {
+    const exitCodes: number[] = [];
+    const dependencies = baseDependencies(exitCodes);
+    const reportBytes = Buffer.from("{\"report\":true}\n");
+    vi.mocked(dependencies.readFile).mockResolvedValue(reportBytes);
+    const written = new Map<string, string>();
+    dependencies.writeVerifyReceipt = vi.fn((path: string, content: string) => {
+      written.set(path, content);
+      return Promise.resolve();
+    });
+    vi.mocked(dependencies.readJson).mockImplementation((path) => Promise.resolve(
+      path.endsWith(".meta.json") ? meta
+        : path.includes("journey") ? runtimeJourney : runtimeConfig
+    ));
+
+    await createProgram(dependencies).parseAsync([
+      "node", "taphound", "verify",
+      "--project", "/project",
+      "--journey", "search.journey.json",
+      "--policy-from-meta",
+      "--json"
+    ]);
+
+    expect(dependencies.readFile).toHaveBeenCalledWith("/reports/report.json");
+    const receipt = JSON.parse(written.get("/reports/receipt.json") ?? "null") as unknown;
+    expect(receipt).toEqual({
+      version: 1,
+      argv: [
+        "verify",
+        "--project", "/project",
+        "--config", "/project/.taphound/config.json",
+        "--journey", "/project/search.journey.json",
+        "--device", "emulator-5554",
+        "--policy-from-meta",
+        "--json"
+      ],
+      exitCode: 0,
+      journeySha256: validReport().journey.sha256,
+      reportPath: "/reports/report.json",
+      reportSha256: createHash("sha256").update(reportBytes).digest("hex")
+    });
+    expect(JSON.parse((dependencies.stdout as BufferOutput).value)).toMatchObject({
+      exitCode: 0,
+      receiptPath: "/reports/receipt.json"
+    });
+    expect(exitCodes).toEqual([0]);
+  });
+
+  it("keeps the verify result and reports on stderr when the receipt cannot be written", async () => {
+    const exitCodes: number[] = [];
+    const dependencies = baseDependencies(exitCodes);
+    dependencies.writeVerifyReceipt = vi.fn(() => Promise.reject(new Error("disk full")));
+
+    await runVerify(dependencies);
+
+    const output = JSON.parse((dependencies.stdout as BufferOutput).value) as Record<string, unknown>;
+    expect(output).toMatchObject({ status: "passed", exitCode: 0 });
+    expect(output).not.toHaveProperty("receiptPath");
+    expect((dependencies.stderr as BufferOutput).value)
+      .toContain("verify receipt was not written: disk full");
+    expect(exitCodes).toEqual([0]);
   });
 
   it("initializes the safe build layout before verification", async () => {

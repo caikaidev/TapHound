@@ -15,6 +15,14 @@ export type IdleBackend = "uiautomator" | "androidCli" | "gfxFrameStats" | "mobi
 
 const EARLY_BAIL_FRAME_CHANGES = 2;
 const POST_FALLBACK_MIN_STABLE = 2;
+/**
+ * Once frame stats showed no rendering for `stablePolls` polls, the
+ * structural phase only has to confirm the hierarchy did not change between
+ * two captures taken during this wait: one empty diff after at least two
+ * structural samples. Each capture costs a full hierarchy dump.
+ */
+const POST_FRAME_STABLE_CONFIRMATIONS = 1;
+const POST_FRAME_STABLE_MIN_SAMPLES = 2;
 
 export interface IdleConfig {
   strategy?: IdleStrategy | undefined;
@@ -174,6 +182,8 @@ export class IdleWaiter {
     let lastLayout: readonly LayoutElement[] | undefined;
     let backend: IdleBackend | undefined;
     let fallbackUsed = false;
+    let frameStable = false;
+    let structuralSamples = 0;
     let frameActivityDetected = false;
     let samplingDurationMs = 0;
     let useStructuralBackend = strategy === "layoutDiff"
@@ -250,6 +260,7 @@ export class IdleWaiter {
         fallbackUsed = true;
         consecutiveEmpty = 0;
       } else if (useStructuralBackend) {
+        structuralSamples += 1;
         let visibleChanges = meaningfulChanges(
           diff,
           config.ignoreCursorBlink === true
@@ -282,13 +293,19 @@ export class IdleWaiter {
 
       const isPostFallback = fallbackUsed && strategy === "hybrid";
       const requiredStableObservations = useStructuralBackend
-        ? (isPostFallback
-          ? Math.max(POST_FALLBACK_MIN_STABLE, config.stablePolls - 1)
-          : Math.max(2, config.stablePolls))
+        ? (frameStable
+          ? POST_FRAME_STABLE_CONFIRMATIONS
+          : isPostFallback
+            ? Math.max(POST_FALLBACK_MIN_STABLE, config.stablePolls - 1)
+            : Math.max(2, config.stablePolls))
         : config.stablePolls;
-      if (consecutiveEmpty >= requiredStableObservations) {
+      if (
+        consecutiveEmpty >= requiredStableObservations
+        && (!frameStable || structuralSamples >= POST_FRAME_STABLE_MIN_SAMPLES)
+      ) {
         if (strategy === "hybrid" && !useStructuralBackend) {
           useStructuralBackend = true;
+          frameStable = true;
           consecutiveEmpty = 0;
         } else {
           return {

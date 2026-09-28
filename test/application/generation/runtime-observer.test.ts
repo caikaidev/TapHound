@@ -426,8 +426,12 @@ describe("RuntimeObserver", () => {
     await test.observer.observe({ generationId: "generation-1", idle });
 
     expect(test.waitUntilIdle).toHaveBeenCalledWith(
-      "emulator-5554", idle, undefined, "com.example.app", provider, test.adb
+      "emulator-5554", idle, undefined, "com.example.app",
+      expect.anything(), test.adb
     );
+    const probe = vi.mocked(test.waitUntilIdle).mock.calls[0]?.[4] as UiStabilityProbe;
+    await probe.sample({ deviceSerial: "emulator-5554", stabilityBackend: "uiautomator" });
+    expect(provider.sample).toHaveBeenCalledOnce();
   });
 
   it("prefers the session idle policy over the observe idle input", async () => {

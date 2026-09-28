@@ -256,13 +256,16 @@ supported semantic element or structured event. Such a Case stays `PAUSED`,
 never silently weaker.
 
 The helper also requires a machine-generated process receipt because a report
-file alone cannot establish an independent CLI invocation:
+file alone cannot establish an independent CLI invocation. `taphound verify
+--journey` writes it as `receipt.json` beside the published `report.json` and
+prints its path as `receiptPath` in the `--json` output:
 
 ```json
 {
   "version": 1,
   "argv": [
     "verify", "--project", "/absolute/project",
+    "--config", "/absolute/project/.taphound/config.json",
     "--journey", "/absolute/project/.taphound/journeys/forward.json",
     "--device", "emulator-5554", "--policy-from-meta", "--json"
   ],
@@ -273,9 +276,13 @@ file alone cannot establish an independent CLI invocation:
 }
 ```
 
-The workflow runner must capture actual argv, exit status, and resulting
-digests. An agent must not write a success receipt merely because a report
-exists.
+`argv` is the normalized invocation TapHound ran: absolute project, config,
+and Journey paths plus the selected device serial. Pass the `receiptPath`
+that `verify` printed; never write or edit a receipt by hand. A missing
+`receiptPath` (the receipt could not be written, reported on stderr) means the
+evidence is unavailable, so rerun `verify`. Pass absolute, symlink-free
+`--project` and `--journey` paths so the recorded paths match the helper's
+checks.
 
 **A, historical worktree:**
 
@@ -288,7 +295,8 @@ exists.
      --device <serial> --policy-from-meta --json
    ```
 
-2. Record its process receipt. Prepare with a private input:
+2. Take `reportPath` and `receiptPath` from that `verify --json` output.
+   Prepare with a private input:
 
    ```json
    {
@@ -306,7 +314,7 @@ exists.
        "journeyPath": "/absolute/old-project/.taphound/journeys/forward.json",
        "metaPath": "/absolute/old-project/.taphound/journeys/forward.meta.json",
        "reportPath": "/absolute/old-project/.taphound/build/runs/<run>/report.json",
-       "receiptPath": "/absolute/old-project/.taphound/build/workflows/<case>/receipt.json"
+       "receiptPath": "/absolute/old-project/.taphound/build/runs/<run>/receipt.json"
      }
    }
    ```
@@ -332,7 +340,7 @@ exists.
    goal/scenario against B's current Project Context and UI, but copy every
    observable exactly into its deterministic expectations. Finalize it, then
    launch a separate strict `verify` process on the installed refactored APK
-   and record the same receipt shape.
+   and keep the `reportPath` and `receiptPath` it prints.
 3. Compare only after that independent Replay:
 
    ```

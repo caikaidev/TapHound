@@ -473,9 +473,16 @@ describe("GenerationStepExecutor", () => {
     expect(test.androidCli.layoutDiff).toHaveBeenCalledTimes(5);
   });
 
-  it("uses provider-owned stability sampling instead of the shell probe", async () => {
+  it("uses provider-owned structural sampling instead of the shell layout probe", async () => {
     const runtime = snapshot();
-    const test = harness(session(runtime));
+    const test = harness(session(runtime, {
+      idlePolicy: {
+        strategy: "structural",
+        pollIntervalMs: 5,
+        stablePolls: 2,
+        timeoutMs: 30000
+      }
+    }), () => "attempt-1", true);
     const sample = vi.fn(() => Promise.resolve([]));
     Object.assign(test.uiSnapshotProvider, {
       supportsStability: true,

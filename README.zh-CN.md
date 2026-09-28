@@ -90,7 +90,7 @@ taphound init --agent claude,codex,cursor,droid
 - [设计原则](https://github.com/caikaidev/TapHound/blob/main/docs/principles.md) · [Workflow Skill 与开发场景](https://github.com/caikaidev/TapHound/blob/main/docs/workflow-skills.md) · [Agent 集成](https://github.com/caikaidev/TapHound/blob/main/docs/agent-integration.md) · [Journey Generator 指南](https://github.com/caikaidev/TapHound/blob/main/docs/journey-generator-guide.md)
 - [Acceptance Contract](https://github.com/caikaidev/TapHound/blob/main/docs/contract-schema.md) · [Baseline 与回归对比](https://github.com/caikaidev/TapHound/blob/main/docs/checkpoint-regression.md) · [失败分类](https://github.com/caikaidev/TapHound/blob/main/docs/failure-classification.md)
 - [Semantic Anchor](https://github.com/caikaidev/TapHound/blob/main/docs/semantic-anchor.md) · [能力矩阵](https://github.com/caikaidev/TapHound/blob/main/docs/capability-matrix.md) · [`observe`](https://github.com/caikaidev/TapHound/blob/main/docs/observe.md)
-- [运行时后端](https://github.com/caikaidev/TapHound/blob/main/docs/architecture/runtime-backend.md) · [本地开发与测试](https://github.com/caikaidev/TapHound/blob/main/docs/local-testing.md) · [发布](https://github.com/caikaidev/TapHound/blob/main/docs/releasing.md)
+- [运行时后端](https://github.com/caikaidev/TapHound/blob/main/docs/architecture/runtime-backend.md) · [本地开发与测试](https://github.com/caikaidev/TapHound/blob/main/docs/local-testing.md) · [发布](https://github.com/caikaidev/TapHound/blob/main/docs/releasing.md) · [诊断与反馈](https://github.com/caikaidev/TapHound/blob/main/docs/diagnostics.md)
 
 ## 当前限制
 

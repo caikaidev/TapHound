@@ -3,6 +3,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  rename,
   rm,
   writeFile
 } from "node:fs/promises";
@@ -18,6 +19,20 @@ import {
   SessionBackedUiSnapshotProviderFactory
 } from "../adapters/runtime/session-backed-ports.js";
 import { runtimeSessionPortViews } from "../adapters/runtime/session-adb-view.js";
+import { FileSystemDiagnosticsJournal } from "../adapters/filesystem/diagnostics-journal.js";
+import { UiCaptureTelemetry } from "../application/diagnostics/ui-capture-telemetry.js";
+import { ObservedUiSnapshotProviderFactory } from "../application/ui/observed-ui-snapshot-provider.js";
+import {
+  DiagnosticsExporter,
+  type DiagnosticsExportInput
+} from "../application/diagnostics/diagnostics-exporter.js";
+import type { DiagnosticsBundle } from "../domain/diagnostics.js";
+import { readCliVersion } from "./version.js";
+import {
+  diagnosticsEnabled,
+  diagnosticsHost,
+  type CliDiagnostics
+} from "./diagnostics-recorder.js";
 import { MobileMcpRuntimeBackend } from "../adapters/runtime/mobile-mcp/mobile-mcp-runtime-backend.js";
 import { McpToolClient } from "../adapters/runtime/mobile-mcp/mcp-tool-client.js";
 import {
@@ -358,11 +373,19 @@ export interface CliDependencies {
   } | undefined;
   readJson: (path: string) => Promise<unknown>;
   readFile: (path: string) => Promise<Buffer>;
+  /** Atomically publishes a verify process receipt beside its report. */
+  writeVerifyReceipt?: ((path: string, content: string) => Promise<void>) | undefined;
   cwd: () => string;
   stdout: TextOutput;
   stderr: TextOutput;
   setExitCode: (code: number) => void;
   close?: (() => Promise<void>) | undefined;
+  /** Local diagnostics journal; absent in tests and when disabled. */
+  diagnostics?: CliDiagnostics | undefined;
+  diagnosticsExport?: {
+    export: (input: DiagnosticsExportInput) => Promise<DiagnosticsBundle>;
+    write: (path: string, content: string) => Promise<void>;
+  } | undefined;
 }
 
 export interface ProductionDependencyOptions {
@@ -433,6 +456,11 @@ export function createProductionDependencies(
   const clock = options.clock ?? new SystemClock();
   const now = (): number => clock.now();
   const permissionCaptureTimeoutMs = 10_000;
+  const uiTelemetry = new UiCaptureTelemetry();
+  const diagnosticsJournal = new FileSystemDiagnosticsJournal();
+  const observed = (source: UiSnapshotProviderFactory): UiSnapshotProviderFactory => (
+    new ObservedUiSnapshotProviderFactory(source, uiTelemetry, now)
+  );
   let backend: RuntimeBackend;
   let screenshots: ScreenshotPort;
   let uiSnapshots: UiSnapshotProviderFactory;
@@ -441,7 +469,7 @@ export function createProductionDependencies(
     backend = options.runtimeBackend;
     screenshots = new SessionBackedScreenshotAdapter(backend);
     uiSnapshots = new CachedUiSnapshotProviderFactory(
-      new SessionBackedUiSnapshotProviderFactory(backend),
+      observed(new SessionBackedUiSnapshotProviderFactory(backend)),
       now
     );
   } else if (backendId === "mobile-mcp") {
@@ -455,18 +483,22 @@ export function createProductionDependencies(
     backend = shared;
     screenshots = new SessionBackedScreenshotAdapter(backend);
     uiSnapshots = new CachedUiSnapshotProviderFactory(
-      new SessionBackedUiSnapshotProviderFactory(backend),
+      observed(new SessionBackedUiSnapshotProviderFactory(backend)),
       now
     );
   } else {
     const adbAdapter = new AdbAdapter(runner);
     const androidCli = new AndroidCliAdapter(runner);
     const autoSnapshots = new CachedUiSnapshotProviderFactory(
-      new AutoUiSnapshotProviderFactory(
+      observed(new AutoUiSnapshotProviderFactory(
         new SystemUiAutomatorSnapshotProviderFactory(runner),
         new AndroidCliSnapshotProviderFactory(runner),
-        new AppiumUiSnapshotProviderFactory(runner)
-      ),
+        new AppiumUiSnapshotProviderFactory(runner, undefined, {
+          onSessionRecovery: (succeeded): void => {
+            uiTelemetry.sessionRecovered("appium-uiautomator2", succeeded);
+          }
+        })
+      )),
       now
     );
     const adbBackend = new AdbRuntimeBackend({
@@ -1039,6 +1071,16 @@ export function createProductionDependencies(
       await readFile(path, "utf8")
     ) as unknown,
     readFile: async (path): Promise<Buffer> => readFile(path),
+    writeVerifyReceipt: async (path, content): Promise<void> => {
+      const temporaryPath = `${path}.${randomUUID()}.tmp`;
+      try {
+        await writeFile(temporaryPath, content, { encoding: "utf8", flag: "wx" });
+        await rename(temporaryPath, path);
+      } catch (error) {
+        await rm(temporaryPath, { force: true });
+        throw error;
+      }
+    },
     cwd: () => process.cwd(),
     stdout: {
       write: (content): void => {
@@ -1052,6 +1094,36 @@ export function createProductionDependencies(
     },
     setExitCode: (code): void => {
       process.exitCode = code;
-    }
+    },
+    diagnosticsExport: {
+      export: (input): Promise<DiagnosticsBundle> => new DiagnosticsExporter({
+        journal: diagnosticsJournal,
+        readJson: async (path): Promise<unknown> => JSON.parse(
+          await readFile(path, "utf8")
+        ) as unknown,
+        now: (): Date => new Date(),
+        taphoundVersion: readCliVersion(),
+        host: diagnosticsHost()
+      }).export(input),
+      write: async (path, content): Promise<void> => {
+        await mkdir(dirname(path), { recursive: true });
+        const temporaryPath = `${path}.${randomUUID()}.tmp`;
+        try {
+          await writeFile(temporaryPath, content, { encoding: "utf8", flag: "wx", mode: 0o600 });
+          await rename(temporaryPath, path);
+        } catch (error) {
+          await rm(temporaryPath, { force: true });
+          throw error;
+        }
+      }
+    },
+    ...(diagnosticsEnabled(process.env)
+      ? {
+          diagnostics: {
+            journal: diagnosticsJournal,
+            telemetry: uiTelemetry
+          }
+        }
+      : {})
   };
 }

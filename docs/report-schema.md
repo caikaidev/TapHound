@@ -151,10 +151,10 @@ A post-processing failure must not overwrite `primaryFailure`. For example, when
 - `0`: verification passed, or the Recorder was safely cancelled by the user.
 - `1`: the project under verification did not meet requirements, e.g. Replay, Activity, or Expect failure.
 - `2`: invalid config, Journey, or CLI arguments.
-- `3`: tools, permissions, app not installed, device environment unavailable, or the selected runtime backend lacks a capability the command needs (`RUNTIME_CAPABILITY_MISSING`).
+- `3`: tools, permissions, app not installed, device environment unavailable, a UI backend that cannot open (`UI_BACKEND_UNAVAILABLE`) or capture (`UI_SNAPSHOT_FAILED`), or the selected runtime backend lacks a capability the command needs (`RUNTIME_CAPABILITY_MISSING`). A Replay that stops on `UI_BACKEND_UNAVAILABLE` or `UI_SNAPSHOT_FAILED` has report status `error`, so a Contract Verdict is `inconclusive` rather than `fail`. The Appium backend recreates its UiAutomator2 session and retries a page source read once when it times out or the session is gone (HTTP 404) before failing with `UI_SNAPSHOT_FAILED`.
 - `4`: TapHound internal error or an unclassifiable cancellation.
 
-The JSON `exitCode` of `taphound verify --json` matches the process exit code. Success or a normal verification failure includes `report`, `reportPath`, and `summaryPath`; config, environment, or internal errors that occur before the report is generated use `failure.code` and `failure.message`.
+The JSON `exitCode` of `taphound verify --json` matches the process exit code. Success or a normal verification failure includes `report`, `reportPath`, `summaryPath`, and `receiptPath`: `verify --journey` writes a hash-bound process receipt (`receipt.json`: normalized `argv`, `exitCode`, `journeySha256`, `reportPath`, `reportSha256`) beside the report. If the receipt cannot be written, `receiptPath` is omitted and the reason goes to stderr; config, environment, or internal errors that occur before the report is generated use `failure.code` and `failure.message`.
 
 ## Step Failure Evidence
 
@@ -174,6 +174,13 @@ their original `${name}` reference. A passed, hashed structured event may also
 record `logcatEvent.requestErrorClass` when the app emits a valid
 `fields.errorClass` (`client`, `auth`, `network`, `server`). Classification
 uses only these references, not unstructured log text.
+
+When the first step a device runs after cold launch fails with
+`LOCATOR_NOT_FOUND`, `ANCHOR_NOT_FOUND`, or `SCROLL_TARGET_NOT_FOUND`, the
+primary failure message ends with a hint that TapHound does not reset app
+data. That step is the first to see persisted app state (settings, login,
+layout preferences), so a missing target there most often means that state
+differs from the state the Journey was generated in.
 
 When a step targets a semantic Knowledge `anchor`, the Locator report records
 `matchedBy: "anchor"`, the resolved `anchorId`, and an `anchor` sub-report whose

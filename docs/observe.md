@@ -37,8 +37,9 @@ exits with code `2` (`CONFIG_INVALID`). A doctor failure exits with code `3`
 runtime backend lacks a capability the observation needs (for example an
 `annotatedScreens` or `startActivityByIntent` member that is `undefined`),
 observe fails closed with `RUNTIME_CAPABILITY_MISSING`/exit `3`. Provider
-availability failures use `UI_BACKEND_UNAVAILABLE`/exit `3`; capture or source
-validation failures use `UI_SNAPSHOT_FAILED` or `UI_SNAPSHOT_INVALID`/exit `1`.
+availability and capture failures use `UI_BACKEND_UNAVAILABLE` or
+`UI_SNAPSHOT_FAILED`/exit `3`; source validation failures use
+`UI_SNAPSHOT_INVALID`/exit `1`.
 An internal error during observation exits with code `4` (`INTERNAL_ERROR`). A successful
 observation exits with code `0`.
 

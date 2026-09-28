@@ -9,7 +9,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { FileSystemArtifactStore } from "../../../src/adapters/filesystem/artifact-store.js";
-import { ReportWriter } from "../../../src/application/report/report-writer.js";
+import {
+  logcatEvidenceWarning,
+  ReportWriter
+} from "../../../src/application/report/report-writer.js";
 import { validReport } from "../../fixtures/report.js";
 
 const roots: string[] = [];
@@ -25,6 +28,37 @@ async function temporaryRoot(): Promise<string> {
   roots.push(root);
   return root;
 }
+
+describe("logcatEvidenceWarning", () => {
+  it("names dropped Logcat lines across device roles", () => {
+    expect(logcatEvidenceWarning({})).toBeUndefined();
+    expect(logcatEvidenceWarning({
+      logcatEvidence: [
+        { role: "default", droppedLines: 1883, droppedBytes: 274880, status: "incomplete" },
+        { role: "receiver", droppedLines: 17, droppedBytes: 900, status: "incomplete" }
+      ]
+    })).toBe(
+      "Warning: Logcat evidence is incomplete (1900 line(s) dropped); "
+        + "Logcat-based expectations fail closed on drops in their window"
+    );
+  });
+
+  it("adds the warning to the published summary", async () => {
+    const root = await temporaryRoot();
+    const session = await new FileSystemArtifactStore().begin(root, "run-logcat");
+    const report = validReport({
+      artifacts: { ...validReport().artifacts, directory: session.finalDirectory },
+      logcatEvidence: [
+        { role: "default", droppedLines: 3, droppedBytes: 90, status: "incomplete" }
+      ]
+    });
+
+    const published = await new ReportWriter().writeAndPublish(session, report);
+
+    await expect(readFile(published.summaryPath, "utf8"))
+      .resolves.toContain("Warning: Logcat evidence is incomplete (3 line(s) dropped)");
+  });
+});
 
 describe("ReportWriter", () => {
   it("writes JSON and human summary before publishing", async () => {

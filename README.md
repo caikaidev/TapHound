@@ -90,7 +90,7 @@ taphound init --agent claude,codex,cursor,droid
 - [Principles](https://github.com/caikaidev/TapHound/blob/main/docs/principles.md) · [Workflow Skills and development scenarios](https://github.com/caikaidev/TapHound/blob/main/docs/workflow-skills.md) · [Agent integration](https://github.com/caikaidev/TapHound/blob/main/docs/agent-integration.md) · [Journey Generator guide](https://github.com/caikaidev/TapHound/blob/main/docs/journey-generator-guide.md)
 - [Acceptance Contracts](https://github.com/caikaidev/TapHound/blob/main/docs/contract-schema.md) · [Baselines & regression](https://github.com/caikaidev/TapHound/blob/main/docs/checkpoint-regression.md) · [Failure classification](https://github.com/caikaidev/TapHound/blob/main/docs/failure-classification.md)
 - [Semantic Anchors](https://github.com/caikaidev/TapHound/blob/main/docs/semantic-anchor.md) · [Capability matrix](https://github.com/caikaidev/TapHound/blob/main/docs/capability-matrix.md) · [`observe`](https://github.com/caikaidev/TapHound/blob/main/docs/observe.md)
-- [Runtime backends](https://github.com/caikaidev/TapHound/blob/main/docs/architecture/runtime-backend.md) · [Local development & testing](https://github.com/caikaidev/TapHound/blob/main/docs/local-testing.md) · [Releasing](https://github.com/caikaidev/TapHound/blob/main/docs/releasing.md)
+- [Runtime backends](https://github.com/caikaidev/TapHound/blob/main/docs/architecture/runtime-backend.md) · [Local development & testing](https://github.com/caikaidev/TapHound/blob/main/docs/local-testing.md) · [Releasing](https://github.com/caikaidev/TapHound/blob/main/docs/releasing.md) · [Diagnostics and feedback](https://github.com/caikaidev/TapHound/blob/main/docs/diagnostics.md)
 
 ## Current Limitations
 

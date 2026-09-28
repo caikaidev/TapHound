@@ -1,4 +1,5 @@
-import { resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { dirname, join, resolve } from "node:path";
 
 import { Command } from "commander";
 
@@ -8,6 +9,7 @@ import {
   loadPublishedReplayPolicy,
   type PublishedReplayPolicy
 } from "../../application/generation/replay-policy-loader.js";
+import { logcatEvidenceWarning } from "../../application/report/report-writer.js";
 import { TapHoundConfigSchema } from "../../domain/config.js";
 import {
   DEFAULT_DEVICE_ROLE,
@@ -21,6 +23,10 @@ import {
   exitCodeForFailure,
   type FailureCode
 } from "../../domain/failure.js";
+import {
+  VERIFY_RECEIPT_FILE,
+  VerifyReceiptSchema
+} from "../../domain/verify-receipt.js";
 import type { CliDependencies } from "../dependencies.js";
 import {
   errorMessage,
@@ -70,6 +76,64 @@ function writeFailure(
     writeLine(dependencies.stderr, output.failure.message);
   }
   dependencies.setExitCode(exitCode);
+}
+
+/** The normalized invocation TapHound ran, recorded in the process receipt. */
+function receiptArgv(
+  options: VerifyOptions,
+  projectRoot: string,
+  deviceSerial: string
+): string[] {
+  const root = resolve(projectRoot);
+  return [
+    "verify",
+    "--project", root,
+    "--config", resolve(root, options.config),
+    "--journey", resolve(root, options.journey as string),
+    "--device", deviceSerial,
+    ...(options.package === undefined ? [] : ["--package", options.package]),
+    ...(options.activity === undefined ? [] : ["--activity", options.activity]),
+    ...(options.reports === undefined ? [] : ["--reports", options.reports]),
+    ...(options.policyFromMeta === true ? ["--policy-from-meta"] : []),
+    ...(options.json === true ? ["--json"] : [])
+  ];
+}
+
+/**
+ * Publishes the process receipt beside the report. The report is already
+ * published, so a receipt failure is reported on stderr and leaves the
+ * verify result intact; a Workflow checker then pauses on the missing receipt.
+ */
+async function writeReceipt(
+  dependencies: CliDependencies,
+  argv: string[],
+  result: { exitCode: number; reportPath: string; report: { journey: { sha256: string } } }
+): Promise<string | undefined> {
+  if (dependencies.writeVerifyReceipt === undefined) return undefined;
+  const receiptPath = join(dirname(result.reportPath), VERIFY_RECEIPT_FILE);
+  try {
+    const receipt = VerifyReceiptSchema.parse({
+      version: 1,
+      argv,
+      exitCode: result.exitCode,
+      journeySha256: result.report.journey.sha256,
+      reportPath: result.reportPath,
+      reportSha256: createHash("sha256")
+        .update(await dependencies.readFile(result.reportPath))
+        .digest("hex")
+    });
+    await dependencies.writeVerifyReceipt(
+      receiptPath,
+      `${JSON.stringify(receipt, null, 2)}\n`
+    );
+    return receiptPath;
+  } catch (error) {
+    writeLine(
+      dependencies.stderr,
+      `TapHound: verify receipt was not written: ${errorMessage(error)}`
+    );
+    return undefined;
+  }
 }
 
 async function runDoctorAndVerify(
@@ -160,13 +224,27 @@ async function runDoctorAndVerify(
         ? {}
         : { signal: dependencies.signal })
     });
+    const receiptPath = await writeReceipt(
+      dependencies,
+      receiptArgv(options, projectRoot, deviceSerial),
+      result
+    );
     if (json) {
-      writeJson(dependencies.stdout, result);
+      writeJson(
+        dependencies.stdout,
+        receiptPath === undefined ? result : { ...result, receiptPath }
+      );
     } else {
       writeLine(
         dependencies.stdout,
-        `TapHound verify: ${result.status.toUpperCase()}\nReport: ${result.reportPath}`
+        `TapHound verify: ${result.status.toUpperCase()}\nReport: ${result.reportPath}${
+          receiptPath === undefined ? "" : `\nReceipt: ${receiptPath}`
+        }`
       );
+    }
+    const logcatWarning = logcatEvidenceWarning(result.report);
+    if (logcatWarning !== undefined) {
+      writeLine(dependencies.stderr, logcatWarning);
     }
     dependencies.setExitCode(result.exitCode);
   } catch (error) {

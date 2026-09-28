@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import {
   access,
@@ -10,7 +11,7 @@ import {
   writeFile
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -164,6 +165,16 @@ describe("built taphound verify --json process contract", () => {
     await expect(access(String(reportPath), constants.R_OK)).resolves.toBeUndefined();
     expect(JSON.parse(await readFile(String(reportPath), "utf8")))
       .toMatchObject({ status: "passed" });
+    expect(output.receiptPath).toBe(join(dirname(String(reportPath)), "receipt.json"));
+    const receipt = JSON.parse(await readFile(String(output.receiptPath), "utf8")) as {
+      reportPath: string;
+      reportSha256: string;
+      exitCode: number;
+    };
+    expect(receipt).toMatchObject({ reportPath, exitCode: 0 });
+    expect(receipt.reportSha256).toBe(createHash("sha256")
+      .update(await readFile(String(reportPath)))
+      .digest("hex"));
     await expect(readFile(
       join(test.root, ".taphound", ".gitignore"),
       "utf8"

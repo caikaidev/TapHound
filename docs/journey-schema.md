@@ -663,6 +663,11 @@ Implementation details that affect tuning:
   `packageName` it starts on `uiautomator` (structural).
 - `hybrid` falls back to structural after `EARLY_BAIL_FRAME_CHANGES = 2`
   consecutive frame-change polls.
+- When frame stats stay silent for `stablePolls` polls, `hybrid` confirms
+  structurally with one unchanged diff across at least two structural
+  captures taken during the same wait, instead of `stablePolls` more polls.
+  Frame-stat polls always use the device's `dumpsys gfxinfo`, even when the
+  UI backend (Appium) samples the structural phase itself.
 - After fallback, `hybrid` requires
   `max(POST_FALLBACK_MIN_STABLE = 2, stablePolls - 1)` consecutive stable polls.
   This is the anti-jitter floor.

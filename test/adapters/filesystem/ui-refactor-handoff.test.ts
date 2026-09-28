@@ -385,7 +385,7 @@ describe("cross-version UI-refactor Preserve gate", () => {
     const receipt = await readJson(fixture.afterReceipt) as {
       reportSha256: string; exitCode: number;
     };
-    receipt.exitCode = 4;
+    receipt.exitCode = 1;
     receipt.reportSha256 = sha(await readFile(fixture.afterReport, "utf8"));
     await put(fixture.afterReceipt, receipt);
     // A matching failed strict Replay is a regression, never a PASS.

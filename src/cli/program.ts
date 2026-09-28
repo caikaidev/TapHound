@@ -16,6 +16,7 @@ import { createImpactCommand } from "./commands/impact.js";
 import { createKnowledgeCommand } from "./commands/knowledge.js";
 import { createBaselineCommand } from "./commands/baseline.js";
 import { createFailureCommand } from "./commands/failure.js";
+import { createDiagnoseCommand } from "./commands/diagnose.js";
 import {
   createProductionDependencies,
   type CliDependencies
@@ -64,5 +65,6 @@ export function createProgram(
     .addCommand(configureOutput(createFailureCommand(dependencies)))
     .addCommand(configureOutput(createInitCommand(dependencies)))
     .addCommand(configureOutput(createAlignCommand(dependencies)))
-    .addCommand(configureOutput(createImpactCommand(dependencies)));
+    .addCommand(configureOutput(createImpactCommand(dependencies)))
+    .addCommand(configureOutput(createDiagnoseCommand(dependencies)));
 }

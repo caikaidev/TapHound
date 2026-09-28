@@ -52,6 +52,21 @@ import {
   type ReplayBinding
 } from "./step-runner.js";
 
+/**
+ * The first step after a cold launch is the first to see the app's persisted
+ * state. TapHound never clears app data, so a target that is missing there
+ * most often means that state drifted since the Journey was generated.
+ */
+const INITIAL_STATE_FAILURE_CODES: ReadonlySet<FailureCode> = new Set([
+  "LOCATOR_NOT_FOUND",
+  "ANCHOR_NOT_FOUND",
+  "SCROLL_TARGET_NOT_FOUND"
+]);
+const INITIAL_STATE_HINT = "this is the first step after cold launch: "
+  + "TapHound does not reset app data, so check persisted app state such as "
+  + "settings, login, or layout preferences against the state the Journey "
+  + "was generated in before changing the Journey";
+
 export type VerifyProgressEvent =
   | { stage: "preparing" }
   | { stage: "replaying"; stepIndex: number; stepCount: number }
@@ -716,6 +731,7 @@ export class VerifyRuntime {
         const runtimeByRole = new Map(
           runtimes.map((runtime) => [runtime.role, runtime])
         );
+        const rolesStarted = new Set<string>();
         for (const [index, step] of input.journey.steps.entries()) {
           input.progress?.({
             stage: "replaying",
@@ -734,6 +750,8 @@ export class VerifyRuntime {
             break;
           }
           const result = await runner.run(step, index, input.signal);
+          const firstStepOnDevice = !rolesStarted.has(role);
+          rolesStarted.add(role);
           steps.push(result.report);
           if (result.status === "manualRequired") {
             setPrimary(
@@ -756,7 +774,10 @@ export class VerifyRuntime {
           if (result.status === "failed") {
             setPrimary(
               result.failure.code,
-              result.failure.message,
+              firstStepOnDevice
+                && INITIAL_STATE_FAILURE_CODES.has(result.failure.code)
+                ? `${result.failure.message} (${INITIAL_STATE_HINT})`
+                : result.failure.message,
               result.failure.phase,
               result.failure.stepIndex
             );
@@ -944,6 +965,8 @@ export class VerifyRuntime {
             "DEVICE_UNAVAILABLE",
             "DEVICE_ROLE_UNMAPPED",
             "APP_NOT_INSTALLED",
+            "UI_BACKEND_UNAVAILABLE",
+            "UI_SNAPSHOT_FAILED",
             "INTERNAL_ERROR"
           ].includes(failure.code)
         ? "error"

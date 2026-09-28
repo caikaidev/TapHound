@@ -11,6 +11,7 @@ import {
   type ReplayBinding
 } from "../../../src/application/runtime/step-runner.js";
 import { adbRuntimeCapabilities } from "../../../src/adapters/runtime/adb-runtime-backend.js";
+import { UiSnapshotError } from "../../../src/adapters/ui/ui-snapshot-error.js";
 import type { AppProcess } from "../../../src/domain/app-process.js";
 import type { Journey } from "../../../src/domain/journey.js";
 import { hashJourney } from "../../../src/domain/report.js";
@@ -778,6 +779,99 @@ describe("VerifyRuntime", () => {
       status: "error",
       exitCode: 4,
       report: { primaryFailure: { code: "INTERNAL_ERROR" } }
+    });
+    expect(test.order.at(-1)).toBe("report");
+  });
+
+  describe("first-step initial state hint", () => {
+    function failingAt(
+      failIndex: number,
+      code: "LOCATOR_NOT_FOUND" | "ACTION_FAILED"
+    ): StepRunnerLike {
+      return {
+        run: vi.fn<StepRunner["run"]>((_step, index) => {
+          const report = {
+            index,
+            action: "click" as const,
+            status: index === failIndex ? "failed" as const : "passed" as const,
+            startedAtMs: 0,
+            finishedAtMs: 0,
+            durationMs: 0
+          };
+          return Promise.resolve(index === failIndex
+            ? {
+                status: "failed" as const,
+                report,
+                failure: {
+                  code,
+                  message: "No element matches the locator",
+                  phase: "replay" as const,
+                  stepIndex: index
+                }
+              }
+            : { status: "passed" as const, report });
+        })
+      };
+    }
+    const twoSteps: Journey = {
+      ...runtimeJourney,
+      steps: [runtimeJourney.steps[0], runtimeJourney.steps[0]].filter(
+        (step): step is NonNullable<typeof step> => step !== undefined
+      )
+    };
+
+    it("points a missing target on the first step at persisted app state", async () => {
+      const test = runtimeFixture();
+      test.dependencies.createStepRunner = (): StepRunnerLike => failingAt(0, "LOCATOR_NOT_FOUND");
+
+      const result = await new VerifyRuntime(test.dependencies).verify(input());
+
+      expect(result.report.primaryFailure).toMatchObject({
+        code: "LOCATOR_NOT_FOUND",
+        stepIndex: 0,
+        message: expect.stringMatching(
+          /^No element matches the locator \(this is the first step after cold launch: TapHound does not reset app data/
+        ) as unknown
+      });
+    });
+
+    it.each([
+      ["a later step", 1, "LOCATOR_NOT_FOUND"],
+      ["an unrelated failure", 0, "ACTION_FAILED"]
+    ] as const)("keeps the message for %s", async (_label, failIndex, code) => {
+      const test = runtimeFixture();
+      test.dependencies.createStepRunner = (): StepRunnerLike => failingAt(failIndex, code);
+
+      const result = await new VerifyRuntime(test.dependencies).verify({
+        ...input(),
+        journey: twoSteps
+      });
+
+      expect(result.report.primaryFailure).toMatchObject({
+        code,
+        stepIndex: failIndex,
+        message: "No element matches the locator"
+      });
+    });
+  });
+
+  it.each([
+    ["UI_SNAPSHOT_FAILED", "Appium page source capture failed: timeout"],
+    ["UI_BACKEND_UNAVAILABLE", "Appium UiAutomator2 session could not be opened"]
+  ] as const)("reports %s as an environment error, not a replay failure", async (code, message) => {
+    const test = runtimeFixture();
+    test.dependencies.createStepRunner = (): StepRunnerLike => ({
+      run: vi.fn<StepRunner["run"]>(() => Promise.reject(
+        new UiSnapshotError(code, "appium-uiautomator2", message, { terminal: true })
+      ))
+    });
+
+    const result = await new VerifyRuntime(test.dependencies).verify(input());
+
+    expect(result).toMatchObject({
+      status: "error",
+      exitCode: 3,
+      report: { status: "error", primaryFailure: { code, message } }
     });
     expect(test.order.at(-1)).toBe("report");
   });

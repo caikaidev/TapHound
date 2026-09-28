@@ -200,6 +200,26 @@ describe("IdleWaiter", () => {
     });
   });
 
+  it("confirms frame stability with two structural captures, not stablePolls more", async () => {
+    const cli = stabilityProbe();
+    vi.mocked(cli.sample).mockImplementation((options) => Promise.resolve(
+      options.stabilityBackend === "uiautomator"
+        ? { changes: [], backend: "uiautomator" }
+        : { changes: [], backend: "gfxFrameStats" }
+    ));
+
+    const result = await new IdleWaiter(
+      cli,
+      new FakeClock(),
+      "emulator-5554",
+      "com.example.app"
+    ).waitUntilIdle({ pollIntervalMs: 100, stablePolls: 3, timeoutMs: 5000 });
+
+    expect(result).toMatchObject({ status: "stable", polls: 5 });
+    expect(vi.mocked(cli.sample).mock.calls.map(([options]) => options.stabilityBackend))
+      .toEqual(["frameStats", "frameStats", "frameStats", "uiautomator", "uiautomator"]);
+  });
+
   it("continues polling when confirmation shows layout changes", async () => {
     const cli = stabilityProbe();
     let confirmCount = 0;
@@ -226,11 +246,13 @@ describe("IdleWaiter", () => {
       timeoutMs: 5000
     });
 
+    // Frame stats are stable after 2 polls; one changed and one unchanged
+    // structural sample then confirm the settled hierarchy.
     expect(result).toMatchObject({
       status: "stable",
       backend: "uiautomator",
-      polls: 5,
-      durationMs: 400
+      polls: 4,
+      durationMs: 300
     });
   });
 

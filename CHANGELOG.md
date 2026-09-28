@@ -16,6 +16,15 @@
   a Contract Verdict is `inconclusive` instead of `fail`. A UI backend that
   cannot capture the screen is not evidence of a regression.
 
+### Performance
+
+- With the Appium UI backend, `hybrid` idle waits now sample frame stats with
+  `dumpsys gfxinfo` instead of capturing a full Appium page source for every
+  frame poll. Once frames are silent, `hybrid` confirms with two structural
+  captures instead of `stablePolls` + 1. At the default `stablePolls: 3` an
+  idle wait on a static Appium screen drops from 7 page source captures to 2,
+  and on the system UIAutomator backend from 4 hierarchy dumps to 2.
+
 ### Fixed
 
 - The Appium backend recreates its UiAutomator2 session and retries a page

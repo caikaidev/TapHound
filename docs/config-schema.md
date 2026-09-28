@@ -71,7 +71,7 @@ floors, per-strategy poll accounting) are documented in
 
 | Strategy | Backend | Behavior |
 |---|---|---|
-| `hybrid` (default) | `frameStats` then `uiautomator` | Fast frame-silence detection, structural confirmation, structural fallback after 2 consecutive frame-change polls |
+| `hybrid` (default) | `frameStats` then `uiautomator` | Fast frame-silence detection, a two-capture structural confirmation, structural fallback after 2 consecutive frame-change polls |
 | `layoutDiff` | `uiautomator` | Skips frame analysis entirely; compares the layout tree directly. For continuously rendering screens (spinners, animated backgrounds). |
 | `frameStats` | `gfxFrameStats` only | Pure frame timing, no structural fallback. Not recommended standalone. |
 | `structural` | `uiautomator` only | Pure layout-tree comparison. |

@@ -175,6 +175,13 @@ record `logcatEvent.requestErrorClass` when the app emits a valid
 `fields.errorClass` (`client`, `auth`, `network`, `server`). Classification
 uses only these references, not unstructured log text.
 
+When the first step a device runs after cold launch fails with
+`LOCATOR_NOT_FOUND`, `ANCHOR_NOT_FOUND`, or `SCROLL_TARGET_NOT_FOUND`, the
+primary failure message ends with a hint that TapHound does not reset app
+data. That step is the first to see persisted app state (settings, login,
+layout preferences), so a missing target there most often means that state
+differs from the state the Journey was generated in.
+
 When a step targets a semantic Knowledge `anchor`, the Locator report records
 `matchedBy: "anchor"`, the resolved `anchorId`, and an `anchor` sub-report whose
 `status` is one of `"resolved"`, `"locatorFallback"`, or `"failed"`

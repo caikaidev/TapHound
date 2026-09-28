@@ -11,6 +11,11 @@
 
 ### Changed
 
+- When the first step after cold launch cannot find its target
+  (`LOCATOR_NOT_FOUND`, `ANCHOR_NOT_FOUND`, `SCROLL_TARGET_NOT_FOUND`), the
+  failure message now says TapHound does not reset app data and points at
+  persisted app state, which is the usual cause there.
+
 - `UI_SNAPSHOT_FAILED` exits `3` (environment) instead of `1`, and a Replay
   that stops on it or on `UI_BACKEND_UNAVAILABLE` reports status `error`, so
   a Contract Verdict is `inconclusive` instead of `fail`. A UI backend that

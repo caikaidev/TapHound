@@ -374,6 +374,26 @@ describe("journey-generator envelope helper", () => {
     expect(result.output.code).toBe("ENVELOPE_INVALID");
   });
 
+  it("names the accepted bind sources when given a hand-assembled subset", async () => {
+    const input = await put("proposal.json", {
+      version: 1,
+      proposal: proposal({ binding: undefined })
+    });
+    const from = await put("subset.json", {
+      generationId: "generation-1",
+      baseRevision: 6,
+      snapshotHash,
+      snapshotRef
+    });
+    const result = command("bind", "--input", input, "--from", from);
+    expect(result.code).toBe(2);
+    expect(result.output.code).toBe("ENVELOPE_INVALID");
+    expect(result.output.message).toContain('unknown field "snapshotRef"');
+    expect(result.output.message).toContain(
+      "bind --from expects the unmodified stdout of `taphound generation observe --json`"
+    );
+  });
+
   it("rejects unknown commands", () => {
     const result = command("nope");
     expect(result.code).toBe(2);

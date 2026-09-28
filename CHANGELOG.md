@@ -21,6 +21,14 @@
   a Contract Verdict is `inconclusive` instead of `fail`. A UI backend that
   cannot capture the screen is not evidence of a regression.
 
+- `verify` prints a warning on stderr, and `summary.txt` carries one, when a
+  run dropped Logcat lines. The report already recorded `logcatEvidence`, but
+  a passed run gave no visible sign of it.
+
+- The Journey generator's `envelope.mjs bind` names the accepted `--from`
+  shapes (unmodified `generation observe --json` or succeeded
+  `generation step --json` output) when the source is rejected.
+
 ### Performance
 
 - With the Appium UI backend, `hybrid` idle waits now sample frame stats with

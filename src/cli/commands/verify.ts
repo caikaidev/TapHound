@@ -9,6 +9,7 @@ import {
   loadPublishedReplayPolicy,
   type PublishedReplayPolicy
 } from "../../application/generation/replay-policy-loader.js";
+import { logcatEvidenceWarning } from "../../application/report/report-writer.js";
 import { TapHoundConfigSchema } from "../../domain/config.js";
 import {
   DEFAULT_DEVICE_ROLE,
@@ -240,6 +241,10 @@ async function runDoctorAndVerify(
           receiptPath === undefined ? "" : `\nReceipt: ${receiptPath}`
         }`
       );
+    }
+    const logcatWarning = logcatEvidenceWarning(result.report);
+    if (logcatWarning !== undefined) {
+      writeLine(dependencies.stderr, logcatWarning);
     }
     dependencies.setExitCode(result.exitCode);
   } catch (error) {

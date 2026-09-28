@@ -12,6 +12,20 @@ export interface PublishedReport {
   summaryPath: string;
 }
 
+/**
+ * One line naming dropped Logcat evidence. Logcat-based expectations already
+ * fail closed on a relevant drop; this keeps a passed run from hiding it.
+ */
+export function logcatEvidenceWarning(
+  report: Pick<TapHoundReport, "logcatEvidence">
+): string | undefined {
+  const entries = report.logcatEvidence ?? [];
+  if (entries.length === 0) return undefined;
+  const lines = entries.reduce((total, entry) => total + entry.droppedLines, 0);
+  return `Warning: Logcat evidence is incomplete (${String(lines)} line(s) dropped); `
+    + "Logcat-based expectations fail closed on drops in their window";
+}
+
 function renderSummary(report: TapHoundReport): string {
   const lines = [
     `TapHound run ${report.runId}: ${report.status.toUpperCase()}`,
@@ -27,6 +41,10 @@ function renderSummary(report: TapHoundReport): string {
     )
   ];
 
+  const logcatWarning = logcatEvidenceWarning(report);
+  if (logcatWarning !== undefined) {
+    lines.push("", logcatWarning);
+  }
   if (report.primaryFailure !== undefined) {
     lines.push(
       "",

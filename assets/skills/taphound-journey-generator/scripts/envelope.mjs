@@ -370,6 +370,14 @@ function validateEnvelope(envelope) {
 
 // A bind source is one observe output, one step output, or a raw binding
 // object. The binding fields are copied verbatim; nothing is invented.
+const BIND_SOURCE_HINT = "bind --from expects the unmodified stdout of "
+  + "`taphound generation observe --json` (status \"observed\" with "
+  + "generationId, baseRevision, snapshotHash, snapshotRef) or of a succeeded "
+  + "`taphound generation step --json` (status \"succeeded\" with nextBinding "
+  + "and nextSnapshotRef); save it with `> file` instead of assembling a "
+  + "subset. A bare binding {generationId, baseRevision, snapshotHash} is also "
+  + "accepted";
+
 function readBindingFromSource(source) {
   if (!isPlainObject(source)) {
     fail("ENVELOPE_INVALID", "bind source must be a JSON object");
@@ -460,7 +468,16 @@ async function bind(inputPath, fromPath, outPath) {
     fail("ENVELOPE_INVALID", "envelope.version must be 1");
   }
   const source = await readJsonFile(fromPath, "bind source");
-  const { binding, snapshotRef } = readBindingFromSource(source);
+  let bindingSource;
+  try {
+    bindingSource = readBindingFromSource(source);
+  } catch (error) {
+    if (error?.code === "ENVELOPE_INVALID") {
+      fail("ENVELOPE_INVALID", `${error.message}. ${BIND_SOURCE_HINT}`);
+    }
+    throw error;
+  }
+  const { binding, snapshotRef } = bindingSource;
   const proposal = isPlainObject(envelope.proposal)
     ? { ...envelope.proposal, binding }
     : undefined;

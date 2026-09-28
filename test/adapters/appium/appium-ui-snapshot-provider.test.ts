@@ -156,7 +156,10 @@ describe("AppiumUiSnapshotProvider", () => {
       };
     }
 
-    async function openProvider(request: AppiumHttpClient["request"]): Promise<
+    async function openProvider(
+      request: AppiumHttpClient["request"],
+      onSessionRecovery?: (succeeded: boolean) => void
+    ): Promise<
       Awaited<ReturnType<AppiumUiSnapshotProviderFactory["open"]>>
     > {
       const runner = processRunner();
@@ -164,7 +167,9 @@ describe("AppiumUiSnapshotProvider", () => {
         .mockResolvedValueOnce(commandResult({ stdout: "36\n" }))
         .mockResolvedValueOnce(commandResult({ stdout: "Physical size: 1080x1920\n" }))
         .mockResolvedValueOnce(commandResult({ stdout: "SurfaceOrientation: 0\n" }));
-      return new AppiumUiSnapshotProviderFactory(runner, { request }).open({
+      return new AppiumUiSnapshotProviderFactory(runner, { request }, {
+        onSessionRecovery
+      }).open({
         deviceSerial: "SM02G4061928151",
         timeoutMs: 5000,
         backend: "appium-uiautomator2"
@@ -196,6 +201,19 @@ describe("AppiumUiSnapshotProvider", () => {
         "GET /session/session-2/source",
         "DELETE /session/session-2"
       ]);
+    });
+
+    it("reports each recovery attempt and its outcome", async () => {
+      const outcomes: boolean[] = [];
+      const fake = appium([undefined, timeout(), timeout(), timeout()]);
+      const provider = await openProvider(fake.request, (succeeded) => {
+        outcomes.push(succeeded);
+      });
+
+      await provider.capture({ reason: "idle", timeoutMs: 1000 }).catch(() => undefined);
+      await provider.capture({ reason: "idle", timeoutMs: 1000 });
+
+      expect(outcomes).toEqual([false, true]);
     });
 
     it("fails with both causes when the retry on a fresh session also fails", async () => {

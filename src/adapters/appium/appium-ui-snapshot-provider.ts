@@ -38,6 +38,8 @@ export interface AppiumHttpClient {
 export interface AppiumProviderOptions {
   endpoint?: string | undefined;
   mapTestTagToResourceId?: boolean | undefined;
+  /** Called after each attempt to recreate a degraded session. */
+  onSessionRecovery?: ((succeeded: boolean) => void) | undefined;
 }
 
 function loopbackEndpoint(value: string): URL {
@@ -117,7 +119,8 @@ class AppiumUiSnapshotProvider implements UiSnapshotProvider, UiStabilityProbe {
     private sessionId: string,
     private readonly createSession: CreateAppiumSession,
     private readonly environment: DeviceUiEnvironment,
-    public readonly descriptor: UiBackendDescriptor
+    public readonly descriptor: UiBackendDescriptor,
+    private readonly onSessionRecovery?: ((succeeded: boolean) => void) | undefined
   ) {}
 
   public reset(): void {
@@ -169,7 +172,9 @@ class AppiumUiSnapshotProvider implements UiSnapshotProvider, UiStabilityProbe {
       try {
         await this.recreateSession(options.signal);
         source = await this.pageSource(options);
+        this.onSessionRecovery?.(true);
       } catch (retryError) {
+        this.onSessionRecovery?.(false);
         throw this.captureFailure(
           `${errorText(error)}; retry on a recreated session failed: ${
             errorText(retryError)
@@ -263,6 +268,7 @@ export class AppiumUiSnapshotProviderFactory implements
   private readonly endpoint: URL;
   private readonly http: AppiumHttpClient;
   private readonly settings: { mapTestTagToResourceId: boolean };
+  private readonly onSessionRecovery: ((succeeded: boolean) => void) | undefined;
 
   public constructor(
     private readonly runner: ProcessRunner,
@@ -276,6 +282,7 @@ export class AppiumUiSnapshotProviderFactory implements
     this.settings = {
       mapTestTagToResourceId: options.mapTestTagToResourceId ?? false
     };
+    this.onSessionRecovery = options.onSessionRecovery;
   }
 
   public async probe(timeoutMs = 2000): Promise<boolean> {
@@ -332,7 +339,8 @@ export class AppiumUiSnapshotProviderFactory implements
         sessionId,
         createSession,
         environment,
-        descriptor
+        descriptor,
+        this.onSessionRecovery
       );
       await provider.capture({
         reason: "evidence",

@@ -9,6 +9,8 @@ import {
 import type { CliDependencies, TextOutput } from "../../src/cli/dependencies.js";
 import { runtimeConfig, runtimeJourney } from "../fakes/runtime-fixture.js";
 import { fakeWorkspaceLayout } from "../fakes/workspace-layout.js";
+import { UiCaptureTelemetry } from "../../src/application/diagnostics/ui-capture-telemetry.js";
+import type { CommandEvent } from "../../src/domain/diagnostics.js";
 
 class BufferOutput implements TextOutput {
   public value = "";
@@ -119,6 +121,62 @@ describe("runMain", () => {
     expect(stdout.trim().split("\n")).toHaveLength(1);
     expect((test.stderr as BufferOutput).value)
       .toContain("required option '--session <id>' not specified");
+    expect(exitCodes).toEqual([2]);
+  });
+
+  it("journals the finished invocation with its structured outcome", async () => {
+    const exitCodes: number[] = [];
+    const test = dependencies(exitCodes);
+    const appended: Array<{ projectRoot: string; event: CommandEvent }> = [];
+    test.diagnostics = {
+      journal: {
+        append: (projectRoot, event): Promise<void> => {
+          appended.push({ projectRoot, event });
+          return Promise.resolve();
+        },
+        readLines: (): Promise<string[]> => Promise.resolve([]),
+        salt: (): Promise<Buffer> => Promise.resolve(Buffer.alloc(32))
+      },
+      telemetry: new UiCaptureTelemetry()
+    };
+
+    await runMain([
+      "node", "taphound", "verify", "--journey", "secret.json", "--json"
+    ], test);
+
+    expect(exitCodes).toEqual([2]);
+    expect(appended).toMatchObject([{
+      projectRoot: "/project",
+      event: {
+        command: "verify",
+        flags: ["journey", "json"],
+        exitCode: 2,
+        status: "error",
+        failureCode: "CONFIG_INVALID",
+        ui: []
+      }
+    }]);
+    expect(JSON.stringify(appended)).not.toContain("secret.json");
+  });
+
+  it("never lets a journal failure change the command result", async () => {
+    const exitCodes: number[] = [];
+    const test = dependencies(exitCodes);
+    test.diagnostics = {
+      journal: {
+        append: (): Promise<void> => Promise.reject(new Error("disk full")),
+        readLines: (): Promise<string[]> => Promise.resolve([]),
+        salt: (): Promise<Buffer> => Promise.resolve(Buffer.alloc(32))
+      },
+      telemetry: new UiCaptureTelemetry()
+    };
+
+    await runMain(["node", "taphound", "verify", "--journey", "j.json", "--json"], test);
+
+    const stdout = (test.stdout as BufferOutput).value;
+    expect(stdout.trim().split("\n")).toHaveLength(1);
+    expect(JSON.parse(stdout)).toMatchObject({ exitCode: 2 });
+    expect((test.stderr as BufferOutput).value).not.toContain("disk full");
     expect(exitCodes).toEqual([2]);
   });
 

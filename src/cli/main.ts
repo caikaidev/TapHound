@@ -16,6 +16,11 @@ import {
   RuntimeBackendSelectionError,
   resolveRuntimeBackendChoiceFromInvocation
 } from "./runtime-selection.js";
+import {
+  commandEvent,
+  describeInvocation,
+  type InvokedCommand
+} from "./diagnostics-recorder.js";
 import { errorMessage, failureOutput, writeJson, writeLine } from "./output.js";
 import { createProgram } from "./program.js";
 
@@ -68,14 +73,74 @@ function overrideCommandExits(command: Command): void {
   }
 }
 
+/**
+ * Wraps the dependencies so the finished invocation can be journaled: the
+ * last exit code, and stdout only when the command promised one JSON value.
+ */
+function observeInvocation(
+  dependencies: CliDependencies,
+  json: boolean
+): { dependencies: CliDependencies; exitCode: () => number; stdout: () => string | undefined } {
+  let exitCode = 0;
+  let stdout = "";
+  return {
+    dependencies: {
+      ...dependencies,
+      stdout: {
+        write: (content): void => {
+          if (json) stdout += content;
+          dependencies.stdout.write(content);
+        }
+      },
+      setExitCode: (code): void => {
+        exitCode = code;
+        dependencies.setExitCode(code);
+      }
+    },
+    exitCode: () => exitCode,
+    stdout: () => (json ? stdout : undefined)
+  };
+}
+
+async function journalInvocation(
+  dependencies: CliDependencies,
+  invocation: InvokedCommand | undefined,
+  startedAt: Date,
+  observed: ReturnType<typeof observeInvocation>
+): Promise<void> {
+  const diagnostics = dependencies.diagnostics;
+  if (diagnostics === undefined || invocation === undefined) return;
+  try {
+    await diagnostics.journal.append(invocation.projectRoot, commandEvent({
+      invocation,
+      startedAt,
+      durationMs: Date.now() - startedAt.getTime(),
+      exitCode: observed.exitCode(),
+      stdout: observed.stdout(),
+      telemetry: diagnostics.telemetry
+    }));
+  } catch {
+    // The journal is best-effort evidence; it never changes a command result.
+  }
+}
+
 export async function runMain(
   argv: readonly string[],
-  dependencies: CliDependencies = createProductionDependencies()
+  baseDependencies: CliDependencies = createProductionDependencies()
 ): Promise<void> {
   const json = argv.includes("--json");
+  const startedAt = new Date();
+  const observed = observeInvocation(baseDependencies, json);
+  const dependencies = baseDependencies.diagnostics === undefined
+    ? baseDependencies
+    : observed.dependencies;
+  let invocation: InvokedCommand | undefined;
   try {
     const program = createProgram(dependencies);
     overrideCommandExits(program);
+    program.hook("preAction", (_program, action) => {
+      invocation = describeInvocation(action, dependencies.cwd());
+    });
     await program.parseAsync([...argv]);
   } catch (error) {
     const commander = asCommanderFailure(error);
@@ -96,6 +161,8 @@ export async function runMain(
       writeLine(dependencies.stderr, output.failure.message);
     }
     dependencies.setExitCode(exitCode);
+  } finally {
+    await journalInvocation(dependencies, invocation, startedAt, observed);
   }
 }
 

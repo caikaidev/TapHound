@@ -4,6 +4,17 @@
 
 ### Added
 
+- A local diagnostics journal and `taphound diagnose export`. Each command
+  appends a structured line (command path, passed flag names, exit code,
+  failure code, UI backend latency histogram and failures, Appium session
+  recoveries) to the Git-ignored `.taphound/build/log/events.jsonl`, only
+  where the build layout already exists. `diagnose export` writes a
+  redacted, strict-schema bundle with recent events and Replay summaries for
+  feedback: Activity, Journey, device, and run names become aliases, locator
+  values become salted digests, and paths, packages, serials, messages,
+  screenshots, hierarchies, and Logcat text are dropped. Opt out with
+  `TAPHOUND_DIAGNOSTICS=off`. See `docs/diagnostics.md`.
+
 - `verify --journey` writes a hash-bound process receipt (`receipt.json`)
   beside the published report and prints `receiptPath` in its `--json`
   output. The `taphound-verify-change` UI-refactor helper consumes this

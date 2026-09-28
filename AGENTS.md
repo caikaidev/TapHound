@@ -134,8 +134,8 @@ The code follows ports and adapters:
 
 The CLI exposes `doctor`, `record`, `verify`, `contract`, `observe`,
 `project`, `context`, `journey`, `generation`, `knowledge`, `baseline`,
-`failure`, `init`, `align`, and `impact`. Keep external tools and filesystem
-effects behind ports so application tests can inject fakes.
+`failure`, `init`, `align`, `impact`, and `diagnose`. Keep external tools and
+filesystem effects behind ports so application tests can inject fakes.
 
 Repository-only developer tools live under `tools/` (type-checked, linted,
 and tested, but not built into `dist/` or published). The False-Done
@@ -202,7 +202,16 @@ layout; derive every path from it instead of writing `.taphound` literals:
       jobs/<id>/          # detached finalize stdout and progress
       runs/<runId>/       # verify reports, screenshots, Logcat
       workflows/<caseId>/ # ephemeral Workflow provenance and command JSON
+      log/                # local diagnostics journal (events.jsonl) and salt
+      diagnostics/        # redacted bundles from `diagnose export`
 ```
+
+`src/cli/main.ts` journals each finished invocation (command path, passed
+flag names, exit code, structured JSON outcome, UI backend latency) into
+`build/log/` only where the build layout already exists; `diagnose export`
+builds an allowlisted, strict-schema bundle from it with aliases and salted
+locator digests. Neither may carry paths, package/Activity/Journey names,
+locator values, serials, or free text (see `docs/diagnostics.md`).
 
 `artifactsDir` is optional and defaults to `.taphound/build/runs`. Core
 artifacts must stay under `.taphound/build`; the same boundary applies to

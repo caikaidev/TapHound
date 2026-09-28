@@ -24,6 +24,8 @@ export const GENERATIONS_DIR = `${BUILD_DIR}/generations`;
 export const JOBS_DIR = `${BUILD_DIR}/jobs`;
 export const DEFAULT_ARTIFACTS_DIR = `${BUILD_DIR}/runs`;
 export const WORKFLOWS_DIR = `${BUILD_DIR}/workflows`;
+export const DIAGNOSTICS_LOG_DIR = `${BUILD_DIR}/log`;
+export const DIAGNOSTICS_EXPORT_DIR = `${BUILD_DIR}/diagnostics`;
 
 export function workflowManifestPath(caseId: string): string {
   if (!/^[a-z][a-z0-9-]{0,63}$/.test(caseId)) {

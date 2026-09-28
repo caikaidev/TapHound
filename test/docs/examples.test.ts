@@ -286,7 +286,8 @@ describe("TapHound documentation examples", () => {
       "failure",
       "init",
       "align",
-      "impact"
+      "impact",
+      "diagnose"
     ]);
     for (const doc of [readme, readmeZh]) {
       expect(doc).toContain("# TapHound");

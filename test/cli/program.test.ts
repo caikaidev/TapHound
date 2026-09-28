@@ -30,7 +30,8 @@ describe("createProgram", () => {
       "failure",
       "init",
       "align",
-      "impact"
+      "impact",
+      "diagnose"
     ]);
     expect(
       createProgram().commands.find((command) => command.name() === "project")

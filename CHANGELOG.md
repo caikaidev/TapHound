@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0-dev.11 — 2026-09-28
 
 ### Added
 
@@ -33,6 +33,12 @@
   Generation step now issues 44 instead of 74 fsyncs.
 
 ### Changed
+
+- Outdated design documents are removed: the two V2 architecture notes, the
+  completed plans under `docs/plans/`, the self-verification analysis, and a
+  one-off acceptance record. Their durable principles now live in
+  `docs/principles.md` ("Outsource mechanics. Own semantics. Verify
+  outcomes.", what belongs in Core, and what is out of scope).
 
 - The READMEs describe TapHound as the check on AI-coded Android changes,
   list the five current Skills, and link the Workflow Skills, capability,

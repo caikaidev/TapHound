@@ -944,6 +944,8 @@ export class VerifyRuntime {
             "DEVICE_UNAVAILABLE",
             "DEVICE_ROLE_UNMAPPED",
             "APP_NOT_INSTALLED",
+            "UI_BACKEND_UNAVAILABLE",
+            "UI_SNAPSHOT_FAILED",
             "INTERNAL_ERROR"
           ].includes(failure.code)
         ? "error"

@@ -9,8 +9,19 @@
   output. The `taphound-verify-change` UI-refactor helper consumes this
   receipt instead of one an Agent assembled by hand.
 
+### Changed
+
+- `UI_SNAPSHOT_FAILED` exits `3` (environment) instead of `1`, and a Replay
+  that stops on it or on `UI_BACKEND_UNAVAILABLE` reports status `error`, so
+  a Contract Verdict is `inconclusive` instead of `fail`. A UI backend that
+  cannot capture the screen is not evidence of a regression.
+
 ### Fixed
 
+- The Appium backend recreates its UiAutomator2 session and retries a page
+  source read once when the read times out or Appium no longer knows the
+  session (HTTP 404). A degraded session previously failed the whole run on
+  its first slow read.
 - The UI-refactor `compare` helper expected exit code 4 in the receipt of a
   deterministic failed Replay; `verify` exits 1 for such a failure, so a real
   failed run was paused instead of reported as `FAIL`.

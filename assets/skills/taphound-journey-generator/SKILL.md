@@ -488,6 +488,8 @@ the index with `taphound knowledge rehash --project <project> --json` and
   session's selected module shards, stop and report a Context coverage gap.
   Do not add modules after start because `contextSelection` is bound to the
   authoritative session.
+- `UI_SNAPSHOT_FAILED` exits `3`: it is an environment failure, not
+  evidence about the app. Rerun before diagnosing the Journey.
 - Repeated `UI_SNAPSHOT_FAILED` ("UIAutomator dump failed") on a slow or
   busy device usually means the dump deadline is too tight, not that the
   device is broken. Raise `ui.snapshotTimeoutMs` in `.taphound/config.json`

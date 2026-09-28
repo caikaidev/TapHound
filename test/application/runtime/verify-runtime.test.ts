@@ -11,6 +11,7 @@ import {
   type ReplayBinding
 } from "../../../src/application/runtime/step-runner.js";
 import { adbRuntimeCapabilities } from "../../../src/adapters/runtime/adb-runtime-backend.js";
+import { UiSnapshotError } from "../../../src/adapters/ui/ui-snapshot-error.js";
 import type { AppProcess } from "../../../src/domain/app-process.js";
 import type { Journey } from "../../../src/domain/journey.js";
 import { hashJourney } from "../../../src/domain/report.js";
@@ -778,6 +779,27 @@ describe("VerifyRuntime", () => {
       status: "error",
       exitCode: 4,
       report: { primaryFailure: { code: "INTERNAL_ERROR" } }
+    });
+    expect(test.order.at(-1)).toBe("report");
+  });
+
+  it.each([
+    ["UI_SNAPSHOT_FAILED", "Appium page source capture failed: timeout"],
+    ["UI_BACKEND_UNAVAILABLE", "Appium UiAutomator2 session could not be opened"]
+  ] as const)("reports %s as an environment error, not a replay failure", async (code, message) => {
+    const test = runtimeFixture();
+    test.dependencies.createStepRunner = (): StepRunnerLike => ({
+      run: vi.fn<StepRunner["run"]>(() => Promise.reject(
+        new UiSnapshotError(code, "appium-uiautomator2", message, { terminal: true })
+      ))
+    });
+
+    const result = await new VerifyRuntime(test.dependencies).verify(input());
+
+    expect(result).toMatchObject({
+      status: "error",
+      exitCode: 3,
+      report: { status: "error", primaryFailure: { code, message } }
     });
     expect(test.order.at(-1)).toBe("report");
   });

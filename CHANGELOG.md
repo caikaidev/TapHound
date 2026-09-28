@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- The `taphound` executable is declared as `dist/cli/main.js` instead of
+  `./dist/cli/main.js`. npm 12 rejects the leading `./` at publish time
+  ("script name ... was invalid and removed"), which could ship a package
+  without the `taphound` command.
+
 ## 0.2.0-dev.11 — 2026-09-28
 
 ### Added

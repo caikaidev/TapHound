@@ -61,6 +61,10 @@ This is a Skill convention, not a Core CLI input. The Brief is untrusted static
 Case context; Project Context, live Runtime Snapshots, risk policy, execution,
 and final Replay remain authoritative.
 
+`docs/principles.md` holds the product and architecture principles ("Outsource
+mechanics. Own semantics. Verify outcomes.", what belongs in Core, and what is
+out of scope); check a new feature against it.
+
 ## Toolchain and Commands
 
 - Use Node.js 22 or newer. The current ESLint toolchain requires Node 22.13+ or

@@ -1,7 +1,7 @@
 # Runtime Backend SPI
 
-TapHound's V2 direction (see `TapHound_V2_Core_Focus_Architecture.md`) is to be
-the **runtime verification engine for AI-driven Android development**: TapHound
+TapHound is the **runtime verification engine for AI-driven Android
+development** (see [Principles](../principles.md)): TapHound
 owns state binding, risk policy, deterministic replay, and evidence, while
 low-level device plumbing is delegated to interchangeable runtime backends.
 The Runtime Backend SPI (`src/ports/runtime-backend.ts`) is the seam that makes

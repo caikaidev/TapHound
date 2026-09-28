@@ -154,7 +154,7 @@ A post-processing failure must not overwrite `primaryFailure`. For example, when
 - `3`: tools, permissions, app not installed, device environment unavailable, or the selected runtime backend lacks a capability the command needs (`RUNTIME_CAPABILITY_MISSING`).
 - `4`: TapHound internal error or an unclassifiable cancellation.
 
-The JSON `exitCode` of `taphound verify --json` matches the process exit code. Success or a normal verification failure includes `report`, `reportPath`, and `summaryPath`; config, environment, or internal errors that occur before the report is generated use `failure.code` and `failure.message`.
+The JSON `exitCode` of `taphound verify --json` matches the process exit code. Success or a normal verification failure includes `report`, `reportPath`, `summaryPath`, and `receiptPath`: `verify --journey` writes a hash-bound process receipt (`receipt.json`: normalized `argv`, `exitCode`, `journeySha256`, `reportPath`, `reportSha256`) beside the report. If the receipt cannot be written, `receiptPath` is omitted and the reason goes to stderr; config, environment, or internal errors that occur before the report is generated use `failure.code` and `failure.message`.
 
 ## Step Failure Evidence
 

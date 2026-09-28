@@ -2,7 +2,18 @@
 
 ## Unreleased
 
+### Added
+
+- `verify --journey` writes a hash-bound process receipt (`receipt.json`)
+  beside the published report and prints `receiptPath` in its `--json`
+  output. The `taphound-verify-change` UI-refactor helper consumes this
+  receipt instead of one an Agent assembled by hand.
+
 ### Fixed
+
+- The UI-refactor `compare` helper expected exit code 4 in the receipt of a
+  deterministic failed Replay; `verify` exits 1 for such a failure, so a real
+  failed run was paused instead of reported as `FAIL`.
 
 - The `taphound` executable is declared as `dist/cli/main.js` instead of
   `./dist/cli/main.js`. npm 12 rejects the leading `./` at publish time

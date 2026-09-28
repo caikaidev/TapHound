@@ -3,6 +3,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  rename,
   rm,
   writeFile
 } from "node:fs/promises";
@@ -358,6 +359,8 @@ export interface CliDependencies {
   } | undefined;
   readJson: (path: string) => Promise<unknown>;
   readFile: (path: string) => Promise<Buffer>;
+  /** Atomically publishes a verify process receipt beside its report. */
+  writeVerifyReceipt?: ((path: string, content: string) => Promise<void>) | undefined;
   cwd: () => string;
   stdout: TextOutput;
   stderr: TextOutput;
@@ -1039,6 +1042,16 @@ export function createProductionDependencies(
       await readFile(path, "utf8")
     ) as unknown,
     readFile: async (path): Promise<Buffer> => readFile(path),
+    writeVerifyReceipt: async (path, content): Promise<void> => {
+      const temporaryPath = `${path}.${randomUUID()}.tmp`;
+      try {
+        await writeFile(temporaryPath, content, { encoding: "utf8", flag: "wx" });
+        await rename(temporaryPath, path);
+      } catch (error) {
+        await rm(temporaryPath, { force: true });
+        throw error;
+      }
+    },
     cwd: () => process.cwd(),
     stdout: {
       write: (content): void => {

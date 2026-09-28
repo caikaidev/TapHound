@@ -449,7 +449,7 @@ async function compare(handoff, projectPath, journeyPath, reportPath, receiptPat
   await checkReceipt(receiptFile, project, journeyFile, reportFile,
     data.manifest.base.device, {
       journey: journeyHash(journey), report: await fileHash(reportFile)
-    }, report.status === "failed" ? 4 : 0);
+    }, report.status === "failed" ? 1 : 0);
   const covered = checkReplay(project, data.manifest.base.device,
     data.caseData, journey, meta, report, reportFile);
   if (report.runId === data.manifest.base.runId) {

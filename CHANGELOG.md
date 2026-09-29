@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- The Brief Author subagent role prompts (English and zh-CN) state that
+  Briefs are written only under `.taphound/briefs/<caseId>/` or
+  `.taphound/suites/<suite-id>/briefs/<caseId>/`, and fit a 2000-character
+  subagent prompt field; details stay in `SKILL.md`.
+
 ## 0.2.0-dev.13 — 2026-09-29
 
 ### Added

@@ -56,8 +56,13 @@ Only the optional evidence actually produced appears in `artifacts`. The report 
 - `fallbackUsed`: whether any step used an explicit annotated fallback.
 - `primaryFailure`: the first primary failure.
 - `secondaryErrors`: collection or internal secondary errors that occurred after the primary failure.
-- `logcatEvidence` (optional): `{role,status:"incomplete",droppedLines,droppedBytes,lastDroppedAtMs?}`
-  when bounded Logcat buffering discarded unparsed or App-PID lines. Drops
+- `logcatEvidence` (optional): `{role,status:"incomplete",expectationImpact,droppedLines,droppedBytes,lastDroppedAtMs?}`
+  when bounded Logcat buffering discarded unparsed or App-PID lines.
+  `status` describes the capture, not the verdict. `expectationImpact` is
+  `none` when no step's `logcat`/`logcatEvent` expectation failed: those
+  expectations fail closed on a relevant drop, so every one that passed had
+  the evidence it needed and the drop is non-fatal. It is `possible` when a
+  Logcat expectation failed, because the drops may explain that failure. Drops
   belonging only to unrelated parsed PIDs do not mark scoped evidence
   incomplete. A requirement needing whole-run Logcat evidence cannot pass.
   Structured-event windows starting after the last relevant drop can still be

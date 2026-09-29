@@ -30,16 +30,27 @@ async function temporaryRoot(): Promise<string> {
 }
 
 describe("logcatEvidenceWarning", () => {
-  it("names dropped Logcat lines across device roles", () => {
+  it("marks drops non-fatal when no Logcat expectation failed", () => {
     expect(logcatEvidenceWarning({})).toBeUndefined();
     expect(logcatEvidenceWarning({
       logcatEvidence: [
-        { role: "default", droppedLines: 1883, droppedBytes: 274880, status: "incomplete" },
-        { role: "receiver", droppedLines: 17, droppedBytes: 900, status: "incomplete" }
+        { role: "default", droppedLines: 1883, droppedBytes: 274880, status: "incomplete", expectationImpact: "none" },
+        { role: "receiver", droppedLines: 17, droppedBytes: 900, status: "incomplete", expectationImpact: "none" }
       ]
     })).toBe(
-      "Warning: Logcat evidence is incomplete (1900 line(s) dropped); "
-        + "Logcat-based expectations fail closed on drops in their window"
+      "Warning (non-fatal): Logcat capture is partial (1900 line(s) dropped); "
+        + "no Logcat expectation failed, and those expectations fail closed on drops in their window"
+    );
+  });
+
+  it("names drops as a possible cause when a Logcat expectation failed", () => {
+    expect(logcatEvidenceWarning({
+      logcatEvidence: [
+        { role: "default", droppedLines: 5, droppedBytes: 90, status: "incomplete", expectationImpact: "possible" }
+      ]
+    })).toBe(
+      "Warning: Logcat evidence is incomplete (5 line(s) dropped) "
+        + "and a Logcat expectation failed; the drops may be the cause"
     );
   });
 
@@ -49,7 +60,7 @@ describe("logcatEvidenceWarning", () => {
     const report = validReport({
       artifacts: { ...validReport().artifacts, directory: session.finalDirectory },
       logcatEvidence: [
-        { role: "default", droppedLines: 3, droppedBytes: 90, status: "incomplete" }
+        { role: "default", droppedLines: 3, droppedBytes: 90, status: "incomplete", expectationImpact: "possible" }
       ]
     });
 

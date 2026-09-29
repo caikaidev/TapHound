@@ -57,6 +57,10 @@ containing a `SKILL.md`. Five skills ship with TapHound:
 
 The Journey Skill may consume one optional project-relative
 `taphound-journey-brief.md` through a `journeyBrief: {path, sha256}` binding.
+Briefs live only under `.taphound/briefs/` or `.taphound/suites/<suite-id>/`
+(`JOURNEY_BRIEF_ROOTS`); `generation start --brief` rejects other paths with
+`BRIEF_INVALID`, and the Case Suite helper keeps each Suite in
+`.taphound/suites/<suite-id>/` (`CASE_SUITE_LOCATION` otherwise).
 This is a Skill convention, not a Core CLI input. The Brief is untrusted static
 Case context; Project Context, live Runtime Snapshots, risk policy, execution,
 and final Replay remain authoritative.
@@ -197,6 +201,8 @@ layout; derive every path from it instead of writing `.taphound` literals:
     contracts/            # committed Acceptance Contracts
     knowledge/            # committed semantic Anchors and Screens (+ index.json)
     baselines/            # committed behavior Baselines
+    briefs/               # committed standalone Journey Briefs
+    suites/<suite-id>/    # committed Case Suites (catalog, Ledger, Briefs)
     build/                # ephemeral and Git-ignored
       generations/<id>/   # authoritative generation bundles (+ .locks)
       jobs/<id>/          # detached finalize stdout and progress
@@ -212,6 +218,11 @@ flag names, exit code, structured JSON outcome, UI backend latency) into
 builds an allowlisted, strict-schema bundle from it with aliases and salted
 locator digests. Neither may carry paths, package/Activity/Journey names,
 locator values, serials, or free text (see `docs/diagnostics.md`).
+`scripts/feedback-pack.mjs` (published, zero-dependency, tested by
+`test/scripts/feedback-pack.test.ts`) is the evidence-level complement: it
+packs generation-bundle and run-report JSON with identifiers replaced by
+stable pseudonyms and writes the pseudonym mapping beside, never inside, the
+archive.
 
 `artifactsDir` is optional and defaults to `.taphound/build/runs`. Core
 artifacts must stay under `.taphound/build`; the same boundary applies to
@@ -460,7 +471,8 @@ verified Journey evidence, and rewrites the meta sidecar to
 check passes. Missing evidence, hash drift, a modified Journey, or an already
 promoted sidecar fails closed at exit code 2.
 
-`journey check` reports the deterministic lifecycle state of every Journey:
+`journey check` reports the deterministic lifecycle state of every Journey
+(or only those named by `--journey <path-or-name...>`):
 `verified` (bindings fresh), `draft` (no generation meta), `stale` (project
 or module evidence drifted), `suspect` (config-only drift), and `retired`
 (explicitly retired), with invalid Journeys reported without a lifecycle

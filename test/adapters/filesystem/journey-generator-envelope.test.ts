@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,6 +37,7 @@ interface HelperOutput {
   snapshotSource?: string;
   path?: string;
   snapshotRef?: string;
+  activityCheck?: string;
 }
 
 function command(...args: string[]): {
@@ -361,6 +362,58 @@ describe("journey-generator envelope helper", () => {
     const validated = command("validate", "--input", out);
     expect(validated.code).toBe(0);
     expect(validated.output.status).toBe("valid");
+  });
+
+  it("rejects a before Activity that contradicts the full observe snapshot", async () => {
+    const input = await put("proposal.json", {
+      version: 1,
+      proposal: proposal({ activity: { before: "com.example.app.PLACEHOLDER" } })
+    });
+    const from = await put("observe.json", observeOutput({
+      snapshot: { activity: "com.example.app.DetailActivity" }
+    }));
+    const result = command("bind", "--input", input, "--from", from);
+    expect(result.code).toBe(2);
+    expect(result.output.code).toBe("ENVELOPE_ACTIVITY_MISMATCH");
+    expect(result.output.message).toContain(
+      "proposal.activity.before com.example.app.PLACEHOLDER does not match the bound snapshot Activity com.example.app.DetailActivity"
+    );
+  });
+
+  it("checks the before Activity against the snapshot file under --project", async () => {
+    const project = await mkdtemp(join(tmpdir(), "taphound-envelope-project-"));
+    created.push(project);
+    await mkdir(dirname(join(project, snapshotRef)), { recursive: true });
+    await writeFile(join(project, snapshotRef), JSON.stringify({
+      activity: "com.example.app.MainActivity"
+    }));
+    const input = await put("proposal.json", { version: 1, proposal: proposal() });
+    const from = await put("step.json", {
+      status: "succeeded",
+      nextBinding: { generationId: "generation-1", baseRevision: 6, snapshotHash },
+      nextSnapshotRef: snapshotRef
+    });
+    const out = join(project, "bound.json");
+    const matched = command(
+      "bind", "--input", input, "--from", from, "--out", out, "--project", project
+    );
+    expect(matched.code).toBe(0);
+    expect(matched.output).toMatchObject({ status: "bound", activityCheck: "matched" });
+
+    const stale = await put("stale.json", {
+      version: 1,
+      proposal: proposal({ activity: { before: "com.example.app.OtherActivity" } })
+    });
+    const mismatch = command(
+      "bind", "--input", stale, "--from", from, "--out", out, "--project", project
+    );
+    expect(mismatch.output.code).toBe("ENVELOPE_ACTIVITY_MISMATCH");
+
+    const unreadable = command("bind", "--input", input, "--from", from, "--out", out);
+    expect(unreadable.output).toMatchObject({
+      status: "bound",
+      activityCheck: "unverified"
+    });
   });
 
   it("rejects a bind source without usable binding fields", async () => {

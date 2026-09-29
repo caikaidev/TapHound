@@ -64,7 +64,7 @@ export interface JourneyCheckResult {
   summary: JourneyCheckSummary;
 }
 
-export type JourneyCheckErrorCode = "CONFIG_INVALID";
+export type JourneyCheckErrorCode = "CONFIG_INVALID" | "JOURNEY_NOT_FOUND";
 
 export class JourneyCheckError extends Error {
   public override readonly name = "JourneyCheckError";
@@ -83,6 +83,12 @@ export interface JourneyCheckInput {
   config: TapHoundConfig;
   project: ProjectDescription;
   bundle: ProjectContext;
+  /**
+   * Restrict the check to these Journeys. Each selector is a project-relative
+   * Journey path (`.taphound/journeys/<name>.json`) or a Journey name
+   * (`<name>`). A selector that matches no committed Journey fails.
+   */
+  journeys?: readonly string[] | undefined;
 }
 
 export interface JourneyCheckDependencies {
@@ -102,6 +108,32 @@ function journeyName(journeyPath: string): string {
     ? journeyPath.slice(prefix.length)
     : journeyPath;
   return withoutPrefix.slice(0, -".json".length);
+}
+
+function selectJourneys(
+  paths: readonly string[],
+  selectors: readonly string[] | undefined
+): readonly string[] {
+  if (selectors === undefined || selectors.length === 0) {
+    return paths;
+  }
+  const normalize = (value: string): string => value
+    .replaceAll("\\", "/")
+    .replace(/^\.\//, "");
+  const wanted = new Set(selectors.map(normalize));
+  const selected = paths.filter((path) => (
+    wanted.has(path) || wanted.has(journeyName(path))
+  ));
+  const missing = [...wanted].filter((selector) => !selected.some((path) => (
+    path === selector || journeyName(path) === selector
+  )));
+  if (missing.length > 0) {
+    throw new JourneyCheckError(
+      "JOURNEY_NOT_FOUND",
+      `No committed Journey matches ${missing.join(", ")} under ${JOURNEYS_DIR}`
+    );
+  }
+  return selected;
 }
 
 function summarize(
@@ -138,8 +170,9 @@ export class JourneyCheckService {
   public readonly check = async (
     input: JourneyCheckInput
   ): Promise<JourneyCheckResult> => {
-    const paths = await this.dependencies.store.listJourneyPaths(
-      input.projectRoot
+    const paths = selectJourneys(
+      await this.dependencies.store.listJourneyPaths(input.projectRoot),
+      input.journeys
     );
     const projectHash = hashGenerationBinding(input.project);
     const configHash = hashGenerationBinding(input.config);

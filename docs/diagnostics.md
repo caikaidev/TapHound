@@ -53,6 +53,43 @@ The salt lives in `.taphound/build/log/salt` and never leaves the host, so a
 digest cannot be reversed by guessing common strings, while the same locator
 keeps the same digest across runs. Review the file before sharing it.
 
+## Packing generation evidence
+
+`diagnose export` deliberately drops layouts, step evidence, and free text.
+Timing and screen-state problems (slow idle waits, a post-action snapshot that
+shows a loading screen, a locator that misses) need that evidence, so
+TapHound ships a standalone packer that keeps it and redacts identifiers
+instead. It needs only Node.js and `tar`:
+
+```bash
+cd /path/to/android-project
+node "$(npm root -g)/taphound/scripts/feedback-pack.mjs" --run <runId>
+```
+
+(From a TapHound checkout, run `node scripts/feedback-pack.mjs --project
+/path/to/android-project`.) It collects every JSON file under
+`.taphound/build/generations/` (including unfinished `.<id>.work` bundles:
+`state.json`, `meta.json`, per-step `proposal.json`/`result.json` with
+`timing`, every `snapshot.json`, `verification/report.json`) plus the
+`runs/<runId>/report.json` of each `--run`. `--generation <id>` narrows it.
+Screenshots, Logcat text, and other non-JSON files are never copied.
+
+Identifiers become stable pseudonyms so files still cross-reference: the
+package becomes `com.example.app`, app classes and Activities
+`com.example.app.Activity<N>`, resource ids `com.example.app:id/r<N>` (or
+`r<N>` for bare names), UI text, window titles, and Logcat tags/patterns
+`T<N>`, device serials `device-<N>`, and the project path `<project>`.
+Platform names (`android.*`, `androidx.*`, `com.android.*`) and all timing,
+bounds, and status fields are kept. UI text is replaced only in text fields,
+so a label that reads `passed` never rewrites a `status`. Diagnostic
+sentences (`message`, `reason`, ...) get the same substitutions, except UI
+text shorter than three characters.
+
+The archive and a `<archive>.mapping.json` land in
+`.taphound/build/diagnostics/` (or `--out`). The mapping translates
+pseudonyms back; keep it local and never attach it. Unpack the archive and
+search it for names specific to your product before sharing.
+
 ## Reporting a problem
 
 Attach the exported bundle to the issue together with what you expected and

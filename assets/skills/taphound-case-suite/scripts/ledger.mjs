@@ -7,7 +7,11 @@ import {
 import {
   dirname, isAbsolute, join, relative, resolve, sep
 } from "node:path";
+import { fileURLToPath } from "node:url";
 
+// Suites are committed TapHound project material; the layout mirrors
+// SUITES_DIR in src/domain/workspace.ts.
+const SUITES_DIR = ".taphound/suites";
 const CATALOG = "cases.json";
 const LEDGER = "case-ledger.json";
 const STATUS = "STATUS.md";
@@ -82,22 +86,35 @@ function canonicalHash(value) {
   return digest(JSON.stringify(canonical(value)));
 }
 
-function exactKeys(value, required, optional = []) {
+// `contract` names the object and, for command inputs, the shipped template
+// so a rejected field points at the shape the command accepts.
+function exactKeys(value, required, optional = [], contract = undefined) {
+  const where = contract === undefined ? "" : ` in ${contract.name}`;
+  const hint = () => {
+    const fields = [...required, ...optional.map((key) => `${key}?`)];
+    return `; allowed fields: ${fields.join(", ")}${
+      contract?.template === undefined
+        ? ""
+        : `; see ${contract.template}`
+    }`;
+  };
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    fail("CASE_SUITE_INVALID", "Expected a JSON object");
+    fail("CASE_SUITE_INVALID", `Expected a JSON object${where}`);
   }
   const allowed = new Set([...required, ...optional]);
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) {
-      fail("CASE_SUITE_INVALID", `Unknown field "${key}"`);
+      fail("CASE_SUITE_INVALID", `Unknown field "${key}"${where}${hint()}`);
     }
   }
   for (const key of required) {
     if (!(key in value)) {
-      fail("CASE_SUITE_INVALID", `Missing required field "${key}"`);
+      fail("CASE_SUITE_INVALID", `Missing required field "${key}"${where}${hint()}`);
     }
   }
 }
+
+const TEMPLATES = join(dirname(fileURLToPath(import.meta.url)), "..", "templates");
 
 function nonempty(value, label, max = 1000) {
   if (typeof value !== "string") {
@@ -123,6 +140,14 @@ function assertSha(value, label) {
   if (typeof value !== "string" || !shaPattern.test(value)) {
     fail("CASE_SUITE_INVALID", `${label} must be a lowercase SHA-256`);
   }
+}
+
+function suiteDirectory(projectRoot, suiteId) {
+  return join(projectRoot, ...SUITES_DIR.split("/"), suiteId);
+}
+
+function suiteBriefPath(suiteId, caseId) {
+  return `${SUITES_DIR}/${suiteId}/briefs/${caseId}/taphound-journey-brief.md`;
 }
 
 function inside(root, path) {
@@ -459,6 +484,13 @@ async function loadSuite(suitePath) {
   if (projectRoot !== catalog.projectRoot || !inside(projectRoot, root)) {
     fail("CASE_SUITE_INVALID", "Suite must stay beneath canonical projectRoot");
   }
+  if (root !== suiteDirectory(projectRoot, catalog.suiteId)) {
+    fail(
+      "CASE_SUITE_LOCATION",
+      `Suite ${catalog.suiteId} must live in ${SUITES_DIR}/${catalog.suiteId}, `
+        + `found ${relative(projectRoot, root)}; initialize it there`
+    );
+  }
   const ledger = parseLedger(await json(ledgerPath, LEDGER), catalog);
   const catalogSha256 = digest(catalogBytes);
   if (ledger.catalog.sha256 !== catalogSha256) {
@@ -599,7 +631,8 @@ function parseSuiteInput(value) {
   exactKeys(
     value,
     ["version", "suiteId", "title", "projectRoot", "cases"],
-    ["deviceSerial", "contextPath"]
+    ["deviceSerial", "contextPath"],
+    { name: "init input", template: join(TEMPLATES, "suite-input.example.json") }
   );
   if (value.version !== 1 || !suiteIdPattern.test(value.suiteId ?? "")
     || !isAbsolute(value.projectRoot ?? "")
@@ -629,9 +662,13 @@ function parseSuiteInput(value) {
 async function init(inputPath, outputPath) {
   const input = parseSuiteInput(await json(resolve(inputPath), "Suite input"));
   const projectRoot = await realpath(input.projectRoot);
-  const output = resolve(outputPath);
-  if (!inside(projectRoot, output) || output === projectRoot) {
-    fail("CASE_SUITE_INVALID", "Suite output must be a new directory inside projectRoot");
+  const output = suiteDirectory(projectRoot, input.suiteId);
+  if (outputPath !== undefined && resolve(outputPath) !== output) {
+    fail(
+      "CASE_SUITE_LOCATION",
+      `Suite directory must be ${SUITES_DIR}/${input.suiteId} under projectRoot `
+        + `(${output}); omit --out to use it: ${outputPath}`
+    );
   }
   await access(output).then(
     () => fail("CASE_SUITE_EXISTS", "Suite output already exists"),
@@ -708,7 +745,8 @@ function parseTransition(value) {
   exactKeys(
     value,
     ["version", "expectedRevision", "caseId", "from", "to", "reason"],
-    ["brief", "generation", "failure", "nextAction", "completion"]
+    ["brief", "generation", "failure", "nextAction", "completion"],
+    { name: "transition input", template: join(TEMPLATES, "transition.example.json") }
   );
   if (value.version !== 1 || !caseIdPattern.test(value.caseId ?? "")
     || !statuses.has(value.from) || !statuses.has(value.to)) {
@@ -861,10 +899,12 @@ async function transition(suitePath, inputPath) {
       const briefFile = await regularProjectFile(
         suite.projectRoot, request.brief, `${entry.id}.brief`
       );
-      if (!briefFile.relativePath.endsWith(
-        `/briefs/${entry.id}/taphound-journey-brief.md`
-      )) {
-        fail("CASE_SUITE_INVALID", "Brief path must be Case-specific");
+      const expectedBrief = suiteBriefPath(suite.catalog.suiteId, entry.id);
+      if (briefFile.relativePath !== expectedBrief) {
+        fail(
+          "CASE_SUITE_LOCATION",
+          `Brief for ${entry.id} must be ${expectedBrief}: ${briefFile.relativePath}`
+        );
       }
     }
     if (request.to === "generating") {
@@ -958,10 +998,18 @@ async function transition(suitePath, inputPath) {
 }
 
 function parseFlowRecord(value) {
-  exactKeys(value, [
-    "version", "expectedRevision", "name", "path", "sha256",
-    "exitActivity", "journey", "resolutionManifest", "report"
-  ]);
+  exactKeys(
+    value,
+    [
+      "version", "expectedRevision", "name", "path", "sha256",
+      "exitActivity", "journey", "resolutionManifest", "report"
+    ],
+    [],
+    {
+      name: "record-flow input",
+      template: join(TEMPLATES, "base-flow-record.example.json")
+    }
+  );
   if (value.version !== 1 || !flowNamePattern.test(value.name ?? "")) {
     fail("CASE_SUITE_INVALID", "Invalid Base Flow record");
   }
@@ -1154,12 +1202,26 @@ function help() {
     "TapHound Case Suite Ledger",
     "",
     "Commands:",
-    "  init --input <json> --out <suite-directory>",
+    "  init --input <json> [--out <project>/.taphound/suites/<suite-id>]",
     "  validate --suite <suite-directory>",
     "  status --suite <suite-directory> [--case <case-id>]",
     "  transition --suite <suite-directory> --input <json>",
     "  record-flow --suite <suite-directory> --input <json>",
-    "  recover-lock --suite <suite-directory>"
+    "  recover-lock --suite <suite-directory>",
+    "",
+    `Input templates live in ${TEMPLATES}: suite-input.example.json (init),`,
+    "transition.example.json (transition), base-flow-record.example.json",
+    "(record-flow). Unknown or missing fields are rejected with the allowed list.",
+    "",
+    `Layout: a Suite lives in <projectRoot>/${SUITES_DIR}/<suite-id>/ and each`,
+    "Case Brief in its briefs/<case-id>/taphound-journey-brief.md. Other",
+    "locations fail with CASE_SUITE_LOCATION.",
+    "",
+    "Ledger revision: every successful transition or record-flow increments",
+    "ledger.revision by exactly 1. Pass the current value as expectedRevision",
+    "(read it from `status`); a stale value fails without writing. It is",
+    "unrelated to TapHound generation session revisions (observe +1, step +3",
+    "with its post-action observation), which the ledger never stores."
   ].join("\n");
 }
 
@@ -1172,6 +1234,9 @@ async function main() {
   let output;
   if (command === "init") {
     const input = options(argv, ["--input", "--out"]);
+    if (input.input === undefined) {
+      fail("CASE_SUITE_USAGE", "init requires --input");
+    }
     output = await init(input.input, input.out);
   } else if (command === "validate") {
     const input = options(argv, ["--suite"]);

@@ -225,7 +225,7 @@ taphound generation start \
   --module :feature:search \
   --device emulator-5554 \
   --base-flow search/open \
-  --brief taphound-journey-brief.md \
+  --brief .taphound/briefs/search/taphound-journey-brief.md \
   --json
 ```
 
@@ -238,8 +238,10 @@ Omit `--brief` when no Journey Brief is bound. When the invocation carries a
 `journeyBrief: {path, sha256}` binding, pass the same project-relative path via
 `--brief`: Core reads the file itself, computes the SHA-256 content hash (never
 trust an agent-supplied hash), and binds `sourceBrief` into the session and the
-exported meta sidecar. An unreadable file or an escaping path fails with
-`BRIEF_INVALID` before any device work.
+exported meta sidecar. Briefs are committed TapHound material and must live
+under `.taphound/briefs/` or `.taphound/suites/<suite-id>/briefs/`. An
+unreadable file, an escaping path, or a Brief anywhere else in the project
+fails with `BRIEF_INVALID` before any device work.
 
 **Output** (`--json` mode writes exactly one JSON object to stdout):
 
@@ -896,6 +898,10 @@ taphound journey check \
 `--context` (the live Project Context index) is required. Exit `0` means the
 check completed — findings or not; `--strict` exits `1` when any Journey is
 stale, invalid, or missing its sidecar, suitable for CI gates.
+`--journey <path-or-name...>` limits the audit to the named Journeys, given
+as a project-relative path (`.taphound/journeys/search.json`) or a Journey
+name (`search`, `chat/send`); a selector that matches no committed Journey
+fails with `JOURNEY_NOT_FOUND` (exit `2`).
 
 
 A sidecar bound with `sourceBrief` re-hashes the Brief file on every check:

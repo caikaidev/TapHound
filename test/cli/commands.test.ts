@@ -717,7 +717,7 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
       verification: { status: "notRun" as const },
       publication: { status: "notRun" as const },
       sourceBrief: {
-        path: "docs/cases/search-brief.md",
+        path: ".taphound/briefs/search/taphound-journey-brief.md",
         sha256: createHash("sha256").update(briefContent).digest("hex")
       },
       externalFlows: [],
@@ -731,25 +731,25 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
       "--context", "context.json",
       "--module", ":feature:search",
       "--device", "emulator-5554",
-      "--brief", "docs/cases/search-brief.md",
+      "--brief", ".taphound/briefs/search/taphound-journey-brief.md",
       "--json"
     ]);
 
     expect(test.value.readFile).toHaveBeenCalledWith(
-      "/project/docs/cases/search-brief.md"
+      "/project/.taphound/briefs/search/taphound-journey-brief.md"
     );
     const startInput = vi.mocked(
       test.value.generationStarter.start
     ).mock.calls[0]?.[0];
     expect(startInput?.sourceBrief).toEqual({
-      path: "docs/cases/search-brief.md",
+      path: ".taphound/briefs/search/taphound-journey-brief.md",
       sha256: createHash("sha256").update(briefContent).digest("hex")
     });
     expect(JSON.parse(test.stdout.value)).toMatchObject({
       status: "started",
       exitCode: 0,
       sourceBrief: {
-        path: "docs/cases/search-brief.md",
+        path: ".taphound/briefs/search/taphound-journey-brief.md",
         sha256: createHash("sha256").update(briefContent).digest("hex")
       }
     });
@@ -773,7 +773,7 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
       "--context", "context.json",
       "--module", ":feature:search",
       "--device", "emulator-5554",
-      "--brief", "docs/cases/missing-brief.md",
+      "--brief", ".taphound/briefs/missing/taphound-journey-brief.md",
       "--json"
     ]);
 
@@ -787,7 +787,7 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
     expect(unreadablePayload.exitCode).toBe(2);
     expect(unreadablePayload.failure.code).toBe("BRIEF_INVALID");
     expect(unreadablePayload.failure.message).toContain(
-      "docs/cases/missing-brief.md"
+      ".taphound/briefs/missing/taphound-journey-brief.md"
     );
     expect(test.stdout.value.trim().split("\n")).toHaveLength(1);
     expect(test.exitCodes).toEqual([2]);
@@ -821,6 +821,36 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
     expect(escapePayload.exitCode).toBe(2);
     expect(escapePayload.failure.code).toBe("BRIEF_INVALID");
     expect(escapePayload.failure.message).toContain("../escape-brief.md");
+    expect(test.exitCodes).toEqual([2]);
+  });
+
+  it("fails with BRIEF_INVALID when the Brief lives outside the TapHound Brief roots", async () => {
+    const test = dependencies();
+    vi.mocked(test.value.readJson).mockImplementation((path) => Promise.resolve(
+      path.includes("context") ? generationContext : runtimeConfig
+    ));
+
+    await createProgram(test.value).parseAsync([
+      "node", "taphound", "generation", "start",
+      "--project", "/project",
+      "--config", ".taphound/config.json",
+      "--context", "context.json",
+      "--module", ":feature:search",
+      "--device", "emulator-5554",
+      "--brief", "doc/development/suite-1/briefs/CASE-001/taphound-journey-brief.md",
+      "--json"
+    ]);
+
+    expect(test.value.readFile).not.toHaveBeenCalled();
+    expect(test.value.generationStarter.start).not.toHaveBeenCalled();
+    const payload = JSON.parse(test.stdout.value) as {
+      failure: { code: string; message: string };
+    };
+    expect(payload.failure).toEqual({
+      code: "BRIEF_INVALID",
+      message: "Journey Brief must live under .taphound/briefs/ or .taphound/suites/: "
+        + "doc/development/suite-1/briefs/CASE-001/taphound-journey-brief.md"
+    });
     expect(test.exitCodes).toEqual([2]);
   });
 

@@ -190,8 +190,8 @@ It freezes the approved catalog and maintains a revisioned Ledger in an
 explicit project-relative suite directory. Every later agent starts with:
 
 ```bash
-node <installed-skill>/scripts/ledger.mjs validate --suite <suite-directory>
-node <installed-skill>/scripts/ledger.mjs status --suite <suite-directory>
+node <installed-skill>/scripts/ledger.mjs validate --suite <project>/.taphound/suites/<suite-id>
+node <installed-skill>/scripts/ledger.mjs status --suite <project>/.taphound/suites/<suite-id>
 ```
 
 The Ledger, not chat history, selects the current Case and records its Brief

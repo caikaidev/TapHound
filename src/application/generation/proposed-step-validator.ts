@@ -106,7 +106,12 @@ function validateBinding(
   if (snapshot.activity !== proposal.activity.before) {
     throw new GenerationOperationError(
       "SNAPSHOT_STALE",
-      "Proposal before Activity does not match the current snapshot"
+      `Proposal before Activity ${proposal.activity.before} does not match the current snapshot Activity ${snapshot.activity}`,
+      {
+        field: "activity.before",
+        expected: snapshot.activity,
+        actual: proposal.activity.before
+      }
     );
   }
 }

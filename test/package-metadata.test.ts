@@ -61,7 +61,8 @@ describe("TapHound package metadata", () => {
     expect(document.files).toEqual([
       "dist",
       "assets/brand/taphound-mark.svg",
-      "assets/skills"
+      "assets/skills",
+      "scripts/feedback-pack.mjs"
     ]);
     expect(document.scripts?.prepublishOnly)
       .toBe("npm test && npm run typecheck && npm run lint && npm run build");

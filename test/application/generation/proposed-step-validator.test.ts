@@ -345,6 +345,27 @@ describe("ProposedStepValidator", () => {
     }
   });
 
+  it("names expected and actual Activity when the before Activity is stale", () => {
+    const runtime = snapshot([], { activity: "com.example.app.DetailActivity" });
+    let thrown: unknown;
+    try {
+      validate(runtime, { action: "back" });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toMatchObject({
+      code: "SNAPSHOT_STALE",
+      message: expect.stringContaining(
+        "com.example.app.MainActivity does not match the current snapshot Activity com.example.app.DetailActivity"
+      ) as unknown,
+      details: {
+        field: "activity.before",
+        expected: "com.example.app.DetailActivity",
+        actual: "com.example.app.MainActivity"
+      }
+    });
+  });
+
   it("allows back and wait without a target", () => {
     const runtime = snapshot([]);
     expect(validate(runtime, { action: "back" }).action).toBe("back");

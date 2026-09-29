@@ -27,7 +27,9 @@ import {
 import { ProjectRelativePathSchema } from "../../../domain/project-context.js";
 import {
   CONFIG_PATH,
-  CONTEXT_INDEX_PATH
+  CONTEXT_INDEX_PATH,
+  isJourneyBriefPath,
+  JOURNEY_BRIEF_ROOTS
 } from "../../../domain/workspace.js";
 import {
   GenerationSessionStoreError
@@ -120,6 +122,12 @@ export function createStartCommand(dependencies: CliDependencies): Command {
                 `Journey Brief path must stay within the project: ${briefRequest} (${
                   error instanceof Error ? error.message : String(error)
                 })`
+              );
+            }
+            if (!isJourneyBriefPath(briefPath)) {
+              throw new GenerationOperationError(
+                "BRIEF_INVALID",
+                `Journey Brief must live under ${JOURNEY_BRIEF_ROOTS.join("/ or ")}/: ${briefPath}`
               );
             }
             let bytes: Buffer;

@@ -49,6 +49,26 @@ describe("IdleWaiter", () => {
     expect(clock.sleeps).toEqual([100, 100]);
   });
 
+  it("measures the poll interval from the start of each sample", async () => {
+    const cli = stabilityProbe();
+    const clock = new FakeClock();
+    const sampleCosts = [40, 100, 130];
+    vi.mocked(cli.sample).mockImplementation(() => {
+      clock.currentTime += sampleCosts.shift() ?? 0;
+      return Promise.resolve([]);
+    });
+
+    const result = await new IdleWaiter(
+      cli,
+      clock,
+      "emulator-5554"
+    ).waitUntilIdle({ ...config, stablePolls: 3 });
+
+    expect(result).toMatchObject({ status: "stable", polls: 3, durationMs: 330 });
+    // 40ms sample -> 60ms sleep; a sample as long as the interval -> no sleep.
+    expect(clock.sleeps).toEqual([60]);
+  });
+
   it("resets the stable counter after a new change", async () => {
     const cli = stabilityProbe();
     vi.mocked(cli.sample)

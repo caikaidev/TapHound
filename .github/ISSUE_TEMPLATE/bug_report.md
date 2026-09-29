@@ -19,6 +19,11 @@ The bundle holds command outcomes, timings, UI backend latency, and failure
 codes. Paths, package/Activity/Journey names, locator values, device serials,
 screenshots, UI hierarchies, and log text are left out or replaced by aliases.
 Review it before attaching. See docs/diagnostics.md.
+
+For slow steps, loading screens, or locator misses during generation, also
+attach the redacted evidence archive (never the .mapping.json beside it):
+
+    node "$(npm root -g)/taphound/scripts/feedback-pack.mjs" --run <runId>
 -->
 
 ## Environment

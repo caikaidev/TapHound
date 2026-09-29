@@ -291,6 +291,7 @@ const ReportFields = {
   logcatEvidence: z.array(z.strictObject({
     role: DeviceRoleSchema,
     status: z.literal("incomplete"),
+    expectationImpact: z.enum(["none", "possible"]),
     droppedLines: z.number().int().positive(),
     droppedBytes: z.number().int().positive(),
     lastDroppedAtMs: z.number().nonnegative().optional()

@@ -675,6 +675,14 @@ Implementation details that affect tuning:
   `max(2, stablePolls)` consecutive empty diffs.
 - `frameStats` as a standalone strategy (not `hybrid`) has no structural
   fallback.
+- `pollIntervalMs` runs from the start of one poll to the start of the next,
+  so a slow structural capture shortens the following sleep instead of adding
+  to it. A stable step still costs about `(polls - 1) × pollIntervalMs`, which
+  is why a large interval (for example `1000`) dominates step time.
+- Idle proves only that the tree stopped changing. A full-screen spinner is a
+  static tree, so a post-action capture can show a loading state; bind the
+  settled screen with an `element` expect on the loaded screen instead of
+  raising idle timings.
 
 ### `stablePolls` Tradeoff
 

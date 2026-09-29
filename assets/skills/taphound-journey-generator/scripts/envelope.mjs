@@ -9,7 +9,7 @@
 // schema changes, update this script and its test together.
 import process from "node:process";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 const sha256Pattern = /^[a-f\d]{64}$/;
 const generationIdPattern = /^[A-Za-z\d](?:[A-Za-z\d._-]*[A-Za-z\d])?$/;
@@ -456,7 +456,36 @@ async function readJsonFile(path, label) {
   }
 }
 
-async function bind(inputPath, fromPath, outPath) {
+// The Activity the bound snapshot was captured on, taken from the bind source
+// (full observe/step output), the inline envelope snapshot, or the
+// Store-owned snapshot file under the project root. Undefined when none of
+// them is readable; Core still enforces the check on `generation step`.
+async function boundSnapshotActivity(source, envelope, snapshotRef, projectRoot) {
+  const inline = [
+    ["bind source snapshot", source.snapshot],
+    ["bind source nextSnapshot", source.nextSnapshot],
+    ["envelope.snapshot", envelope.snapshot]
+  ];
+  for (const [from, snapshot] of inline) {
+    if (isPlainObject(snapshot) && typeof snapshot.activity === "string") {
+      return { activity: snapshot.activity, from };
+    }
+  }
+  const ref = envelope.snapshotRef ?? snapshotRef;
+  if (typeof ref !== "string" || !snapshotRefPattern.test(ref)) {
+    return undefined;
+  }
+  try {
+    const snapshot = JSON.parse(await readFile(join(projectRoot, ref), "utf8"));
+    return isPlainObject(snapshot) && typeof snapshot.activity === "string"
+      ? { activity: snapshot.activity, from: ref }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function bind(inputPath, fromPath, outPath, projectRoot) {
   const envelope = await readJsonFile(inputPath, "envelope input");
   exactKeys(
     "envelope input",
@@ -494,6 +523,23 @@ async function bind(inputPath, fromPath, outPath) {
       : { snapshot: envelope.snapshot })
   };
   validateEnvelope(bound);
+  const snapshotActivity = await boundSnapshotActivity(
+    source,
+    bound,
+    snapshotRef,
+    projectRoot
+  );
+  const before = proposal.activity?.before;
+  if (snapshotActivity !== undefined && before !== snapshotActivity.activity) {
+    fail(
+      "ENVELOPE_ACTIVITY_MISMATCH",
+      `proposal.activity.before ${String(before)} does not match the bound snapshot Activity ${
+        snapshotActivity.activity
+      } (from ${snapshotActivity.from}); set activity.before to ${
+        snapshotActivity.activity
+      }`
+    );
+  }
   if (outPath !== undefined) {
     const absolute = resolve(outPath);
     await mkdir(dirname(absolute), { recursive: true });
@@ -505,7 +551,8 @@ async function bind(inputPath, fromPath, outPath) {
       exitCode: 0,
       path: outPath,
       binding,
-      ...(snapshotRef === undefined ? {} : { snapshotRef })
+      ...(snapshotRef === undefined ? {} : { snapshotRef }),
+      activityCheck: snapshotActivity === undefined ? "unverified" : "matched"
     })}\n`);
     return;
   }
@@ -532,16 +579,22 @@ function help() {
     "Commands:",
     "  validate --input <envelope.json>",
     "      Validate one generation step envelope offline (no device, no session).",
-    "  bind --input <envelope.json> --from <observe-or-step-output.json> [--out <path>]",
+    "  bind --input <envelope.json> --from <observe-or-step-output.json> [--out <path>] [--project <root>]",
     "      Fill proposal.binding (and snapshotRef when absent) from the preceding",
     "      observe output, step output, or raw binding, then validate.",
+    "      It also checks proposal.activity.before against the bound snapshot's",
+    "      Activity (from the full output, the inline snapshot, or the snapshot",
+    "      file under --project, default the current directory) and fails with",
+    "      ENVELOPE_ACTIVITY_MISMATCH naming the snapshot Activity. With --out,",
+    "      activityCheck reports \"matched\" or \"unverified\" (no readable snapshot).",
     "",
     "bind writes the bound envelope to --out; without --out the bound envelope",
     "itself is the single stdout JSON value.",
     "",
-    "Revision rule: each accepted step advances the session revision by 2 and",
-    "each observe by 1, so one observe-then-step cycle needs baseRevision + 3.",
-    "Prefer binding from the latest output instead of computing revisions."
+    "Revision rule: observe advances the session revision by 1. A succeeded",
+    "step advances it by 2 for the step plus 1 for the post-action observation",
+    "behind nextBinding, so consecutive steps are 3 apart. Never compute",
+    "revisions: bind from the latest observe or step output."
   ].join("\n");
 }
 
@@ -558,11 +611,11 @@ async function main() {
     return;
   }
   if (command === "bind") {
-    const input = options(argv, ["--input", "--from", "--out"]);
+    const input = options(argv, ["--input", "--from", "--out", "--project"]);
     if (input.input === undefined || input.from === undefined) {
       fail("ENVELOPE_USAGE", "bind requires --input and --from");
     }
-    await bind(input.input, input.from, input.out);
+    await bind(input.input, input.from, input.out, resolve(input.project ?? "."));
     return;
   }
   fail("ENVELOPE_USAGE", `Unknown command ${command}`);

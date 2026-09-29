@@ -1,6 +1,6 @@
 {
   "name": "taphound",
-  "version": "0.2.0-dev.12",
+  "version": "0.2.0-dev.13",
   "description": "Deterministic app journey recording and verification",
   "license": "Apache-2.0",
   "repository": {
@@ -30,7 +30,8 @@
   "files": [
     "dist",
     "assets/brand/taphound-mark.svg",
-    "assets/skills"
+    "assets/skills",
+    "scripts/feedback-pack.mjs"
   ],
   "engines": {
     "node": ">=22"

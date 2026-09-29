@@ -123,13 +123,13 @@ describe("BaselineCapturer", () => {
     });
     expect(compare()).toMatchObject({ equivalent: true, coverage: { checkpoints: 1 } });
     run.report.logcatEvidence = [{
-      role: "default", status: "incomplete",
+      role: "default", status: "incomplete", expectationImpact: "none",
       droppedLines: 1, droppedBytes: 10, lastDroppedAtMs: 5
     }];
     expect(compare()).toMatchObject({ equivalent: true });
     expect(capture().checkpoints).toHaveLength(1);
     run.report.logcatEvidence = [{
-      role: "default", status: "incomplete",
+      role: "default", status: "incomplete", expectationImpact: "none",
       droppedLines: 1, droppedBytes: 10, lastDroppedAtMs: 10
     }];
     expect(compare).toThrow(/unresolved current evidence/);

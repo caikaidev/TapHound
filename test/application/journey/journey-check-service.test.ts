@@ -300,6 +300,40 @@ describe("JourneyCheckService", () => {
     expect(unreadable.entries[0]?.reasons).toEqual(["meta-unreadable"]);
   });
 
+  it("checks only the selected Journeys by path or name", async () => {
+    const journey = `${JSON.stringify(runtimeJourney)}\n`;
+    const store = {
+      journeys: {
+        ".taphound/journeys/search.json": journey,
+        ".taphound/journeys/chat/send.json": journey,
+        ".taphound/journeys/legacy.json": journey
+      }
+    };
+    const selected = await service(store).check({
+      projectRoot: "/project",
+      config: runtimeConfig,
+      project,
+      bundle: projectContextIndex,
+      journeys: ["chat/send", "./.taphound/journeys/search.json"]
+    });
+    expect(selected.entries.map((entry) => entry.name)).toEqual([
+      "chat/send",
+      "search"
+    ]);
+    expect(selected.summary.total).toBe(2);
+
+    await expect(service(store).check({
+      projectRoot: "/project",
+      config: runtimeConfig,
+      project,
+      bundle: projectContextIndex,
+      journeys: ["search", "missing"]
+    })).rejects.toMatchObject({
+      code: "JOURNEY_NOT_FOUND",
+      message: "No committed Journey matches missing under .taphound/journeys"
+    });
+  });
+
   it("derives nested names and returns an empty result for no Journeys", async () => {
     const nested = await check({
       journeys: {

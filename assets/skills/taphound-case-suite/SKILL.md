@@ -53,11 +53,13 @@ Use `node <skill>/scripts/ledger.mjs help` for the helper contract.
 
 ## Durable suite directory
 
-The caller chooses an explicit project-relative suite directory. A normal
-layout is:
+A Suite always lives in `.taphound/suites/<suite-id>/` under the project
+root; the helper derives that directory from the Suite ID and rejects any
+other location (and a Brief anywhere but its Case directory) with
+`CASE_SUITE_LOCATION`:
 
 ```text
-doc/development/<suite-id>/
+.taphound/suites/<suite-id>/
 ├── cases.json          # frozen user-approved Case catalog
 ├── case-ledger.json    # mutable, revisioned orchestration state
 ├── STATUS.md           # generated human view; never the Source of Truth
@@ -95,8 +97,7 @@ Create an input from `templates/suite-input.example.json`, then:
 
 ```bash
 node <skill>/scripts/ledger.mjs init \
-  --input /tmp/taphound-suite-input.json \
-  --out <project>/doc/development/<suite-id>
+  --input /tmp/taphound-suite-input.json
 ```
 
 Initialization canonicalizes `projectRoot`, validates dependency cycles and
@@ -215,7 +216,8 @@ Dispatch exactly one Case to `taphound-journey-brief-author` with:
 - exact catalog `sourceText` as `caseGoal`;
 - explicit context paths only;
 - output
-  `<suite>/briefs/<case-id>/taphound-journey-brief.md`.
+  `.taphound/suites/<suite-id>/briefs/<case-id>/taphound-journey-brief.md`
+  (the only path `briefReady` accepts).
 
 After authoring, compute its exact hash and transition:
 

@@ -19,6 +19,20 @@ export const JOURNEY_SOURCES_DIR = `${TAPHOUND_DIR}/sources`;
 export const JOURNEYS_DIR = `${TAPHOUND_DIR}/journeys`;
 export const CONTRACTS_DIR = `${TAPHOUND_DIR}/contracts`;
 export const BASELINES_DIR = `${TAPHOUND_DIR}/baselines`;
+export const BRIEFS_DIR = `${TAPHOUND_DIR}/briefs`;
+export const SUITES_DIR = `${TAPHOUND_DIR}/suites`;
+
+/**
+ * Journey Briefs are committed project material: standalone Briefs live under
+ * `.taphound/briefs/`, Case Suite Briefs under `.taphound/suites/<suite-id>/`.
+ * Nothing else in the project may be bound as a Brief.
+ */
+export const JOURNEY_BRIEF_ROOTS = [BRIEFS_DIR, SUITES_DIR] as const;
+
+export function isJourneyBriefPath(path: string): boolean {
+  const normalized = posix.normalize(path.replaceAll("\\", "/"));
+  return JOURNEY_BRIEF_ROOTS.some((root) => normalized.startsWith(`${root}/`));
+}
 export const BUILD_DIR = `${TAPHOUND_DIR}/build`;
 export const GENERATIONS_DIR = `${BUILD_DIR}/generations`;
 export const JOBS_DIR = `${BUILD_DIR}/jobs`;

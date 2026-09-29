@@ -225,7 +225,7 @@ taphound generation start \
   --module :feature:search \
   --device emulator-5554 \
   --base-flow search/open \
-  --brief taphound-journey-brief.md \
+  --brief .taphound/briefs/search/taphound-journey-brief.md \
   --json
 ```
 
@@ -238,8 +238,10 @@ Omit `--brief` when no Journey Brief is bound. When the invocation carries a
 `journeyBrief: {path, sha256}` binding, pass the same project-relative path via
 `--brief`: Core reads the file itself, computes the SHA-256 content hash (never
 trust an agent-supplied hash), and binds `sourceBrief` into the session and the
-exported meta sidecar. An unreadable file or an escaping path fails with
-`BRIEF_INVALID` before any device work.
+exported meta sidecar. Briefs are committed TapHound material and must live
+under `.taphound/briefs/` or `.taphound/suites/<suite-id>/briefs/`. An
+unreadable file, an escaping path, or a Brief anywhere else in the project
+fails with `BRIEF_INVALID` before any device work.
 
 **Output** (`--json` mode writes exactly one JSON object to stdout):
 

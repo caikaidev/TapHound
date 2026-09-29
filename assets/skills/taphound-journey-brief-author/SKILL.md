@@ -104,7 +104,7 @@ Orchestrator (lean context)
 | contextOnly     | no       | `false`                                          | Run only the Context lifecycle (ensure/refresh/regenerate); skip Brief authoring |
 | observeSnapshot | no       | —                                                | Pre-captured `taphound observe --json` result    |
 | device          | no       | doctor auto-selects                              | Device serial                                    |
-| output          | no       | `.taphound/journeys/taphound-journey-brief.md`   | Brief output path (relative to project)          |
+| output          | no       | `.taphound/briefs/<caseId>/taphound-journey-brief.md` | Brief output path (relative to project); must be under `.taphound/briefs/` or `.taphound/suites/<suite-id>/briefs/` |
 
 **Hard rule**: NEVER search for or assume files named `plan.md`,
 `requirement.md`, or any convention. Read ONLY files the caller explicitly
@@ -114,13 +114,18 @@ passes via `contextPaths`. If no `contextPaths` are supplied, work from
 ## Output
 
 For a Brief run, the Skill writes a `taphound-journey-brief.md` at the
-`output` path and returns a structured JSON summary:
+`output` path and returns a structured JSON summary. Briefs are committed
+TapHound material: write them only under `.taphound/briefs/<caseId>/`
+(standalone) or `.taphound/suites/<suite-id>/briefs/<caseId>/` (Case Suite),
+never elsewhere in the project (for example `doc/` or the project root).
+`generation start --brief` rejects any other location with `BRIEF_INVALID`.
+Without a `caseId`, use a short kebab-case name of the Goal as the directory.
 
 ```json
 {
   "status": "authored",
   "caseId": "CASE-002",
-  "path": ".taphound/journeys/taphound-journey-brief.md",
+  "path": ".taphound/briefs/CASE-002/taphound-journey-brief.md",
   "sha256": "<exact-byte-hash>",
   "edgesVerified": 2,
   "edgesNeedsObservation": 1

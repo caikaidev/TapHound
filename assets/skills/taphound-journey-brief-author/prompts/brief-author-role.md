@@ -43,7 +43,9 @@ The orchestrator dispatches your task with:
 - **observeSnapshot** (optional): Pre-captured `taphound observe --json`
   result. Use it directly; do NOT call `taphound observe` when provided.
 - **output** (optional): Brief output path, defaults to
-  `.taphound/journeys/taphound-journey-brief.md` (relative to project).
+  `.taphound/briefs/<caseId>/taphound-journey-brief.md` (relative to
+  project). It must stay under `.taphound/briefs/` or
+  `.taphound/suites/<suite-id>/briefs/`; refuse any other location.
 
 ## Output
 

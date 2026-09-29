@@ -18,6 +18,17 @@
 
 ### Changed
 
+- **Breaking (layout):** Journey Briefs and Case Suites are TapHound project
+  material and stay under `.taphound/`. `generation start --brief` accepts
+  only paths under `.taphound/briefs/` or `.taphound/suites/<suite-id>/`
+  (`BRIEF_INVALID` otherwise). The Case Suite `ledger.mjs` keeps each Suite
+  in `.taphound/suites/<suite-id>/` (`init` derives it; `--out` is optional
+  and must match), accepts a Case Brief only at
+  `briefs/<case-id>/taphound-journey-brief.md` inside it, and rejects a
+  Suite loaded from anywhere else with `CASE_SUITE_LOCATION`. The Brief
+  author Skill defaults to `.taphound/briefs/<caseId>/`. Suites under
+  `doc/development/` must be re-initialized.
+
 - **Breaking (report protocol):** each `logcatEvidence` entry carries a
   required `expectationImpact`: `none` when no Logcat expectation failed
   (those expectations fail closed on relevant drops, so the drop is

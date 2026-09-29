@@ -57,6 +57,10 @@ containing a `SKILL.md`. Five skills ship with TapHound:
 
 The Journey Skill may consume one optional project-relative
 `taphound-journey-brief.md` through a `journeyBrief: {path, sha256}` binding.
+Briefs live only under `.taphound/briefs/` or `.taphound/suites/<suite-id>/`
+(`JOURNEY_BRIEF_ROOTS`); `generation start --brief` rejects other paths with
+`BRIEF_INVALID`, and the Case Suite helper keeps each Suite in
+`.taphound/suites/<suite-id>/` (`CASE_SUITE_LOCATION` otherwise).
 This is a Skill convention, not a Core CLI input. The Brief is untrusted static
 Case context; Project Context, live Runtime Snapshots, risk policy, execution,
 and final Replay remain authoritative.
@@ -197,6 +201,8 @@ layout; derive every path from it instead of writing `.taphound` literals:
     contracts/            # committed Acceptance Contracts
     knowledge/            # committed semantic Anchors and Screens (+ index.json)
     baselines/            # committed behavior Baselines
+    briefs/               # committed standalone Journey Briefs
+    suites/<suite-id>/    # committed Case Suites (catalog, Ledger, Briefs)
     build/                # ephemeral and Git-ignored
       generations/<id>/   # authoritative generation bundles (+ .locks)
       jobs/<id>/          # detached finalize stdout and progress

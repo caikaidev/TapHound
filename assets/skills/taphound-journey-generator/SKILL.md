@@ -86,7 +86,8 @@ risk confirmation, recovery, or final Replay rules.
 
 `journeyBrief` is the Skill-level handoff for one Journey Case. When present,
 it carries `{path, sha256}` pointing to a project-relative
-`taphound-journey-brief.md`. Bind the same path into Core with
+`taphound-journey-brief.md` under `.taphound/briefs/` or
+`.taphound/suites/<suite-id>/briefs/`. Bind the same path into Core with
 `generation start --brief <path>`: Core reads the file itself, computes the
 SHA-256 (never trust an agent-supplied hash), and persists `sourceBrief` in
 the session and the exported meta sidecar, so `journey check` reports

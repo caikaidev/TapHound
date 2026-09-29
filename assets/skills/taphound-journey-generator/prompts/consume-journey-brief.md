@@ -11,7 +11,9 @@ Use this prompt only when the caller supplied `journeyBrief`.
 ## Validation
 
 1. Resolve the path beneath the project root without following a symlink
-   outside it. Its basename must be `taphound-journey-brief.md`.
+   outside it. Its basename must be `taphound-journey-brief.md`, and it must
+   live under `.taphound/briefs/` or `.taphound/suites/<suite-id>/briefs/`
+   (Core rejects other locations with `BRIEF_INVALID`).
 2. Compute SHA-256 over the exact file bytes and compare it with the binding.
 3. Require YAML frontmatter values:
    - `schemaVersion: 2`

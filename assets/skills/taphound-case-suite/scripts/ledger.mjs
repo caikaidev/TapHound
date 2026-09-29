@@ -9,6 +9,9 @@ import {
 } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// Suites are committed TapHound project material; the layout mirrors
+// SUITES_DIR in src/domain/workspace.ts.
+const SUITES_DIR = ".taphound/suites";
 const CATALOG = "cases.json";
 const LEDGER = "case-ledger.json";
 const STATUS = "STATUS.md";
@@ -137,6 +140,14 @@ function assertSha(value, label) {
   if (typeof value !== "string" || !shaPattern.test(value)) {
     fail("CASE_SUITE_INVALID", `${label} must be a lowercase SHA-256`);
   }
+}
+
+function suiteDirectory(projectRoot, suiteId) {
+  return join(projectRoot, ...SUITES_DIR.split("/"), suiteId);
+}
+
+function suiteBriefPath(suiteId, caseId) {
+  return `${SUITES_DIR}/${suiteId}/briefs/${caseId}/taphound-journey-brief.md`;
 }
 
 function inside(root, path) {
@@ -473,6 +484,13 @@ async function loadSuite(suitePath) {
   if (projectRoot !== catalog.projectRoot || !inside(projectRoot, root)) {
     fail("CASE_SUITE_INVALID", "Suite must stay beneath canonical projectRoot");
   }
+  if (root !== suiteDirectory(projectRoot, catalog.suiteId)) {
+    fail(
+      "CASE_SUITE_LOCATION",
+      `Suite ${catalog.suiteId} must live in ${SUITES_DIR}/${catalog.suiteId}, `
+        + `found ${relative(projectRoot, root)}; initialize it there`
+    );
+  }
   const ledger = parseLedger(await json(ledgerPath, LEDGER), catalog);
   const catalogSha256 = digest(catalogBytes);
   if (ledger.catalog.sha256 !== catalogSha256) {
@@ -644,9 +662,13 @@ function parseSuiteInput(value) {
 async function init(inputPath, outputPath) {
   const input = parseSuiteInput(await json(resolve(inputPath), "Suite input"));
   const projectRoot = await realpath(input.projectRoot);
-  const output = resolve(outputPath);
-  if (!inside(projectRoot, output) || output === projectRoot) {
-    fail("CASE_SUITE_INVALID", "Suite output must be a new directory inside projectRoot");
+  const output = suiteDirectory(projectRoot, input.suiteId);
+  if (outputPath !== undefined && resolve(outputPath) !== output) {
+    fail(
+      "CASE_SUITE_LOCATION",
+      `Suite directory must be ${SUITES_DIR}/${input.suiteId} under projectRoot `
+        + `(${output}); omit --out to use it: ${outputPath}`
+    );
   }
   await access(output).then(
     () => fail("CASE_SUITE_EXISTS", "Suite output already exists"),
@@ -877,10 +899,12 @@ async function transition(suitePath, inputPath) {
       const briefFile = await regularProjectFile(
         suite.projectRoot, request.brief, `${entry.id}.brief`
       );
-      if (!briefFile.relativePath.endsWith(
-        `/briefs/${entry.id}/taphound-journey-brief.md`
-      )) {
-        fail("CASE_SUITE_INVALID", "Brief path must be Case-specific");
+      const expectedBrief = suiteBriefPath(suite.catalog.suiteId, entry.id);
+      if (briefFile.relativePath !== expectedBrief) {
+        fail(
+          "CASE_SUITE_LOCATION",
+          `Brief for ${entry.id} must be ${expectedBrief}: ${briefFile.relativePath}`
+        );
       }
     }
     if (request.to === "generating") {
@@ -1178,7 +1202,7 @@ function help() {
     "TapHound Case Suite Ledger",
     "",
     "Commands:",
-    "  init --input <json> --out <suite-directory>",
+    "  init --input <json> [--out <project>/.taphound/suites/<suite-id>]",
     "  validate --suite <suite-directory>",
     "  status --suite <suite-directory> [--case <case-id>]",
     "  transition --suite <suite-directory> --input <json>",
@@ -1188,6 +1212,10 @@ function help() {
     `Input templates live in ${TEMPLATES}: suite-input.example.json (init),`,
     "transition.example.json (transition), base-flow-record.example.json",
     "(record-flow). Unknown or missing fields are rejected with the allowed list.",
+    "",
+    `Layout: a Suite lives in <projectRoot>/${SUITES_DIR}/<suite-id>/ and each`,
+    "Case Brief in its briefs/<case-id>/taphound-journey-brief.md. Other",
+    "locations fail with CASE_SUITE_LOCATION.",
     "",
     "Ledger revision: every successful transition or record-flow increments",
     "ledger.revision by exactly 1. Pass the current value as expectedRevision",
@@ -1206,6 +1234,9 @@ async function main() {
   let output;
   if (command === "init") {
     const input = options(argv, ["--input", "--out"]);
+    if (input.input === undefined) {
+      fail("CASE_SUITE_USAGE", "init requires --input");
+    }
     output = await init(input.input, input.out);
   } else if (command === "validate") {
     const input = options(argv, ["--suite"]);

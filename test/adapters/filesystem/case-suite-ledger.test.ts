@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
-  mkdir, mkdtemp, readFile, realpath, rm, writeFile
+  cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -84,7 +84,7 @@ async function setup(options: {
 }> {
   const root = await realpath(await mkdtemp(join(tmpdir(), "taphound-case-suite-")));
   created.push(root);
-  const suite = join(root, "doc", "development", "suite-1");
+  const suite = join(root, ".taphound", "suites", "suite-1");
   const input = join(root, "suite-input.json");
   await put(input, {
     version: 1,
@@ -136,7 +136,7 @@ async function bindBrief(
   fixture: { root: string; suite: string },
   expectedRevision: number
 ): Promise<{ path: string; sha256: string }> {
-  const relativePath = "doc/development/suite-1/briefs/CASE-001/taphound-journey-brief.md";
+  const relativePath = ".taphound/suites/suite-1/briefs/CASE-001/taphound-journey-brief.md";
   const sha256 = await text(join(fixture.root, relativePath), "# Goal\n\nOpen detail.\n");
   expect(await transition(fixture.suite, fixture.root, {
     expectedRevision,
@@ -382,6 +382,52 @@ describe("packaged Case Suite Ledger", () => {
         message: "Case CASE-999 does not exist"
       }
     });
+  });
+
+  it("keeps Suites and their Briefs under .taphound/suites", async () => {
+    const fixture = await setup({ secondCase: true });
+    const elsewhere = join(fixture.root, "doc", "development", "suite-1");
+    expect(command("init", "--input", fixture.input, "--out", elsewhere)).toMatchObject({
+      code: 2,
+      output: { status: "error", code: "CASE_SUITE_LOCATION" }
+    });
+
+    const moved = join(fixture.root, "doc", "suite-1");
+    await mkdir(dirname(moved), { recursive: true });
+    await cp(fixture.suite, moved, { recursive: true });
+    const load = command("status", "--suite", moved);
+    expect(load.output).toMatchObject({ code: "CASE_SUITE_LOCATION" });
+    expect(load.output.message).toContain("must live in .taphound/suites/suite-1");
+
+    expect(await transition(fixture.suite, fixture.root, {
+      expectedRevision: 0,
+      caseId: "CASE-001",
+      from: "pending",
+      to: "briefing",
+      reason: "Claim"
+    })).toMatchObject({ code: 0 });
+    const stray = "doc/briefs/CASE-001/taphound-journey-brief.md";
+    const sha256 = await text(join(fixture.root, stray), "# Goal\n");
+    const rejected = await transition(fixture.suite, fixture.root, {
+      expectedRevision: 1,
+      caseId: "CASE-001",
+      from: "briefing",
+      to: "briefReady",
+      reason: "Brief authored",
+      brief: { path: stray, sha256 }
+    });
+    expect(rejected.output).toMatchObject({ code: "CASE_SUITE_LOCATION" });
+    expect(rejected.output.message).toContain(
+      ".taphound/suites/suite-1/briefs/CASE-001/taphound-journey-brief.md"
+    );
+  });
+
+  it("initializes in .taphound/suites/<suite-id> when --out is omitted", async () => {
+    const fixture = await setup();
+    await rm(fixture.suite, { recursive: true });
+    const result = command("init", "--input", fixture.input);
+    expect(result).toMatchObject({ code: 0, output: { status: "initialized" } });
+    expect((result.output as { suitePath?: string }).suitePath).toBe(fixture.suite);
   });
 
   it("names the allowed fields and template for an unknown transition field", async () => {

@@ -31,7 +31,7 @@ generate`/`refresh`/`rehash`/`validate`/`status`/`list`、`taphound observe`。
 | contextPaths | 否 | 显式文档路径数组，只读这些 |
 | contextOnly | 否 | 为 `true` 时只运行 Context 生命周期（Phase 0），返回 Context 摘要 JSON，不写 Brief |
 | observeSnapshot | 否 | 预采集的 `taphound observe --json` 结果；提供则直接用，不再调 observe |
-| output | 否 | Brief 输出路径，默认 `.taphound/journeys/taphound-journey-brief.md` |
+| output | 否 | Brief 输出路径，默认 `.taphound/briefs/<caseId>/taphound-journey-brief.md`；只能位于 `.taphound/briefs/` 或 `.taphound/suites/<suite-id>/briefs/` 下，拒绝其他位置 |
 
 ## 输出
 

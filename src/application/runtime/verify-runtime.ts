@@ -971,6 +971,15 @@ export class VerifyRuntime {
           ].includes(failure.code)
         ? "error"
         : "failed";
+    // Logcat expectations fail closed on a relevant drop, so drops can only
+    // have changed the outcome of a Logcat expectation that failed.
+    const expectationImpact = steps.some((step) => (
+      step.expectation?.status === "failed"
+      && (step.expectation.type === "logcat"
+        || step.expectation.type === "logcatEvent")
+    ))
+      ? "possible" as const
+      : "none" as const;
     const report: TapHoundReport = {
       schemaVersion: 4,
       ...(runtimes.some((runtime) => runtime.logcatStarted
@@ -988,7 +997,8 @@ export class VerifyRuntime {
                 ...(metadata.lastDroppedAtMs === undefined ? {} : {
                   lastDroppedAtMs: metadata.lastDroppedAtMs
                 }),
-                status: "incomplete" as const
+                status: "incomplete" as const,
+                expectationImpact
               }];
             })
           }

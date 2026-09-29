@@ -129,6 +129,52 @@ describe("VerifyRuntime", () => {
       .toBe(result.report.steps[1]?.marker?.startedAtMs);
   });
 
+  it.each([
+    ["none", "Search: submitted", "passed"],
+    ["possible", "Search: never logged", "failed"]
+  ] as const)(
+    "reports Logcat drops with expectationImpact %s",
+    async (impact, pattern, status) => {
+      const test = runtimeFixture();
+      const original = runtimeJourney.steps[0];
+      if (original === undefined) throw new Error("Journey fixture needs a step");
+      const clock = test.dependencies.clock as FakeClock;
+      let flooded = false;
+      clock.onSleep = (): void => {
+        const stream = vi.mocked(test.adb.startLogcat).mock.calls[0]?.[0];
+        if (stream === undefined) return;
+        if (!flooded) {
+          flooded = true;
+          for (let index = 0; index < 10_050; index += 1) {
+            stream.onStdoutLine(
+              `09-15 15:00:00.200  42  42 D Noise: line ${String(index)}`
+            );
+          }
+        }
+        stream.onStdoutLine("09-15 15:00:00.300  42  42 I Search: submitted query");
+      };
+      const [tag, message] = pattern.split(": ") as [string, string];
+      const result = await new VerifyRuntime(test.dependencies).verify({
+        ...input(),
+        journey: {
+          ...runtimeJourney,
+          steps: [{
+            ...original,
+            expect: { type: "logcat", tag, pattern: message, match: "literal", timeoutMs: 50 }
+          }]
+        }
+      });
+      expect(result.status).toBe(status);
+      expect(result.report.logcatEvidence).toEqual([
+        expect.objectContaining({
+          role: "default",
+          status: "incomplete",
+          expectationImpact: impact
+        })
+      ]);
+    }
+  );
+
   it("evaluates step and final Checkpoints in order and includes their evidence", async () => {
     const test = runtimeFixture();
     const result = await new VerifyRuntime(test.dependencies).verify({

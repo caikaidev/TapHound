@@ -62,6 +62,7 @@ interface JourneyCheckOptions {
   project: string;
   config: string;
   context?: string | undefined;
+  journey?: string[] | undefined;
   json?: boolean | undefined;
   strict?: boolean | undefined;
 }
@@ -320,6 +321,10 @@ function createCheckCommand(dependencies: CliDependencies): Command {
     .option("--project <path>", "Android project root", dependencies.cwd())
     .option("--config <path>", "TapHound config path", CONFIG_PATH)
     .option("--context <path>", "Project Context index path")
+    .option(
+      "--journey <path-or-name...>",
+      "Check only these Journeys (project-relative path or Journey name)"
+    )
     .option("--json", "Emit one machine-readable JSON value")
     .option("--strict", "Exit non-zero when any Journey is not fresh")
     .action(async (options: JourneyCheckOptions): Promise<void> => {
@@ -363,7 +368,8 @@ function createCheckCommand(dependencies: CliDependencies): Command {
           projectRoot,
           config,
           project,
-          bundle: index.bundle
+          bundle: index.bundle,
+          journeys: options.journey
         });
         const notFresh = result.summary.total - result.summary.fresh;
         const exitCode = options.strict === true && notFresh > 0 ? 1 : 0;

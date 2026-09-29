@@ -58,7 +58,7 @@ have no defaults; `strategy` defaults to `"hybrid"`.
 | Field | Type | Constraint |
 |---|---|---|
 | `idle.strategy` | enum | `hybrid` (default), `layoutDiff`, `frameStats`, `structural` |
-| `idle.pollIntervalMs` | integer | Required, positive. Sleep between polls (not the poll duration). |
+| `idle.pollIntervalMs` | integer | Required, positive. Interval from the start of one poll to the start of the next: a sample that takes longer than the interval is followed immediately by the next poll. Every step pays at least `(polls - 1) × pollIntervalMs` (a `hybrid` wait takes at least 5 polls), so keep it near 300; 1000 adds about 4 s per step. |
 | `idle.stablePolls` | integer | Required, positive. Consecutive stable polls required to declare idle. |
 | `idle.timeoutMs` | integer | Required, positive. Total wait budget per idle phase before `IDLE_TIMEOUT`. Each poll consumes its own duration from this budget, so slow UI dumps require a larger value. |
 | `idle.ignoreCursorBlink` | boolean | Optional. Treat layout changes that touch only editable widgets (`EditText` / `EDITABLE`) as cursor-blink noise instead of layout instability. For OEM keyboards and IME animations that keep polling busy. Requires element-level diffs: a backend that samples an opaque layout signature (Appium UiAutomator2, system UIAutomator, Mobile MCP) reports one unidentified change, so the option has no effect there. |

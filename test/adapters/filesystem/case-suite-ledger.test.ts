@@ -384,6 +384,33 @@ describe("packaged Case Suite Ledger", () => {
     });
   });
 
+  it("names the allowed fields and template for an unknown transition field", async () => {
+    const fixture = await setup();
+    const result = await transition(fixture.suite, fixture.root, {
+      expectedRevision: 0,
+      caseId: "CASE-001",
+      from: "pending",
+      to: "briefing",
+      reason: "Claim",
+      suite: "suite-1"
+    });
+    expect(result).toMatchObject({
+      code: 2,
+      output: { status: "error", code: "CASE_SUITE_INVALID" }
+    });
+    expect(result.output.message).toContain(
+      'Unknown field "suite" in transition input; allowed fields: version, '
+        + "expectedRevision, caseId, from, to, reason, brief?, generation?, "
+        + "failure?, nextAction?, completion?; see "
+    );
+    expect(result.output.message).toMatch(/templates[/\\]transition\.example\.json$/);
+  });
+
+  it("documents the ledger revision rule in help", () => {
+    const result = spawnSync(process.execPath, [helper, "help"], { encoding: "utf8" });
+    expect(result.stdout).toContain("increments\nledger.revision by exactly 1");
+  });
+
   it("accepts reason and nextAction limits and reports over-limit fields", async () => {
     const reasonLimit = await setup();
     expect(await transition(reasonLimit.suite, reasonLimit.root, {

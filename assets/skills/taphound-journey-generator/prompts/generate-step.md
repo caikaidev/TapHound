@@ -102,6 +102,15 @@ the observe result).
      varying middle can identify the event, use `match: "regex"` and anchor
      the stable words instead of the varying text.
    - `activity`: a specific Activity should be foregrounded.
+   - **Screens that load asynchronously**: idle detection only proves the
+     layout tree stopped changing. A full-screen spinner or skeleton is a
+     static tree, so the post-action snapshot can be the loading state. When
+     an action opens a screen that loads, prefer an `element` expect on a
+     control of the loaded screen: Core polls until it appears and returns
+     that settled layout as the next snapshot. When the step needs a `logcat`
+     expect instead, follow it with a `wait` step whose `element` expect names
+     the loaded screen's control, rather than proposing the next action
+     against a loading snapshot.
    - Do not add expectations you cannot verify from source code or Context.
    - Do not invent log patterns that don't exist in the source.
 

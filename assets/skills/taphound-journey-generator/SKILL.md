@@ -264,12 +264,18 @@ them with `MANUAL_STEP_REQUIRED`.
       node <skill>/scripts/envelope.mjs bind \
         --input <draft-envelope-path> \
         --from <previous-observe-or-step-output-path> \
-        --out <envelope-path>
+        --out <envelope-path> \
+        --project <project>
       ```
       The draft envelope needs only `version` and `proposal` (binding may be
       omitted or stale); `bind` fills `proposal.binding` from the preceding
       observe output, step output, or raw binding, adds `snapshotRef` when
-      absent, and validates the result offline. The helper contract:
+      absent, and validates the result offline. It also compares
+      `proposal.activity.before` with the bound snapshot's Activity (read
+      from `snapshotRef` under `--project`) and fails with
+      `ENVELOPE_ACTIVITY_MISMATCH`, naming the snapshot Activity, before any
+      device work. `activityCheck: "unverified"` in its output means no
+      snapshot was readable; Core still enforces the check on `step`. The helper contract:
       `node <skill>/scripts/envelope.mjs help`. The resulting shape:
       ```json
       {
@@ -375,10 +381,12 @@ the index with `taphound knowledge rehash --project <project> --json` and
    taphound journey check \
      --project <project> \
      --context .taphound/context/project-context.json \
+     --journey .taphound/journeys/<name>.json \
      --json
    ```
-   The newly published Journey must classify as `fresh`. `journey check`
-   audits every committed Journey under `.taphound/journeys` by comparing
+   The newly published Journey must classify as `fresh`. `--journey`
+   limits the audit to that Journey; without it `journey check` audits every
+   committed Journey under `.taphound/journeys` by comparing
    its sidecar bindings (project, config, and `contextSelection` module
    hashes, plus the Brief content hash when `sourceBrief` is bound) against
    the live project. `--strict` exits `1` when any Journey

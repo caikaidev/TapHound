@@ -896,6 +896,10 @@ taphound journey check \
 `--context` (the live Project Context index) is required. Exit `0` means the
 check completed — findings or not; `--strict` exits `1` when any Journey is
 stale, invalid, or missing its sidecar, suitable for CI gates.
+`--journey <path-or-name...>` limits the audit to the named Journeys, given
+as a project-relative path (`.taphound/journeys/search.json`) or a Journey
+name (`search`, `chat/send`); a selector that matches no committed Journey
+fails with `JOURNEY_NOT_FOUND` (exit `2`).
 
 
 A sidecar bound with `sourceBrief` re-hashes the Brief file on every check:

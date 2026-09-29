@@ -199,7 +199,8 @@ export class IdleWaiter {
         };
       }
 
-      const elapsedBeforePoll = this.clock.now() - startedAt;
+      const pollStartedAt = this.clock.now();
+      const elapsedBeforePoll = pollStartedAt - startedAt;
       polls += 1;
       let observation: UiStabilityObservation;
       try {
@@ -359,11 +360,18 @@ export class IdleWaiter {
           )
         };
       }
+      // The interval runs from the start of one poll to the start of the
+      // next: a slow sample (a full hierarchy dump) eats into the wait
+      // instead of being added on top of it.
+      const sleepMs = Math.min(
+        config.pollIntervalMs - (this.clock.now() - pollStartedAt),
+        remainingMs
+      );
+      if (sleepMs <= 0) {
+        continue;
+      }
       try {
-        await this.clock.sleep(
-          Math.min(config.pollIntervalMs, remainingMs),
-          signal
-        );
+        await this.clock.sleep(sleepMs, signal);
       } catch (error) {
         if (isAborted(signal)) {
           return {

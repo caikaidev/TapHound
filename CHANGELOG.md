@@ -1,5 +1,56 @@
 # Changelog
 
+## 0.2.0-dev.13 — 2026-09-29
+
+### Added
+
+- `journey check --journey <path-or-name...>` audits only the named Journeys
+  (project-relative path or Journey name). A selector that matches no
+  committed Journey fails with `JOURNEY_NOT_FOUND` (exit `2`).
+
+- `scripts/feedback-pack.mjs`, published with the package, packs a redacted
+  evidence archive for feedback: every generation-bundle JSON (step
+  `timing`, idle telemetry, snapshots, verification reports) plus chosen run
+  reports, with package, class, resource id, UI text, Logcat tag/pattern,
+  serial, and path values replaced by stable pseudonyms. The pseudonym
+  mapping is written beside the archive, never inside it. See
+  `docs/diagnostics.md`.
+
+### Changed
+
+- **Breaking (report protocol):** each `logcatEvidence` entry carries a
+  required `expectationImpact`: `none` when no Logcat expectation failed
+  (those expectations fail closed on relevant drops, so the drop is
+  non-fatal), `possible` when one failed. The `verify` stderr warning and
+  `summary.txt` say "non-fatal" in the first case. Regenerate stored reports.
+
+- `SNAPSHOT_STALE` for a mismatched before Activity names both Activities in
+  its message and carries `details: {field, expected, actual}`.
+
+- The Journey generator's `envelope.mjs bind` compares
+  `proposal.activity.before` with the bound snapshot's Activity (from the
+  full observe/step output, the inline snapshot, or the snapshot file under
+  `--project`) and fails offline with `ENVELOPE_ACTIVITY_MISMATCH`. With
+  `--out` it reports `activityCheck: "matched"` or `"unverified"`. Its help
+  states the revision rule precisely (observe +1, a succeeded step +3).
+
+- The Case Suite `ledger.mjs` names the input, the allowed fields, and the
+  shipped template when it rejects an unknown or missing field, and its help
+  states the ledger revision rule (+1 per transition or record-flow).
+
+- The Journey generator's step prompt explains that idle detection cannot
+  tell a static full-screen spinner from a loaded screen, and binds loading
+  screens with an `element` expect (Core returns the matched layout as the
+  next snapshot) or a following `wait` step.
+
+### Performance
+
+- `idle.pollIntervalMs` is measured from the start of one poll to the start
+  of the next, so a slow structural capture shortens the following sleep
+  instead of adding to it. The config docs note that each stable step costs
+  about `(polls - 1) × pollIntervalMs`; field data with `pollIntervalMs:
+  1000` spent 83% of generation time in idle sleeps, so keep it near `300`.
+
 ## 0.2.0-dev.12 — 2026-09-28
 
 ### Added

@@ -81,7 +81,7 @@ function sensitiveReport(runId: string): TapHoundReport {
       stepIndex: 0
     },
     secondaryErrors: [{ code: "COLLECTION_FAILED", message: `${ROOT}/logcat`, phase: "collection" }],
-    logcatEvidence: [{ role: "sender", status: "incomplete", droppedLines: 1883, droppedBytes: 274880 }],
+    logcatEvidence: [{ role: "sender", status: "incomplete", expectationImpact: "none", droppedLines: 1883, droppedBytes: 274880 }],
     artifacts: {
       ...base.artifacts,
       directory: `${ROOT}/.taphound/build/runs/${runId}`,

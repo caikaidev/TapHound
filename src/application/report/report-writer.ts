@@ -22,8 +22,12 @@ export function logcatEvidenceWarning(
   const entries = report.logcatEvidence ?? [];
   if (entries.length === 0) return undefined;
   const lines = entries.reduce((total, entry) => total + entry.droppedLines, 0);
-  return `Warning: Logcat evidence is incomplete (${String(lines)} line(s) dropped); `
-    + "Logcat-based expectations fail closed on drops in their window";
+  if (entries.every((entry) => entry.expectationImpact === "none")) {
+    return `Warning (non-fatal): Logcat capture is partial (${String(lines)} line(s) dropped); `
+      + "no Logcat expectation failed, and those expectations fail closed on drops in their window";
+  }
+  return `Warning: Logcat evidence is incomplete (${String(lines)} line(s) dropped) `
+    + "and a Logcat expectation failed; the drops may be the cause";
 }
 
 function renderSummary(report: TapHoundReport): string {

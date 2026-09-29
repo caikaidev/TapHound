@@ -365,12 +365,12 @@ describe("ContractVerifier", () => {
       verdict: "pass", checkpoints: [{ id: "search-event", status: "passed" }]
     });
     const beforeWindow = await verifyWith({ logcatEvidence: [{
-      role: "default", status: "incomplete",
+      role: "default", status: "incomplete", expectationImpact: "none",
       droppedLines: 1, droppedBytes: 20, lastDroppedAtMs: 5
     }] });
     expect(beforeWindow.view.checkpoints).toMatchObject([{ status: "passed" }]);
     const overflow = await verifyWith({ logcatEvidence: [{
-      role: "default", status: "incomplete", droppedLines: 1, droppedBytes: 20
+      role: "default", status: "incomplete", expectationImpact: "none", droppedLines: 1, droppedBytes: 20
     }] });
     expect(overflow.view.checkpoints).toMatchObject([{ status: "unresolved" }]);
     const withoutHash = await verifyWith({

@@ -266,6 +266,18 @@ describe("TapHound documentation examples", () => {
     }
   });
 
+  it("keeps both Brief Author role prompts pasteable into a 2000-character subagent prompt", async () => {
+    for (const path of [
+      "assets/skills/taphound-journey-brief-author/prompts/brief-author-role.md",
+      "assets/skills/taphound-journey-brief-author/prompts/brief-author-role.zh-CN.md"
+    ]) {
+      const prompt = await text(path);
+      expect(Array.from(prompt).length).toBeLessThanOrEqual(2000);
+      expect(prompt).toContain(".taphound/briefs/<caseId>/taphound-journey-brief.md");
+      expect(prompt).toContain("BRIEF_INVALID");
+    }
+  });
+
   it("documents every executable command and its primary workflow", async () => {
     const readme = await text("README.md");
     const readmeZh = await text("README.zh-CN.md");

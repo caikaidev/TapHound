@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- The Brief Author subagent role prompts (English and zh-CN) state that
+  Briefs are written only under `.taphound/briefs/<caseId>/` or
+  `.taphound/suites/<suite-id>/briefs/<caseId>/`, and fit a 2000-character
+  subagent prompt field; details stay in `SKILL.md`.
+
 ## 0.2.0-dev.13 — 2026-09-29
 
 ### Added
@@ -26,10 +35,8 @@
   and must match), accepts a Case Brief only at
   `briefs/<case-id>/taphound-journey-brief.md` inside it, and rejects a
   Suite loaded from anywhere else with `CASE_SUITE_LOCATION`. The Brief
-  author Skill defaults to `.taphound/briefs/<caseId>/`, and its subagent
-  role prompts (English and zh-CN) state the location rule and fit a
-  2000-character prompt field. Suites under `doc/development/` must be
-  re-initialized.
+  author Skill defaults to `.taphound/briefs/<caseId>/`. Suites under
+  `doc/development/` must be re-initialized.
 
 - **Breaking (report protocol):** each `logcatEvidence` entry carries a
   required `expectationImpact`: `none` when no Logcat expectation failed

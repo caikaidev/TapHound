@@ -35,6 +35,10 @@
 - `envelope.mjs bind` accepts `generation step --replace` output, so no
   extra `observe` is needed after a replace, and explains that a bare
   binding cannot reuse the draft's old `snapshotRef`.
+- `generation step --input` with a missing or unreadable envelope file fails
+  with `CONFIG_INVALID` (exit 2) naming the path, instead of
+  `INTERNAL_ERROR` (exit 4). The journey-generator Skill says to run `step`
+  only after `envelope.mjs bind` exits 0 and not to pipe `bind`.
 - `generation start --output` fails with a hint that the Journey path is
   chosen at `generation finalize --output`, and `start --help` says so and
   that later commands need the same `--config`.

@@ -278,7 +278,11 @@ them with `MANUAL_STEP_REQUIRED`.
       from `snapshotRef` under `--project`) and fails with
       `ENVELOPE_ACTIVITY_MISMATCH`, naming the snapshot Activity, before any
       device work. `activityCheck: "unverified"` in its output means no
-      snapshot was readable; Core still enforces the check on `step`. The helper contract:
+      snapshot was readable; Core still enforces the check on `step`. Run
+      `generation step` only after `bind` exits 0: do not pipe `bind` into
+      another command (a pipeline reports the last command's exit code, so a
+      failed bind would go unnoticed and `step` would read a missing file).
+      The helper contract:
       `node <skill>/scripts/envelope.mjs help`. The resulting shape:
       ```json
       {

@@ -710,6 +710,38 @@ describe("generation JSON process protocol", () => {
     expect(test.exitCodes).toEqual([2]);
   });
 
+  it("reports a missing --input envelope as caller input, not an internal error", async () => {
+    const test = harness();
+    const missing = Object.assign(
+      new Error("ENOENT: no such file or directory, open '/tmp/missing.json'"),
+      { code: "ENOENT" }
+    );
+    vi.mocked(test.dependencies.readJson).mockResolvedValueOnce(runtimeConfig)
+      .mockRejectedValueOnce(missing);
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "step",
+      "--project", "/project",
+      "--input", "/tmp/missing.json",
+      "--session", "generation-1",
+      "--json"
+    ]);
+
+    const output = JSON.parse(test.stdout.value) as {
+      failure: { code: string; message: string };
+    };
+    expect(output).toMatchObject({
+      status: "error",
+      exitCode: 2,
+      failure: { code: "CONFIG_INVALID" }
+    });
+    expect(output.failure.message).toContain(
+      "Planner envelope --input is not readable: /tmp/missing.json (ENOENT"
+    );
+    expect(test.request).not.toHaveBeenCalled();
+    expect(test.exitCodes).toEqual([2]);
+  });
+
   it("emits an envelope hint when a flat planner envelope is rejected", async () => {
     const test = harness();
     vi.mocked(test.dependencies.readJson).mockResolvedValueOnce(runtimeConfig)

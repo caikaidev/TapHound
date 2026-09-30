@@ -124,8 +124,24 @@ export function createStepCommand(dependencies: CliDependencies): Command {
           "generation step requires either --input <envelope> or --replace <index>"
         );
       }
+      let rawEnvelope: unknown;
+      try {
+        rawEnvelope = await dependencies.readJson(
+          resolve(projectRoot, options.input)
+        );
+      } catch (error) {
+        // Malformed JSON keeps the envelope hint; a missing or unreadable
+        // file is a caller input error, not an internal failure.
+        if (error instanceof SyntaxError) throw error;
+        throw new GenerationOperationError(
+          "CONFIG_INVALID",
+          `Planner envelope --input is not readable: ${options.input} (${
+            error instanceof Error ? error.message : String(error)
+          }); write the envelope first, for example with envelope.mjs bind --out, and check that it succeeded`
+        );
+      }
       const envelope: z.infer<typeof PlannerEnvelopeSchema> = PlannerEnvelopeSchema.parse(
-        await dependencies.readJson(resolve(projectRoot, options.input))
+        rawEnvelope
       );
       const confirmation = await runtime.confirmation.request({
         generationId,

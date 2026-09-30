@@ -260,10 +260,10 @@ fails with `BRIEF_INVALID` before any device work.
 ```
 
 `timing` reports wall-clock milliseconds per start phase, in execution order:
-`contextLoad`, `doctor`, `projectDescribe`, then either `baseFlowReplay`
-(with `--base-flow`, a full Replay of the Flow including cold launch and
-final evidence collection) or `appPrepare` (cold launch without a Flow), then
-`contextValidation`, `uiSnapshotOpen`, and `sessionCreate`. It is output only
+`contextLoad`, `doctor`, `projectDescribe`, `baseFlowReplay` (only with
+`--base-flow`: a full Replay of the Flow including cold launch and final
+evidence collection), `contextValidation`, `appPrepare` (only without a Base
+Flow: the cold launch), `uiSnapshotOpen`, and `sessionCreate`. It is output only
 and is not persisted; include it when reporting slow starts.
 
 **Note the `generationId` and `contextSelection`**. The application module,

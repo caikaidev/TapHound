@@ -17,6 +17,11 @@ import { fileURLToPath } from "node:url";
 const NOTICE = "Smoke check only, not verification evidence: use taphound-verify-change to prove a change.";
 const DUMP_PATH = "/sdcard/taphound-flash.xml";
 const POLL_MS = 250;
+// uiautomator dump fails for a moment while the app or the accessibility
+// service starts ("null root node returned by UiTestAutomationBridge").
+const DUMP_RETRY_MS = 500;
+// Matches listed in a TARGET_AMBIGUOUS failure.
+const MAX_LISTED_MATCHES = 10;
 // Shell commands that change what the device shows.
 const MUTATIONS = new Set(["input", "am", "monkey", "wm"]);
 const TARGET_KEYS = ["id", "text", "desc"];
@@ -30,10 +35,11 @@ const ACTIONS = {
 };
 
 class FlashError extends Error {
-  constructor(code, message, exitCode = 1) {
+  constructor(code, message, exitCode = 1, details = undefined) {
     super(message);
     this.code = code;
     this.exitCode = exitCode;
+    this.details = details;
   }
 }
 
@@ -69,7 +75,11 @@ function parseTarget(value, where) {
 
 export function parsePlan(value) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) fail("plan must be an object");
-  onlyKeys(value, ["version", "packageName", "activity", "device", "timeoutMs", "settleTimeoutMs", "steps"], "plan");
+  onlyKeys(
+    value,
+    ["version", "packageName", "activity", "device", "timeoutMs", "launchTimeoutMs", "settleTimeoutMs", "steps"],
+    "plan"
+  );
   if (value.version !== 1) fail("plan.version must be 1");
   if (typeof value.packageName !== "string" || !/^[A-Za-z][\w]*(\.[A-Za-z][\w]*)+$/.test(value.packageName)) {
     fail("plan.packageName must be an Android package name");
@@ -85,6 +95,9 @@ export function parsePlan(value) {
     activity: value.activity,
     device: value.device,
     timeoutMs: value.timeoutMs === undefined ? 10_000 : positiveInt(value.timeoutMs, "plan.timeoutMs"),
+    launchTimeoutMs: value.launchTimeoutMs === undefined
+      ? 30_000
+      : positiveInt(value.launchTimeoutMs, "plan.launchTimeoutMs"),
     settleTimeoutMs: value.settleTimeoutMs === undefined
       ? 5_000
       : positiveInt(value.settleTimeoutMs, "plan.settleTimeoutMs"),
@@ -148,9 +161,11 @@ function adb(args, { binary = false, timeoutMs = 30_000 } = {}) {
 }
 
 class Device {
-  constructor(serial, packageName) {
+  constructor(serial, packageName, dumpTimeoutMs) {
     this.serial = serial;
     this.packageName = packageName;
+    // How long a failing uiautomator dump is retried before it is reported.
+    this.dumpTimeoutMs = dumpTimeoutMs;
     // The last settled UI dump, valid until the next device mutation or wait.
     this.settled = undefined;
   }
@@ -192,7 +207,20 @@ class Device {
       : { packageName: focus[1], activity: qualify(focus[1], focus[2]) };
   }
 
-  async dump() {
+  /** A UI dump, retrying transient failures for up to `retryMs`. */
+  async dump(retryMs = this.dumpTimeoutMs) {
+    const deadline = Date.now() + retryMs;
+    for (;;) {
+      try {
+        return await this.dumpOnce();
+      } catch (error) {
+        if (!(error instanceof FlashError) || error.code !== "UI_DUMP_FAILED" || Date.now() >= deadline) throw error;
+      }
+      await sleep(DUMP_RETRY_MS);
+    }
+  }
+
+  async dumpOnce() {
     const dumped = await this.run(["shell", "uiautomator", "dump", DUMP_PATH]);
     if (dumped.code !== 0 || !/dumped to/i.test(dumped.stdout)) {
       throw new FlashError("UI_DUMP_FAILED", `uiautomator dump failed: ${(dumped.stderr || dumped.stdout).trim()}`);
@@ -238,6 +266,7 @@ export function parseHierarchy(xml) {
       id: attributes["resource-id"] ?? "",
       text: attributes.text ?? "",
       desc: attributes["content-desc"] ?? "",
+      className: attributes.class ?? "",
       packageName: attributes.package ?? "",
       clickable: attributes.clickable === "true",
       enabled: attributes.enabled !== "false",
@@ -262,6 +291,25 @@ export function findTarget(nodes, target, packageName) {
   }
   if (target.text !== undefined) return inApp.filter((node) => node.text === target.text);
   return inApp.filter((node) => node.desc === target.desc);
+}
+
+/** TARGET_AMBIGUOUS, listing every match so the plan can pick a unique target. */
+function ambiguous(target, matches) {
+  const listed = matches.slice(0, MAX_LISTED_MATCHES).map((node) => ({
+    id: node.id,
+    text: node.text,
+    desc: node.desc,
+    className: node.className,
+    bounds: node.bounds === undefined ? "" : `[${node.bounds[0]},${node.bounds[1]}][${node.bounds[2]},${node.bounds[3]}]`
+  }));
+  const summary = listed.map((match) => [match.bounds, match.className, match.id && `id=${match.id}`]
+    .filter((part) => part !== "").join(" ")).join("; ");
+  return new FlashError(
+    "TARGET_AMBIGUOUS",
+    `${describe(target)} matches ${matches.length} elements: ${summary}`,
+    1,
+    { matches: listed }
+  );
 }
 
 function center(bounds) {
@@ -292,18 +340,20 @@ export function tapPoint(node) {
 
 // ---------------------------------------------------------------- runner
 
-async function settle(device, timeoutMs) {
+async function settle(device, timeoutMs, budget = "settleTimeoutMs") {
   const deadline = Date.now() + timeoutMs;
-  let previous = await device.dump();
+  // A failing dump is retried within this settle's own budget.
+  const remaining = () => Math.max(1, deadline - Date.now());
+  let previous = await device.dump(remaining());
   for (;;) {
     await sleep(POLL_MS);
-    const current = await device.dump();
+    const current = await device.dump(remaining());
     if (current === previous) {
       device.settled = current;
       return current;
     }
     if (Date.now() >= deadline) {
-      throw new FlashError("UNSETTLED", `The UI kept changing for ${timeoutMs} ms`);
+      throw new FlashError("UNSETTLED", `The UI kept changing for ${timeoutMs} ms; raise ${budget}`);
     }
     previous = current;
   }
@@ -356,7 +406,13 @@ function visiblePackages(nodes) {
   return [...new Set(nodes.map((node) => node.packageName).filter((name) => name !== ""))];
 }
 
+/**
+ * Cold launch within `launchTimeoutMs`: the process starts, then the first
+ * screen may keep loading and animating until the budget runs out.
+ */
 async function launch(device, plan) {
+  const deadline = Date.now() + plan.launchTimeoutMs;
+  const remaining = () => Math.max(1, deadline - Date.now());
   await ensureAwake(device);
   await device.shell(["am", "force-stop", plan.packageName], "force-stop");
   const started = plan.activity === undefined
@@ -365,12 +421,12 @@ async function launch(device, plan) {
   if (started.code !== 0 || /^Error|No activities found|monkey aborted/im.test(started.stdout)) {
     throw new FlashError("LAUNCH_FAILED", `Could not launch ${plan.packageName}: ${(started.stdout + started.stderr).trim()}`);
   }
-  await poll(plan.timeoutMs, async () => ((await device.pid()) === ""
+  await poll(remaining(), async () => ((await device.pid()) === ""
     ? { done: false, error: new FlashError("LAUNCH_FAILED", "The app process did not start") }
     : { done: true }));
   await assertInApp(device);
-  await poll(plan.timeoutMs, async () => {
-    const nodes = parseHierarchy(await settle(device, plan.settleTimeoutMs));
+  await poll(remaining(), async () => {
+    const nodes = parseHierarchy(await settle(device, remaining(), "launchTimeoutMs"));
     return nodes.some((node) => node.packageName === plan.packageName)
       ? { done: true }
       : {
@@ -390,9 +446,7 @@ async function runStep(device, plan, step) {
       const node = await poll(timeoutMs, async () => {
         const matches = findTarget(parseHierarchy(await device.observe()), step.target, plan.packageName);
         if (matches.length === 1) return { done: true, value: matches[0] };
-        if (matches.length > 1) {
-          throw new FlashError("TARGET_AMBIGUOUS", `${describe(step.target)} matches ${matches.length} elements`);
-        }
+        if (matches.length > 1) throw ambiguous(step.target, matches);
         return { done: false, error: new FlashError("TARGET_NOT_FOUND", `No element with ${describe(step.target)}`) };
       });
       const [x, y] = tapPoint(node);
@@ -422,12 +476,9 @@ async function runStep(device, plan, step) {
         if (matches.length === 1) return { done: true, value: `${describe(step.target)} is shown` };
         return {
           done: false,
-          error: new FlashError(
-            matches.length > 1 ? "TARGET_AMBIGUOUS" : "EXPECT_FAILED",
-            matches.length > 1
-              ? `${describe(step.target)} matches ${matches.length} elements`
-              : `${describe(step.target)} did not appear within ${timeoutMs} ms`
-          )
+          error: matches.length > 1
+            ? ambiguous(step.target, matches)
+            : new FlashError("EXPECT_FAILED", `${describe(step.target)} did not appear within ${timeoutMs} ms`)
         };
       });
     case "expectActivity": {
@@ -471,7 +522,7 @@ async function collectFailureEvidence(device, dir, code) {
   } catch { /* best effort */ }
   try {
     evidence.hierarchy = join(dir, "failure.xml");
-    await writeFile(evidence.hierarchy, await device.dump());
+    await writeFile(evidence.hierarchy, await device.dumpOnce());
   } catch {
     delete evidence.hierarchy;
   }
@@ -488,7 +539,7 @@ async function collectFailureEvidence(device, dir, code) {
 export async function runPlan(plan, { device: requested, out }) {
   const startedAt = Date.now();
   const serial = await selectDevice(requested ?? plan.device);
-  const device = new Device(serial, plan.packageName);
+  const device = new Device(serial, plan.packageName, plan.timeoutMs);
   const installed = await device.run(["shell", "pm", "path", plan.packageName]);
   if (!installed.stdout.includes("package:")) {
     throw new FlashError("APP_NOT_INSTALLED", `${plan.packageName} is not installed on ${serial}`, 3);
@@ -527,7 +578,12 @@ export async function runPlan(plan, { device: requested, out }) {
   } catch (error) {
     if (!(error instanceof FlashError) || error.exitCode !== 1) throw error;
     result.status = "failed";
-    result.failure = { stepIndex: current === -1 ? null : current, code: error.code, message: error.message };
+    result.failure = {
+      stepIndex: current === -1 ? null : current,
+      code: error.code,
+      message: error.message,
+      ...error.details
+    };
     if (current !== -1) {
       steps[current].status = "failed";
       steps[current].detail = error.message;

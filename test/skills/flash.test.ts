@@ -25,6 +25,8 @@ interface DeviceState {
   running: boolean;
   crashed: boolean;
   crashOnTap?: string;
+  dumpFailures?: number;
+  launchFrames?: number;
   screen: string;
   focused: boolean;
   typed: string;
@@ -36,7 +38,12 @@ interface FlashRun {
   code: number;
   result: {
     status: string;
-    failure?: { code: string; message: string; stepIndex?: number | null };
+    failure?: {
+      code: string;
+      message: string;
+      stepIndex?: number | null;
+      matches?: { id: string; text: string; className: string; bounds: string }[];
+    };
     steps?: { status: string; detail?: string }[];
     evidence?: Record<string, string>;
   };
@@ -138,7 +145,48 @@ describe("taphound-flash", () => {
     const run = await flash(plan([{ action: "tap", target: { text: "Twin" } }]));
 
     expect(run.result.failure?.code).toBe("TARGET_AMBIGUOUS");
+    expect(run.result.failure?.message).toContain("[100,1400][500,1500]");
+    expect(run.result.failure?.matches?.map((match) => match.bounds))
+      .toEqual(["[100,1400][500,1500]", "[600,1400][980,1500]"]);
     expect(run.device.taps).toEqual([]);
+  }, 60_000);
+
+  it("lists every match when an expectation is ambiguous", async () => {
+    const run = await flash(plan([{ action: "expect", target: { text: "Twin" } }]));
+
+    expect(run.result.failure?.code).toBe("TARGET_AMBIGUOUS");
+    expect(run.result.failure?.matches).toHaveLength(2);
+  }, 60_000);
+
+  it("retries a UI dump that fails while the app cold-starts", async () => {
+    const run = await flash(plan([{ action: "tap", target: { id: "open_search" } }]), {
+      dumpFailures: 3
+    });
+
+    expect(run.result.status).toBe("passed");
+    expect(run.device.log.filter((entry) => entry.includes("uiautomator dump")).length)
+      .toBeGreaterThan(3);
+  }, 60_000);
+
+  it("reports UI_DUMP_FAILED once dumps keep failing past the timeout", async () => {
+    const run = await flash({ ...plan([{ action: "back" }]), launchTimeoutMs: 1_500 }, { dumpFailures: 1_000 });
+
+    expect(run.code).toBe(1);
+    expect(run.result.failure).toMatchObject({ code: "UI_DUMP_FAILED", stepIndex: null });
+    expect(run.result.failure?.message).toContain("null root node");
+  }, 60_000);
+
+  it("gives the first screen launchTimeoutMs to stop changing", async () => {
+    const loading = { launchFrames: 8 };
+    const passed = await flash(plan([{ action: "expect", target: { id: "open_search" } }]), loading);
+    const unsettled = await flash({
+      ...plan([{ action: "expect", target: { id: "open_search" } }]),
+      launchTimeoutMs: 800
+    }, loading);
+
+    expect(passed.result.status).toBe("passed");
+    expect(unsettled.result.failure).toMatchObject({ code: "UNSETTLED", stepIndex: null });
+    expect(unsettled.result.failure?.message).toContain("launchTimeoutMs");
   }, 60_000);
 
   it("reports a crash with the crash log", async () => {

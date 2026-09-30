@@ -47,7 +47,8 @@ shows the demo app's search flow.
 | `activity` | optional launch Activity (`.Main` or fully qualified); omit to use the launcher entry |
 | `device` | optional serial; otherwise exactly one device must be online |
 | `timeoutMs` | how long `tap` and `expect` wait for their target (default 10000) |
-| `settleTimeoutMs` | how long the UI may keep changing after an action (default 5000) |
+| `launchTimeoutMs` | how long the cold launch may take until the first screen stops changing (default 30000) |
+| `settleTimeoutMs` | how long the UI may keep changing after each step (default 5000) |
 
 | Step | Does |
 |---|---|
@@ -74,7 +75,9 @@ node <this-skill>/scripts/flash.mjs run flash-plan.json --out <evidence-dir>
 The script force-stops and launches the app (waking the screen and
 dismissing a non-secure lock screen), runs the steps, and prints one JSON
 result. After each action it waits for the UI to settle and checks the app
-is still running and in front.
+is still running and in front. A UI dump that fails while the app starts
+(for example `null root node` during a splash screen) is retried until the
+current wait runs out.
 
 | Exit | `status` | Meaning |
 |---|---|---|
@@ -93,10 +96,11 @@ failure) before changing anything.
 | `APP_CRASHED` | the process died; read `evidence.crashLog` |
 | `LAUNCH_FAILED`, `APP_NOT_VISIBLE` | wrong `activity`, a startup crash, or something covering the app |
 | `TARGET_NOT_FOUND` | the element is gone, renamed, or not on this screen yet |
-| `TARGET_AMBIGUOUS` | several elements match; use a more specific target |
+| `TARGET_AMBIGUOUS` | several elements match; `failure.matches` lists each one's id, text, class, and bounds, so pick a unique target (another id, text, or description, or reach a screen where only one remains) |
 | `NOT_CLICKABLE`, `TARGET_DISABLED` | nothing clickable handles the tap, or it is disabled |
 | `EXPECT_FAILED`, `ACTIVITY_MISMATCH` | the change did not produce the expected screen |
-| `UNSETTLED` | the UI never stopped changing (animation, polling); raise `settleTimeoutMs` |
+| `UNSETTLED` | the UI never stopped changing (animation, polling); raise the budget the message names (`launchTimeoutMs` or `settleTimeoutMs`) |
+| `UI_DUMP_FAILED` | uiautomator kept failing for the whole wait; check that no other UI automation (for example an Appium server) holds the device |
 | `LEFT_APP` | the action opened another app or a system dialog |
 
 Fix the code or the plan, reinstall, and run again. Never weaken an
@@ -107,6 +111,12 @@ purpose, say so.
 
 - Flash never guesses: no coordinates, no visual matching. A missing or
   ambiguous target fails the step.
+- Flash checks that screens are reachable, elements are present, and the
+  right Activity is in front. It cannot check colors, styles, or layout
+  details, and neither can TapHound: a TapHound Contract can require a
+  screenshot as evidence but never compares pixels. For a visual change, let
+  a person review the screenshot (`contract review` can raise a Verdict to
+  `needsReview`); do not report a flash pass as proof of a visual change.
 - A tap lands on the matched element's own center and must be handled by
   that element or its nearest clickable ancestor, as in TapHound Replay.
 - It only drives the app under test; a flow through the camera or a picker

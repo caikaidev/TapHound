@@ -235,6 +235,7 @@ import { isErrnoException } from "../shared/errors.js";
 import { readRuntimeBackendChoice } from "./runtime-selection.js";
 import { CONTEXT_INDEX_PATH } from "../domain/workspace.js";
 import { JourneySchema } from "../domain/journey.js";
+import { configMismatchMessage } from "../application/generation/binding-mismatch.js";
 
 export interface TextOutput {
   write: (content: string) => void;
@@ -1031,10 +1032,11 @@ export function createProductionDependencies(
         ),
         assertConfigIdentity: async (id): Promise<void> => {
           const session = await store.read(id);
-          if (hashGenerationBinding(config) !== session.bindings.configHash) {
+          const configHash = hashGenerationBinding(config);
+          if (configHash !== session.bindings.configHash) {
             throw new GenerationOperationError(
               "CONFIG_INVALID",
-              "Generation configuration does not match the authoritative session"
+              configMismatchMessage(session.bindings.configHash, configHash)
             );
           }
         },

@@ -38,6 +38,7 @@ import type {
 import { GenerationOperationError } from "./generation-starter.js";
 import { closeUiSnapshotProvider } from "../ui/ui-snapshot-lifecycle.js";
 import { uiStabilityProbe } from "../ui/ui-stability-probe.js";
+import { uiBackendMismatchMessage } from "./binding-mismatch.js";
 
 export type RuntimeObservationBinding = ProposalBinding;
 
@@ -253,7 +254,10 @@ export class RuntimeObserver {
       ) {
         throw new GenerationOperationError(
           "CONFIG_INVALID",
-          "Generation UI backend does not match the authoritative session"
+          uiBackendMismatchMessage(
+            current.bindings.uiBackend,
+            uiSnapshotProvider.descriptor
+          )
         );
       }
       if (

@@ -92,6 +92,7 @@ import {
 } from "./focused-input.js";
 import { closeUiSnapshotProvider } from "../ui/ui-snapshot-lifecycle.js";
 import { uiStabilityProbe } from "../ui/ui-stability-probe.js";
+import { uiBackendMismatchMessage } from "./binding-mismatch.js";
 
 export type GenerationCandidateSource = "planner" | "manualOverride";
 
@@ -579,7 +580,10 @@ export class GenerationStepExecutor {
     ) {
       throw new GenerationOperationError(
         "CONFIG_INVALID",
-        "Generation UI backend does not match the authoritative session"
+        uiBackendMismatchMessage(
+          session.bindings.uiBackend,
+          this.boundUiSnapshotProvider().descriptor
+        )
       );
     }
     assertBaseAuthorization(session, proposal, snapshot);

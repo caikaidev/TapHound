@@ -11,7 +11,7 @@ import {
   TapHoundConfigSchema,
   type TapHoundConfig
 } from "../../src/domain/config.js";
-import type { Journey, JourneyStep } from "../../src/domain/journey.js";
+import type { Expectation, Journey, JourneyStep } from "../../src/domain/journey.js";
 import type { ProposalBinding, ProposedStep } from "../../src/domain/proposed-step.js";
 import type { RuntimeSnapshot } from "../../src/domain/runtime-snapshot.js";
 import {
@@ -331,6 +331,36 @@ export async function runGeneration(
     observation = next;
   }
   return { outcomes, stepCalls, generationId: session.id, device };
+}
+
+/**
+ * `generation recover --decision amend-expect`: replace the expectation of
+ * the failed in-flight step and evaluate it on the current screen, without
+ * touching the device.
+ */
+export async function amendGeneration(
+  project: ParityProject,
+  run: { generationId: string; device: SimulatedDevice },
+  expect: Expectation
+): Promise<{ outcome: string; calls: Record<string, number> }> {
+  const deps = dependencies(run.device);
+  const runtime = deps.generationRuntime?.({
+    projectRoot: project.root,
+    config: PARITY_CONFIG
+  });
+  if (runtime === undefined) throw new Error("Generation runtime unavailable");
+  run.device.resetCounts();
+  let outcome: string;
+  try {
+    const result = await runtime.executor.amendExpectation({
+      generationId: run.generationId,
+      expect
+    });
+    outcome = result.status === "succeeded" ? "passed" : result.failure.code;
+  } catch (error) {
+    outcome = failureCode(error);
+  }
+  return { outcome, calls: run.device.countsSnapshot() };
 }
 
 export async function finalizeGeneration(

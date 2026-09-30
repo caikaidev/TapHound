@@ -429,8 +429,15 @@ Agent must never infer approval or apply it to another challenge.
 Approved challenge ID and approval mode are persisted atomically in the
 in-flight attempt before device mutation, then copied into successful or failed
 step result evidence for audit.
-`generation recover --decision retry` is the only CLI transition out of an
-interrupted action or dead receipt-free verification attempt. The explicit
+`generation recover --decision retry` is the general CLI transition out of an
+interrupted action or dead receipt-free verification attempt.
+`generation recover --decision amend-expect --expect <file>` is the narrow
+alternative for an unconfirmed step whose action completed and only its
+expectation failed: `GenerationStepExecutor.amendExpectation` evaluates a
+new `element`/`activity` expectation on the current screen without device
+mutation and commits the step through the Store's `amendStep`
+(`recoveryRequired` → `active`, exactly one appended step), recording
+`amendment-<id>.json` evidence. The explicit
 decision is required because the interrupted action or replay may already have
 produced business side effects. Its result distinguishes step from verification
 recovery and names the next action; verification recovery requires rerunning

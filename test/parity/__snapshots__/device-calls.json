@@ -764,5 +764,24 @@
         "windowTopology": 6
       }
     ]
+  },
+  "amend expectation": {
+    "stillWrong": {
+      "appProcesses": 12,
+      "foregroundComponent": 12,
+      "openSession": 1,
+      "openUiSnapshots": 1,
+      "uiCapture": 6,
+      "windowTopology": 6
+    },
+    "amended": {
+      "appProcesses": 3,
+      "captureScreenshot": 1,
+      "foregroundComponent": 3,
+      "openSession": 2,
+      "openUiSnapshots": 1,
+      "uiCapture": 1,
+      "windowTopology": 1
+    }
   }
 }

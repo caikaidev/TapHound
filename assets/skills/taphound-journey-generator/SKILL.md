@@ -315,9 +315,14 @@ them with `MANUAL_STEP_REQUIRED`.
          → re-observe once; if it persists, report. `PACKAGE_ESCAPE` → switch
          to `generation bridge`. If retries exhausted, stop and report.
       - **`recoveryRequired`**: Run `generation status`, report
-        `actionMayHaveExecuted`. Stop for the user's explicit retry decision.
-        Only after approval run `generation recover --decision retry`.
-        Re-observe after recovery.
+        `actionMayHaveExecuted`. If `recovery.amendExpectAvailable` is true
+        and the current screen shows the expectation was simply wrong (for
+        example a mistyped resourceId), write the corrected `element` or
+        `activity` expectation to a file and run `generation recover
+        --decision amend-expect --expect <file> --compact --json`; its
+        `succeeded` output is a bind source for the next step. Otherwise
+        stop for the user's explicit retry decision; only after approval run
+        `generation recover --decision retry`, then re-observe.
 
    f. Clean up the temp envelope file after each iteration.
 

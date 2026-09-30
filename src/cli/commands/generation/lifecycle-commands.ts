@@ -14,6 +14,7 @@ import {
 import {
   GenerationSessionIdSchema
 } from "../../../domain/generation.js";
+import { ExpectSchema } from "../../../domain/journey.js";
 import {
   JOBS_DIR
 } from "../../../domain/workspace.js";
@@ -203,15 +204,29 @@ export function createRecoverCommand(dependencies: CliDependencies): Command {
       .description("Explicitly reactivate an interrupted in-flight step")
       .requiredOption(
         "--decision <decision>",
-        "Recovery decision; retry acknowledges the action may have executed"
+        "retry acknowledges the action may have executed; amend-expect commits a step whose action completed with a corrected expectation"
+      )
+      .option(
+        "--expect <path>",
+        "amend-expect only: JSON file with the corrected element or activity expectation"
+      )
+      .option(
+        "--compact",
+        "amend-expect only: return nextSnapshotRef instead of the full next snapshot"
       ),
     dependencies
   ).action(async (options: GenerationRecoverOptions): Promise<void> => {
     try {
-      if (options.decision !== "retry") {
+      if (options.decision !== "retry" && options.decision !== "amend-expect") {
         throw new GenerationOperationError(
           "CONFIG_INVALID",
-          "generation recover currently requires --decision retry"
+          "generation recover requires --decision retry or --decision amend-expect"
+        );
+      }
+      if ((options.decision === "amend-expect") !== (options.expect !== undefined)) {
+        throw new GenerationOperationError(
+          "CONFIG_INVALID",
+          "--expect <path> is required with --decision amend-expect and not accepted otherwise"
         );
       }
       const generationId = GenerationSessionIdSchema.parse(options.session);
@@ -221,6 +236,13 @@ export function createRecoverCommand(dependencies: CliDependencies): Command {
         );
       const runtime = requireRuntime(dependencies, projectRoot, config);
       await assertRuntimeConfig(runtime, generationId);
+      if (options.expect !== undefined) {
+        await amendExpectation(dependencies, options, runtime, {
+          generationId,
+          expectPath: resolve(projectRoot, options.expect)
+        });
+        return;
+      }
       const before = await runtime.recovery.status(generationId);
       if (!before.recovery.available) {
         throw new GenerationOperationError(
@@ -249,6 +271,79 @@ export function createRecoverCommand(dependencies: CliDependencies): Command {
       mappedFailure(dependencies, options, error);
     }
   });
+}
+
+async function amendExpectation(
+  dependencies: CliDependencies,
+  options: GenerationRecoverOptions,
+  runtime: NonNullable<ReturnType<NonNullable<CliDependencies["generationRuntime"]>>>,
+  input: { generationId: string; expectPath: string }
+): Promise<void> {
+  let raw: unknown;
+  try {
+    raw = await dependencies.readJson(input.expectPath);
+  } catch (error) {
+    if (error instanceof SyntaxError) throw error;
+    throw new GenerationOperationError(
+      "CONFIG_INVALID",
+      `--expect is not readable: ${options.expect ?? input.expectPath} (${
+        error instanceof Error ? error.message : String(error)
+      })`
+    );
+  }
+  const expect = ExpectSchema.parse(raw);
+  const result = await runtime.executor.amendExpectation({
+    generationId: input.generationId,
+    expect,
+    ...(dependencies.signal === undefined
+      ? {}
+      : { signal: dependencies.signal })
+  });
+  if (result.status !== "succeeded") {
+    writeFailure(
+      dependencies,
+      options,
+      1,
+      result.failure.code,
+      result.failure.message,
+      {
+        status: "recoveryRequired",
+        generationId: input.generationId,
+        ...("amendmentId" in result
+          ? { details: { amendmentId: result.amendmentId } }
+          : {})
+      }
+    );
+    return;
+  }
+  const session = await runtime.readSession(input.generationId);
+  // Same shape as a succeeded step, so envelope.mjs bind accepts it.
+  writeSuccess(dependencies, options, {
+    status: "succeeded",
+    exitCode: 0,
+    generationId: input.generationId,
+    revision: session.revision,
+    stepIndex: session.candidateSteps.length - 1,
+    step: result.step,
+    source: result.source,
+    recoveryDecision: "amend-expect",
+    amendmentId: result.amendmentId,
+    ...(result.nextObservation === undefined
+      ? {}
+      : options.compact === true
+        ? {
+            nextBinding: result.nextObservation.binding,
+            nextSnapshotRef: result.nextObservation.snapshotRef
+          }
+        : {
+            nextBinding: result.nextObservation.binding,
+            nextSnapshot: result.nextObservation.snapshot,
+            nextSnapshotRef: result.nextObservation.snapshotRef
+          }),
+    ...(result.nextObservationFailure === undefined
+      ? {}
+      : { nextObservationFailure: result.nextObservationFailure })
+  }, `Generation step ${String(session.candidateSteps.length - 1)} amended and committed`);
 }
 
 export function createReopenCommand(dependencies: CliDependencies): Command {

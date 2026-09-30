@@ -17,6 +17,7 @@ import {
   type PendingConfirmation
 } from "../../domain/generation.js";
 import {
+  ExpectSchema,
   JourneyStepSchema,
   type Expectation,
   type JourneyStep
@@ -93,6 +94,8 @@ import {
 import { closeUiSnapshotProvider } from "../ui/ui-snapshot-lifecycle.js";
 import { uiStabilityProbe } from "../ui/ui-stability-probe.js";
 import { uiBackendMismatchMessage } from "./binding-mismatch.js";
+import { expectationHoldsOnScreen } from "../assertion/expectation-evaluator.js";
+import { bindExpectationEvidence } from "./proposed-step-validator.js";
 
 export type GenerationCandidateSource = "planner" | "manualOverride";
 
@@ -143,12 +146,62 @@ export type GenerationStepExecutionResult =
       timing?: GenerationStepTiming | undefined;
     };
 
+export interface GenerationExpectationAmendmentInput {
+  generationId: string;
+  expect: Expectation;
+  signal?: AbortSignal | undefined;
+}
+
+export type GenerationExpectationAmendmentResult =
+  | {
+      status: "succeeded";
+      step: JourneyStep;
+      source: GenerationCandidateSource;
+      amendmentId: string;
+      nextObservation?: RuntimeObservation | undefined;
+      nextObservationFailure?: GenerationStepFailure | undefined;
+    }
+  | { status: "failed"; failure: GenerationStepFailure; amendmentId: string }
+  | { status: "cancelled"; failure: GenerationStepFailure };
+
+/**
+ * Expectation failures that Core reports only after the action, idle wait,
+ * and post-action observation succeeded, so the device already shows the
+ * action's result.
+ */
+export const AMENDABLE_EXPECTATION_FAILURES: ReadonlySet<string> = new Set([
+  "EXPECT_ACTIVITY_FAILED",
+  "EXPECT_ELEMENT_FAILED",
+  "EXPECT_LOGCAT_FAILED",
+  "EXPECT_LOGCAT_AMBIGUOUS"
+]);
+
+const StepAttemptResultSchema = z.looseObject({
+  stepIndex: z.number().int().nonnegative(),
+  proposalHash: z.string(),
+  snapshotHash: z.string(),
+  attemptId: z.string(),
+  source: z.enum(["planner", "manualOverride"]),
+  proposalEvidence: z.strictObject({ path: z.string(), sha256: z.string() }),
+  snapshotEvidence: z.strictObject({ path: z.string(), sha256: z.string() }),
+  outcome: z.looseObject({
+    status: z.enum(["succeeded", "failed", "cancelled"]),
+    failure: z.looseObject({ code: z.string() }).optional()
+  })
+});
+
+function amendmentUnavailable(message: string): never {
+  throw new GenerationOperationError("RECOVERY_REQUIRED", message);
+}
+
 export interface GenerationStepExecutorDependencies {
   store: Pick<
     GenerationSessionStore,
     | "read"
+    | "readEvidence"
     | "beginStep"
     | "completeStep"
+    | "amendStep"
     | "update"
     | "writeEvidence"
     | "writeTextEvidence"
@@ -497,28 +550,36 @@ export class GenerationStepExecutor {
     return snapshot.roots;
   }
 
-  public readonly execute = async (
-    input: GenerationStepExecutionInput
-  ): Promise<GenerationStepExecutionResult> => {
-    if (this.dependencies.uiSnapshotProvider === undefined) {
-      if (
-        this.dependencies.sessions === undefined
-        || this.dependencies.sessionPorts === undefined
-        || this.dependencies.createFreshnessGuard === undefined
-      ) {
-        throw new Error("Generation UI snapshot provider factory is unavailable");
-      }
-      const session = GenerationSessionSchema.parse(
-        await this.dependencies.store.read(input.generationId)
-      );
-      const idle = session.idlePolicy === undefined
-        ? this.dependencies.idle
-        : session.idlePolicy;
-      const deviceSession = await this.dependencies.sessions.openSession({
-        deviceSerial: session.target.deviceSerial,
-        ...(input.signal === undefined ? {} : { signal: input.signal })
-      });
-      try {
+  /**
+   * Runs `run` on an executor bound to one borrowed device session and the
+   * session's bound UI backend, or on this executor when it is already bound.
+   */
+  private async withBoundExecutor<T>(
+    generationId: string,
+    signal: AbortSignal | undefined,
+    run: (executor: GenerationStepExecutor) => Promise<T>
+  ): Promise<T> {
+    if (this.dependencies.uiSnapshotProvider !== undefined) {
+      return run(this);
+    }
+    if (
+      this.dependencies.sessions === undefined
+      || this.dependencies.sessionPorts === undefined
+      || this.dependencies.createFreshnessGuard === undefined
+    ) {
+      throw new Error("Generation UI snapshot provider factory is unavailable");
+    }
+    const session = GenerationSessionSchema.parse(
+      await this.dependencies.store.read(generationId)
+    );
+    const idle = session.idlePolicy === undefined
+      ? this.dependencies.idle
+      : session.idlePolicy;
+    const deviceSession = await this.dependencies.sessions.openSession({
+      deviceSerial: session.target.deviceSerial,
+      ...(signal === undefined ? {} : { signal })
+    });
+    try {
       const views = this.dependencies.sessionPorts(deviceSession);
       const boundBackendSelection = uiBackendIdAsSelection(
         session.bindings.uiBackend.id
@@ -531,10 +592,10 @@ export class GenerationStepExecutor {
         ...(this.dependencies.uiCacheEnabled === undefined
           ? {}
           : { cacheEnabled: this.dependencies.uiCacheEnabled }),
-        ...(input.signal === undefined ? {} : { signal: input.signal })
+        ...(signal === undefined ? {} : { signal })
       });
       try {
-        return await new GenerationStepExecutor({
+        return await run(new GenerationStepExecutor({
           ...this.dependencies,
           idle,
           freshnessGuard: this.dependencies.createFreshnessGuard(
@@ -543,13 +604,24 @@ export class GenerationStepExecutor {
           ),
           views,
           uiSnapshotProvider
-        }).execute(input);
+        }));
       } finally {
         await closeUiSnapshotProvider(uiSnapshotProvider);
       }
-      } finally {
-        await deviceSession.close();
-      }
+    } finally {
+      await deviceSession.close();
+    }
+  }
+
+  public readonly execute = async (
+    input: GenerationStepExecutionInput
+  ): Promise<GenerationStepExecutionResult> => {
+    if (this.dependencies.uiSnapshotProvider === undefined) {
+      return this.withBoundExecutor(
+        input.generationId,
+        input.signal,
+        (executor) => executor.execute(input)
+      );
     }
     const freshnessGuard = this.dependencies.freshnessGuard;
     if (freshnessGuard === undefined) {
@@ -1325,6 +1397,293 @@ export class GenerationStepExecutor {
 
     await this.markRecovery(session.id, inFlight);
     return outcome;
+  };
+
+  /**
+   * `generation recover --decision amend-expect`: replaces the expectation
+   * of a recovery-held step whose action completed but whose expectation
+   * failed, evaluates the new expectation on the current screen without
+   * touching the device, and commits the step when it passes. The final
+   * Replay still re-executes every step.
+   */
+  public readonly amendExpectation = async (
+    input: GenerationExpectationAmendmentInput
+  ): Promise<GenerationExpectationAmendmentResult> => {
+    if (this.dependencies.uiSnapshotProvider === undefined) {
+      return this.withBoundExecutor(
+        input.generationId,
+        input.signal,
+        (executor) => executor.amendExpectation(input)
+      );
+    }
+    const session = GenerationSessionSchema.parse(
+      await this.dependencies.store.read(input.generationId)
+    );
+    if (
+      JSON.stringify(session.bindings.uiBackend)
+        !== JSON.stringify(this.boundUiSnapshotProvider().descriptor)
+    ) {
+      throw new GenerationOperationError(
+        "CONFIG_INVALID",
+        uiBackendMismatchMessage(
+          session.bindings.uiBackend,
+          this.boundUiSnapshotProvider().descriptor
+        )
+      );
+    }
+    const inFlight = session.inFlight;
+    if (
+      session.state !== "recoveryRequired"
+      || inFlight === null
+      || session.pendingConfirmation !== null
+      || session.verification.status !== "notRun"
+      || session.publication.status !== "notRun"
+    ) {
+      amendmentUnavailable(
+        "amend-expect requires a recovery-held in-flight step"
+      );
+    }
+    if (inFlight.confirmation !== undefined) {
+      amendmentUnavailable(
+        "amend-expect is unavailable for a risk-confirmed step; use --decision retry and generation step --replace"
+      );
+    }
+    const attempt = StepAttemptResultSchema.parse(JSON.parse(
+      (await this.dependencies.store.readEvidence(
+        session.id,
+        executionPath(inFlight, "result.json")
+      )).toString("utf8")
+    ) as unknown);
+    const failedCode = attempt.outcome.failure?.code;
+    if (
+      attempt.attemptId !== inFlight.attemptId
+      || attempt.stepIndex !== inFlight.stepIndex
+      || attempt.proposalHash !== inFlight.proposalHash
+      || attempt.snapshotHash !== inFlight.snapshotHash
+      || attempt.outcome.status !== "failed"
+      || failedCode === undefined
+      || !AMENDABLE_EXPECTATION_FAILURES.has(failedCode)
+    ) {
+      amendmentUnavailable(
+        `amend-expect requires a step that failed only its expectation after the action completed (last outcome: ${
+          failedCode ?? attempt.outcome.status
+        }); use --decision retry and generation step --replace`
+      );
+    }
+    const proposalBytes = await this.dependencies.store.readEvidence(
+      session.id,
+      attempt.proposalEvidence.path
+    );
+    const snapshotBytes = await this.dependencies.store.readEvidence(
+      session.id,
+      attempt.snapshotEvidence.path
+    );
+    const proposal = ProposedStepSchema.parse(
+      JSON.parse(proposalBytes.toString("utf8")) as unknown
+    );
+    const snapshot = RuntimeSnapshotSchema.parse(
+      JSON.parse(snapshotBytes.toString("utf8")) as unknown
+    );
+    if (
+      sha256(canonicalEvidenceBytes(proposal)) !== attempt.proposalEvidence.sha256
+      || sha256(canonicalEvidenceBytes(snapshot)) !== attempt.snapshotEvidence.sha256
+      || hashProposedStep(proposal) !== inFlight.proposalHash
+      || hashRuntimeSnapshot(snapshot) !== inFlight.snapshotHash
+    ) {
+      amendmentUnavailable(
+        "Stored step evidence does not match the in-flight attempt"
+      );
+    }
+    if (proposal.action === "bridge") {
+      throw new GenerationOperationError(
+        "EXPECT_UNSUPPORTED",
+        "amend-expect does not support bridge steps; use --decision retry and generation step --replace"
+      );
+    }
+    const risk = this.riskEvaluator.evaluate(
+      proposal,
+      session.target.interactionPolicy,
+      snapshot
+    );
+    if (risk.effectiveRisk !== "safe") {
+      amendmentUnavailable(
+        "amend-expect is unavailable for a step that requires risk confirmation"
+      );
+    }
+    const expect = ExpectSchema.parse(input.expect);
+    if (expect.type !== "element" && expect.type !== "activity") {
+      throw new GenerationOperationError(
+        "EXPECT_UNSUPPORTED",
+        "amend-expect accepts only an element or activity expectation; the step's Logcat window has passed"
+      );
+    }
+    const amended = ProposedStepSchema.parse({
+      ...proposal,
+      expect: bindExpectationEvidence(snapshot.layout, expect)
+    });
+    if (
+      (amended.action === "click" || amended.action === "longClick")
+      && amended.touchPolicy === "element"
+      && expectationHoldsOnScreen(expect, snapshot.layout, snapshot.activity)
+    ) {
+      throw new GenerationOperationError(
+        "EXPECT_UNSUPPORTED",
+        "touchPolicy element expectation already holds before the touch, so it cannot prove the touch took effect"
+      );
+    }
+    const authoritativePid = snapshot.pid;
+    if (authoritativePid === null) {
+      amendmentUnavailable("The failed step's snapshot has no App process");
+    }
+
+    const amendmentId = this.dependencies.generateAttemptId();
+    const amendmentPath = executionPath(
+      inFlight,
+      `amendment-${amendmentId}.json`
+    );
+    const writeAmendment = (
+      outcome: Record<string, unknown>
+    ): Promise<void> => this.dependencies.store.writeEvidence(
+      session.id,
+      amendmentPath,
+      {
+        version: 1,
+        stepIndex: inFlight.stepIndex,
+        attemptId: inFlight.attemptId,
+        amendmentId,
+        originalFailure: attempt.outcome.failure,
+        ...(proposal.expect === undefined
+          ? {}
+          : { originalExpect: proposal.expect }),
+        amendedExpect: amended.expect,
+        amendedProposalHash: hashProposedStep(amended),
+        outcome
+      }
+    );
+
+    let after: LiveRuntime;
+    let settled: LiveRuntime;
+    const stepStartedAt = this.dependencies.clock.now();
+    try {
+      after = await this.observeLive(
+        session,
+        authoritativePid,
+        undefined,
+        input.signal
+      );
+      const observations = new GuardedExpectationObservations<LiveRuntime>({
+        activity: (observation): Promise<string> => this.assertForegroundIdentity(
+          session,
+          authoritativePid,
+          undefined,
+          observation.signal,
+          observation.timeoutMs
+        ),
+        layout: (observation): Promise<LiveRuntime> => this.observeLive(
+          session,
+          authoritativePid,
+          after.activity,
+          observation.signal,
+          undefined,
+          observation.timeoutMs
+        ),
+        rethrow: (error): boolean => error instanceof StepCancelledError
+      }, after);
+      const expectation = await new ExpectationEvaluator(
+        this.boundViews().adb,
+        this.boundUiSnapshotProvider(),
+        new LogcatCollector(this.boundViews().adb, this.dependencies.clock),
+        this.dependencies.clock
+      ).evaluate(expect, {
+        packageName: session.target.packageName,
+        deviceSerial: session.target.deviceSerial,
+        stepStartedAt
+      }, input.signal, observations.boundary());
+      if (expectation.status === "cancelled") {
+        return {
+          status: "cancelled",
+          failure: {
+            code: "RECOVERY_REQUIRED",
+            message: "Expectation amendment was cancelled"
+          }
+        };
+      }
+      if (expectation.status === "failed") {
+        const failure = { code: expectation.code, message: expectation.message };
+        await writeAmendment({ status: "failed", failure });
+        return { status: "failed", failure, amendmentId };
+      }
+      settled = await this.settledExpectationRuntime(
+        session,
+        authoritativePid,
+        expect,
+        after,
+        observations.lastLayoutObservation(),
+        input.signal
+      );
+    } catch (error) {
+      if (error instanceof StepCancelledError || isCancelled(input.signal)) {
+        return {
+          status: "cancelled",
+          failure: {
+            code: "RECOVERY_REQUIRED",
+            message: "Expectation amendment was cancelled"
+          }
+        };
+      }
+      const failure = asFailure(error);
+      await writeAmendment({ status: "failed", failure });
+      return { status: "failed", failure, amendmentId };
+    }
+
+    const step = executableStep(amended, session.variables, after.activity);
+    await writeAmendment({ status: "succeeded", step });
+    const next = GenerationSessionSchema.parse({
+      ...session,
+      revision: session.revision + 1,
+      state: "active",
+      inFlight: null,
+      candidateSteps: [...session.candidateSteps, step],
+      candidateSources: [...session.candidateSources, attempt.source]
+    });
+    await this.dependencies.store.amendStep(
+      session.id,
+      session.revision,
+      inFlight,
+      next
+    );
+    if (this.dependencies.observeNext === undefined) {
+      return { status: "succeeded", step, source: attempt.source, amendmentId };
+    }
+    try {
+      const nextObservation = await this.dependencies.observeNext({
+        generationId: session.id,
+        runtime: {
+          foregroundPackageName: settled.foregroundPackageName,
+          activity: settled.activity,
+          pid: settled.pid,
+          layout: settled.layout,
+          windowHierarchy: settled.windowHierarchy,
+          uiSnapshot: settled.uiSnapshot
+        },
+        ...(input.signal === undefined ? {} : { signal: input.signal })
+      });
+      return {
+        status: "succeeded",
+        step,
+        source: attempt.source,
+        amendmentId,
+        nextObservation
+      };
+    } catch (error) {
+      return {
+        status: "succeeded",
+        step,
+        source: attempt.source,
+        amendmentId,
+        nextObservationFailure: asFailure(error)
+      };
+    }
   };
 
   /**

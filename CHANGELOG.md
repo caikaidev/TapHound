@@ -4,6 +4,15 @@
 
 ### Added
 
+- `generation recover --decision amend-expect --expect <file>` commits a
+  step whose action completed but whose expectation failed, with a
+  corrected `element` or `activity` expectation evaluated on the current
+  screen, instead of `retry` plus a full-prefix `step --replace`. It never
+  touches the device, records `amendment-<id>.json` evidence, is refused for
+  risk-confirmed steps, bridge steps, and Logcat expectations, and emits the
+  `succeeded` step shape that `envelope.mjs bind` accepts. `generation
+  status` reports `recovery.amendExpectAvailable`.
+
 - `generation start --json` reports `timing` (`totalMs` and per-phase
   milliseconds: `contextLoad`, `doctor`, `projectDescribe`,
   `baseFlowReplay` or `appPrepare`, `contextValidation`, `uiSnapshotOpen`,

@@ -113,6 +113,7 @@ export interface GenerationFinalizeOptions extends GenerationObserveOptions {
 
 export interface GenerationRecoverOptions extends GenerationObserveOptions {
   decision: string;
+  expect?: string | undefined;
 }
 
 export interface GenerationReopenOptions extends GenerationObserveOptions {

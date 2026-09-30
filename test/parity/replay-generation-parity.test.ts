@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { demoApp, scenarios } from "../harness/demo-app.js";
 import type { JourneyStep } from "../../src/domain/journey.js";
 import {
+  amendGeneration,
   createParityProject,
   runRecording,
   finalizeGeneration,
@@ -119,6 +120,48 @@ describe("Replay ↔ Generation parity on a simulated device", () => {
     expect(replay.outcomes.map((outcome) => outcome.outcome))
       .toEqual(["EXTERNAL_PACKAGE_MISMATCH"]);
     expect(replay.stepCalls[0]?.tap).toBe(1);
+  }, SCENARIO_TIMEOUT_MS);
+
+  it("amends a mistyped expectation on the current screen without replaying", async () => {
+    const search = scenarios.find((scenario) => scenario.name === "search happy path");
+    const open = search?.journey.steps[0];
+    if (
+      search === undefined
+      || open?.action !== "click"
+      || open.expect?.type !== "element"
+    ) {
+      throw new Error("search scenario is missing");
+    }
+    const typo: JourneyStep = {
+      ...open,
+      expect: { ...open.expect, locator: { resourceId: "search_inputt" } }
+    };
+    const generation = await runGeneration(demoApp, project, {
+      ...search.journey,
+      steps: [typo]
+    });
+    expect(generation.outcomes.map((step) => step.outcome))
+      .toEqual(["EXPECT_ELEMENT_FAILED"]);
+
+    // A still-wrong amendment leaves the step in recovery.
+    const stillWrong = await amendGeneration(project, generation, {
+      ...open.expect,
+      locator: { resourceId: "search_field" }
+    });
+    expect(stillWrong.outcome).toBe("EXPECT_ELEMENT_FAILED");
+
+    const amended = await amendGeneration(project, generation, open.expect);
+    expect(amended.outcome).toBe("passed");
+    // Only observation: no tap, no input, no launch, no force-stop.
+    expect(Object.keys(amended.calls).filter((call) => (
+      ["tap", "longClick", "inputText", "swipe", "back", "launchApp", "forceStop"]
+        .includes(call)
+    ))).toEqual([]);
+    await expect(finalizeGeneration(project, generation)).resolves.toBe("verified");
+    deviceCalls["amend expectation"] = {
+      stillWrong: stillWrong.calls,
+      amended: amended.calls
+    };
   }, SCENARIO_TIMEOUT_MS);
 
   it("pins per-step device calls for both engines", async () => {

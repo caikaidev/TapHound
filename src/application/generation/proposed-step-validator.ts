@@ -2,7 +2,7 @@ import {
   GenerationSessionSchema,
   type GenerationSession
 } from "../../domain/generation.js";
-import type { TouchPolicy } from "../../domain/journey.js";
+import type { Expectation, TouchPolicy } from "../../domain/journey.js";
 import type { LayoutElement, Locator } from "../../domain/layout.js";
 import {
   ProposedStepSchema,
@@ -226,6 +226,16 @@ function bindLocatorEvidence(
         evidence: locatorEvidenceForElement(resolution.element)
       }
     : locator;
+}
+
+/** Binds indexed element-expectation Locator evidence from a snapshot. */
+export function bindExpectationEvidence(
+  layout: readonly LayoutElement[],
+  expect: Expectation
+): Expectation {
+  return expect.type === "element"
+    ? { ...expect, locator: bindLocatorEvidence(layout, expect.locator) }
+    : expect;
 }
 
 function bindProposalEvidence(

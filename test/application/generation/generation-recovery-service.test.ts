@@ -66,7 +66,11 @@ function session(
   };
 }
 
-function harness(initial: GenerationSession, ownerAlive = false): {
+function harness(
+  initial: GenerationSession,
+  ownerAlive = false,
+  evidence: Record<string, unknown> = {}
+): {
   service: GenerationRecoveryService;
   current: () => GenerationSession;
   recover: ReturnType<typeof vi.fn>;
@@ -93,7 +97,9 @@ function harness(initial: GenerationSession, ownerAlive = false): {
     service: new GenerationRecoveryService({
       store: {
         read: () => Promise.resolve(current),
-        readEvidence: () => Promise.reject(
+        readEvidence: (_id: string, path: string) => path in evidence
+          ? Promise.resolve(Buffer.from(JSON.stringify(evidence[path])))
+          : Promise.reject(
           new GenerationSessionStoreError(
             "EVIDENCE_NOT_FOUND",
             "missing"
@@ -162,6 +168,44 @@ describe("GenerationRecoveryService", () => {
       revision: 3,
       state: "active",
       inFlight: null
+    });
+  });
+
+  it("offers amend-expect only for an unconfirmed expectation failure", async () => {
+    const inFlight = {
+      stepIndex: 0,
+      snapshotHash: "d".repeat(64),
+      proposalHash: "f".repeat(64),
+      attemptId: "attempt-1"
+    };
+    const result = (code: string): Record<string, unknown> => ({
+      "evidence/steps/0-attempt-1/result.json": {
+        outcome: { status: "failed", failure: { code, message: "failed" } }
+      }
+    });
+    const held = session({ state: "recoveryRequired", inFlight });
+
+    await expect(harness(held, false, result("EXPECT_ELEMENT_FAILED"))
+      .service.status("generation-1")).resolves.toMatchObject({
+      recovery: {
+        requiredDecision: "retry",
+        attemptOutcome: "failed",
+        amendExpectAvailable: true
+      }
+    });
+    await expect(harness(held, false, result("ACTION_FAILED"))
+      .service.status("generation-1")).resolves.toMatchObject({
+      recovery: { amendExpectAvailable: false }
+    });
+    await expect(harness(session({
+      state: "recoveryRequired",
+      inFlight: {
+        ...inFlight,
+        confirmation: { challengeId: "challenge-1", approvalMode: "localTty" }
+      }
+    }), false, result("EXPECT_ELEMENT_FAILED"))
+      .service.status("generation-1")).resolves.toMatchObject({
+      recovery: { amendExpectAvailable: false }
     });
   });
 

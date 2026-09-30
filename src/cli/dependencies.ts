@@ -246,7 +246,7 @@ export interface GenerationCliRuntime {
     GenerationConfirmationService,
     "request" | "requestManual" | "confirmStored" | "findPendingManual"
   >;
-  executor: Pick<GenerationStepExecutor, "execute">;
+  executor: Pick<GenerationStepExecutor, "execute" | "amendExpectation">;
   observer: Pick<RuntimeObserver, "observe">;
   finalizer: Pick<GenerationFinalizer, "finalize">;
   recovery: Pick<GenerationRecoveryService, "status" | "retry">;

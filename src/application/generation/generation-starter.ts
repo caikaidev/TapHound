@@ -88,7 +88,15 @@ export interface GenerationStartInput {
   } | undefined;
   externalFlows?: readonly GenerationExternalFlowInput[] | undefined;
   sourceBrief?: { path: string; sha256: string } | undefined;
+  /** Receives the duration of each start phase, for CLI timing output. */
+  recordPhase?: ((phase: GenerationStartPhase, durationMs: number) => void) | undefined;
 }
+
+export type GenerationStartPhase =
+  | "contextValidation"
+  | "appPrepare"
+  | "uiSnapshotOpen"
+  | "sessionCreate";
 
 export interface GenerationStarterDependencies {
   contextValidator: Pick<ContextValidator, "validate">;
@@ -223,11 +231,27 @@ export class GenerationStarter {
         "Project package does not match configured package"
       );
     }
-    const validation = await this.dependencies.contextValidator.validate({
-      context: input.context,
-      projectRoot: input.projectRoot,
-      config
-    });
+    const phase = async <T>(
+      name: GenerationStartPhase,
+      run: () => Promise<T>
+    ): Promise<T> => {
+      const startedAt = this.dependencies.now().getTime();
+      try {
+        return await run();
+      } finally {
+        input.recordPhase?.(
+          name,
+          Math.max(0, this.dependencies.now().getTime() - startedAt)
+        );
+      }
+    };
+    const validation = await phase("contextValidation", () => (
+      this.dependencies.contextValidator.validate({
+        context: input.context,
+        projectRoot: input.projectRoot,
+        config
+      })
+    ));
     if (
       validation.status !== "valid"
       && !(validation.status === "stale" && input.allowEvidenceDrift === true)
@@ -339,11 +363,11 @@ export class GenerationStarter {
 
     if (baseFlow === undefined) {
       try {
-        await this.dependencies.appPreparer.prepare({
+        await phase("appPrepare", () => this.dependencies.appPreparer.prepare({
           config,
           deviceSerial: input.deviceSerial,
           ...(input.signal === undefined ? {} : { signal: input.signal })
-        });
+        }));
       } catch (error) {
         if (isRuntimeCapabilityError(error)) {
           throw error;
@@ -368,15 +392,18 @@ export class GenerationStarter {
       ? undefined
       : GenerationSourceBriefSchema.parse(input.sourceBrief);
 
-    const uiSnapshotProvider = await this.dependencies.uiSnapshots.open({
-      deviceSerial: input.deviceSerial,
-      timeoutMs: config.ui?.snapshotTimeoutMs ?? config.idle.timeoutMs,
-      backend: config.ui?.backend ?? "auto",
-      cacheEnabled: config.ui?.cacheEnabled ?? true,
-      ...(input.signal === undefined ? {} : { signal: input.signal })
+    const uiBackend = await phase("uiSnapshotOpen", async () => {
+      const uiSnapshotProvider = await this.dependencies.uiSnapshots.open({
+        deviceSerial: input.deviceSerial,
+        timeoutMs: config.ui?.snapshotTimeoutMs ?? config.idle.timeoutMs,
+        backend: config.ui?.backend ?? "auto",
+        cacheEnabled: config.ui?.cacheEnabled ?? true,
+        ...(input.signal === undefined ? {} : { signal: input.signal })
+      });
+      const descriptor = uiSnapshotProvider.descriptor;
+      await closeUiSnapshotProvider(uiSnapshotProvider);
+      return descriptor;
     });
-    const uiBackend = uiSnapshotProvider.descriptor;
-    await closeUiSnapshotProvider(uiSnapshotProvider);
 
     const generationId = this.dependencies.generateId();
     const runId = distinctId(generationId, this.dependencies.generateId);
@@ -416,12 +443,14 @@ export class GenerationStarter {
       publication: { status: "notRun" }
     });
 
-    await this.dependencies.store.create(session);
-    await this.dependencies.store.writeEvidence(
-      session.id,
-      GENERATION_CONTEXT_SNAPSHOT_PATH,
-      context
-    );
+    await phase("sessionCreate", async () => {
+      await this.dependencies.store.create(session);
+      await this.dependencies.store.writeEvidence(
+        session.id,
+        GENERATION_CONTEXT_SNAPSHOT_PATH,
+        context
+      );
+    });
     return session;
   };
 }

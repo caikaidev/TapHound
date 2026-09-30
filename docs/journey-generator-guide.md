@@ -254,9 +254,17 @@ fails with `BRIEF_INVALID` before any device work.
   "bindings": { "projectHash": "...", "configHash": "...", "contextHash": "...", "snapshotHash": null },
   "contextSelection": { "bundleVersion": 2, "indexHash": "...", "modules": [{"id": ":app", "sha256": "...", "projectDir": "app", "inventory": {"pathSetSha256": "...", "categories": ["manifests", "sources", "layouts", "navigation"]}}, {"id": ":feature:search", "sha256": "...", "projectDir": "features/search", "inventory": {"pathSetSha256": "...", "categories": ["manifests", "sources", "layouts", "navigation"]}}] },
   "variables": { "runId": "...", "timestamp": "...", "randomHex": "..." },
-  "target": { "packageName": "...", "deviceSerial": "...", "resetStrategy": "processOnly", "interactionPolicy": {...} }
+  "target": { "packageName": "...", "deviceSerial": "...", "resetStrategy": "processOnly", "interactionPolicy": {...} },
+  "timing": { "totalMs": 41250, "phases": { "contextLoad": 120, "doctor": 2480, "projectDescribe": 35, "baseFlowReplay": 31900, "contextValidation": 5810, "uiSnapshotOpen": 640, "sessionCreate": 60 } }
 }
 ```
+
+`timing` reports wall-clock milliseconds per start phase, in execution order:
+`contextLoad`, `doctor`, `projectDescribe`, then either `baseFlowReplay`
+(with `--base-flow`, a full Replay of the Flow including cold launch and
+final evidence collection) or `appPrepare` (cold launch without a Flow), then
+`contextValidation`, `uiSnapshotOpen`, and `sessionCreate`. It is output only
+and is not persisted; include it when reporting slow starts.
 
 **Note the `generationId` and `contextSelection`**. The application module,
 requested modules, and their declared dependencies are bound to the session.

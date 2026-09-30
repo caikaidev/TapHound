@@ -4,6 +4,11 @@
 
 ### Added
 
+- `generation start --json` reports `timing` (`totalMs` and per-phase
+  milliseconds: `contextLoad`, `doctor`, `projectDescribe`,
+  `baseFlowReplay` or `appPrepare`, `contextValidation`, `uiSnapshotOpen`,
+  `sessionCreate`) so slow starts can be attributed. Output only.
+
 - `click` and `longClick` steps and proposals accept `touchPolicy:
   "element"` for targets that react to touches although neither they nor an
   ancestor report `clickable` (RecyclerView item-touch listeners, WebView DOM

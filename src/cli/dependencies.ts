@@ -273,6 +273,8 @@ export interface GenerationCliRuntime {
 
 export interface CliDependencies {
   signal?: AbortSignal | undefined;
+  /** Monotonic milliseconds for command timing output; defaults to performance.now. */
+  monotonicNow?: (() => number) | undefined;
   doctor: {
     run: (input?: DoctorRunInput) => Promise<DoctorReport>;
   };

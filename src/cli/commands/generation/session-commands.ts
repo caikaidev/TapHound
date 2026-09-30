@@ -8,7 +8,8 @@ import { z } from "zod";
 
 import {
   GenerationOperationError,
-  flowReplayFailureDetails
+  flowReplayFailureDetails,
+  type GenerationStartPhase
 } from "../../../application/generation/generation-starter.js";
 import type {
   RuntimeObservation
@@ -59,6 +60,17 @@ import {
   writeSuccess
 } from "./shared.js";
 
+/**
+ * `generation start` phases in execution order; `baseFlowReplay` and
+ * `appPrepare` are exclusive (a Base Flow replay already cold-launches).
+ */
+type StartTimingPhase =
+  | "contextLoad"
+  | "doctor"
+  | "projectDescribe"
+  | "baseFlowReplay"
+  | GenerationStartPhase;
+
 export function createStartCommand(dependencies: CliDependencies): Command {
   return new Command("start")
     .description(
@@ -96,6 +108,20 @@ export function createStartCommand(dependencies: CliDependencies): Command {
     )
     .option("--json", "Emit one machine-readable JSON value")
     .action(async (options: GenerationStartOptions): Promise<void> => {
+      const now = dependencies.monotonicNow ?? ((): number => performance.now());
+      const startedAt = now();
+      const phases: Partial<Record<StartTimingPhase, number>> = {};
+      const timed = async <T>(
+        name: StartTimingPhase,
+        run: () => Promise<T>
+      ): Promise<T> => {
+        const phaseStartedAt = now();
+        try {
+          return await run();
+        } finally {
+          phases[name] = Math.max(0, Math.round(now() - phaseStartedAt));
+        }
+      };
       try {
         const projectRoot = await canonicalProjectRoot(
           dependencies.cwd(),
@@ -109,12 +135,12 @@ export function createStartCommand(dependencies: CliDependencies): Command {
           projectRoot,
           options.context ?? CONTEXT_INDEX_PATH
         );
-        const loaded = await dependencies.contextLoader.load({
+        const loaded = await timed("contextLoad", () => dependencies.contextLoader.load({
           projectRoot,
           contextPath,
           allowIncomplete: true,
           ...(options.module === undefined ? {} : { moduleIds: options.module })
-        });
+        }));
         const context = loaded.context;
         const briefRequest = options.brief;
         const sourceBrief = briefRequest === undefined
@@ -155,7 +181,7 @@ export function createStartCommand(dependencies: CliDependencies): Command {
               sha256: createHash("sha256").update(bytes).digest("hex")
             };
           })();
-        const doctor = await dependencies.doctor.run({
+        const doctor = await timed("doctor", () => dependencies.doctor.run({
           packageName: config.run.packageName,
           ...(config.ui?.backend === undefined
             ? {}
@@ -166,7 +192,7 @@ export function createStartCommand(dependencies: CliDependencies): Command {
           ...(dependencies.signal === undefined
             ? {}
             : { signal: dependencies.signal })
-        });
+        }));
         if (doctor.status === "failed") {
           writeFailure(
             dependencies,
@@ -182,13 +208,13 @@ export function createStartCommand(dependencies: CliDependencies): Command {
         if (deviceSerial === undefined) {
           throw new Error("Doctor did not select a device");
         }
-        const project = await dependencies.projectDescriber.describe({
+        const project = await timed("projectDescribe", () => dependencies.projectDescriber.describe({
           projectRoot,
           config,
           ...(dependencies.signal === undefined
             ? {}
             : { signal: dependencies.signal })
-        });
+        }));
         const baseFlow = options.baseFlow === undefined
           ? undefined
           : await (async (): Promise<NonNullable<
@@ -213,7 +239,7 @@ export function createStartCommand(dependencies: CliDependencies): Command {
                 dependencies.stderr,
                 `TapHound: replaying base Flow ${options.baseFlow as string}`
               );
-              const verification = await dependencies.verifier.verify({
+              const verification = await timed("baseFlowReplay", () => dependencies.verifier.verify({
                 config,
                 journey: resolution.journey,
                 projectRoot,
@@ -227,7 +253,7 @@ export function createStartCommand(dependencies: CliDependencies): Command {
                 ...(dependencies.signal === undefined
                   ? {}
                   : { signal: dependencies.signal })
-              });
+              }));
               if (
                 verification.status !== "passed"
                 || verification.exitCode !== 0
@@ -297,7 +323,10 @@ export function createStartCommand(dependencies: CliDependencies): Command {
           ...(sourceBrief === undefined ? {} : { sourceBrief }),
           ...(options.allowEvidenceDrift === true
             ? { allowEvidenceDrift: true }
-            : {})
+            : {}),
+          recordPhase: (phase, durationMs) => {
+            phases[phase] = Math.round(durationMs);
+          }
         });
         const output = {
           status: "started" as const,
@@ -329,7 +358,11 @@ export function createStartCommand(dependencies: CliDependencies): Command {
             : { sourceBrief: session.sourceBrief }),
           ...(session.externalFlows.length === 0
             ? {}
-            : { externalFlows: session.externalFlows })
+            : { externalFlows: session.externalFlows }),
+          timing: {
+            totalMs: Math.max(0, Math.round(now() - startedAt)),
+            phases
+          }
         };
         if (options.json === true) {
           writeJson(dependencies.stdout, output);

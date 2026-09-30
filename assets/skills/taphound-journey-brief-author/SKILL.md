@@ -392,6 +392,17 @@ Verify:
    - Match by `resourceId` → `text` → `contentDescription` priority.
    - Confirm element `enabled: true` and supports the target action
      (e.g., `clickable: true`).
+   - Read capability only from this `observe` layout, never from a raw
+     `uiautomator dump` or static XML: backends expose different trees (for
+     example, Appium hides the `android.webkit.WebView` wrapper that a raw
+     dump shows). For a `click`/`longClick` edge, record which element holds
+     the capability: the target itself, a named ancestor, or none. When none
+     does (RecyclerView item-touch listeners, WebView DOM nodes such as mail
+     images), write that in `## Capability Notes` and name the observable
+     outcome (an element or Activity that is absent now and appears after
+     the touch) that the generator needs for `touchPolicy: "element"`.
+   - Never state a capability you did not see in this snapshot; mark the
+     edge `needs-observation` instead.
 3. Extract logcat tag patterns from `report.logcat[]` for Capability
    Notes.
 4. Edges verifiable in the snapshot keep `source` confidence. Edges not

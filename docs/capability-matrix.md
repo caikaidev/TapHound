@@ -49,6 +49,22 @@ Locator fields: `resourceId`, `text`, `contentDescription`.
 | Scope | `within` restricts candidates to descendants of the scope element's match; the scope element itself is **not** included (ancestor chains exclude self) |
 | Ambiguity | More than one surviving candidate fails `LOCATOR_AMBIGUOUS`; zero fail `LOCATOR_NOT_FOUND`. TapHound never picks heuristically |
 
+## UI tree fidelity
+
+TapHound matches Locators and checks capabilities against the layout of the
+selected `ui.backend`, never against a raw `uiautomator dump`. The backends
+see the same accessibility data but shape it differently, so study the tree
+with `taphound observe` or `generation observe` on the backend the Journey
+will run with.
+
+| Observation | Consequence |
+|---|---|
+| Backends expose different hierarchies: a raw `uiautomator dump` shows the `android.webkit.WebView` wrapper nodes that the Appium UiAutomator2 tree omits | Ancestor chains, `within` scopes, and "nearest clickable ancestor" conclusions drawn from a raw dump may not hold in Replay |
+| RecyclerView rows handled by an item-touch listener and WebView DOM nodes report no `clickable` element anywhere in their ancestor chain | `click`/`longClick` fail closed (`ACTION_UNSUPPORTED` in Generation, `ACTION_FAILED` in Replay) unless the step opts into `touchPolicy: "element"` with an outcome `expect` (see `docs/journey-schema.md`) |
+| WebView DOM bounds follow the CSS box, not the rendered pixels (a 60 px image reported as 1533 px tall), and may overflow the WebView and the display | `touchPolicy: "element"` touches the center of the bounds clipped to every ancestor and the display; that point can still miss small content, so the step's `expect` must be one only the intended target can cause |
+| Field reports show content such as an open DrawerLayout drawer missing from a raw dump while present in `taphound observe` | Assert drawer contents only from TapHound snapshots |
+| System UIAutomator captures are slower than Appium captures (field report: about 2.7 s against 0.5–1.2 s per capture) | Choose the backend before `generation start`; the session binds it, and later commands must use the same `--config` |
+
 ## Generation revision rules
 
 Session revisions advance atomically with persisted evidence. A proposal must

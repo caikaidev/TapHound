@@ -40,6 +40,7 @@ stateDiagram-v2
 - Runtime variable capture: <supported/not supported — guidance, e.g. "not supported — use a fixed unique string as the business identifier.">
 - Multi-field locators: TapHound stops at the first field with a unique match; later fields are not validated — text assertions must use a text-only locator.
 - logcat expect: tag matches by exact equality (including all prefixes); literal matches by substring.
+- Touch capability (from `taphound observe`, not a raw dump): <e.g. "e3 target mail_row has no clickable element in its ancestor chain — needs touchPolicy element; outcome: tv_mail_title appears.">
 
 ## Assertions
 

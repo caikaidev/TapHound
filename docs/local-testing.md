@@ -265,6 +265,18 @@ Cross-machine validation should retain at minimum:
 
 Do not commit tokens, OTPs, device privacy data, or other credentials.
 
+### Proxy environment variables
+
+With `NODE_USE_ENV_PROXY=1` and `HTTP_PROXY`/`HTTPS_PROXY` set, Node routes
+`fetch` through its experimental `EnvHttpProxyAgent` and prints
+`[UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental` on the first
+request, which TapHound makes to the local Appium server
+(`http://127.0.0.1:4723`). The warning goes to stderr and never changes JSON
+stdout, but the proxy also applies to that local request: add
+`127.0.0.1,localhost` to `NO_PROXY`, or unset `NODE_USE_ENV_PROXY` for
+TapHound commands. `NODE_NO_WARNINGS=1` hides the warning without changing
+routing.
+
 ## 7. Vendor-Specific Device Notes
 
 Customized ROMs differ in UI idle behavior. Two seams exist for device-specific

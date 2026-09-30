@@ -55,6 +55,15 @@
 
 ### Changed
 
+- `docs/capability-matrix.md` documents UI tree fidelity across backends
+  (raw dump versus Appium hierarchy, WebView DOM bounds, non-clickable
+  touch targets), and `docs/local-testing.md` explains the Node
+  `UNDICI-EHPA` proxy warning and the `NO_PROXY` setting for the local
+  Appium server.
+- The Brief Author reads touch capability only from `taphound observe`
+  snapshots, records which element holds it, and names the outcome a
+  `touchPolicy: "element"` step needs when no element does.
+
 - The `taphound-flash` Skill states that visual styles (colors, layout
   details) are out of scope for flash and TapHound alike: Contracts can require
   a screenshot but never compare pixels, so a visual change needs human review.

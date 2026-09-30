@@ -35,6 +35,9 @@
 - `envelope.mjs bind` accepts `generation step --replace` output, so no
   extra `observe` is needed after a replace, and explains that a bare
   binding cannot reuse the draft's old `snapshotRef`.
+- `generation start --output` fails with a hint that the Journey path is
+  chosen at `generation finalize --output`, and `start --help` says so and
+  that later commands need the same `--config`.
 
 - `taphound-flash` retries a failing uiautomator dump (for example `null root
   node` while a splash screen starts) until the current wait runs out instead

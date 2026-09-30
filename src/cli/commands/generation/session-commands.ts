@@ -61,9 +61,16 @@ import {
 
 export function createStartCommand(dependencies: CliDependencies): Command {
   return new Command("start")
-    .description("Start a Core-owned generation session")
+    .description(
+      "Start a Core-owned generation session"
+        + " (the Journey path is chosen later with `generation finalize --output`)"
+    )
     .option("--project <path>", "Android project root", dependencies.cwd())
-    .option("--config <path>", "TapHound config path", CONFIG_PATH)
+    .option(
+      "--config <path>",
+      "TapHound config path; later generation commands must pass the same --config",
+      CONFIG_PATH
+    )
     .option("--context <path>", "Project Context path")
     .option("--module <id...>", "Select Context modules for this session")
     .option("--device <serial>", "Select an online Android device")

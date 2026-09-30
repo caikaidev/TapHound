@@ -140,6 +140,10 @@ themselves.
   `anchor` is supplied, Core resolves it first and taps the anchor point to
   focus the field before typing; an anchor without bounds fails with
   `ANCHOR_NOT_FOUND`.
+- `direction` (`swipe` and `scrollTo`) is the finger direction: `up` drags
+  from the bottom toward the top of the element and reveals content below,
+  `down` reveals content above, `left` reveals content to the right, and
+  `right` reveals content to the left.
 - `swipe`: targets a `locator` or a semantic `anchor`, plus `direction`;
   `distancePercent` is in `(0, 1]`, default 0.6; `durationMs` default 300. The
   Recorder only shows elements that Android CLI marks as scrollable and that
@@ -151,7 +155,11 @@ themselves.
   respectively. Replay deterministically resolves the target (resolving an
   `anchor` to its element bounds) before and after each swipe, stopping once the
   target appears uniquely, without clicking the target; exceeding the limit
-  returns `SCROLL_TARGET_NOT_FOUND`. The container must be unique and provide
+  returns `SCROLL_TARGET_NOT_FOUND`. When the container subtree is unchanged
+  after 2 consecutive swipes, the container is at its edge in that
+  direction: the step stops early with `SCROLL_TARGET_NOT_FOUND` and a
+  message naming the direction instead of spending the rest of
+  `maxSwipes`. The container must be unique and provide
   bounds; annotated fallback is not supported.
 - `back`: performs the ADB BACK keyevent.
 - `wait`: performs only Layout stability detection, with no fixed sleep. A

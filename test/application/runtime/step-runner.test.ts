@@ -217,6 +217,7 @@ function scrollCli(
     | "present"
     | "afterOneSwipe"
     | "absent"
+    | "absentMoving"
     | "idleTimeout"
     | "ambiguous"
     | "containerMissing"
@@ -259,6 +260,20 @@ function scrollCli(
       const withBubble = [container, bubble];
       const withoutBubble = [container];
       if (target === "present") return Promise.resolve(withBubble);
+      if (target === "absentMoving") {
+        // Each read shows a different page of rows, but never the target.
+        return Promise.resolve([{
+          ...container,
+          children: [{
+            id: "row",
+            resourceId: "row",
+            text: `row ${String(reads)}`,
+            enabled: true,
+            bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+            children: []
+          }]
+        }]);
+      }
       if (target === "absent" || target === "idleTimeout") {
         return Promise.resolve(withoutBubble);
       }
@@ -834,14 +849,35 @@ describe("scrollTo replay", () => {
   it("fails with SCROLL_TARGET_NOT_FOUND when the bound is exhausted", async () => {
     const { runner } = fixture({
       adb: mainActivityAdb(),
+      androidCli: scrollCli("absentMoving")
+    });
+    const result = await runner.run(scrollStep, 0);
+    expect(result.status).toBe("failed");
+    if (result.status === "failed") {
+      expect(result.failure.code).toBe("SCROLL_TARGET_NOT_FOUND");
+      expect(result.failure.message).toBe("Target not visible after 3 swipes");
+    }
+    expect(result.report.scroll).toEqual({ swipesUsed: 3, maxSwipes: 3 });
+  });
+
+  it("stops early and names the finger direction when the container never moves", async () => {
+    const { runner, adb } = fixture({
+      adb: mainActivityAdb(),
       androidCli: scrollCli("absent")
     });
     const result = await runner.run(scrollStep, 0);
     expect(result.status).toBe("failed");
     if (result.status === "failed") {
       expect(result.failure.code).toBe("SCROLL_TARGET_NOT_FOUND");
+      expect(result.failure.message).toContain(
+        'the container did not move after 2 consecutive "up" swipes'
+      );
+      expect(result.failure.message).toContain(
+        'direction is the finger direction: "up" reveals content below'
+      );
     }
-    expect(result.report.scroll).toEqual({ swipesUsed: 3, maxSwipes: 3 });
+    expect(result.report.scroll).toEqual({ swipesUsed: 2, maxSwipes: 3 });
+    expect(adb.swipe).toHaveBeenCalledTimes(2);
   });
 
   it("fails with IDLE_TIMEOUT and writes layout-diff when idle times out during a scroll swipe", async () => {

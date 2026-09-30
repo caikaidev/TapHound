@@ -82,6 +82,11 @@ the observe result).
    - For `swipe`: the target should be `scrollable: true` with `bounds`.
    - For `scrollTo`: specify both `locator` (target) and `container`
      (scrollable parent).
+   - `direction` for `swipe` and `scrollTo` is the finger direction: `up`
+     reveals content below (the usual way down a list), `down` reveals
+     content above. A `scrollTo` whose container stops moving fails early
+     with `SCROLL_TARGET_NOT_FOUND` naming the direction; reverse it rather
+     than raising `maxSwipes`.
 
 5. **Detect cross-app transitions**: Before proposing a `click` on a trigger
    that opens an external app, check whether the element clearly initiates a

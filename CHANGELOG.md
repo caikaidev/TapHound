@@ -23,6 +23,19 @@
 
 ### Fixed
 
+- `scrollTo` stops with `SCROLL_TARGET_NOT_FOUND` once 2 consecutive swipes
+  leave the container unchanged, naming the direction, instead of spending
+  every remaining swipe at a list edge. The docs state that `direction` is
+  the finger direction (`up` reveals content below).
+- The diagnostics journal keeps Generation-only failure codes such as
+  `ACTION_UNSUPPORTED`; they were dropped as a bare `error` status.
+- Generation `CONFIG_INVALID` for a config or UI backend that differs from
+  the session names the bound and current hashes and says to rerun with the
+  `--config` used at `generation start`.
+- `envelope.mjs bind` accepts `generation step --replace` output, so no
+  extra `observe` is needed after a replace, and explains that a bare
+  binding cannot reuse the draft's old `snapshotRef`.
+
 - `taphound-flash` retries a failing uiautomator dump (for example `null root
   node` while a splash screen starts) until the current wait runs out instead
   of failing the whole run on the first attempt.

@@ -531,7 +531,10 @@ without meta fails with `META_MISSING` and a second retire fails with
   without element bounds fails rather than guessing a region.
 - `scrollTo` swipes a `container` up to `maxSwipes` until the anchor or
   `locator` resolves uniquely, then stops without acting. Exhaustion is
-  `SCROLL_TARGET_NOT_FOUND`; annotated fallback is not allowed.
+  `SCROLL_TARGET_NOT_FOUND`; so is a container subtree left unchanged by 2
+  consecutive swipes (stalled at its edge, often a reversed direction).
+  `direction` is the finger direction (`up` reveals content below).
+  Annotated fallback is not allowed.
 - `AdbPort` uses `appProcesses` for process discovery. Streaming Logcat starts
   with `-T 1`; generation observes and binds the App PID set before starting
   the per-step collector. `LogcatCollector` may also add later PIDs with

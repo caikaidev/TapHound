@@ -13,7 +13,7 @@ Every CLI invocation appends one JSON line to
 - the command path (`verify`, `generation step`) and the names of the flags
   the user passed, never their values;
 - duration, exit code, and, for `--json` commands, the output `status`,
-  failure code, and run id;
+  failure code (Replay and Generation codes), and run id;
 - per UI backend: capture count, total and maximum latency, a latency
   histogram (`<250`, `<500`, `<1000`, `<2000`, `<5000`, `≥5000` ms), failures
   by kind (`timeout`, `cancelled`, `http4xx`, `http5xx`, `error`), and Appium

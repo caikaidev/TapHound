@@ -443,6 +443,50 @@ describe("journey-generator envelope helper", () => {
     });
   });
 
+  it("binds from a replace output and replaces the draft's old snapshotRef", async () => {
+    const newRef = snapshotRef.replace("revision-000006", "revision-000009");
+    const input = await put("proposal.json", envelope({
+      proposal: proposal({ binding: undefined })
+    }));
+    const from = await put("replace.json", {
+      status: "replaced",
+      exitCode: 0,
+      stepIndex: 3,
+      remainingStepCount: 3,
+      truncatedStepCount: 1,
+      generationId: "generation-1",
+      baseRevision: 9,
+      snapshotHash,
+      snapshotRef: newRef
+    });
+    const result = command("bind", "--input", input, "--from", from);
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual(envelope({
+      proposal: proposal({
+        binding: { generationId: "generation-1", baseRevision: 9, snapshotHash }
+      }),
+      snapshotRef: newRef
+    }));
+  });
+
+  it("explains that a bare binding cannot reuse the draft's snapshotRef", async () => {
+    const input = await put("proposal.json", envelope({
+      proposal: proposal({ binding: undefined })
+    }));
+    const from = await put("binding.json", {
+      generationId: "generation-1",
+      baseRevision: 6,
+      snapshotHash
+    });
+    const result = command("bind", "--input", input, "--from", from);
+    expect(result.code).toBe(2);
+    expect(result.output.code).toBe("ENVELOPE_INVALID");
+    expect(result.output.message).toContain(
+      "bind source is a bare binding without a snapshotRef"
+    );
+    expect(result.output.message).toContain("generation step --replace");
+  });
+
   it("rejects a bind source without usable binding fields", async () => {
     const input = await put("proposal.json", {
       version: 1,

@@ -264,14 +264,16 @@ them with `MANUAL_STEP_REQUIRED`.
       ```bash
       node <skill>/scripts/envelope.mjs bind \
         --input <draft-envelope-path> \
-        --from <previous-observe-or-step-output-path> \
+        --from <previous-observe-step-or-replace-output-path> \
         --out <envelope-path> \
         --project <project>
       ```
       The draft envelope needs only `version` and `proposal` (binding may be
       omitted or stale); `bind` fills `proposal.binding` from the preceding
-      observe output, step output, or raw binding, adds `snapshotRef` when
-      absent, and validates the result offline. It also compares
+      observe output, `step --replace` output, succeeded step output, or raw
+      binding, sets `snapshotRef` from that source (a draft's old
+      `snapshotRef` is never reused; a raw binding therefore needs an inline
+      `snapshot`), and validates the result offline. It also compares
       `proposal.activity.before` with the bound snapshot's Activity (read
       from `snapshotRef` under `--project`) and fails with
       `ENVELOPE_ACTIVITY_MISMATCH`, naming the snapshot Activity, before any

@@ -503,6 +503,9 @@ All edges retain their Phase 1 confidence.
   <project> --context <context> --json` (read-only, no device) to surface
   drifted Journeys (`module-drift`, `module-missing`); the
   `taphound-journey-generator` Skill re-finalizes them from their sessions.
+  Any shard rewrite, even a `semanticSha256` backfill or a formatting-only
+  rehash, drifts every Journey that selected the module, so tell the user
+  how many Journeys a refresh will mark stale before running it.
 - Conditionally rendered elements (a clear button that only appears once a
   search field has text, collapsed containers) are still valid Context
   evidence — record them — but flag them in the shard `summary` as

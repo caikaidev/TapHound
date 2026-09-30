@@ -895,6 +895,17 @@ taphound journey check \
   --json
 ```
 
+`module-drift` compares the whole module shard hash, so any change to the
+shard marks every Journey that selected the module `stale`: a semantic
+source change in any file of the module (including code unrelated to the
+Journey, since Core does not infer relevance), and also bookkeeping-only
+rewrites such as `context refresh` backfilling `semanticSha256` or
+rehashing a formatting-only change. The only proof that the Journey still
+holds is a new Replay, so re-finalize it (for state-changing Journeys, seed
+the test data again first). To limit the blast radius, run `context
+refresh` only when a Journey needs the new evidence, and keep
+formatting-only churn out of modules that many Journeys select.
+
 `--context` (the live Project Context index) is required. Exit `0` means the
 check completed — findings or not; `--strict` exits `1` when any Journey is
 stale, invalid, or missing its sidecar, suitable for CI gates.

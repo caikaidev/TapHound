@@ -25,7 +25,7 @@
         "blocked", "deferred", "verified", "archived"
       ]
     },
-    "reason": { "type": "string", "minLength": 1, "maxLength": 500 },
+    "reason": { "type": "string", "minLength": 1, "maxLength": 1000 },
     "brief": { "$ref": "case-ledger-v1.json#/$defs/artifact" },
     "generation": {
       "type": "object",

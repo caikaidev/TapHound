@@ -141,7 +141,11 @@ export function summarizeProposedStep(step: ProposedStep): string {
   if (step.action === "bridge") {
     return `Bridge ${step.scenario} via ${locatorSummary(step)} on ${before}`;
   }
-  return `${step.action} ${locatorSummary(step)} on ${before}`;
+  const touch = (step.action === "click" || step.action === "longClick")
+    && step.touchPolicy === "element"
+    ? " (touchPolicy element: no clickable ancestor)"
+    : "";
+  return `${step.action} ${locatorSummary(step)}${touch} on ${before}`;
 }
 
 function bindingFailure(message: string): GenerationOperationError {

@@ -15,7 +15,9 @@ cold-launch replay engine as finalize (honoring the session's current idle
 policy), truncates the candidate to that prefix, and binds a fresh
 post-replay snapshot. The response matches `observe` plus `status:
 "replaced"`, `stepIndex`, `remainingStepCount`, and `truncatedStepCount`;
-the next proposal must bind the returned revision and snapshot. The index
+the next proposal must bind the returned revision and snapshot; save the
+output and pass it to `envelope.mjs bind --from` directly, with no extra
+`observe`. The index
 must be an integer in `[0, candidateStepCount]` (`0` cold-resets without
 replay); an index inside the bound Base Flow prefix fails with
 `FLOW_INVALID`; `--input` and `--replace` are mutually exclusive. Replace is

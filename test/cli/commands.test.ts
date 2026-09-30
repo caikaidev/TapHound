@@ -478,6 +478,17 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
 
   it("starts a generation with one exact JSON result", async () => {
     const test = dependencies();
+    // Each clock read advances 10 ms, so every phase reports 10 ms.
+    let tick = 0;
+    test.value.monotonicNow = (): number => (tick += 10);
+    const start = vi.mocked(test.value.generationStarter.start);
+    const started = start.getMockImplementation();
+    if (started === undefined) throw new Error("start mock is missing");
+    start.mockImplementationOnce((input) => {
+      input.recordPhase?.("contextValidation", 1200);
+      input.recordPhase?.("appPrepare", 3400);
+      return started(input);
+    });
     vi.mocked(test.value.readJson).mockImplementation((path) => Promise.resolve(
       path.includes("context") ? generationContext : runtimeConfig
     ));
@@ -518,6 +529,16 @@ describe("TapHound CLI commands", () => {  it("uses TapHound config defaults", (
           allowedActions: ["click"],
           confirmationRequiredActions: [],
           forbiddenActions: ["back"]
+        }
+      },
+      timing: {
+        totalMs: 70,
+        phases: {
+          contextLoad: 10,
+          doctor: 10,
+          projectDescribe: 10,
+          contextValidation: 1200,
+          appPrepare: 3400
         }
       }
     });

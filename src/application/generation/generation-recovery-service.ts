@@ -10,9 +10,11 @@ import {
   type GenerationSessionStore
 } from "../../ports/generation-session-store.js";
 import { GenerationOperationError } from "./generation-starter.js";
+import { AMENDABLE_EXPECTATION_FAILURES } from "./generation-step-executor.js";
 
 const AttemptOutcomeSchema = z.looseObject({
-  status: z.enum(["succeeded", "failed", "cancelled"])
+  status: z.enum(["succeeded", "failed", "cancelled"]),
+  failure: z.looseObject({ code: z.string() }).optional()
 });
 
 export interface GenerationRecoveryStatus {
@@ -34,6 +36,11 @@ export interface GenerationRecoveryStatus {
     actionMayHaveExecuted: boolean;
     attemptOutcome: "succeeded" | "failed" | "cancelled" | "unknown" | null;
     requiredDecision: "retry" | null;
+    /**
+     * `amend-expect` is also accepted: the unconfirmed action completed and
+     * only its expectation failed.
+     */
+    amendExpectAvailable: boolean;
     ownerAlive: boolean | null;
   };
 }
@@ -74,6 +81,7 @@ export class GenerationRecoveryService {
       | "cancelled"
       | "unknown"
       | null = null;
+    let failureCode: string | undefined;
     if (path !== undefined) {
       try {
         const bytes = await this.dependencies.store.readEvidence(
@@ -84,6 +92,7 @@ export class GenerationRecoveryService {
           outcome: AttemptOutcomeSchema
         }).parse(JSON.parse(bytes.toString("utf8")) as unknown);
         attemptOutcome = parsed.outcome.status;
+        failureCode = parsed.outcome.failure?.code;
       } catch (error) {
         if (
           error instanceof GenerationSessionStoreError
@@ -149,6 +158,12 @@ export class GenerationRecoveryService {
           || session.verification.status === "running",
         attemptOutcome,
         requiredDecision: available ? "retry" : null,
+        amendExpectAvailable: stepAvailable
+          && session.pendingConfirmation === null
+          && session.inFlight?.confirmation === undefined
+          && attemptOutcome === "failed"
+          && failureCode !== undefined
+          && AMENDABLE_EXPECTATION_FAILURES.has(failureCode),
         ownerAlive: verificationOwnerAlive
       }
     };

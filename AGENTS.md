@@ -429,8 +429,15 @@ Agent must never infer approval or apply it to another challenge.
 Approved challenge ID and approval mode are persisted atomically in the
 in-flight attempt before device mutation, then copied into successful or failed
 step result evidence for audit.
-`generation recover --decision retry` is the only CLI transition out of an
-interrupted action or dead receipt-free verification attempt. The explicit
+`generation recover --decision retry` is the general CLI transition out of an
+interrupted action or dead receipt-free verification attempt.
+`generation recover --decision amend-expect --expect <file>` is the narrow
+alternative for an unconfirmed step whose action completed and only its
+expectation failed: `GenerationStepExecutor.amendExpectation` evaluates a
+new `element`/`activity` expectation on the current screen without device
+mutation and commits the step through the Store's `amendStep`
+(`recoveryRequired` → `active`, exactly one appended step), recording
+`amendment-<id>.json` evidence. The explicit
 decision is required because the interrupted action or replay may already have
 produced business side effects. Its result distinguishes step from verification
 recovery and names the next action; verification recovery requires rerunning
@@ -500,7 +507,13 @@ without meta fails with `META_MISSING` and a second retire fails with
   `src/application/interaction/action-target.ts`) across Generation, its
   proposal validator, generated Replay, and External Flow steps: click and
   longClick reach the nearest capable element but touch the matched
-  element's own point; swipe needs scrollable bounds.
+  element's own point; swipe needs scrollable bounds. An explicit
+  `touchPolicy: "element"` on a click or longClick skips the capability
+  rule and touches the matched element's visible center (bounds clipped to
+  ancestors and the display) for RecyclerView item-touch listeners and
+  WebView DOM nodes; the step must prove its outcome with an `element` or
+  `activity` expect (or an Activity change) that does not already hold
+  before the touch.
 - Journey `click`, `longClick`, `swipe`, `scrollTo`, and `inputText` steps may
   express their target as a semantic Knowledge `anchor` (an id from
   `.taphound/knowledge/anchors/`) instead of or alongside `locator`. Replay
@@ -525,7 +538,10 @@ without meta fails with `META_MISSING` and a second retire fails with
   without element bounds fails rather than guessing a region.
 - `scrollTo` swipes a `container` up to `maxSwipes` until the anchor or
   `locator` resolves uniquely, then stops without acting. Exhaustion is
-  `SCROLL_TARGET_NOT_FOUND`; annotated fallback is not allowed.
+  `SCROLL_TARGET_NOT_FOUND`; so is a container subtree left unchanged by 2
+  consecutive swipes (stalled at its edge, often a reversed direction).
+  `direction` is the finger direction (`up` reveals content below).
+  Annotated fallback is not allowed.
 - `AdbPort` uses `appProcesses` for process discovery. Streaming Logcat starts
   with `-T 1`; generation observes and binds the App PID set before starting
   the per-step collector. `LogcatCollector` may also add later PIDs with

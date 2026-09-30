@@ -610,6 +610,45 @@ implements GenerationSessionStore {
     expectedInFlightInput: GenerationInFlight,
     input: GenerationSession
   ): Promise<void> => {
+    await this.appendStep(
+      id,
+      expectedRevision,
+      expectedInFlightInput,
+      input,
+      "active",
+      "complete a step"
+    );
+  };
+
+  public readonly amendStep = async (
+    id: string,
+    expectedRevision: number,
+    expectedInFlightInput: GenerationInFlight,
+    input: GenerationSession
+  ): Promise<void> => {
+    await this.appendStep(
+      id,
+      expectedRevision,
+      expectedInFlightInput,
+      input,
+      "recoveryRequired",
+      "amend a step"
+    );
+  };
+
+  /**
+   * Clears the matching inFlight record and appends exactly one Journey
+   * step: from `active` for a completed step, from `recoveryRequired` for
+   * an amended expectation.
+   */
+  private async appendStep(
+    id: string,
+    expectedRevision: number,
+    expectedInFlightInput: GenerationInFlight,
+    input: GenerationSession,
+    fromState: "active" | "recoveryRequired",
+    operation: string
+  ): Promise<void> {
     assertId(id);
     const expectedInFlight = parseInFlight(expectedInFlightInput);
     const next = parseSession(input, true);
@@ -622,7 +661,7 @@ implements GenerationSessionStore {
         if (await pathExists(this.finalDirectory(id))) {
           throw new GenerationSessionStoreError(
             "SESSION_PUBLISHED",
-            `Published generation session cannot complete a step: ${id}`
+            `Published generation session cannot ${operation}: ${id}`
           );
         }
         throw new GenerationSessionStoreError(
@@ -647,7 +686,7 @@ implements GenerationSessionStore {
         );
       }
       if (
-        current.state !== "active"
+        current.state !== fromState
         || current.inFlight === null
         || !sameInFlight(current.inFlight, expectedInFlight)
         || next.state !== "active"
@@ -704,7 +743,7 @@ implements GenerationSessionStore {
         activeEvidence
       );
     });
-  };
+  }
 
   public readonly recover = async (
     id: string,

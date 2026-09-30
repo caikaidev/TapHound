@@ -452,6 +452,57 @@ describe("packaged Case Suite Ledger", () => {
     expect(result.output.message).toMatch(/templates[/\\]transition\.example\.json$/);
   });
 
+  it("tells a caller that --input takes a file path, not inline JSON", async () => {
+    const fixture = await setup();
+    const inline = JSON.stringify({ version: 1, expectedRevision: 0 });
+    expect(command("transition", "--suite", fixture.suite, "--input", inline))
+      .toMatchObject({
+        code: 2,
+        output: {
+          code: "CASE_SUITE_USAGE",
+          message: "--input takes the path of a JSON file, not inline JSON; write the Transition input to a file and pass its path"
+        }
+      });
+  });
+
+  it("names the invalid identity field and the path through skipped states", async () => {
+    const fixture = await setup();
+    const unknownStatus = await transition(fixture.suite, fixture.root, {
+      expectedRevision: 0,
+      caseId: "CASE-001",
+      from: "pending",
+      to: "brief-ready",
+      reason: "Claim"
+    });
+    expect(unknownStatus.output.message).toContain(
+      'transition to "brief-ready" is not a Case status; expected one of pending, briefing, briefReady'
+    );
+
+    expect(await transition(fixture.suite, fixture.root, {
+      expectedRevision: 0,
+      caseId: "CASE-001",
+      from: "pending",
+      to: "briefing",
+      reason: "Claim"
+    })).toMatchObject({ code: 0 });
+    const skipped = await transition(fixture.suite, fixture.root, {
+      expectedRevision: 1,
+      caseId: "CASE-001",
+      from: "briefing",
+      to: "generating",
+      reason: "Start generation"
+    });
+    expect(skipped).toMatchObject({
+      code: 2,
+      output: { code: "CASE_SUITE_TRANSITION_INVALID" }
+    });
+    expect(skipped.output.message).toBe(
+      "Transition briefing -> generating is not allowed; from briefing the next "
+        + "status is one of: briefReady, blocked, deferred, archived; reach "
+        + "generating through briefing -> briefReady -> generating"
+    );
+  });
+
   it("documents the ledger revision rule in help", () => {
     const result = spawnSync(process.execPath, [helper, "help"], { encoding: "utf8" });
     expect(result.stdout).toContain("increments\nledger.revision by exactly 1");
@@ -464,7 +515,7 @@ describe("packaged Case Suite Ledger", () => {
       caseId: "CASE-001",
       from: "pending",
       to: "deferred",
-      reason: "r".repeat(500),
+      reason: "r".repeat(1000),
       failure: { code: "DEFERRED", message: "Postponed" },
       nextAction: "n".repeat(1000)
     })).toMatchObject({ code: 0, output: { revision: 1 } });
@@ -475,14 +526,14 @@ describe("packaged Case Suite Ledger", () => {
       caseId: "CASE-001",
       from: "pending",
       to: "deferred",
-      reason: "r".repeat(501),
+      reason: "r".repeat(1001),
       failure: { code: "DEFERRED", message: "Postponed" },
       nextAction: "Resume later"
     })).toMatchObject({
       code: 2,
       output: {
         code: "CASE_SUITE_INVALID",
-        message: "reason exceeds 500 characters"
+        message: "reason exceeds 1000 characters; keep the reason short and put failure evidence in failure.message (1000) and the recovery path in nextAction (1000)"
       }
     });
 

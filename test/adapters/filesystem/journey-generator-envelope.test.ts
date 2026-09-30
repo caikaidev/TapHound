@@ -207,8 +207,35 @@ describe("journey-generator envelope helper", () => {
     expect(result.code).toBe(2);
     expect(result.output.code).toBe("ENVELOPE_INVALID");
     expect(result.output.message).toContain(
-      'action "click" allows fields: action, locator, binding, activity, expect'
+      'action "click" allows fields: action, locator, binding, activity, touchPolicy, expect'
     );
+  });
+
+  it("accepts touchPolicy element only with an outcome expectation", async () => {
+    const expectDetail = {
+      type: "element",
+      locator: { resourceId: "detail" },
+      timeoutMs: 500
+    };
+    const valid = await put("envelope.json", envelope({
+      proposal: proposal({ touchPolicy: "element", expect: expectDetail })
+    }));
+    expect(command("validate", "--input", valid).code).toBe(0);
+
+    for (const [overrides, message] of [
+      [{ touchPolicy: "element" }, "requires an element or activity expect"],
+      [
+        { touchPolicy: "ancestor", expect: expectDetail },
+        'touchPolicy must be "element"'
+      ]
+    ] as const) {
+      const input = await put("envelope.json", envelope({
+        proposal: proposal(overrides)
+      }));
+      const result = command("validate", "--input", input);
+      expect(result.code).toBe(2);
+      expect(result.output.message).toContain(message);
+    }
   });
 
   it("rejects an envelope that carries both snapshot and snapshotRef", async () => {
@@ -414,6 +441,50 @@ describe("journey-generator envelope helper", () => {
       status: "bound",
       activityCheck: "unverified"
     });
+  });
+
+  it("binds from a replace output and replaces the draft's old snapshotRef", async () => {
+    const newRef = snapshotRef.replace("revision-000006", "revision-000009");
+    const input = await put("proposal.json", envelope({
+      proposal: proposal({ binding: undefined })
+    }));
+    const from = await put("replace.json", {
+      status: "replaced",
+      exitCode: 0,
+      stepIndex: 3,
+      remainingStepCount: 3,
+      truncatedStepCount: 1,
+      generationId: "generation-1",
+      baseRevision: 9,
+      snapshotHash,
+      snapshotRef: newRef
+    });
+    const result = command("bind", "--input", input, "--from", from);
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual(envelope({
+      proposal: proposal({
+        binding: { generationId: "generation-1", baseRevision: 9, snapshotHash }
+      }),
+      snapshotRef: newRef
+    }));
+  });
+
+  it("explains that a bare binding cannot reuse the draft's snapshotRef", async () => {
+    const input = await put("proposal.json", envelope({
+      proposal: proposal({ binding: undefined })
+    }));
+    const from = await put("binding.json", {
+      generationId: "generation-1",
+      baseRevision: 6,
+      snapshotHash
+    });
+    const result = command("bind", "--input", input, "--from", from);
+    expect(result.code).toBe(2);
+    expect(result.output.code).toBe("ENVELOPE_INVALID");
+    expect(result.output.message).toContain(
+      "bind source is a bare binding without a snapshotRef"
+    );
+    expect(result.output.message).toContain("generation step --replace");
   });
 
   it("rejects a bind source without usable binding fields", async () => {

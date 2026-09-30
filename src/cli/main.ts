@@ -66,6 +66,26 @@ function asCommanderFailure(error: unknown): CommanderFailure | undefined {
     : undefined;
 }
 
+/** Options that belong to a later step of the same workflow. */
+const MISPLACED_OPTION_HINTS: readonly {
+  command: readonly string[];
+  option: string;
+  hint: string;
+}[] = [{
+  command: ["generation", "start"],
+  option: "--output",
+  hint: "the Journey output path is chosen later with `generation finalize --output <path>`"
+}];
+
+function commanderMessage(error: unknown, argv: readonly string[]): string {
+  const message = errorMessage(error);
+  const found = MISPLACED_OPTION_HINTS.find((entry) => (
+    message.includes(`unknown option '${entry.option}'`)
+    && entry.command.every((token, index) => argv[index + 2] === token)
+  ));
+  return found === undefined ? message : `${message}; ${found.hint}`;
+}
+
 function overrideCommandExits(command: Command): void {
   command.exitOverride();
   for (const child of command.commands) {
@@ -153,7 +173,7 @@ export async function runMain(
     const output = failureOutput(
       exitCode,
       commanderFailure ? "CONFIG_INVALID" : "INTERNAL_ERROR",
-      errorMessage(error)
+      commanderFailure ? commanderMessage(error, argv) : errorMessage(error)
     );
     if (json) {
       writeJson(dependencies.stdout, output);

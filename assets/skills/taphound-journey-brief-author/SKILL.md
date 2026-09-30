@@ -392,6 +392,17 @@ Verify:
    - Match by `resourceId` → `text` → `contentDescription` priority.
    - Confirm element `enabled: true` and supports the target action
      (e.g., `clickable: true`).
+   - Read capability only from this `observe` layout, never from a raw
+     `uiautomator dump` or static XML: backends expose different trees (for
+     example, Appium hides the `android.webkit.WebView` wrapper that a raw
+     dump shows). For a `click`/`longClick` edge, record which element holds
+     the capability: the target itself, a named ancestor, or none. When none
+     does (RecyclerView item-touch listeners, WebView DOM nodes such as mail
+     images), write that in `## Capability Notes` and name the observable
+     outcome (an element or Activity that is absent now and appears after
+     the touch) that the generator needs for `touchPolicy: "element"`.
+   - Never state a capability you did not see in this snapshot; mark the
+     edge `needs-observation` instead.
 3. Extract logcat tag patterns from `report.logcat[]` for Capability
    Notes.
 4. Edges verifiable in the snapshot keep `source` confidence. Edges not
@@ -492,6 +503,9 @@ All edges retain their Phase 1 confidence.
   <project> --context <context> --json` (read-only, no device) to surface
   drifted Journeys (`module-drift`, `module-missing`); the
   `taphound-journey-generator` Skill re-finalizes them from their sessions.
+  Any shard rewrite, even a `semanticSha256` backfill or a formatting-only
+  rehash, drifts every Journey that selected the module, so tell the user
+  how many Journeys a refresh will mark stale before running it.
 - Conditionally rendered elements (a clear button that only appears once a
   search field has text, collapsed containers) are still valid Context
   evidence — record them — but flag them in the shard `summary` as

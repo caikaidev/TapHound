@@ -157,6 +157,7 @@ function harness(
   clock?: Clock
 ): {
   execute: GenerationStepExecutor["execute"];
+  amend: GenerationStepExecutor["amendExpectation"];
   current: () => GenerationSession;
   calls: string[];
   adb: Record<
@@ -314,6 +315,25 @@ function harness(
     writeTextEvidence: vi.fn((_id: string, path: string, value: string) => {
       evidence.set(path, value);
       return Promise.resolve();
+    }),
+    readEvidence: vi.fn((_id: string, path: string) => {
+      if (!evidence.has(path)) {
+        return Promise.reject(new Error(`missing evidence ${path}`));
+      }
+      return Promise.resolve(Buffer.from(JSON.stringify(evidence.get(path))));
+    }),
+    amendStep: vi.fn((
+      _id: string,
+      expectedRevision: number,
+      inFlight: NonNullable<GenerationSession["inFlight"]>,
+      next: GenerationSession
+    ) => {
+      calls.push("amend");
+      expect(current.revision).toBe(expectedRevision);
+      expect(current.state).toBe("recoveryRequired");
+      expect(current.inFlight).toEqual(inFlight);
+      current = GenerationSessionSchema.parse(next);
+      return Promise.resolve();
     })
   };
   const externalFlowResolver = {
@@ -381,6 +401,7 @@ function harness(
   });
   return {
     execute: executor.execute,
+    amend: executor.amendExpectation,
     current: (): GenerationSession => current,
     calls,
     adb,
@@ -2930,5 +2951,166 @@ describe("GenerationStepExecutor", () => {
       failure: { code: "EXTERNAL_STEP_FAILED" }
     });
     expect(test.current().state).toBe("recoveryRequired");
+  });
+});
+
+describe("GenerationStepExecutor expectation amendment", () => {
+  const missing = {
+    type: "element" as const,
+    locator: { resourceId: "missing" },
+    timeoutMs: 10
+  };
+
+  async function failedExpectation(
+    overrides: Partial<ProposedStep> = {}
+  ): Promise<ReturnType<typeof harness>> {
+    const runtime = snapshot();
+    const test = harness(session(runtime));
+    const result = await test.execute({
+      generationId: "generation-1",
+      proposal: { ...proposal(runtime), expect: missing, ...overrides } as ProposedStep,
+      snapshot: runtime,
+      source: "planner"
+    });
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { code: "EXPECT_ELEMENT_FAILED" }
+    });
+    expect(test.current().state).toBe("recoveryRequired");
+    return test;
+  }
+
+  it("commits the completed action with an expectation proven on the current screen", async () => {
+    const test = await failedExpectation();
+    test.adb.tap.mockClear();
+
+    const result = await test.amend({
+      generationId: "generation-1",
+      expect: { type: "activity", value: afterActivity, timeoutMs: 10 }
+    });
+
+    expect(result).toMatchObject({
+      status: "succeeded",
+      amendmentId: "attempt-1",
+      step: {
+        action: "click",
+        locator: { text: "Continue run-42" },
+        activity: { before: activity, after: afterActivity },
+        expect: { type: "activity", value: afterActivity }
+      }
+    });
+    expect(test.adb.tap).not.toHaveBeenCalled();
+    expect(test.current()).toMatchObject({
+      state: "active",
+      inFlight: null,
+      candidateSources: ["planner"]
+    });
+    expect(test.current().candidateSteps).toHaveLength(1);
+    expect(test.evidence.get(
+      "evidence/steps/0-attempt-1/amendment-attempt-1.json"
+    )).toMatchObject({
+      originalFailure: { code: "EXPECT_ELEMENT_FAILED" },
+      originalExpect: missing,
+      amendedExpect: { type: "activity", value: afterActivity },
+      outcome: { status: "succeeded" }
+    });
+  });
+
+  it("keeps the step in recovery when the amended expectation still fails", async () => {
+    const test = await failedExpectation();
+
+    const result = await test.amend({
+      generationId: "generation-1",
+      expect: { ...missing, locator: { resourceId: "still-missing" } }
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { code: "EXPECT_ELEMENT_FAILED" }
+    });
+    expect(test.current().state).toBe("recoveryRequired");
+    expect(test.current().candidateSteps).toEqual([]);
+  });
+
+  it("rejects Logcat expectations whose step window has passed", async () => {
+    const test = await failedExpectation();
+
+    await expect(test.amend({
+      generationId: "generation-1",
+      expect: {
+        type: "logcat",
+        tag: "App",
+        pattern: "opened",
+        match: "literal",
+        timeoutMs: 10
+      }
+    })).rejects.toMatchObject({ code: "EXPECT_UNSUPPORTED" });
+    expect(test.current().state).toBe("recoveryRequired");
+  });
+
+  it("rejects a touchPolicy element expectation that held before the touch", async () => {
+    const test = await failedExpectation({ touchPolicy: "element" });
+
+    await expect(test.amend({
+      generationId: "generation-1",
+      expect: {
+        type: "element",
+        locator: { resourceId: "submit" },
+        timeoutMs: 10
+      }
+    })).rejects.toMatchObject({ code: "EXPECT_UNSUPPORTED" });
+    expect(test.current().state).toBe("recoveryRequired");
+  });
+
+  it("refuses sessions without an amendable expectation failure", async () => {
+    const test = harness(session());
+    await expect(test.amend({
+      generationId: "generation-1",
+      expect: missing
+    })).rejects.toMatchObject({
+      code: "RECOVERY_REQUIRED",
+      message: "amend-expect requires a recovery-held in-flight step"
+    });
+
+    const failedAction = harness(session());
+    failedAction.adb.tap.mockImplementationOnce((() => Promise.resolve({
+      ...ok,
+      exitCode: 1,
+      stderr: "tap failed"
+    })) as never);
+    const runtime = snapshot();
+    await failedAction.execute({
+      generationId: "generation-1",
+      proposal: { ...proposal(runtime), expect: missing },
+      snapshot: runtime,
+      source: "planner"
+    });
+    expect(failedAction.current().state).toBe("recoveryRequired");
+    await expect(failedAction.amend({
+      generationId: "generation-1",
+      expect: missing
+    })).rejects.toMatchObject({ code: "RECOVERY_REQUIRED" });
+  });
+
+  it("refuses a risk-confirmed step", async () => {
+    const test = await failedExpectation();
+    const held = test.current();
+    const inFlight = held.inFlight;
+    if (inFlight === null) throw new Error("inFlight missing");
+    test.replaceCurrent({
+      ...held,
+      inFlight: {
+        ...inFlight,
+        confirmation: { challengeId: "challenge-1", approvalMode: "delegated" }
+      }
+    });
+
+    await expect(test.amend({
+      generationId: "generation-1",
+      expect: { type: "activity", value: afterActivity, timeoutMs: 10 }
+    })).rejects.toMatchObject({
+      code: "RECOVERY_REQUIRED",
+      message: expect.stringContaining("risk-confirmed") as unknown
+    });
   });
 });

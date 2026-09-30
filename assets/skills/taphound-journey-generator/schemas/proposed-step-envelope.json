@@ -162,9 +162,14 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["action", "locator", "binding", "activity"],
+          "dependentRequired": { "touchPolicy": ["expect"] },
           "properties": {
             "action": { "const": "click" },
             "locator": { "$ref": "#/$defs/Locator" },
+            "touchPolicy": {
+              "const": "element",
+              "description": "Touch the visible part of the located element although neither it nor an ancestor reports clickable (RecyclerView item-touch listeners, WebView DOM nodes). Requires an element or activity expect that does not already hold."
+            },
             "binding": { "$ref": "#/$defs/ProposalBinding" },
             "activity": { "$ref": "#/$defs/ActivityCheckpoint" },
             "expect": { "$ref": "#/$defs/Expect" }
@@ -174,9 +179,14 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["action", "locator", "binding", "activity"],
+          "dependentRequired": { "touchPolicy": ["expect"] },
           "properties": {
             "action": { "const": "longClick" },
             "locator": { "$ref": "#/$defs/Locator" },
+            "touchPolicy": {
+              "const": "element",
+              "description": "Touch the visible part of the located element although neither it nor an ancestor reports longClickable (RecyclerView item-touch listeners, WebView DOM nodes). Requires an element or activity expect that does not already hold."
+            },
             "durationMs": { "type": "integer", "minimum": 1, "default": 800 },
             "binding": { "$ref": "#/$defs/ProposalBinding" },
             "activity": { "$ref": "#/$defs/ActivityCheckpoint" },

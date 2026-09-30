@@ -124,6 +124,24 @@ describe("runMain", () => {
     expect(exitCodes).toEqual([2]);
   });
 
+  it("points a misplaced generation start --output to finalize", async () => {
+    const exitCodes: number[] = [];
+    const test = dependencies(exitCodes);
+
+    await runMain([
+      "node", "taphound", "generation", "start", "--output", "a.json", "--json"
+    ], test);
+
+    expect(JSON.parse((test.stdout as BufferOutput).value)).toMatchObject({
+      exitCode: 2,
+      failure: {
+        code: "CONFIG_INVALID",
+        message: "error: unknown option '--output'; the Journey output path is chosen later with `generation finalize --output <path>`"
+      }
+    });
+    expect(exitCodes).toEqual([2]);
+  });
+
   it("journals the finished invocation with its structured outcome", async () => {
     const exitCodes: number[] = [];
     const test = dependencies(exitCodes);

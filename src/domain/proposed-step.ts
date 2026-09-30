@@ -2,7 +2,12 @@ import { createHash } from "node:crypto";
 
 import { z } from "zod";
 
-import { ExpectSchema, BridgeScenarioSchema } from "./journey.js";
+import {
+  ExpectSchema,
+  BridgeScenarioSchema,
+  TouchPolicySchema,
+  type TouchPolicy
+} from "./journey.js";
 import { LocatorSchema } from "./layout.js";
 
 const QualifiedActivitySchema = z.string().regex(
@@ -28,18 +33,44 @@ const CommonStepShape = {
   expect: ExpectSchema.optional()
 };
 
+/**
+ * A proposal learns its after Activity only by executing, so a touch
+ * without capability proof must declare its outcome as an expectation.
+ */
+const TouchPolicyRefine = (
+  step: {
+    touchPolicy?: TouchPolicy | undefined;
+    expect?: { type: string } | undefined;
+  },
+  context: z.RefinementCtx
+): void => {
+  if (
+    step.touchPolicy !== undefined
+    && step.expect?.type !== "element"
+    && step.expect?.type !== "activity"
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["expect"],
+      message: "touchPolicy element requires an element or activity expect to prove the touch took effect"
+    });
+  }
+};
+
 const ClickStepSchema = z.strictObject({
   action: z.literal("click"),
   locator: LocatorSchema,
+  touchPolicy: TouchPolicySchema.optional(),
   ...CommonStepShape
-});
+}).superRefine(TouchPolicyRefine);
 
 const LongClickStepSchema = z.strictObject({
   action: z.literal("longClick"),
   locator: LocatorSchema,
+  touchPolicy: TouchPolicySchema.optional(),
   durationMs: z.number().int().positive().default(800),
   ...CommonStepShape
-});
+}).superRefine(TouchPolicyRefine);
 
 const InputTextStepSchema = z.strictObject({
   action: z.literal("inputText"),

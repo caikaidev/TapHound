@@ -2,6 +2,7 @@ import {
   GenerationSessionSchema,
   type GenerationSession
 } from "../../domain/generation.js";
+import type { Expectation, TouchPolicy } from "../../domain/journey.js";
 import type { LayoutElement, Locator } from "../../domain/layout.js";
 import {
   ProposedStepSchema,
@@ -19,6 +20,7 @@ import {
   resolveActionTarget,
   type TargetedAction
 } from "../interaction/action-target.js";
+import { expectationHoldsOnScreen } from "../assertion/expectation-evaluator.js";
 import { resolveLocator } from "../locator/locator-resolver.js";
 import { hasExactlyOneEnabledFocusedElement } from "./focused-input.js";
 import { GenerationOperationError } from "./generation-starter.js";
@@ -56,16 +58,59 @@ function rejectResolution(
 function requireActionTarget(
   snapshot: RuntimeSnapshot,
   action: TargetedAction,
-  locator: Locator
+  locator: Locator,
+  touchPolicy?: TouchPolicy
 ): void {
   const resolved = resolveActionTarget(
     snapshot.layout,
     action,
     locator,
-    undefined
+    undefined,
+    touchPolicy
   );
   if (resolved.status !== "found") {
     rejectResolution(resolved);
+  }
+}
+
+/**
+ * `touchPolicy: "element"` is reserved for targets no ancestor claims, and
+ * its expectation must still be unmet so that passing proves the touch.
+ */
+function requireElementTouch(
+  snapshot: RuntimeSnapshot,
+  proposal: Extract<ProposedStep, { action: "click" | "longClick" }>
+): void {
+  const capable = resolveActionTarget(
+    snapshot.layout,
+    proposal.action,
+    proposal.locator,
+    undefined
+  );
+  if (capable.status === "found") {
+    rejectCapability(
+      `${proposal.action} target already reports its capability; omit touchPolicy`
+    );
+  }
+  if (
+    capable.code === "LOCATOR_NOT_FOUND"
+    || capable.code === "LOCATOR_AMBIGUOUS"
+  ) {
+    rejectResolution(capable);
+  }
+  requireActionTarget(snapshot, proposal.action, proposal.locator, "element");
+  if (
+    proposal.expect !== undefined
+    && expectationHoldsOnScreen(
+      proposal.expect,
+      snapshot.layout,
+      snapshot.activity
+    )
+  ) {
+    throw new GenerationOperationError(
+      "EXPECT_UNSUPPORTED",
+      "touchPolicy element expectation already holds before the touch, so it cannot prove the touch took effect"
+    );
   }
 }
 
@@ -121,6 +166,13 @@ function validateAction(
   proposal: ProposedStep
 ): void {
   if (
+    (proposal.action === "click" || proposal.action === "longClick")
+    && proposal.touchPolicy === "element"
+  ) {
+    requireElementTouch(snapshot, proposal);
+    return;
+  }
+  if (
     proposal.action === "click"
     || proposal.action === "longClick"
     || proposal.action === "swipe"
@@ -174,6 +226,16 @@ function bindLocatorEvidence(
         evidence: locatorEvidenceForElement(resolution.element)
       }
     : locator;
+}
+
+/** Binds indexed element-expectation Locator evidence from a snapshot. */
+export function bindExpectationEvidence(
+  layout: readonly LayoutElement[],
+  expect: Expectation
+): Expectation {
+  return expect.type === "element"
+    ? { ...expect, locator: bindLocatorEvidence(layout, expect.locator) }
+    : expect;
 }
 
 function bindProposalEvidence(

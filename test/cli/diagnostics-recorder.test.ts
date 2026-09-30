@@ -52,6 +52,17 @@ describe("diagnostics recorder", () => {
       exitCode: 2,
       failure: { code: "CONFIG_INVALID", message: "/Users/secret/project" }
     }))).toEqual({ failureCode: "CONFIG_INVALID" });
+    expect(outcomeFromJsonOutput(JSON.stringify({
+      status: "error",
+      exitCode: 1,
+      failure: {
+        code: "ACTION_UNSUPPORTED",
+        message: "Layout target lacks required clickable capability"
+      }
+    }))).toEqual({ status: "error", failureCode: "ACTION_UNSUPPORTED" });
+    expect(outcomeFromJsonOutput(JSON.stringify({
+      failure: { code: "NOT_A_TAPHOUND_CODE" }
+    }))).toEqual({});
     expect(outcomeFromJsonOutput(JSON.stringify({ verdict: "inconclusive" })))
       .toEqual({ status: "inconclusive" });
     expect(outcomeFromJsonOutput(JSON.stringify({ status: "com.secret.app/Main" }))).toEqual({});

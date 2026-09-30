@@ -1,4 +1,5 @@
 import type { DisplayViewport } from "../../domain/geometry.js";
+import type { TouchPolicy } from "../../domain/journey.js";
 import type { LayoutElement, Locator } from "../../domain/layout.js";
 import {
   resolveLocator,
@@ -18,23 +19,38 @@ export type ActionTargetResolution =
  * generated Replay, and External Flow steps share: a click or longClick
  * reaches the nearest ancestor with that capability (touching the matched
  * element itself), and a swipe needs a scrollable element with bounds.
+ * Under `touchPolicy: "element"` a click or longClick instead touches the
+ * visible part of the enabled matched element without a capability check.
  */
 export function resolveActionTarget(
   layout: readonly LayoutElement[],
   action: TargetedAction,
   locator: Locator,
-  viewport: DisplayViewport | undefined
+  viewport: DisplayViewport | undefined,
+  touchPolicy?: TouchPolicy
 ): ActionTargetResolution {
+  const visibleElement = touchPolicy === "element" && action !== "swipe";
   const located = resolveLocator(layout, locator, {
     viewport,
-    ...(action === "swipe" ? {} : {
+    ...(action === "swipe" || visibleElement ? {} : {
       requiredCapability: action === "click" ? "clickable" : "longClickable"
-    })
+    }),
+    ...(visibleElement ? { visibleElement } : {})
   });
   if (located.status !== "found") {
     return located;
   }
   const element = located.element;
+  if (visibleElement) {
+    return {
+      status: "found",
+      located,
+      target: {
+        point: located.point,
+        ...(element.bounds === undefined ? {} : { bounds: element.bounds })
+      }
+    };
+  }
   if (action === "click" && element.clickable !== true) {
     return actionFailure("click target is not clickable");
   }

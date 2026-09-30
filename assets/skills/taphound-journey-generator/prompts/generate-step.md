@@ -61,7 +61,21 @@ the observe result).
    - Do not add Locator `evidence`. Core derives versioned semantic evidence
      from the bound snapshot when it persists a resolvable indexed step.
    - The element must be `enabled: true`.
-   - For `click`: prefer `clickable: true` elements.
+   - For `click`: prefer `clickable: true` elements. Core also accepts a
+     target whose nearest ancestor is `clickable: true`.
+   - Only when the live snapshot shows that neither the target nor any
+     ancestor reports `clickable` (or `longClickable` for `longClick`), yet
+     the app reacts to touches there (a RecyclerView item-touch listener, a
+     WebView DOM node such as an inline image), add `"touchPolicy":
+     "element"`. Core then touches the part of the element left visible by
+     its ancestors and the display. Such a proposal must carry an `element`
+     or `activity` `expect` that does not already hold on the bound snapshot;
+     that expectation is the only proof that the touch took effect. Core
+     rejects `touchPolicy` on a target that already reports the capability
+     (`ACTION_UNSUPPORTED`) and an expectation that already holds
+     (`EXPECT_UNSUPPORTED`). WebView accessibility bounds often overflow the
+     rendered content, so prefer an expectation that only the intended
+     target can cause.
    - For `inputText`: the target should be `focusable: true` (an EditText).
      Do not include a `locator` for `inputText` — the Core uses the focused
      element.

@@ -500,7 +500,13 @@ without meta fails with `META_MISSING` and a second retire fails with
   `src/application/interaction/action-target.ts`) across Generation, its
   proposal validator, generated Replay, and External Flow steps: click and
   longClick reach the nearest capable element but touch the matched
-  element's own point; swipe needs scrollable bounds.
+  element's own point; swipe needs scrollable bounds. An explicit
+  `touchPolicy: "element"` on a click or longClick skips the capability
+  rule and touches the matched element's visible center (bounds clipped to
+  ancestors and the display) for RecyclerView item-touch listeners and
+  WebView DOM nodes; the step must prove its outcome with an `element` or
+  `activity` expect (or an Activity change) that does not already hold
+  before the touch.
 - Journey `click`, `longClick`, `swipe`, `scrollTo`, and `inputText` steps may
   express their target as a semantic Knowledge `anchor` (an id from
   `.taphound/knowledge/anchors/`) instead of or alongside `locator`. Replay

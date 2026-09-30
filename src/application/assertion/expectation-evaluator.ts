@@ -100,6 +100,34 @@ export function elementPredicateMismatch(
   return undefined;
 }
 
+/**
+ * Whether an element or activity expectation already holds on a settled
+ * screen, before any action: a touch without capability proof cannot claim
+ * an outcome that was already there.
+ */
+export function expectationHoldsOnScreen(
+  expectation: Expectation,
+  layout: readonly LayoutElement[],
+  activity: string
+): boolean {
+  if (expectation.type === "activity") {
+    return expectation.value === activity;
+  }
+  if (expectation.type !== "element") {
+    return false;
+  }
+  const resolution = resolveLocator(layout, expectation.locator, {
+    requireEnabled: false
+  });
+  if (expectation.absent === true) {
+    return resolution.status === "failed"
+      && resolution.code === "LOCATOR_NOT_FOUND"
+      && resolution.evidenceMismatch !== true;
+  }
+  return resolution.status === "found"
+    && elementPredicateMismatch(resolution.element, expectation) === undefined;
+}
+
 function matchesLogcat(
   line: LogcatLine,
   expectation: Extract<Expectation, { type: "logcat" }>,

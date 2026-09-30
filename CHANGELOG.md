@@ -4,6 +4,16 @@
 
 ### Added
 
+- `click` and `longClick` steps and proposals accept `touchPolicy:
+  "element"` for targets that react to touches although neither they nor an
+  ancestor report `clickable` (RecyclerView item-touch listeners, WebView DOM
+  nodes such as inline mail images). Core touches the element's bounds
+  clipped to its ancestors and the display, and the step must prove its
+  outcome with an `element` or `activity` expect (or an Activity change)
+  that does not already hold before the touch. Generation rejects the policy
+  on targets that already have a capable ancestor. Without it, such targets
+  keep failing closed.
+
 - `taphound-flash` plans accept `launchTimeoutMs` (default 30000): the cold
   launch, including a first screen that keeps loading or animating, gets its
   own budget instead of `settleTimeoutMs`. `UNSETTLED` names the budget to

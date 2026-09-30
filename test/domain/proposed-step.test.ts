@@ -141,6 +141,35 @@ describe("ProposedStepSchema", () => {
     })).toThrow();
   });
 
+  it("requires touchPolicy element proposals to declare an outcome expectation", () => {
+    const touch = {
+      binding,
+      action: "click",
+      locator: { resourceId: "mail_row" },
+      touchPolicy: "element",
+      activity: { before: "com.example.app.MainActivity" }
+    };
+    expect(ProposedStepSchema.parse({
+      ...touch,
+      expect: {
+        type: "activity",
+        value: "com.example.app.DetailActivity",
+        timeoutMs: 500
+      }
+    })).toMatchObject({ touchPolicy: "element" });
+    expect(() => ProposedStepSchema.parse(touch)).toThrow(/element or activity expect/);
+    expect(() => ProposedStepSchema.parse({
+      ...touch,
+      action: "swipe",
+      direction: "up",
+      expect: {
+        type: "element",
+        locator: { resourceId: "detail" },
+        timeoutMs: 500
+      }
+    })).toThrow();
+  });
+
   it("rejects a visual expectation and unknown planner metadata", () => {
     expect(() => ProposedStepSchema.parse({
       binding,

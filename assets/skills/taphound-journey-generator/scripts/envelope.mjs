@@ -21,10 +21,13 @@ const logcatLevels = new Set(["V", "D", "I", "W", "E", "F", "A"]);
 const logcatMatches = new Set(["literal", "regex"]);
 
 const proposalShapes = new Map([
-  ["click", { required: ["action", "locator", "binding", "activity"], optional: ["expect"] }],
+  ["click", {
+    required: ["action", "locator", "binding", "activity"],
+    optional: ["touchPolicy", "expect"]
+  }],
   ["longClick", {
     required: ["action", "locator", "binding", "activity"],
-    optional: ["durationMs", "expect"]
+    optional: ["touchPolicy", "durationMs", "expect"]
   }],
   ["inputText", {
     required: ["action", "text", "binding", "activity"],
@@ -271,6 +274,17 @@ function validateProposal(where, value) {
       "ENVELOPE_INVALID",
       `${where}.direction must be one of "up", "down", "left", "right"`
     );
+  }
+  if (value.touchPolicy !== undefined) {
+    if (value.touchPolicy !== "element") {
+      fail("ENVELOPE_INVALID", `${where}.touchPolicy must be "element"`);
+    }
+    if (value.expect?.type !== "element" && value.expect?.type !== "activity") {
+      fail(
+        "ENVELOPE_INVALID",
+        `${where}.touchPolicy "element" requires an element or activity expect that proves the touch took effect`
+      );
+    }
   }
   if (value.durationMs !== undefined) {
     positiveInteger(`${where}.durationMs`, value.durationMs);

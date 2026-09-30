@@ -119,6 +119,23 @@ themselves.
 - `click`: targets a `locator` or a semantic `anchor`, performs an ADB tap.
 - `longClick`: targets a `locator` or a semantic `anchor`, accepts a positive
   integer `durationMs`, default 800.
+- `touchPolicy` (optional, `click` and `longClick` only): the single value
+  `"element"` touches the located element itself when neither it nor any
+  ancestor reports `clickable` (`longClickable` for `longClick`), as with
+  RecyclerView item-touch listeners and WebView DOM nodes. The touch point is
+  the center of the element's bounds clipped to every ancestor's bounds and
+  to the display (WebView nodes often report boxes that overflow their
+  WebView); an empty intersection or a disabled element fails with
+  `ACTION_FAILED`. The step requires a `locator` (no `anchor`, no annotated
+  `fallback`) and must prove its effect with an `element` or `activity`
+  `expect`, or with `activity.after` different from `activity.before`.
+  Replay (both policies) fails with `ACTION_FAILED` before touching when the
+  `expect` already holds on the pre-action layout. Generation additionally
+  rejects the proposal with `ACTION_UNSUPPORTED` when the target already has
+  a capable ancestor and with `EXPECT_UNSUPPORTED` when its expectation
+  already holds; proposals must carry the `expect`, because they learn the
+  after Activity only by executing. Without `touchPolicy`, a target with no
+  capable ancestor keeps failing closed.
 - `inputText`: requires non-empty `text`, typed into the current focus. When an
   `anchor` is supplied, Core resolves it first and taps the anchor point to
   focus the field before typing; an anchor without bounds fails with

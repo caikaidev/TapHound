@@ -13,6 +13,8 @@ import type { SimulatedApp } from "./simulated-device.js";
 export const DEMO_PACKAGE = "dev.taphound.demo";
 export const MAIN = `${DEMO_PACKAGE}.MainActivity`;
 export const SEARCH = `${DEMO_PACKAGE}.SearchActivity`;
+export const MAIL_DETAIL = `${DEMO_PACKAGE}.MailDetailActivity`;
+export const IMAGE_PREVIEW = `${DEMO_PACKAGE}.ImagePreviewActivity`;
 export const CAMERA_PACKAGE = "com.android.camera";
 export const CAMERA = `${CAMERA_PACKAGE}.CameraActivity`;
 export const CAMERA_FLOW = "camera/photo-capture";
@@ -128,6 +130,51 @@ const settingsRow: LayoutElement = {
   ]
 };
 
+/**
+ * An inbox row handled by a RecyclerView item-touch listener: neither the
+ * row nor any ancestor reports `clickable`, yet a touch on it opens the mail.
+ */
+const inboxList: LayoutElement = {
+  id: "mail_list",
+  resourceId: "mail_list",
+  enabled: true,
+  scrollable: true,
+  bounds: { left: 0, top: 200, right: 1080, bottom: 1900 },
+  children: [{
+    id: "mail_row_1",
+    resourceId: "mail_row",
+    enabled: true,
+    bounds: { left: 0, top: 200, right: 1080, bottom: 400 },
+    children: [{
+      id: "mail_subject",
+      text: "Hello",
+      enabled: true,
+      bounds: { left: 40, top: 240, right: 640, bottom: 360 },
+      children: []
+    }]
+  }]
+};
+
+/**
+ * A mail body rendered in a WebView: the inline image is a DOM accessibility
+ * node that reports no `clickable` and whose bounds overflow the WebView and
+ * the display, so only its visible part inside the WebView can be touched.
+ */
+const mailBody: LayoutElement = {
+  id: "mail_webview",
+  resourceId: "mail_webview",
+  enabled: true,
+  scrollable: true,
+  bounds: { left: 0, top: 300, right: 1080, bottom: 1900 },
+  children: [{
+    id: "body_image",
+    text: "thumbnail?resId=0",
+    enabled: true,
+    bounds: { left: 60, top: 641, right: 1020, bottom: 2400 },
+    children: []
+  }]
+};
+
 export const demoApp: SimulatedApp = {
   packageName: DEMO_PACKAGE,
   launchActivity: MAIN,
@@ -138,8 +185,34 @@ export const demoApp: SimulatedApp = {
       layout: root("main_root", [
         button("open_search", "open_search", "Search", 300),
         button("take_photo", "take_photo", "Photo", 500),
-        settingsRow
+        settingsRow,
+        button("open_inbox", "open_inbox", "Inbox", 1300)
       ])
+    },
+    inbox: {
+      activity: MAIN,
+      layout: root("inbox_root", [inboxList])
+    },
+    mailDetail: {
+      activity: MAIL_DETAIL,
+      layout: root("mail_root", [{
+        id: "mail_detail_title",
+        resourceId: "mail_detail_title",
+        text: "Hello",
+        enabled: true,
+        bounds: { left: 100, top: 100, right: 980, bottom: 200 },
+        children: []
+      }, mailBody])
+    },
+    imagePreview: {
+      activity: IMAGE_PREVIEW,
+      layout: root("preview_root", [{
+        id: "preview_image",
+        resourceId: "preview_image",
+        enabled: true,
+        bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
+        children: []
+      }])
     },
     settings: {
       activity: MAIN,
@@ -244,7 +317,10 @@ export const demoApp: SimulatedApp = {
     { from: "main", on: { action: "tap", elementId: "settings_row" }, to: "settings" },
     { from: "cameraVideo", on: { action: "tap", elementId: "mode_photo" }, to: "cameraPhoto" },
     { from: "cameraPhoto", on: { action: "tap", elementId: "shutter_button" }, to: "photoAttached" },
-    { from: "searchFocused", on: { action: "back" }, to: "main" }
+    { from: "searchFocused", on: { action: "back" }, to: "main" },
+    { from: "main", on: { action: "tap", elementId: "open_inbox" }, to: "inbox" },
+    { from: "inbox", on: { action: "tap", elementId: "mail_row_1" }, to: "mailDetail" },
+    { from: "mailDetail", on: { action: "tap", elementId: "body_image" }, to: "imagePreview" }
   ]
 };
 
@@ -339,6 +415,41 @@ const takePhoto: JourneyStep = {
   }
 };
 
+const openInbox: JourneyStep = {
+  action: "click",
+  locator: { resourceId: "open_inbox" },
+  activity: { before: MAIN, after: MAIN },
+  expect: {
+    type: "element",
+    locator: { resourceId: "mail_list" },
+    timeoutMs: 200
+  }
+};
+
+const openMail: JourneyStep = {
+  action: "click",
+  locator: { text: "Hello" },
+  touchPolicy: "element",
+  activity: { before: MAIN, after: MAIL_DETAIL },
+  expect: {
+    type: "element",
+    locator: { resourceId: "mail_detail_title" },
+    timeoutMs: 200
+  }
+};
+
+const openBodyImage: JourneyStep = {
+  action: "click",
+  locator: { text: "thumbnail?resId=0" },
+  touchPolicy: "element",
+  activity: { before: MAIL_DETAIL, after: IMAGE_PREVIEW },
+  expect: {
+    type: "element",
+    locator: { resourceId: "preview_image" },
+    timeoutMs: 200
+  }
+};
+
 export const scenarios: readonly ParityScenario[] = [
   {
     name: "camera bridge through an External Flow",
@@ -417,6 +528,50 @@ export const scenarios: readonly ParityScenario[] = [
     expected: ["passed", "ACTION_FAILED"],
     recordedReplay: ["passed", "passed"],
     generation: ["passed", "ACTION_UNSUPPORTED"]
+  },
+  {
+    name: "touchPolicy element opens a row no clickable ancestor reports",
+    journey: journey("inbox-row", [openInbox, openMail]),
+    expected: ["passed", "passed"]
+  },
+  {
+    name: "touchPolicy element taps the visible part of a WebView image",
+    journey: journey("webview-image", [openInbox, openMail, openBodyImage]),
+    expected: ["passed", "passed", "passed"]
+  },
+  {
+    name: "row without touchPolicy stays fail-closed",
+    journey: journey("inbox-row-default", [openInbox, {
+      action: "click",
+      locator: { text: "Hello" },
+      activity: { before: MAIN, after: MAIL_DETAIL }
+    }]),
+    expected: ["passed", "ACTION_FAILED"],
+    recordedReplay: ["passed", "passed"],
+    generation: ["passed", "ACTION_UNSUPPORTED"]
+  },
+  {
+    name: "touchPolicy element on a target nothing handles",
+    journey: journey("webview-dead-touch", [openInbox, openMail, {
+      ...openBodyImage,
+      locator: { resourceId: "mail_detail_title" },
+      activity: { before: MAIL_DETAIL, after: MAIL_DETAIL }
+    }]),
+    expected: ["passed", "passed", "EXPECT_ELEMENT_FAILED"]
+  },
+  {
+    name: "touchPolicy element whose expectation already holds",
+    journey: journey("webview-vacuous-expect", [openInbox, openMail, {
+      ...openBodyImage,
+      activity: { before: MAIL_DETAIL, after: IMAGE_PREVIEW },
+      expect: {
+        type: "element",
+        locator: { resourceId: "mail_detail_title" },
+        timeoutMs: 200
+      }
+    }]),
+    expected: ["passed", "passed", "ACTION_FAILED"],
+    generation: ["passed", "passed", "EXPECT_UNSUPPORTED"]
   },
   {
     name: "element expectation never appears",

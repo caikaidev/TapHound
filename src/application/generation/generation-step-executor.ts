@@ -402,7 +402,8 @@ function requireTarget(
     layout,
     step.action,
     step.locator,
-    viewport
+    viewport,
+    step.action === "swipe" ? undefined : step.touchPolicy
   );
   if (resolution.status !== "found") {
     fail(resolution.code, resolution.message);

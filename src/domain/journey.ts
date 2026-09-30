@@ -231,20 +231,75 @@ const AnchorTargetRefine = (
   }
 };
 
+/**
+ * `element` touches the located element itself even though neither it nor
+ * an ancestor reports the action capability (RecyclerView item-touch
+ * listeners, WebView DOM nodes). Without the capability proof, the step
+ * must prove its effect with an outcome instead.
+ */
+export const TouchPolicySchema = z.literal("element");
+export type TouchPolicy = z.infer<typeof TouchPolicySchema>;
+
+const TouchPolicyRefine = (
+  step: {
+    touchPolicy?: TouchPolicy | undefined;
+    anchor?: string | undefined;
+    fallback?: unknown;
+    expect?: { type: string } | undefined;
+    activity: { before: string; after: string };
+  },
+  context: z.RefinementCtx
+): void => {
+  if (step.touchPolicy === undefined) return;
+  if (step.anchor !== undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["touchPolicy"],
+      message: "touchPolicy element requires a runtime locator, not an anchor"
+    });
+  }
+  if (step.fallback !== undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["touchPolicy"],
+      message: "touchPolicy element cannot combine an annotated fallback"
+    });
+  }
+  if (
+    step.expect?.type !== "element"
+    && step.expect?.type !== "activity"
+    && step.activity.after === step.activity.before
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["touchPolicy"],
+      message: "touchPolicy element requires an element or activity expect, or an Activity change, to prove the touch took effect"
+    });
+  }
+};
+
 const ClickStepSchema = z.strictObject({
   action: z.literal("click"),
   ...AnchorLocatorTarget,
+  touchPolicy: TouchPolicySchema.optional(),
   fallback: AnnotatedLabelFallbackSchema.optional(),
   ...CommonStepShape
-}).superRefine(AnchorTargetRefine);
+}).superRefine((step, context) => {
+  AnchorTargetRefine(step, context);
+  TouchPolicyRefine(step, context);
+});
 
 const LongClickStepSchema = z.strictObject({
   action: z.literal("longClick"),
   ...AnchorLocatorTarget,
+  touchPolicy: TouchPolicySchema.optional(),
   durationMs: z.number().int().positive().default(800),
   fallback: AnnotatedLabelFallbackSchema.optional(),
   ...CommonStepShape
-}).superRefine(AnchorTargetRefine);
+}).superRefine((step, context) => {
+  AnchorTargetRefine(step, context);
+  TouchPolicyRefine(step, context);
+});
 
 const InputTextStepSchema = z.strictObject({
   action: z.literal("inputText"),

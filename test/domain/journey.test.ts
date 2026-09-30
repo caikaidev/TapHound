@@ -273,6 +273,51 @@ describe("JourneySchema", () => {
     }]))).toThrow();
   });
 
+  it("requires touchPolicy element to prove its outcome with a locator target", () => {
+    const touch = {
+      action: "click",
+      locator: { resourceId: "mail_row" },
+      touchPolicy: "element",
+      activity
+    };
+    const expectDetail = {
+      type: "element",
+      locator: { resourceId: "detail" },
+      timeoutMs: 500
+    };
+    expect(JourneyStepSchema.parse({ ...touch, expect: expectDetail }))
+      .toMatchObject({ touchPolicy: "element" });
+    expect(JourneyStepSchema.parse({
+      ...touch,
+      action: "longClick",
+      activity: { ...activity, after: "com.example.app.DetailActivity" }
+    })).toMatchObject({ touchPolicy: "element" });
+
+    for (const invalid of [
+      touch,
+      {
+        ...touch,
+        expect: { type: "logcat", tag: "Mail", pattern: "opened", timeoutMs: 500 }
+      },
+      { ...touch, anchor: "mail.row", expect: expectDetail },
+      {
+        ...touch,
+        fallback: { type: "annotatedLabel", label: "#3" },
+        expect: expectDetail
+      },
+      { ...touch, touchPolicy: "ancestor", expect: expectDetail },
+      {
+        action: "swipe",
+        locator: { resourceId: "list" },
+        direction: "up",
+        touchPolicy: "element",
+        activity
+      }
+    ]) {
+      expect(() => JourneyStepSchema.parse(invalid)).toThrow();
+    }
+  });
+
   it("requires an Android CLI annotation label", () => {
     expect(() => JourneySchema.parse(journey([{
       action: "click",

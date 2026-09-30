@@ -207,8 +207,35 @@ describe("journey-generator envelope helper", () => {
     expect(result.code).toBe(2);
     expect(result.output.code).toBe("ENVELOPE_INVALID");
     expect(result.output.message).toContain(
-      'action "click" allows fields: action, locator, binding, activity, expect'
+      'action "click" allows fields: action, locator, binding, activity, touchPolicy, expect'
     );
+  });
+
+  it("accepts touchPolicy element only with an outcome expectation", async () => {
+    const expectDetail = {
+      type: "element",
+      locator: { resourceId: "detail" },
+      timeoutMs: 500
+    };
+    const valid = await put("envelope.json", envelope({
+      proposal: proposal({ touchPolicy: "element", expect: expectDetail })
+    }));
+    expect(command("validate", "--input", valid).code).toBe(0);
+
+    for (const [overrides, message] of [
+      [{ touchPolicy: "element" }, "requires an element or activity expect"],
+      [
+        { touchPolicy: "ancestor", expect: expectDetail },
+        'touchPolicy must be "element"'
+      ]
+    ] as const) {
+      const input = await put("envelope.json", envelope({
+        proposal: proposal(overrides)
+      }));
+      const result = command("validate", "--input", input);
+      expect(result.code).toBe(2);
+      expect(result.output.message).toContain(message);
+    }
   });
 
   it("rejects an envelope that carries both snapshot and snapshotRef", async () => {

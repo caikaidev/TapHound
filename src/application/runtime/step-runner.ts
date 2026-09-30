@@ -41,6 +41,7 @@ import {
 import { resolveActionTarget } from "../interaction/action-target.js";
 import {
   ExpectationEvaluator,
+  expectationHoldsOnScreen,
   type ExpectationObservationInput
 } from "../assertion/expectation-evaluator.js";
 import {
@@ -855,10 +856,15 @@ export class StepRunner {
         }
         const locator = step.locator;
         const action = step.action;
+        const touchPolicy = action === "swipe" ? undefined : step.touchPolicy;
         // Generated Replay targets exactly as Generation did; a recorded
-        // Journey keeps the Recorder's element-center semantics.
+        // Journey keeps the Recorder's element-center semantics. An explicit
+        // touchPolicy is part of the step, so both policies honor it.
         const locate = (): LocatorResolution => {
-          if (this.options.generatedReplayPolicy !== true) {
+          if (
+            this.options.generatedReplayPolicy !== true
+            && touchPolicy === undefined
+          ) {
             return resolveLocator(layout, locator, {
               viewport: this.currentViewport
             });
@@ -867,7 +873,8 @@ export class StepRunner {
             layout,
             action,
             locator,
-            this.currentViewport
+            this.currentViewport,
+            touchPolicy
           );
           return resolved.status === "found" ? resolved.located : resolved;
         };
@@ -918,6 +925,21 @@ export class StepRunner {
             throw error;
           }
           resolution = locate();
+        }
+        if (
+          resolution.status === "found"
+          && touchPolicy === "element"
+          && step.expect !== undefined
+          && expectationHoldsOnScreen(step.expect, layout, step.activity.before)
+        ) {
+          const message = "touchPolicy element expectation already holds before the touch, so it cannot prove the touch took effect";
+          report.locator = {
+            status: "failed",
+            requested: step.locator,
+            fallbackUsed: false,
+            message
+          };
+          return fail("ACTION_FAILED", message);
         }
         if (resolution.status === "found") {
           target = {

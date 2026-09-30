@@ -50,6 +50,11 @@ export interface LocatorResolutionOptions {
   requireEnabled?: boolean | undefined;
   requiredCapability?: "clickable" | "longClickable" | undefined;
   viewport?: DisplayViewport | undefined;
+  /**
+   * Touch the part of the matched element that its ancestors and the
+   * display leave visible, instead of requiring an action capability.
+   */
+  visibleElement?: boolean | undefined;
 }
 
 function pointWithin(
@@ -77,6 +82,43 @@ function center(element: LayoutElement): Point | undefined {
   return {
     x: Math.round((bounds.left + bounds.right) / 2),
     y: Math.round((bounds.top + bounds.bottom) / 2)
+  };
+}
+
+/**
+ * The center of what remains of the element after clipping it to every
+ * ancestor with bounds and to the display: WebView DOM nodes report boxes
+ * that overflow their WebView.
+ */
+function visibleCenter(
+  element: LayoutElement,
+  ancestors: readonly LayoutElement[],
+  viewport: DisplayViewport | undefined
+): Point | undefined {
+  const bounds = element.bounds;
+  if (bounds === undefined) {
+    return undefined;
+  }
+  let { left, top, right, bottom } = bounds;
+  const clips = [
+    ...ancestors.map((ancestor) => ancestor.bounds),
+    ...(viewport === undefined
+      ? []
+      : [{ left: 0, top: 0, right: viewport.width, bottom: viewport.height }])
+  ];
+  for (const clip of clips) {
+    if (clip === undefined) continue;
+    left = Math.max(left, clip.left);
+    top = Math.max(top, clip.top);
+    right = Math.min(right, clip.right);
+    bottom = Math.min(bottom, clip.bottom);
+  }
+  if (left >= right || top >= bottom) {
+    return undefined;
+  }
+  return {
+    x: Math.floor((left + right) / 2),
+    y: Math.floor((top + bottom) / 2)
   };
 }
 
@@ -334,6 +376,25 @@ export function resolveLocator(
       status: "failed",
       code: "ACTION_FAILED",
       message: `Layout element ${element.id} is disabled`
+    };
+  }
+  if (options.visibleElement === true) {
+    const visible = visibleCenter(element, entry.ancestors, options.viewport);
+    if (visible === undefined) {
+      return {
+        status: "failed",
+        code: "ACTION_FAILED",
+        message: `Layout element ${element.id} has no visible geometry inside its ancestors and the display`
+      };
+    }
+    return {
+      status: "found",
+      element,
+      point: visible,
+      matchedBy,
+      ...(resolution.matchedFields === undefined
+        ? {}
+        : { matchedFields: resolution.matchedFields })
     };
   }
   // Touch the matched element itself: it dispatches to the capable ancestor,

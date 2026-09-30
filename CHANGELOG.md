@@ -39,6 +39,12 @@
   with `CONFIG_INVALID` (exit 2) naming the path, instead of
   `INTERNAL_ERROR` (exit 4). The journey-generator Skill says to run `step`
   only after `envelope.mjs bind` exits 0 and not to pipe `bind`.
+- The Case Suite `ledger.mjs` rejects inline JSON passed to `--input` with
+  a usage error instead of `ENAMETOOLONG`, names the invalid field of a
+  transition identity, lists the allowed next statuses and the path through
+  skipped states for a rejected transition, and allows transition reasons up
+  to 1000 characters (was 500), pointing over-long reasons to
+  `failure.message` and `nextAction`.
 - `generation start --output` fails with a hint that the Journey path is
   chosen at `generation finalize --output`, and `start --help` says so and
   that later commands need the same `--config`.

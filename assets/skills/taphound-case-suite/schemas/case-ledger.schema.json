@@ -126,7 +126,7 @@
                 "from": { "type": "string", "minLength": 1 },
                 "to": { "type": "string", "minLength": 1 },
                 "at": { "type": "string", "format": "date-time" },
-                "reason": { "type": "string", "minLength": 1, "maxLength": 500 }
+                "reason": { "type": "string", "minLength": 1, "maxLength": 1000 }
               }
             }
           }

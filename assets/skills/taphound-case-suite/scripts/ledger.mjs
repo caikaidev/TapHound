@@ -116,6 +116,9 @@ function exactKeys(value, required, optional = [], contract = undefined) {
 
 const TEMPLATES = join(dirname(fileURLToPath(import.meta.url)), "..", "templates");
 
+/** Transition reasons; failure detail and recovery go to failure.message and nextAction. */
+const REASON_LIMIT = 1000;
+
 function nonempty(value, label, max = 1000) {
   if (typeof value !== "string") {
     fail("CASE_SUITE_INVALID", `${label} must be a string`);
@@ -124,7 +127,12 @@ function nonempty(value, label, max = 1000) {
     fail("CASE_SUITE_INVALID", `${label} must be a non-empty string`);
   }
   if (value.length > max) {
-    fail("CASE_SUITE_INVALID", `${label} exceeds ${String(max)} characters`);
+    fail(
+      "CASE_SUITE_INVALID",
+      `${label} exceeds ${String(max)} characters${label === "reason"
+        ? "; keep the reason short and put failure evidence in failure.message (1000) and the recovery path in nextAction (1000)"
+        : ""}`
+    );
   }
   return value;
 }
@@ -164,6 +172,18 @@ function projectPath(value, label) {
     fail("CASE_SUITE_INVALID", `${label} must be a normalized project-relative path`);
   }
   return path;
+}
+
+/** `--input` names a JSON file; inline JSON would be opened as a path. */
+async function inputJson(path, label) {
+  const trimmed = path.trimStart();
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    fail(
+      "CASE_SUITE_USAGE",
+      `--input takes the path of a JSON file, not inline JSON; write the ${label} to a file and pass its path`
+    );
+  }
+  return json(resolve(path), label);
 }
 
 async function json(path, label = path) {
@@ -395,7 +415,7 @@ function parseLedger(value, catalog) {
         fail("CASE_SUITE_INVALID", `Invalid transition history for ${entry.id}`);
       }
       nonempty(history.at, `${entry.id}.history.at`, 100);
-      nonempty(history.reason, `${entry.id}.history.reason`, 500);
+      nonempty(history.reason, `${entry.id}.history.reason`, REASON_LIMIT);
     }
     if (entry.status === "verified" && entry.completion === undefined) {
       fail("CASE_SUITE_INVALID", `Verified Case ${entry.id} lacks completion evidence`);
@@ -660,7 +680,7 @@ function parseSuiteInput(value) {
 }
 
 async function init(inputPath, outputPath) {
-  const input = parseSuiteInput(await json(resolve(inputPath), "Suite input"));
+  const input = parseSuiteInput(await inputJson(inputPath, "Suite input"));
   const projectRoot = await realpath(input.projectRoot);
   const output = suiteDirectory(projectRoot, input.suiteId);
   if (outputPath !== undefined && resolve(outputPath) !== output) {
@@ -741,6 +761,28 @@ async function init(inputPath, outputPath) {
   };
 }
 
+/** The shortest allowed path when a transition skips intermediate states. */
+function pathHint(from, to) {
+  const previous = new Map([[from, undefined]]);
+  const queue = [from];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    for (const next of transitions.get(current) ?? []) {
+      if (previous.has(next)) continue;
+      previous.set(next, current);
+      if (next === to) {
+        const path = [to];
+        for (let step = current; step !== undefined; step = previous.get(step)) {
+          path.unshift(step);
+        }
+        return `; reach ${to} through ${path.join(" -> ")}`;
+      }
+      queue.push(next);
+    }
+  }
+  return "";
+}
+
 function parseTransition(value) {
   exactKeys(
     value,
@@ -748,16 +790,26 @@ function parseTransition(value) {
     ["brief", "generation", "failure", "nextAction", "completion"],
     { name: "transition input", template: join(TEMPLATES, "transition.example.json") }
   );
-  if (value.version !== 1 || !caseIdPattern.test(value.caseId ?? "")
-    || !statuses.has(value.from) || !statuses.has(value.to)) {
-    fail("CASE_SUITE_INVALID", "Invalid Case transition identity");
+  if (value.version !== 1) {
+    fail("CASE_SUITE_INVALID", "transition input version must be 1");
+  }
+  if (!caseIdPattern.test(value.caseId ?? "")) {
+    fail("CASE_SUITE_INVALID", `transition caseId ${JSON.stringify(value.caseId)} is not a valid Case id`);
+  }
+  for (const field of ["from", "to"]) {
+    if (!statuses.has(value[field])) {
+      fail(
+        "CASE_SUITE_INVALID",
+        `transition ${field} ${JSON.stringify(value[field])} is not a Case status; expected one of ${[...statuses].join(", ")}`
+      );
+    }
   }
   return {
     expectedRevision: integer(value.expectedRevision, "expectedRevision"),
     caseId: value.caseId,
     from: value.from,
     to: value.to,
-    reason: nonempty(value.reason, "reason", 500),
+    reason: nonempty(value.reason, "reason", REASON_LIMIT),
     ...(value.brief === undefined
       ? {}
       : { brief: parseArtifact(value.brief, "brief", { allowCompute: true }) }),
@@ -822,7 +874,7 @@ async function validateCompletion(suite, entry, completion) {
 }
 
 async function transition(suitePath, inputPath) {
-  const request = parseTransition(await json(resolve(inputPath), "Transition input"));
+  const request = parseTransition(await inputJson(inputPath, "Transition input"));
   const loaded = await loadSuite(suitePath);
   return withLock(loaded, async (suite) => {
     if (suite.ledger.revision !== request.expectedRevision) {
@@ -836,9 +888,12 @@ async function transition(suitePath, inputPath) {
       fail("CASE_SUITE_CONFLICT", "Case status does not match transition.from");
     }
     if (!transitions.get(request.from)?.has(request.to)) {
+      const allowed = [...(transitions.get(request.from) ?? [])];
       fail(
         "CASE_SUITE_TRANSITION_INVALID",
-        `Transition ${request.from} -> ${request.to} is not allowed`
+        `Transition ${request.from} -> ${request.to} is not allowed; from ${request.from} the next status is one of: ${
+          allowed.length === 0 ? "(none, terminal)" : allowed.join(", ")
+        }${pathHint(request.from, request.to)}`
       );
     }
     if (request.from === "blocked"
@@ -1028,7 +1083,7 @@ function parseFlowRecord(value) {
 }
 
 async function recordFlow(suitePath, inputPath) {
-  const request = parseFlowRecord(await json(resolve(inputPath), "Base Flow record"));
+  const request = parseFlowRecord(await inputJson(inputPath, "Base Flow record"));
   assertSha(request.sha256, "flow.sha256");
   const loaded = await loadSuite(suitePath);
   return withLock(loaded, async (suite) => {

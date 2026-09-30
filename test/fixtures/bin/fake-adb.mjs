@@ -64,6 +64,13 @@ function xmlFor(nodes, pkg) {
   }).join("");
 }
 
+/** A loading label that changes on every dump for `launchFrames` dumps after launch. */
+function loading() {
+  if (state.launchFrames === undefined || state.frame >= state.launchFrames) return "";
+  state.frame += 1;
+  return `<node resource-id="" text="Loading ${state.frame}" content-desc="" package="${PKG}" clickable="false" enabled="true" bounds="[0,1800][1080,1900]" />`;
+}
+
 function hierarchy() {
   if (!state.awake || state.keyguard || !state.running) {
     return `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><hierarchy rotation="0">`
@@ -71,7 +78,7 @@ function hierarchy() {
   }
   return `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><hierarchy rotation="0">`
     + `<node resource-id="" text="" content-desc="" package="${PKG}" clickable="false" enabled="true" bounds="[0,0][1080,1920]">`
-    + `${xmlFor(screens[state.screen].nodes, PKG)}</node></hierarchy>`;
+    + `${xmlFor(screens[state.screen].nodes, PKG)}${loading()}</node></hierarchy>`;
 }
 
 /** Deepest element with a transition whose bounds contain the point. */
@@ -114,10 +121,19 @@ else if (command === "wm dismiss-keyguard") {
   if (!state.secureLock) state.keyguard = false;
 } else if (command === `am force-stop ${PKG}`) state.running = false;
 else if (command.startsWith("am start") || command.startsWith("monkey")) {
-  Object.assign(state, { running: true, screen: "main", focused: false, typed: "" });
+  Object.assign(state, { running: true, screen: "main", focused: false, typed: "", frame: 0 });
   out("Status: ok\n");
 } else if (command === `pidof ${PKG}`) out(state.running ? "4242\n" : "");
-else if (command.startsWith("uiautomator dump")) out("UI hierchary dumped to: /sdcard/taphound-flash.xml\n");
+else if (command.startsWith("uiautomator dump")) {
+  // The first `dumpFailures` dumps hit the startup window of the
+  // accessibility bridge, as a cold launch does on real devices.
+  if ((state.dumpFailures ?? 0) > 0) {
+    state.dumpFailures -= 1;
+    out("ERROR: null root node returned by UiTestAutomationBridge.\n");
+  } else {
+    out("UI hierchary dumped to: /sdcard/taphound-flash.xml\n");
+  }
+}
 else if (rest[0] === "input" && rest[1] === "tap") {
   const [x, y] = [Number(rest[2]), Number(rest[3])];
   state.taps.push([x, y]);

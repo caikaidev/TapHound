@@ -2,7 +2,26 @@
 
 ## Unreleased
 
+### Added
+
+- `taphound-flash` plans accept `launchTimeoutMs` (default 30000): the cold
+  launch, including a first screen that keeps loading or animating, gets its
+  own budget instead of `settleTimeoutMs`. `UNSETTLED` names the budget to
+  raise.
+- A `taphound-flash` `TARGET_AMBIGUOUS` failure lists every match (id, text,
+  description, class, bounds) in its message and in `failure.matches`.
+
+### Fixed
+
+- `taphound-flash` retries a failing uiautomator dump (for example `null root
+  node` while a splash screen starts) until the current wait runs out instead
+  of failing the whole run on the first attempt.
+
 ### Changed
+
+- The `taphound-flash` Skill states that visual styles (colors, layout
+  details) are out of scope for flash and TapHound alike: Contracts can require
+  a screenshot but never compare pixels, so a visual change needs human review.
 
 - The Brief Author subagent role prompts (English and zh-CN) state that
   Briefs are written only under `.taphound/briefs/<caseId>/` or

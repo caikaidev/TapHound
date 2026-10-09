@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `taphound-bug-fix` Skill: fixes one bug from a scenario, a bug-tracker
+  ticket, or a crash log with reproduce-first evidence. It reads ticket URLs
+  only through the user's reader Skill (placeholder `bug-tracker-reader`;
+  `scripts/bug-fix.mjs reader set <skill>` saves it per user, and
+  `TAPHOUND_BUG_READER_SKILL` overrides it), normalizes Java/Kotlin, ANR,
+  and native crashes and matches a reproduced crash against the report
+  (`crash parse` / `crash match`), stops at `NOT_REPRODUCED` when the
+  failure cannot be reproduced, and after the fix commits a regression
+  Journey and Contract under `.taphound/journeys/bugs/` and
+  `.taphound/contracts/bugs/`, gated by `taphound-verify-change` accept
+  mode.
+
 ## 0.2.0-dev.14 — 2026-10-09
 
 ### Added

@@ -34,7 +34,7 @@ TapHound 只负责验证。编译和安装 APK 是开发者/Agent 循环中独�
 - **生成** —— AI Agent 驱动的 Journey 生成：步骤绑定证据、敏感操作需风险确认，发布前必须通过一次精确回放（`taphound generation ...`）。
 - **信任链** —— Acceptance Contract、行为 Baseline 与 Failure Classification，把一次回放转化为可审计的判定结论。
 - **知识体系** —— 语义化的 Anchor 与 Screen，让 Journey 在 UI 重构和 resource-id 改名后仍然可用。
-- **Agent Skill** —— 五个可安装的 Skill（`taphound init`）：`taphound-flash`（编码过程中只依赖 adb 的独立冒烟检查）、`taphound-verify-change`（完成前的把关：验收新行为或证明行为保持不变）、`taphound-journey-brief-author` 与 `taphound-journey-generator`（把一个 Case 变成经过验证的 Journey）、`taphound-case-suite`（多个 Case 逐个推进）。
+- **Agent Skill** —— 六个可安装的 Skill（`taphound init`）：`taphound-flash`（编码过程中只依赖 adb 的独立冒烟检查）、`taphound-verify-change`（完成前的把关：验收新行为或证明行为保持不变）、`taphound-journey-brief-author` 与 `taphound-journey-generator`（把一个 Case 变成经过验证的 Journey）、`taphound-case-suite`（多个 Case 逐个推进）、`taphound-bug-fix`（先复现用户报告的 bug 或 crash，再修复，并证明同一场景已通过）。
 
 ## 环境要求
 

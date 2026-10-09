@@ -235,6 +235,7 @@ import { isErrnoException } from "../shared/errors.js";
 import { readRuntimeBackendChoice } from "./runtime-selection.js";
 import { CONTEXT_INDEX_PATH } from "../domain/workspace.js";
 import { JourneySchema } from "../domain/journey.js";
+import { configMismatchMessage } from "../application/generation/binding-mismatch.js";
 
 export interface TextOutput {
   write: (content: string) => void;
@@ -245,7 +246,7 @@ export interface GenerationCliRuntime {
     GenerationConfirmationService,
     "request" | "requestManual" | "confirmStored" | "findPendingManual"
   >;
-  executor: Pick<GenerationStepExecutor, "execute">;
+  executor: Pick<GenerationStepExecutor, "execute" | "amendExpectation">;
   observer: Pick<RuntimeObserver, "observe">;
   finalizer: Pick<GenerationFinalizer, "finalize">;
   recovery: Pick<GenerationRecoveryService, "status" | "retry">;
@@ -272,6 +273,8 @@ export interface GenerationCliRuntime {
 
 export interface CliDependencies {
   signal?: AbortSignal | undefined;
+  /** Monotonic milliseconds for command timing output; defaults to performance.now. */
+  monotonicNow?: (() => number) | undefined;
   doctor: {
     run: (input?: DoctorRunInput) => Promise<DoctorReport>;
   };
@@ -1031,10 +1034,11 @@ export function createProductionDependencies(
         ),
         assertConfigIdentity: async (id): Promise<void> => {
           const session = await store.read(id);
-          if (hashGenerationBinding(config) !== session.bindings.configHash) {
+          const configHash = hashGenerationBinding(config);
+          if (configHash !== session.bindings.configHash) {
             throw new GenerationOperationError(
               "CONFIG_INVALID",
-              "Generation configuration does not match the authoritative session"
+              configMismatchMessage(session.bindings.configHash, configHash)
             );
           }
         },

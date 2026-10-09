@@ -48,6 +48,20 @@ export interface ScrollToExecutorOptions {
   viewport?: (() => DisplayViewport | undefined) | undefined;
 }
 
+/**
+ * Swipes whose container content stayed identical before the scroll stops as
+ * stalled: the list is at its edge in that direction, often because the
+ * direction is reversed.
+ */
+export const SCROLL_STALL_SWIPES = 2;
+
+/** The container subtree without per-capture element ids. */
+function scrollFingerprint(element: LayoutElement): string {
+  return JSON.stringify(element, (key, value: unknown) => (
+    key === "id" || key === "windowId" ? undefined : value
+  ));
+}
+
 function isCancelled(signal?: AbortSignal): boolean {
   return signal?.aborted === true;
 }
@@ -164,6 +178,8 @@ export class ScrollToExecutor {
     let swipesUsed = 0;
     let idleDurationMs = 0;
     let layout = initialLayout;
+    let swipedFingerprint: string | undefined;
+    let stalledSwipes = 0;
     for (;;) {
       if (isCancelled(signal)) {
         return { status: "cancelled", swipesUsed, idleDurationMs };
@@ -232,6 +248,24 @@ export class ScrollToExecutor {
           swipesUsed,
           idleDurationMs
         };
+      }
+      if (swipedFingerprint !== undefined) {
+        stalledSwipes = scrollFingerprint(container.element) === swipedFingerprint
+          ? stalledSwipes + 1
+          : 0;
+        if (stalledSwipes >= SCROLL_STALL_SWIPES) {
+          return {
+            status: "failed",
+            code: "SCROLL_TARGET_NOT_FOUND",
+            message: `Target not visible: the container did not move after ${
+              String(stalledSwipes)
+            } consecutive "${step.direction}" swipes, so it is at its edge in that direction.`
+              + ' direction is the finger direction: "up" reveals content below,'
+              + ' "down" content above, "left" content to the right, "right" content to the left.',
+            swipesUsed,
+            idleDurationMs
+          };
+        }
       }
       if (this.options.beforeSwipe !== undefined) {
         try {
@@ -312,6 +346,7 @@ export class ScrollToExecutor {
       if (isCancelled(signal)) {
         return { status: "cancelled", swipesUsed, idleDurationMs };
       }
+      swipedFingerprint = scrollFingerprint(container.element);
       const swipe = await this.options.actionExecutor.swipeBounds(
         container.element.bounds,
         step.direction,

@@ -264,19 +264,25 @@ them with `MANUAL_STEP_REQUIRED`.
       ```bash
       node <skill>/scripts/envelope.mjs bind \
         --input <draft-envelope-path> \
-        --from <previous-observe-or-step-output-path> \
+        --from <previous-observe-step-or-replace-output-path> \
         --out <envelope-path> \
         --project <project>
       ```
       The draft envelope needs only `version` and `proposal` (binding may be
       omitted or stale); `bind` fills `proposal.binding` from the preceding
-      observe output, step output, or raw binding, adds `snapshotRef` when
-      absent, and validates the result offline. It also compares
+      observe output, `step --replace` output, succeeded step output, or raw
+      binding, sets `snapshotRef` from that source (a draft's old
+      `snapshotRef` is never reused; a raw binding therefore needs an inline
+      `snapshot`), and validates the result offline. It also compares
       `proposal.activity.before` with the bound snapshot's Activity (read
       from `snapshotRef` under `--project`) and fails with
       `ENVELOPE_ACTIVITY_MISMATCH`, naming the snapshot Activity, before any
       device work. `activityCheck: "unverified"` in its output means no
-      snapshot was readable; Core still enforces the check on `step`. The helper contract:
+      snapshot was readable; Core still enforces the check on `step`. Run
+      `generation step` only after `bind` exits 0: do not pipe `bind` into
+      another command (a pipeline reports the last command's exit code, so a
+      failed bind would go unnoticed and `step` would read a missing file).
+      The helper contract:
       `node <skill>/scripts/envelope.mjs help`. The resulting shape:
       ```json
       {
@@ -309,9 +315,14 @@ them with `MANUAL_STEP_REQUIRED`.
          → re-observe once; if it persists, report. `PACKAGE_ESCAPE` → switch
          to `generation bridge`. If retries exhausted, stop and report.
       - **`recoveryRequired`**: Run `generation status`, report
-        `actionMayHaveExecuted`. Stop for the user's explicit retry decision.
-        Only after approval run `generation recover --decision retry`.
-        Re-observe after recovery.
+        `actionMayHaveExecuted`. If `recovery.amendExpectAvailable` is true
+        and the current screen shows the expectation was simply wrong (for
+        example a mistyped resourceId), write the corrected `element` or
+        `activity` expectation to a file and run `generation recover
+        --decision amend-expect --expect <file> --compact --json`; its
+        `succeeded` output is a bind source for the next step. Otherwise
+        stop for the user's explicit retry decision; only after approval run
+        `generation recover --decision retry`, then re-observe.
 
    f. Clean up the temp envelope file after each iteration.
 

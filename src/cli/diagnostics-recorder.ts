@@ -5,11 +5,12 @@ import type { Command } from "commander";
 
 import {
   CommandEventSchema,
+  DIAGNOSTIC_OUTCOME_CODES,
+  type DiagnosticOutcomeCode,
   DIAGNOSTICS_DISABLE_ENV_VAR,
   type CommandEvent,
   type DiagnosticsHostSchema
 } from "../domain/diagnostics.js";
-import { FAILURE_CODES, type FailureCode } from "../domain/failure.js";
 import type { UiCaptureTelemetry } from "../application/diagnostics/ui-capture-telemetry.js";
 import type { DiagnosticsJournal } from "../ports/diagnostics.js";
 import type { z } from "zod";
@@ -64,8 +65,8 @@ function record(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-function failureCode(value: unknown): FailureCode | undefined {
-  return FAILURE_CODES.find((code) => code === value);
+function failureCode(value: unknown): DiagnosticOutcomeCode | undefined {
+  return DIAGNOSTIC_OUTCOME_CODES.find((code) => code === value);
 }
 
 /**

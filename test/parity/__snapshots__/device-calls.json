@@ -383,6 +383,354 @@
       {}
     ]
   },
+  "touchPolicy element opens a row no clickable ancestor reports": {
+    "replay": [
+      {
+        "appProcesses": 1,
+        "currentActivity": 2,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 2
+      },
+      {
+        "appProcesses": 1,
+        "currentActivity": 2,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 2
+      }
+    ],
+    "generatedReplay": [
+      {
+        "appProcesses": 2,
+        "foregroundComponent": 3,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 1
+      },
+      {
+        "appProcesses": 2,
+        "foregroundComponent": 3,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 1
+      }
+    ],
+    "generation": [
+      {
+        "appProcesses": 7,
+        "captureScreenshot": 2,
+        "foregroundComponent": 7,
+        "openSession": 3,
+        "openUiSnapshots": 2,
+        "stabilitySample": 4,
+        "startLogcat": 1,
+        "tap": 1,
+        "uiCapture": 2,
+        "windowTopology": 4
+      },
+      {
+        "appProcesses": 5,
+        "captureScreenshot": 1,
+        "foregroundComponent": 5,
+        "openSession": 2,
+        "openUiSnapshots": 1,
+        "stabilitySample": 2,
+        "startLogcat": 1,
+        "tap": 1,
+        "uiCapture": 1,
+        "windowTopology": 3
+      }
+    ]
+  },
+  "touchPolicy element taps the visible part of a WebView image": {
+    "replay": [
+      {
+        "appProcesses": 1,
+        "currentActivity": 2,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 2
+      },
+      {
+        "appProcesses": 1,
+        "currentActivity": 2,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 2
+      },
+      {
+        "appProcesses": 1,
+        "currentActivity": 2,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 2
+      }
+    ],
+    "generatedReplay": [
+      {
+        "appProcesses": 2,
+        "foregroundComponent": 3,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 1
+      },
+      {
+        "appProcesses": 2,
+        "foregroundComponent": 3,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 1
+      },
+      {
+        "appProcesses": 2,
+        "foregroundComponent": 3,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 1
+      }
+    ],
+    "generation": [
+      {
+        "appProcesses": 7,
+        "captureScreenshot": 2,
+        "foregroundComponent": 7,
+        "openSession": 3,
+        "openUiSnapshots": 2,
+        "stabilitySample": 4,
+        "startLogcat": 1,
+        "tap": 1,
+        "uiCapture": 2,
+        "windowTopology": 4
+      },
+      {
+        "appProcesses": 5,
+        "captureScreenshot": 1,
+        "foregroundComponent": 5,
+        "openSession": 2,
+        "openUiSnapshots": 1,
+        "stabilitySample": 2,
+        "startLogcat": 1,
+        "tap": 1,
+        "uiCapture": 1,
+        "windowTopology": 3
+      },
+      {
+        "appProcesses": 5,
+        "captureScreenshot": 1,
+        "foregroundComponent": 5,
+        "openSession": 2,
+        "openUiSnapshots": 1,
+        "stabilitySample": 2,
+        "startLogcat": 1,
+        "tap": 1,
+        "uiCapture": 1,
+        "windowTopology": 3
+      }
+    ]
+  },
+  "row without touchPolicy stays fail-closed": {
+    "replay": [
+      {
+        "appProcesses": 1,
+        "currentActivity": 2,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 2
+      },
+      {
+        "appProcesses": 1,
+        "currentActivity": 2,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 1
+      }
+    ],
+    "generatedReplay": [
+      {
+        "appProcesses": 2,
+        "foregroundComponent": 3,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 1
+      },
+      {
+        "appProcesses": 1,
+        "foregroundComponent": 2,
+        "uiCapture": 1
+      }
+    ],
+    "generation": [
+      {
+        "appProcesses": 7,
+        "captureScreenshot": 2,
+        "foregroundComponent": 7,
+        "openSession": 3,
+        "openUiSnapshots": 2,
+        "stabilitySample": 4,
+        "startLogcat": 1,
+        "tap": 1,
+        "uiCapture": 2,
+        "windowTopology": 4
+      },
+      {}
+    ]
+  },
+  "touchPolicy element on a target nothing handles": {
+    "replay": [
+      {
+        "appProcesses": 1,
+        "currentActivity": 2,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 2
+      },
+      {
+        "appProcesses": 1,
+        "currentActivity": 2,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 2
+      },
+      {
+        "appProcesses": 1,
+        "currentActivity": 2,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 4
+      }
+    ],
+    "generatedReplay": [
+      {
+        "appProcesses": 2,
+        "foregroundComponent": 3,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 1
+      },
+      {
+        "appProcesses": 2,
+        "foregroundComponent": 3,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 1
+      },
+      {
+        "appProcesses": 6,
+        "foregroundComponent": 7,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 3
+      }
+    ],
+    "generation": [
+      {
+        "appProcesses": 7,
+        "captureScreenshot": 2,
+        "foregroundComponent": 7,
+        "openSession": 3,
+        "openUiSnapshots": 2,
+        "stabilitySample": 4,
+        "startLogcat": 1,
+        "tap": 1,
+        "uiCapture": 2,
+        "windowTopology": 4
+      },
+      {
+        "appProcesses": 5,
+        "captureScreenshot": 1,
+        "foregroundComponent": 5,
+        "openSession": 2,
+        "openUiSnapshots": 1,
+        "stabilitySample": 2,
+        "startLogcat": 1,
+        "tap": 1,
+        "uiCapture": 1,
+        "windowTopology": 3
+      },
+      {
+        "appProcesses": 8,
+        "foregroundComponent": 8,
+        "openSession": 1,
+        "openUiSnapshots": 1,
+        "stabilitySample": 2,
+        "startLogcat": 1,
+        "tap": 1,
+        "uiCapture": 3,
+        "windowTopology": 5
+      }
+    ]
+  },
+  "touchPolicy element whose expectation already holds": {
+    "replay": [
+      {
+        "appProcesses": 1,
+        "currentActivity": 2,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 2
+      },
+      {
+        "appProcesses": 1,
+        "currentActivity": 2,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 2
+      },
+      {
+        "currentActivity": 1,
+        "uiCapture": 1
+      }
+    ],
+    "generatedReplay": [
+      {
+        "appProcesses": 2,
+        "foregroundComponent": 3,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 1
+      },
+      {
+        "appProcesses": 2,
+        "foregroundComponent": 3,
+        "stabilitySample": 2,
+        "tap": 1,
+        "uiCapture": 1
+      },
+      {
+        "appProcesses": 1,
+        "foregroundComponent": 2,
+        "uiCapture": 1
+      }
+    ],
+    "generation": [
+      {
+        "appProcesses": 7,
+        "captureScreenshot": 2,
+        "foregroundComponent": 7,
+        "openSession": 3,
+        "openUiSnapshots": 2,
+        "stabilitySample": 4,
+        "startLogcat": 1,
+        "tap": 1,
+        "uiCapture": 2,
+        "windowTopology": 4
+      },
+      {
+        "appProcesses": 5,
+        "captureScreenshot": 1,
+        "foregroundComponent": 5,
+        "openSession": 2,
+        "openUiSnapshots": 1,
+        "stabilitySample": 2,
+        "startLogcat": 1,
+        "tap": 1,
+        "uiCapture": 1,
+        "windowTopology": 3
+      },
+      {}
+    ]
+  },
   "element expectation never appears": {
     "replay": [
       {
@@ -416,5 +764,24 @@
         "windowTopology": 6
       }
     ]
+  },
+  "amend expectation": {
+    "stillWrong": {
+      "appProcesses": 12,
+      "foregroundComponent": 12,
+      "openSession": 1,
+      "openUiSnapshots": 1,
+      "uiCapture": 6,
+      "windowTopology": 6
+    },
+    "amended": {
+      "appProcesses": 3,
+      "captureScreenshot": 1,
+      "foregroundComponent": 3,
+      "openSession": 2,
+      "openUiSnapshots": 1,
+      "uiCapture": 1,
+      "windowTopology": 1
+    }
   }
 }

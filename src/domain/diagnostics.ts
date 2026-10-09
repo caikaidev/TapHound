@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { FAILURE_CODES } from "./failure.js";
+import { GENERATION_ERROR_CODES } from "./generation.js";
 import { RuntimeBackendChoiceSchema } from "./runtime.js";
 import { UiBackendIdSchema, UiBackendSelectionSchema } from "./ui-backend.js";
 import { UiCacheTelemetrySchema } from "./ui-cache.js";
@@ -59,6 +60,19 @@ export const UiBackendTelemetrySchema = z.strictObject({
 });
 export type UiBackendTelemetry = z.infer<typeof UiBackendTelemetrySchema>;
 
+/**
+ * Structured codes a journaled outcome may carry: Replay failure codes plus
+ * the Generation-only codes (`ACTION_UNSUPPORTED`, `SNAPSHOT_STALE`, ...).
+ */
+export const DIAGNOSTIC_OUTCOME_CODES = [
+  ...new Set([...FAILURE_CODES, ...GENERATION_ERROR_CODES])
+] as [
+  (typeof FAILURE_CODES)[number] | (typeof GENERATION_ERROR_CODES)[number],
+  ...((typeof FAILURE_CODES)[number] | (typeof GENERATION_ERROR_CODES)[number])[]
+];
+export const DiagnosticOutcomeCodeSchema = z.enum(DIAGNOSTIC_OUTCOME_CODES);
+export type DiagnosticOutcomeCode = z.infer<typeof DiagnosticOutcomeCodeSchema>;
+
 /** One journal line: a finished CLI invocation. */
 export const CommandEventSchema = z.strictObject({
   version: z.literal(1),
@@ -71,7 +85,7 @@ export const CommandEventSchema = z.strictObject({
   durationMs: DurationSchema,
   exitCode: z.number().int(),
   status: TokenSchema.optional(),
-  failureCode: z.enum(FAILURE_CODES).optional(),
+  failureCode: DiagnosticOutcomeCodeSchema.optional(),
   runId: z.string().regex(/^[\w.-]{1,128}$/).optional(),
   ui: z.array(UiBackendTelemetrySchema)
 });

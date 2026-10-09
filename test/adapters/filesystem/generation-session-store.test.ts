@@ -1205,6 +1205,51 @@ describe("FileSystemGenerationSessionStore", () => {
     await expect(store.read("generation-1")).resolves.toEqual(completed);
   });
 
+  it("amends only a recovery-held inFlight step by appending one step", async () => {
+    const root = await temporaryRoot();
+    const store = new FileSystemGenerationSessionStore(root);
+    const inFlight = {
+      stepIndex: 0,
+      snapshotHash: "b".repeat(64),
+      proposalHash: "c".repeat(64),
+      attemptId: "attempt-1"
+    };
+    const step = {
+      action: "wait" as const,
+      activity: {
+        before: "com.example.app.MainActivity",
+        after: "com.example.app.CompletedActivity"
+      }
+    };
+    await store.create(validSession(0, { inFlight }));
+    const amended = (revision: number): ReturnType<typeof validSession> => validSession(revision, {
+      candidateSteps: [step],
+      candidateSources: ["planner"],
+      inFlight: null
+    });
+
+    // An active step completes through completeStep, never amendStep.
+    await expectStoreError(
+      store.amendStep("generation-1", 0, inFlight, amended(1)),
+      "INVALID_TRANSITION"
+    );
+    await store.update("generation-1", 0, validSession(1, {
+      state: "recoveryRequired",
+      inFlight
+    }));
+    await expectStoreError(
+      store.amendStep("generation-1", 1, inFlight, validSession(2)),
+      "INVALID_TRANSITION"
+    );
+    await expectStoreError(
+      store.amendStep("generation-1", 1, { ...inFlight, attemptId: "other" }, amended(2)),
+      "INVALID_TRANSITION"
+    );
+    await store.amendStep("generation-1", 1, inFlight, amended(2));
+
+    await expect(store.read("generation-1")).resolves.toEqual(amended(2));
+  });
+
   it.each([
     "begin",
     "markRecovery",

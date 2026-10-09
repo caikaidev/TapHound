@@ -254,9 +254,17 @@ fails with `BRIEF_INVALID` before any device work.
   "bindings": { "projectHash": "...", "configHash": "...", "contextHash": "...", "snapshotHash": null },
   "contextSelection": { "bundleVersion": 2, "indexHash": "...", "modules": [{"id": ":app", "sha256": "...", "projectDir": "app", "inventory": {"pathSetSha256": "...", "categories": ["manifests", "sources", "layouts", "navigation"]}}, {"id": ":feature:search", "sha256": "...", "projectDir": "features/search", "inventory": {"pathSetSha256": "...", "categories": ["manifests", "sources", "layouts", "navigation"]}}] },
   "variables": { "runId": "...", "timestamp": "...", "randomHex": "..." },
-  "target": { "packageName": "...", "deviceSerial": "...", "resetStrategy": "processOnly", "interactionPolicy": {...} }
+  "target": { "packageName": "...", "deviceSerial": "...", "resetStrategy": "processOnly", "interactionPolicy": {...} },
+  "timing": { "totalMs": 41250, "phases": { "contextLoad": 120, "doctor": 2480, "projectDescribe": 35, "baseFlowReplay": 31900, "contextValidation": 5810, "uiSnapshotOpen": 640, "sessionCreate": 60 } }
 }
 ```
+
+`timing` reports wall-clock milliseconds per start phase, in execution order:
+`contextLoad`, `doctor`, `projectDescribe`, `baseFlowReplay` (only with
+`--base-flow`: a full Replay of the Flow including cold launch and final
+evidence collection), `contextValidation`, `appPrepare` (only without a Base
+Flow: the cold launch), `uiSnapshotOpen`, and `sessionCreate`. It is output only
+and is not persisted; include it when reporting slow starts.
 
 **Note the `generationId` and `contextSelection`**. The application module,
 requested modules, and their declared dependencies are bound to the session.
@@ -570,6 +578,38 @@ user before `generation recover --decision retry`, then re-observe. Recovery
 does not commit the interrupted action and does not return a snapshot. If the
 new state shows that the old action executed, stop and start a clean session;
 do not silently omit or repeat the action.
+
+**Amending a wrong expectation.** When the action completed and only its
+expectation failed (`EXPECT_ELEMENT_FAILED`, `EXPECT_ACTIVITY_FAILED`,
+`EXPECT_LOGCAT_FAILED`, `EXPECT_LOGCAT_AMBIGUOUS`), `generation status`
+reports `recovery.amendExpectAvailable: true`. Instead of `retry` plus
+`step --replace` (a cold launch and a full prefix Replay), commit the step
+with a corrected expectation:
+
+```bash
+taphound generation recover \
+  --project /path/to/android-project \
+  --session <generationId> \
+  --decision amend-expect \
+  --expect corrected-expect.json \
+  --compact --json
+```
+
+`corrected-expect.json` holds one `element` or `activity` expectation (Logcat
+windows start at the step and have passed). Core never touches the device: it
+re-reads the step's stored proposal and pre-action snapshot, evaluates the new
+expectation on the current screen, and on success commits the original action
+with the new expectation and the observed after Activity, emitting the same
+`succeeded` shape as `generation step` (with `recoveryDecision:
+"amend-expect"` and `amendmentId`), so `envelope.mjs bind --from` accepts it.
+Each attempt is recorded as `evidence/steps/<index>-<attempt>/amendment-<id>.json`
+with the original failure and both expectations. A still-failing amendment
+exits `1` with `recoveryRequired` and leaves the step held. Amending is
+refused (`RECOVERY_REQUIRED`) for risk-confirmed or otherwise
+confirmation-requiring steps and for any other failure, and rejected
+(`EXPECT_UNSUPPORTED`) for bridge steps, Logcat expectations, and a
+`touchPolicy: "element"` step whose new expectation already held before the
+touch. Finalization still replays every step.
 
 ### 3.7 Step 5 — Repeat Until Goal is Complete
 
@@ -894,6 +934,17 @@ taphound journey check \
   --context .taphound/context/project-context.json \
   --json
 ```
+
+`module-drift` compares the whole module shard hash, so any change to the
+shard marks every Journey that selected the module `stale`: a semantic
+source change in any file of the module (including code unrelated to the
+Journey, since Core does not infer relevance), and also bookkeeping-only
+rewrites such as `context refresh` backfilling `semanticSha256` or
+rehashing a formatting-only change. The only proof that the Journey still
+holds is a new Replay, so re-finalize it (for state-changing Journeys, seed
+the test data again first). To limit the blast radius, run `context
+refresh` only when a Journey needs the new evidence, and keep
+formatting-only churn out of modules that many Journeys select.
 
 `--context` (the live Project Context index) is required. Exit `0` means the
 check completed — findings or not; `--strict` exits `1` when any Journey is

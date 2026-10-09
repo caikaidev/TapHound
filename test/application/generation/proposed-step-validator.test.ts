@@ -366,6 +366,70 @@ describe("ProposedStepValidator", () => {
     });
   });
 
+  it("accepts touchPolicy element only for a target no ancestor claims", () => {
+    const expectDetail = {
+      type: "element" as const,
+      locator: { resourceId: "detail" },
+      timeoutMs: 500
+    };
+    const row = element({
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 }
+    });
+    expect(validate(snapshot([row]), {
+      action: "click",
+      locator: { resourceId: "target" },
+      touchPolicy: "element",
+      expect: expectDetail
+    })).toMatchObject({ touchPolicy: "element" });
+
+    expect(() => validate(snapshot([{ ...row, clickable: true }]), {
+      action: "click",
+      locator: { resourceId: "target" },
+      touchPolicy: "element",
+      expect: expectDetail
+    })).toThrow(expect.objectContaining({
+      code: "ACTION_UNSUPPORTED",
+      message: "click target already reports its capability; omit touchPolicy"
+    }));
+    expect(() => validate(snapshot([]), {
+      action: "click",
+      locator: { resourceId: "target" },
+      touchPolicy: "element",
+      expect: expectDetail
+    })).toThrow(expect.objectContaining({ code: "LOCATOR_NOT_FOUND" }));
+    expect(() => validate(snapshot([{ ...row, enabled: false }]), {
+      action: "click",
+      locator: { resourceId: "target" },
+      touchPolicy: "element",
+      expect: expectDetail
+    })).toThrow(expect.objectContaining({ code: "ACTION_UNSUPPORTED" }));
+  });
+
+  it("rejects a touchPolicy element expectation that already holds", () => {
+    const layout = [
+      element({ bounds: { left: 0, top: 0, right: 100, bottom: 100 } }),
+      element({ id: "detail", resourceId: "detail" })
+    ];
+    for (const expectation of [
+      { type: "element" as const, locator: { resourceId: "detail" }, timeoutMs: 500 },
+      {
+        type: "element" as const,
+        locator: { resourceId: "gone" },
+        absent: true,
+        timeoutMs: 500
+      },
+      { type: "activity" as const, value: activity, timeoutMs: 500 }
+    ]) {
+      expect(() => validate(snapshot(layout), {
+        action: "longClick",
+        locator: { resourceId: "target" },
+        durationMs: 800,
+        touchPolicy: "element",
+        expect: expectation
+      })).toThrow(expect.objectContaining({ code: "EXPECT_UNSUPPORTED" }));
+    }
+  });
+
   it("allows back and wait without a target", () => {
     const runtime = snapshot([]);
     expect(validate(runtime, { action: "back" }).action).toBe("back");

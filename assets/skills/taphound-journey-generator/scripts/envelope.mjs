@@ -21,10 +21,13 @@ const logcatLevels = new Set(["V", "D", "I", "W", "E", "F", "A"]);
 const logcatMatches = new Set(["literal", "regex"]);
 
 const proposalShapes = new Map([
-  ["click", { required: ["action", "locator", "binding", "activity"], optional: ["expect"] }],
+  ["click", {
+    required: ["action", "locator", "binding", "activity"],
+    optional: ["touchPolicy", "expect"]
+  }],
   ["longClick", {
     required: ["action", "locator", "binding", "activity"],
-    optional: ["durationMs", "expect"]
+    optional: ["touchPolicy", "durationMs", "expect"]
   }],
   ["inputText", {
     required: ["action", "text", "binding", "activity"],
@@ -272,6 +275,17 @@ function validateProposal(where, value) {
       `${where}.direction must be one of "up", "down", "left", "right"`
     );
   }
+  if (value.touchPolicy !== undefined) {
+    if (value.touchPolicy !== "element") {
+      fail("ENVELOPE_INVALID", `${where}.touchPolicy must be "element"`);
+    }
+    if (value.expect?.type !== "element" && value.expect?.type !== "activity") {
+      fail(
+        "ENVELOPE_INVALID",
+        `${where}.touchPolicy "element" requires an element or activity expect that proves the touch took effect`
+      );
+    }
+  }
   if (value.durationMs !== undefined) {
     positiveInteger(`${where}.durationMs`, value.durationMs);
   }
@@ -372,18 +386,23 @@ function validateEnvelope(envelope) {
 // object. The binding fields are copied verbatim; nothing is invented.
 const BIND_SOURCE_HINT = "bind --from expects the unmodified stdout of "
   + "`taphound generation observe --json` (status \"observed\" with "
-  + "generationId, baseRevision, snapshotHash, snapshotRef) or of a succeeded "
+  + "generationId, baseRevision, snapshotHash, snapshotRef), of "
+  + "`taphound generation step --replace <index> --json` (status "
+  + "\"replaced\", same fields), or of a succeeded "
   + "`taphound generation step --json` (status \"succeeded\" with nextBinding "
   + "and nextSnapshotRef); save it with `> file` instead of assembling a "
   + "subset. A bare binding {generationId, baseRevision, snapshotHash} is also "
-  + "accepted";
+  + "accepted for an envelope with an inline snapshot";
 
 function readBindingFromSource(source) {
   if (!isPlainObject(source)) {
     fail("ENVELOPE_INVALID", "bind source must be a JSON object");
   }
-  if (source.status === "observed") {
-    validateBinding("observe output", {
+  // A replace re-observes after truncation and reports the same binding
+  // fields as observe.
+  if (source.status === "observed" || source.status === "replaced") {
+    const label = `${source.status === "observed" ? "observe" : "replace"} output`;
+    validateBinding(label, {
       generationId: source.generationId,
       baseRevision: source.baseRevision,
       snapshotHash: source.snapshotHash
@@ -392,7 +411,7 @@ function readBindingFromSource(source) {
       || !snapshotRefPattern.test(source.snapshotRef)) {
       fail(
         "ENVELOPE_INVALID",
-        "observe output.snapshotRef is missing or not a Store-owned evidence reference"
+        `${label}.snapshotRef is missing or not a Store-owned evidence reference`
       );
     }
     return {
@@ -425,10 +444,7 @@ function readBindingFromSource(source) {
       baseRevision: source.baseRevision,
       snapshotHash: source.snapshotHash
     },
-    snapshotRef: typeof source.snapshotRef === "string"
-      && snapshotRefPattern.test(source.snapshotRef)
-      ? source.snapshotRef
-      : undefined
+    snapshotRef: undefined
   };
 }
 
@@ -513,13 +529,21 @@ async function bind(inputPath, fromPath, outPath, projectRoot) {
   if (proposal === undefined) {
     fail("ENVELOPE_INVALID", "envelope.proposal must be a JSON object");
   }
+  // A draft's snapshotRef belongs to its old binding, so only the source's
+  // reference (or the draft's inline snapshot) can accompany the new one.
+  if (envelope.snapshot === undefined && snapshotRef === undefined) {
+    fail(
+      "ENVELOPE_INVALID",
+      "bind source is a bare binding without a snapshotRef, and the envelope "
+        + "has no inline snapshot; the draft's snapshotRef belongs to its old "
+        + `binding and is not reused. ${BIND_SOURCE_HINT}`
+    );
+  }
   const bound = {
     version: 1,
     proposal,
     ...(envelope.snapshot === undefined
-      ? envelope.snapshotRef === undefined && snapshotRef !== undefined
-        ? { snapshotRef }
-        : {}
+      ? { snapshotRef }
       : { snapshot: envelope.snapshot })
   };
   validateEnvelope(bound);

@@ -208,6 +208,13 @@ node <skill>/scripts/ledger.mjs transition \
   --input /tmp/taphound-transition.json
 ```
 
+`--input` is always the path of a JSON file, never inline JSON. Keep
+`reason` to one line (at most 1000 characters); put failure evidence in
+`failure.message` and the recovery path in `nextAction` (1000 each). Every
+state must be entered in order: a rejected transition names the allowed next
+statuses and the path to the requested one (for example `briefing →
+briefReady → generating`).
+
 ### 3.2 Brief
 
 Dispatch exactly one Case to `taphound-journey-brief-author` with:

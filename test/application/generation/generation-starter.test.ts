@@ -265,6 +265,30 @@ describe("GenerationStarter", () => {
     );
   });
 
+  it("reports every start phase to recordPhase in order", async () => {
+    const test = starter();
+    const phases: string[] = [];
+
+    await test.service.start({
+      projectRoot: "/project",
+      config,
+      context,
+      project,
+      deviceSerial: "emulator-5554",
+      recordPhase: (phase, durationMs) => {
+        expect(durationMs).toBe(0);
+        phases.push(phase);
+      }
+    });
+
+    expect(phases).toEqual([
+      "contextValidation",
+      "appPrepare",
+      "uiSnapshotOpen",
+      "sessionCreate"
+    ]);
+  });
+
   it("fails the start when the context snapshot cannot be persisted", async () => {
     const test = starter();
     test.writeEvidence.mockRejectedValueOnce(

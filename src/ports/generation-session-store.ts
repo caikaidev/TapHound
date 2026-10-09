@@ -74,6 +74,18 @@ export interface GenerationSessionStore {
     expectedInFlight: GenerationInFlight,
     next: GenerationSession
   ) => Promise<void>;
+  /**
+   * Commits a recovery-held step whose action completed but whose
+   * expectation failed, with an amended expectation proven on the current
+   * screen: clears the matching inFlight record, reactivates the session,
+   * and appends exactly one Journey step.
+   */
+  amendStep: (
+    id: string,
+    expectedRevision: number,
+    expectedInFlight: GenerationInFlight,
+    next: GenerationSession
+  ) => Promise<void>;
   recover: (
     id: string,
     expectedRevision: number,

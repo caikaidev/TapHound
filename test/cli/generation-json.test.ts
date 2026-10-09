@@ -85,6 +85,7 @@ interface Harness {
   finalize: Mock;
   assertConfigIdentity: Mock;
   recoveryStatus: Mock;
+  amendExpectation: Mock;
   retry: Mock;
   reopen: Mock;
   archive: Mock;
@@ -148,6 +149,32 @@ function harness(signal?: AbortSignal): Harness {
     replayed: true
   }));
   const assertConfigIdentity = vi.fn(() => Promise.resolve());
+  const amendExpectation = vi.fn(() => Promise.resolve({
+    status: "succeeded" as const,
+    source: "planner" as const,
+    amendmentId: "amend-1",
+    step: {
+      action: "wait" as const,
+      activity: {
+        before: "com.example.app.MainActivity",
+        after: "com.example.app.MainActivity"
+      },
+      expect: {
+        type: "activity" as const,
+        value: "com.example.app.MainActivity",
+        timeoutMs: 500
+      }
+    },
+    nextObservation: {
+      binding: {
+        generationId: "generation-1",
+        baseRevision: 6,
+        snapshotHash: "f".repeat(64)
+      },
+      snapshotRef: ".taphound/build/generations/.generation-1.work/evidence/snapshots/revision-000006/x/snapshot.json",
+      snapshot
+    }
+  }));
   const recoveryStatus = vi.fn(() => Promise.resolve({
     generationId: "generation-1",
     revision: 4,
@@ -163,6 +190,7 @@ function harness(signal?: AbortSignal): Harness {
       actionMayHaveExecuted: false,
       attemptOutcome: null,
       requiredDecision: null,
+      amendExpectAvailable: false,
       ownerAlive: null
     }
   }));
@@ -325,7 +353,7 @@ function harness(signal?: AbortSignal): Harness {
         confirmStored,
         findPendingManual
       },
-      executor: { execute },
+      executor: { execute, amendExpectation },
       observer: { observe },
       finalizer: { finalize },
       recovery: { status: recoveryStatus, retry },
@@ -369,6 +397,7 @@ function harness(signal?: AbortSignal): Harness {
     finalize,
     assertConfigIdentity,
     recoveryStatus,
+    amendExpectation,
     retry,
     reopen,
     archive,
@@ -707,6 +736,38 @@ describe("generation JSON process protocol", () => {
     });
     expect(test.request).not.toHaveBeenCalled();
     expect(test.execute).not.toHaveBeenCalled();
+    expect(test.exitCodes).toEqual([2]);
+  });
+
+  it("reports a missing --input envelope as caller input, not an internal error", async () => {
+    const test = harness();
+    const missing = Object.assign(
+      new Error("ENOENT: no such file or directory, open '/tmp/missing.json'"),
+      { code: "ENOENT" }
+    );
+    vi.mocked(test.dependencies.readJson).mockResolvedValueOnce(runtimeConfig)
+      .mockRejectedValueOnce(missing);
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "step",
+      "--project", "/project",
+      "--input", "/tmp/missing.json",
+      "--session", "generation-1",
+      "--json"
+    ]);
+
+    const output = JSON.parse(test.stdout.value) as {
+      failure: { code: string; message: string };
+    };
+    expect(output).toMatchObject({
+      status: "error",
+      exitCode: 2,
+      failure: { code: "CONFIG_INVALID" }
+    });
+    expect(output.failure.message).toContain(
+      "Planner envelope --input is not readable: /tmp/missing.json (ENOENT"
+    );
+    expect(test.request).not.toHaveBeenCalled();
     expect(test.exitCodes).toEqual([2]);
   });
 
@@ -1670,6 +1731,7 @@ describe("generation JSON process protocol", () => {
         actionMayHaveExecuted: true,
         attemptOutcome: null,
         requiredDecision: null,
+        amendExpectAvailable: false,
         ownerAlive: true
       }
     });
@@ -1769,6 +1831,7 @@ describe("generation JSON process protocol", () => {
         actionMayHaveExecuted: false,
         attemptOutcome: null,
         requiredDecision: null,
+        amendExpectAvailable: false,
         ownerAlive: true
       }
     });
@@ -1820,6 +1883,7 @@ describe("generation JSON process protocol", () => {
         actionMayHaveExecuted: false,
         attemptOutcome: null,
         requiredDecision: null,
+        amendExpectAvailable: false,
         ownerAlive: null
       }
     };
@@ -1948,6 +2012,107 @@ describe("generation JSON process protocol", () => {
       nextAction: "retry the interrupted generation step",
       actionMayHaveExecuted: true
     });
+  });
+
+  it("requires --expect exactly with the amend-expect decision", async () => {
+    for (const args of [
+      ["--decision", "amend-expect"],
+      ["--decision", "retry", "--expect", "expect.json"]
+    ]) {
+      const test = harness();
+      await createProgram(test.dependencies).parseAsync([
+        "node", "taphound", "generation", "recover",
+        "--project", "/project",
+        "--session", "generation-1",
+        ...args,
+        "--json"
+      ]);
+      expect(JSON.parse(test.stdout.value)).toMatchObject({
+        exitCode: 2,
+        failure: {
+          code: "CONFIG_INVALID",
+          message: "--expect <path> is required with --decision amend-expect and not accepted otherwise"
+        }
+      });
+      expect(test.amendExpectation).not.toHaveBeenCalled();
+      expect(test.retry).not.toHaveBeenCalled();
+    }
+  });
+
+  it("amends the failed expectation and emits a bindable succeeded step", async () => {
+    const test = harness();
+    const corrected = {
+      type: "activity",
+      value: "com.example.app.MainActivity",
+      timeoutMs: 500
+    };
+    vi.mocked(test.dependencies.readJson).mockImplementation((path: string) => (
+      Promise.resolve(path === "/project/expect.json" ? corrected : runtimeConfig)
+    ));
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "recover",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--decision", "amend-expect",
+      "--expect", "expect.json",
+      "--compact",
+      "--json"
+    ]);
+
+    expect(test.amendExpectation).toHaveBeenCalledWith({
+      generationId: "generation-1",
+      expect: corrected
+    });
+    expect(test.retry).not.toHaveBeenCalled();
+    const output = JSON.parse(test.stdout.value) as Record<string, unknown>;
+    expect(output).toMatchObject({
+      status: "succeeded",
+      exitCode: 0,
+      recoveryDecision: "amend-expect",
+      amendmentId: "amend-1",
+      source: "planner",
+      nextBinding: {
+        generationId: "generation-1",
+        baseRevision: 6,
+        snapshotHash: "f".repeat(64)
+      }
+    });
+    expect(output).not.toHaveProperty("nextSnapshot");
+    expect(test.exitCodes).toEqual([0]);
+  });
+
+  it("keeps recovery when the amended expectation still fails", async () => {
+    const test = harness();
+    vi.mocked(test.dependencies.readJson).mockImplementation((path: string) => (
+      Promise.resolve(path === "/project/expect.json"
+        ? { type: "element", locator: { resourceId: "x" }, timeoutMs: 500 }
+        : runtimeConfig)
+    ));
+    test.amendExpectation.mockResolvedValueOnce({
+      status: "failed",
+      amendmentId: "amend-2",
+      failure: { code: "EXPECT_ELEMENT_FAILED", message: "not there" }
+    });
+
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "generation", "recover",
+      "--project", "/project",
+      "--session", "generation-1",
+      "--decision", "amend-expect",
+      "--expect", "expect.json",
+      "--json"
+    ]);
+
+    expect(JSON.parse(test.stdout.value)).toMatchObject({
+      status: "recoveryRequired",
+      exitCode: 1,
+      failure: {
+        code: "EXPECT_ELEMENT_FAILED",
+        details: { amendmentId: "amend-2" }
+      }
+    });
+    expect(test.exitCodes).toEqual([1]);
   });
 
   it("tells verification recovery to rerun finalize", async () => {
@@ -2229,6 +2394,7 @@ describe("generation JSON process protocol", () => {
         actionMayHaveExecuted: false,
         attemptOutcome: null,
         requiredDecision: null,
+        amendExpectAvailable: false,
         ownerAlive: null
       }
     }));

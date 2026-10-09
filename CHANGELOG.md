@@ -4,6 +4,30 @@
 
 ### Added
 
+- `generation recover --decision amend-expect --expect <file>` commits a
+  step whose action completed but whose expectation failed, with a
+  corrected `element` or `activity` expectation evaluated on the current
+  screen, instead of `retry` plus a full-prefix `step --replace`. It never
+  touches the device, records `amendment-<id>.json` evidence, is refused for
+  risk-confirmed steps, bridge steps, and Logcat expectations, and emits the
+  `succeeded` step shape that `envelope.mjs bind` accepts. `generation
+  status` reports `recovery.amendExpectAvailable`.
+
+- `generation start --json` reports `timing` (`totalMs` and per-phase
+  milliseconds: `contextLoad`, `doctor`, `projectDescribe`,
+  `baseFlowReplay` or `appPrepare`, `contextValidation`, `uiSnapshotOpen`,
+  `sessionCreate`) so slow starts can be attributed. Output only.
+
+- `click` and `longClick` steps and proposals accept `touchPolicy:
+  "element"` for targets that react to touches although neither they nor an
+  ancestor report `clickable` (RecyclerView item-touch listeners, WebView DOM
+  nodes such as inline mail images). Core touches the element's bounds
+  clipped to its ancestors and the display, and the step must prove its
+  outcome with an `element` or `activity` expect (or an Activity change)
+  that does not already hold before the touch. Generation rejects the policy
+  on targets that already have a capable ancestor. Without it, such targets
+  keep failing closed.
+
 - `taphound-flash` plans accept `launchTimeoutMs` (default 30000): the cold
   launch, including a first screen that keeps loading or animating, gets its
   own budget instead of `settleTimeoutMs`. `UNSETTLED` names the budget to
@@ -13,11 +37,46 @@
 
 ### Fixed
 
+- `scrollTo` stops with `SCROLL_TARGET_NOT_FOUND` once 2 consecutive swipes
+  leave the container unchanged, naming the direction, instead of spending
+  every remaining swipe at a list edge. The docs state that `direction` is
+  the finger direction (`up` reveals content below).
+- The diagnostics journal keeps Generation-only failure codes such as
+  `ACTION_UNSUPPORTED`; they were dropped as a bare `error` status.
+- Generation `CONFIG_INVALID` for a config or UI backend that differs from
+  the session names the bound and current hashes and says to rerun with the
+  `--config` used at `generation start`.
+- `envelope.mjs bind` accepts `generation step --replace` output, so no
+  extra `observe` is needed after a replace, and explains that a bare
+  binding cannot reuse the draft's old `snapshotRef`.
+- `generation step --input` with a missing or unreadable envelope file fails
+  with `CONFIG_INVALID` (exit 2) naming the path, instead of
+  `INTERNAL_ERROR` (exit 4). The journey-generator Skill says to run `step`
+  only after `envelope.mjs bind` exits 0 and not to pipe `bind`.
+- The Case Suite `ledger.mjs` rejects inline JSON passed to `--input` with
+  a usage error instead of `ENAMETOOLONG`, names the invalid field of a
+  transition identity, lists the allowed next statuses and the path through
+  skipped states for a rejected transition, and allows transition reasons up
+  to 1000 characters (was 500), pointing over-long reasons to
+  `failure.message` and `nextAction`.
+- `generation start --output` fails with a hint that the Journey path is
+  chosen at `generation finalize --output`, and `start --help` says so and
+  that later commands need the same `--config`.
+
 - `taphound-flash` retries a failing uiautomator dump (for example `null root
   node` while a splash screen starts) until the current wait runs out instead
   of failing the whole run on the first attempt.
 
 ### Changed
+
+- `docs/capability-matrix.md` documents UI tree fidelity across backends
+  (raw dump versus Appium hierarchy, WebView DOM bounds, non-clickable
+  touch targets), and `docs/local-testing.md` explains the Node
+  `UNDICI-EHPA` proxy warning and the `NO_PROXY` setting for the local
+  Appium server.
+- The Brief Author reads touch capability only from `taphound observe`
+  snapshots, records which element holds it, and names the outcome a
+  `touchPolicy: "element"` step needs when no element does.
 
 - The `taphound-flash` Skill states that visual styles (colors, layout
   details) are out of scope for flash and TapHound alike: Contracts can require

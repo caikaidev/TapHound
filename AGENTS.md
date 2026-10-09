@@ -12,7 +12,7 @@ TapHound does not build or install APKs. The target package must already be
 installed before recording, generation, or verification.
 
 `taphound init` scans `assets/skills/` and installs every skill directory
-containing a `SKILL.md`. Five skills ship with TapHound:
+containing a `SKILL.md`. Six skills ship with TapHound:
 
 - `taphound-journey-generator` drives one deterministic Journey generation session.
   Requirement analysis, planning, coding, build/install, multi-Case
@@ -54,6 +54,16 @@ containing a `SKILL.md`. Five skills ship with TapHound:
   the matched element's point) and prints one JSON result. It never counts
   as evidence; `test/skills/flash.test.ts` drives it with a stateful fake
   adb (`test/fixtures/bin/fake-adb.mjs`).
+- `taphound-bug-fix` fixes one bug from a scenario, a bug-tracker ticket, or
+  a crash log under the rule "no reproduction, no fix": it reads the report
+  (ticket URLs through the user's reader Skill, `bug-tracker-reader` by
+  default, saved per user with `scripts/bug-fix.mjs reader set`), reproduces
+  the failure in a held generation session (`APP_CRASHED` matched by `crash
+  match`, or a failed correct-behavior expectation), stops at
+  `NOT_REPRODUCED` otherwise, then fixes, finalizes a regression Journey and
+  Contract under `.taphound/journeys/bugs/` and `.taphound/contracts/bugs/`,
+  and gates through `taphound-verify-change` accept mode. Its helper is
+  tested by `test/skills/bug-fix.test.ts`.
 
 The Journey Skill may consume one optional project-relative
 `taphound-journey-brief.md` through a `journeyBrief: {path, sha256}` binding.

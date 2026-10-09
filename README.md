@@ -34,7 +34,7 @@ The change type picks the proof: new behavior (with or without UI) must pass an 
 - **Generate** — AI-agent-driven Journey generation: evidence-bound steps, risk confirmation for sensitive actions, and a final exact replay before a Journey is published (`taphound generation ...`).
 - **Trust chain** — Acceptance Contracts, behavior Baselines, and Failure Classification turn a replay into an auditable verdict.
 - **Knowledge** — semantic Anchors and Screens let Journeys survive UI refactors and resource-id renames.
-- **Agent Skills** — five installable Skills (`taphound init`): `taphound-flash` (a standalone adb-only smoke check while coding), `taphound-verify-change` (the done-gate: accept new behavior or preserve existing behavior), `taphound-journey-brief-author` and `taphound-journey-generator` (turn a Case into a verified Journey), and `taphound-case-suite` (many Cases, one at a time).
+- **Agent Skills** — six installable Skills (`taphound init`): `taphound-flash` (a standalone adb-only smoke check while coding), `taphound-verify-change` (the done-gate: accept new behavior or preserve existing behavior), `taphound-journey-brief-author` and `taphound-journey-generator` (turn a Case into a verified Journey), `taphound-case-suite` (many Cases, one at a time), and `taphound-bug-fix` (reproduce a reported bug or crash, fix it, and prove the same scenario passes).
 
 ## Requirements
 

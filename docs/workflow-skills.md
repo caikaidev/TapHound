@@ -24,6 +24,14 @@ Skills give each stage of that loop a proportionate check:
    none exists.
 4. **Many Cases**: `taphound-case-suite` schedules them one at a time with a
    durable ledger.
+5. **Bug fixes**: `taphound-bug-fix` turns a scenario, ticket, or crash log
+   into a reproduction (a held generation session failing as reported, or a
+   failing unit test for logic-only bugs), stops at `NOT_REPRODUCED` when it
+   cannot reproduce, and after the fix commits a regression Journey and
+   Contract under `.taphound/journeys/bugs/` and `.taphound/contracts/bugs/`
+   gated by `taphound-verify-change` accept mode. Ticket URLs are read only
+   through the user's reader Skill (`scripts/bug-fix.mjs reader set
+   <skill>`, stored per user, never in the project).
 
 ## Durable multi-Case Journey suites
 

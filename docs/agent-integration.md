@@ -125,6 +125,7 @@ can escalate `pass`/`inconclusive` to `needsReview`.
 | `taphound-journey-brief-author` | maintain the Project Context and author one Journey Brief per Case | read-only (`observe`) |
 | `taphound-journey-generator` | turn a Case into a verified Journey through a generation session | drives the app during generation and finalize |
 | `taphound-case-suite` | run many Cases one at a time with a durable ledger | through the Skills it dispatches |
+| `taphound-bug-fix` | fix one reported bug or crash: reproduce it first (stop if it does not reproduce), fix, and prove the same scenario passes | through the Skills it dispatches; reads the crash buffer with `adb logcat -d -b crash` |
 
 `verify --diff`, `failure classify`, and `baseline compare` stay available to
 any orchestration, but only `taphound-verify-change`'s gate decides whether a

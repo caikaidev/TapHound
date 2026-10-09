@@ -23,6 +23,7 @@ describe("FileSystemSkillInstaller", () => {
     const names = await installer.listSkillNames();
 
     expect([...names].sort()).toEqual([
+      "taphound-bug-fix",
       "taphound-case-suite",
       "taphound-flash",
       "taphound-journey-brief-author",
@@ -46,6 +47,26 @@ describe("FileSystemSkillInstaller", () => {
       expect(await readFile(
         join(destination, "scripts", "ledger.mjs"), "utf8"
       )).toContain("CASE_SUITE_REVISION_CONFLICT");
+    } finally {
+      await rm(target, { recursive: true, force: true });
+    }
+  });
+
+  it("installs the bug-fix workflow with its helper and templates", async () => {
+    const installer = new FileSystemSkillInstaller();
+    const target = await mkdtemp(join(tmpdir(), "taphound-bug-fix-skill-"));
+    try {
+      const destination = join(target, "taphound-bug-fix");
+      await installer.installTo("taphound-bug-fix", destination);
+      const content = await readFile(join(destination, "SKILL.md"), "utf8");
+      expect(content).toContain("no reproduction, no fix");
+      expect(content).toContain("bug-tracker-reader");
+      expect(content).toContain(".taphound/journeys/bugs/<caseId>.json");
+      expect(await readdir(join(destination, "templates")))
+        .toEqual(["bug-record.md", "fix-report.md"]);
+      expect(await readFile(
+        join(destination, "scripts", "bug-fix.mjs"), "utf8"
+      )).toContain("TAPHOUND_BUG_READER_SKILL");
     } finally {
       await rm(target, { recursive: true, force: true });
     }

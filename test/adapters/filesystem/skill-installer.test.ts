@@ -228,3 +228,47 @@ describe("FileSystemSkillInstaller", () => {
     }
   });
 });
+
+describe("Field Skills installer integration", () => {
+  it("discovers only three default Field Skills", async () => {
+    const installer = new FileSystemSkillInstaller();
+    expect(await installer.listSkillNames("field")).toEqual([
+      "tap-check", "tap-fix", "taphound-flash"
+    ]);
+  });
+
+  it("copies Field Skills and shared runner with the selected profile", async () => {
+    const installer = new FileSystemSkillInstaller();
+    const root = await mkdtemp(join(tmpdir(), "taphound-field-install-"));
+    try {
+      const names = ["tap-check", "tap-fix", "taphound-flash"];
+      const targets = names.map((name) => join(root, ".agents", "skills", name));
+      await installer.checkConflicts("field", targets);
+      for (let i = 0; i < targets.length; i++) {
+        await installer.installTo(names[i]!, targets[i]!, "field");
+      }
+      expect(await readFile(join(targets[0]!, "SKILL.md"), "utf8")).toContain("3.6-copy-ready");
+      expect(await readFile(join(targets[2]!, "scripts", "feedback.mjs"), "utf8")).toContain("feedback");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects installed legacy Skills before writing Field files", async () => {
+    const installer = new FileSystemSkillInstaller();
+    const root = await mkdtemp(join(tmpdir(), "taphound-profile-conflict-"));
+    try {
+      const skillsRoot = join(root, ".agents", "skills");
+      const old = join(skillsRoot, "taphound-verify-change");
+      const fs = await import("node:fs/promises");
+      await fs.mkdir(old, { recursive: true });
+      await fs.writeFile(join(old, "SKILL.md"), "name: taphound-verify-change");
+      await expect(installer.checkConflicts("field", [
+        join(skillsRoot, "tap-check"), join(skillsRoot, "tap-fix"), join(skillsRoot, "taphound-flash")
+      ])).rejects.toThrow("Move conflicting Skill directories");
+      await expect(readdir(join(skillsRoot, "tap-check"))).rejects.toThrow();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});

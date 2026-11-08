@@ -36,7 +36,7 @@ const statuses=new Set(['PASS','FAIL','BLOCKED','INCONCLUSIVE','NOT_APPLICABLE']
 const gates=new Set(['target','existing-tests','regression']);
 const risks=new Set(['critical','high','medium','low']);
 /** Custom scripts attest to their own observations, not independent UI facts. */
-export function verifyCustomScenarioReport(report,attempt,attached) {
+export function verifyCustomScenarioReport(report,attempt,attached,observationsByPath={}) {
   if(report?.version!==2||!Array.isArray(report.scenarios))
     throw error('CUSTOM_ASSERTION_UNVERIFIED','Custom scenario-results.json must use version 2 with measured assertions; v1 status strings cannot prove PASS');
   const covered=[];
@@ -50,6 +50,11 @@ export function verifyCustomScenarioReport(report,attempt,attached) {
       if(!safeName(a?.id)||a?.operator!=='equals'||!primitive(a?.expected)||!primitive(a?.actual)||a.actual!==a.expected||
         typeof path!=='string'||!path.startsWith(`attempts/${attempt}/evidence/`)||!refs.has(path))
         throw error('CUSTOM_ASSERTION_UNVERIFIED',`Scenario ${scenario.id} requires a matching measured equals assertion and a separate attached evidence file from Attempt ${attempt}`);
+      const measurements=observationsByPath[path]?.measurements;
+      if(!measurements||typeof measurements!=='object'||
+        !Object.prototype.hasOwnProperty.call(measurements,a.id)||
+        !primitive(measurements[a.id])||measurements[a.id]!==a.actual)
+        throw error('CUSTOM_OBSERVATION_MISMATCH',`Scenario ${scenario.id} assertion ${a.id} does not match the separately captured JSON measurements at ${path}`);
     }
     covered.push(scenario.id);
   }
@@ -166,6 +171,7 @@ export async function gate(dir,input,git,deviceBinding){
   if(isPass&&deviceBinding && attempts.some(a=>a.device && a.device!==deviceBinding))throw error('DEVICE_CONFLICT','Gate attempt used a different device');
   if(input.status==='NOT_APPLICABLE'&&input.gate==='target')throw error('GATE_INVALID','Target verification cannot be not-applicable');
   let reports=[];
+  const verificationSources=[];
   if(input.gate==='existing-tests'){
     const relevant=plan.existingTests.filter(t=>t.required).map(t=>t.id);
     if(input.status==='NOT_APPLICABLE'){
@@ -203,7 +209,10 @@ export async function gate(dir,input,git,deviceBinding){
         const result=await readJson(join(dir,'attempts',id,'evidence','field-result.json')).catch(async()=>await readJson(join(dir,'attempts',id,'evidence','result.json')).catch(()=>undefined));
         for(const check of runPlan.scenarioChecks??[]){
           if(!runPlan.scenarioIds?.includes(check.id)||!Array.isArray(check.assertionSteps)||!check.assertionSteps.length)continue;
-          if(check.assertionSteps.every(index=>Number.isInteger(index)&&['expect','expectActivity'].includes(runPlan.steps?.[index]?.action)&&result?.steps?.some(step=>step.index===index&&step.status==='passed'&&step.action===runPlan.steps[index].action)))declared.add(check.id);
+          if(check.assertionSteps.every(index=>Number.isInteger(index)&&['expect','expectActivity'].includes(runPlan.steps?.[index]?.action)&&result?.steps?.some(step=>step.index===index&&step.status==='passed'&&step.action===runPlan.steps[index].action))){
+            declared.add(check.id);
+            verificationSources.push({scenarioId:check.id,attempt:id,method:'runner-step'});
+          }
         }
       }
       for(const entry of attached){
@@ -211,13 +220,22 @@ export async function gate(dir,input,git,deviceBinding){
         const attempt=entry.path.split('/')[1];if(!selected.includes(attempt))continue;
         const data=await readJson(join(dir,entry.path)).catch(()=>undefined);
         if(!data)throw error('CUSTOM_ASSERTION_UNVERIFIED',`Unreadable custom scenario report: ${entry.path}`);
-        for(const scenarioId of verifyCustomScenarioReport(data,attempt,attached))declared.add(scenarioId);
+        const observationPaths=[...new Set(data.scenarios.flatMap(s=>Array.isArray(s.assertions)?s.assertions.map(a=>a?.evidence).filter(Boolean):[]))];
+        const observationsByPath={};
+        for(const path of observationPaths){
+          if(typeof path!=='string'||!attached.some(a=>a.path===path))throw error('CUSTOM_ASSERTION_UNVERIFIED','Custom measurement evidence must be explicitly attached');
+          observationsByPath[path]=await readJson(join(dir,path)).catch(()=>undefined);
+        }
+        for(const scenarioId of verifyCustomScenarioReport(data,attempt,attached,observationsByPath)){
+          declared.add(scenarioId);
+          verificationSources.push({scenarioId,attempt,method:'external-measurements',attestation:'custom-script'});
+        }
       }
       if((input.scenarios??[]).some(id=>!declared.has(id)))throw error('GATE_SCENARIO_EVIDENCE','Regression scenario IDs must be present in a frozen device plan scenarioIds[] or a passing attempt evidence/scenario-results.json with positive assertions');
     }
   }
   if(input.gate==='target'&&isPass && (input.scenarios?.length||input.tests?.length))throw error('GATE_INVALID','Target gate does not accept regression scenarios or test ids');
-  const result={version:1,gate:input.gate,status:input.status,summary:input.summary,recordedAt:new Date().toISOString(),impactSha256:index.sha256,codeFingerprint:fingerprint,attempts:selected,evidence:attached,reports,scenarios:uniq(input.scenarios??[]),tests:uniq(input.tests??[]),device:deviceBinding??null,...(oracleHash?{oracleSha256:oracleHash}:{})};
+  const result={version:1,gate:input.gate,status:input.status,summary:input.summary,recordedAt:new Date().toISOString(),impactSha256:index.sha256,codeFingerprint:fingerprint,attempts:selected,evidence:attached,reports,scenarios:uniq(input.scenarios??[]),tests:uniq(input.tests??[]),verificationSources,device:deviceBinding??null,...(oracleHash?{oracleSha256:oracleHash}:{})};
   await saveGateSnapshot(dir,input.gate,result);
   return {gate:input.gate,status:input.status,attempts:selected,reports:reports.map(x=>({tests:x.tests,passed:x.passed,failures:x.failures})),impactSha256:index.sha256};
 }

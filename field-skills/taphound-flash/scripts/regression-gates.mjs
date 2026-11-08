@@ -35,6 +35,26 @@ async function evidencePaths(dir, paths) {
 const statuses=new Set(['PASS','FAIL','BLOCKED','INCONCLUSIVE','NOT_APPLICABLE']);
 const gates=new Set(['target','existing-tests','regression']);
 const risks=new Set(['critical','high','medium','low']);
+/** Custom scripts attest to their own observations, not independent UI facts. */
+export function verifyCustomScenarioReport(report,attempt,attached) {
+  if(report?.version!==2||!Array.isArray(report.scenarios))
+    throw error('CUSTOM_ASSERTION_UNVERIFIED','Custom scenario-results.json must use version 2 with measured assertions; v1 status strings cannot prove PASS');
+  const covered=[];
+  const refs=new Set(attached.map(x=>x.path));
+  for(const scenario of report.scenarios){
+    if(!safeName(scenario?.id)||scenario.status!=='passed'||!Array.isArray(scenario.assertions)||!scenario.assertions.length)
+      throw error('CUSTOM_ASSERTION_UNVERIFIED','Custom scenario requires id, passed status, and nonempty measured assertions');
+    for(const a of scenario.assertions){
+      const primitive=x=>['string','number','boolean'].includes(typeof x)&&x!==null&&(typeof x!=='number'||Number.isFinite(x));
+      const path=a?.evidence;
+      if(!safeName(a?.id)||a?.operator!=='equals'||!primitive(a?.expected)||!primitive(a?.actual)||a.actual!==a.expected||
+        typeof path!=='string'||!path.startsWith(`attempts/${attempt}/evidence/`)||!refs.has(path))
+        throw error('CUSTOM_ASSERTION_UNVERIFIED',`Scenario ${scenario.id} requires a matching measured equals assertion and a separate attached evidence file from Attempt ${attempt}`);
+    }
+    covered.push(scenario.id);
+  }
+  return covered;
+}
 function uniq(arr){return [...new Set(arr)];}
 export async function saveImpact(dir, file, git) {
   const plan=await readJson(resolve(file));
@@ -187,13 +207,11 @@ export async function gate(dir,input,git,deviceBinding){
         }
       }
       for(const entry of attached){
-        if(!/^attempts\/\d+\/evidence\//.test(entry.path))continue;
+        if(!/^attempts\/\d+\/evidence\/scenario-results\.json$/.test(entry.path))continue;
         const attempt=entry.path.split('/')[1];if(!selected.includes(attempt))continue;
         const data=await readJson(join(dir,entry.path)).catch(()=>undefined);
-        if(data?.version!==1||!Array.isArray(data?.scenarios))continue;
-        for(const scenario of data.scenarios){
-          if(scenario?.status==='passed'&&typeof scenario?.id==='string'&&Array.isArray(scenario?.assertions)&&scenario.assertions.length>0)declared.add(scenario.id);
-        }
+        if(!data)throw error('CUSTOM_ASSERTION_UNVERIFIED',`Unreadable custom scenario report: ${entry.path}`);
+        for(const scenarioId of verifyCustomScenarioReport(data,attempt,attached))declared.add(scenarioId);
       }
       if((input.scenarios??[]).some(id=>!declared.has(id)))throw error('GATE_SCENARIO_EVIDENCE','Regression scenario IDs must be present in a frozen device plan scenarioIds[] or a passing attempt evidence/scenario-results.json with positive assertions');
     }

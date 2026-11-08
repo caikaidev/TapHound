@@ -6,6 +6,7 @@ import {join,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
 import {selectForArchive} from '../taphound-flash/scripts/feedback-pack-policy.mjs';
+import {verifyCustomScenarioReport} from '../taphound-flash/scripts/regression-gates.mjs';
 import {validateOracleReview} from '../taphound-flash/scripts/oracle-review.mjs';
 const dirRoot=dirname(fileURLToPath(import.meta.url));
 const feedback=join(dirRoot,'../taphound-flash/scripts/feedback.mjs');
@@ -57,3 +58,16 @@ test('new oracle source review is versioned and uncertainty blocks a green compl
  assert.notEqual(first.sha256,second.sha256);
  assert.match(await readFile(join(fb,'timeline.jsonl'),'utf8'),/oracle-review/);
 }));
+
+test('custom regression claims must bind actual/expected to separately attached evidence',()=>{
+ const legacy={version:1,scenarios:[{id:'B',status:'passed',assertions:['looked good']}]};
+ assert.throws(()=>verifyCustomScenarioReport(legacy,'003',[]),e=>e.code==='CUSTOM_ASSERTION_UNVERIFIED');
+ const report={version:2,scenarios:[{id:'B',status:'passed',assertions:[{id:'rendered',operator:'equals',expected:true,actual:true,evidence:'attempts/003/evidence/observed.json'}]}]};
+ assert.throws(()=>verifyCustomScenarioReport(report,'003',[]),e=>e.code==='CUSTOM_ASSERTION_UNVERIFIED');
+ const attached=[{path:'attempts/003/evidence/observed.json',sha256:'abc'}];
+ assert.deepEqual(verifyCustomScenarioReport(report,'003',attached),['B']);
+ const changed=structuredClone(report);changed.scenarios[0].assertions[0].actual=false;
+ assert.throws(()=>verifyCustomScenarioReport(changed,'003',attached),e=>e.code==='CUSTOM_ASSERTION_UNVERIFIED');
+ const wrongDevice=structuredClone(report);wrongDevice.scenarios[0].assertions[0].evidence='attempts/004/evidence/observed.json';
+ assert.throws(()=>verifyCustomScenarioReport(wrongDevice,'003',attached),e=>e.code==='CUSTOM_ASSERTION_UNVERIFIED');
+});

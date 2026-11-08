@@ -44,3 +44,7 @@ This check does **not** automatically prove a network request belongs to this ac
 ## Feedback size priorities
 
 `feedback.zip` now prioritizes `summary.md`, `manifest.json`, `timeline.jsonl`, `index.json`, three Gate files, impact/oracle plans, test discovery and **all** per-attempt `attempt.json` metadata before raw screenshots/Logcat. `zip-manifest.json` indicates complete/incomplete packaging and the included/omitted paths; `zip-omissions.txt` details the omissions. Large raw evidence remains in the local directory. Do not claim independent verification if essential files are unavailable or the ZIP is marked `incomplete`.
+
+## Provenance is not semantic truth
+
+A source reference and `confidence: supported` are **Agent-authored claims**, not a machine proof that the source entails `then`. For each critical expectation, the Agent must identify an actual requirement/bug statement, inspect the narrow UI → handler → state path, document why this sequence supports the expected behavior, and map it to a meaningful real test assertion. Do not paste generic placeholders as sources. If the cited source does not establish the step or there is a business conflict, mark the expectation uncertain and continue independent tests; do not change only the confidence label to obtain PASS. Use event `oracle-error` or `assertion-changed` when revising an expectation, with precise old/new conditions and evidence. No new user approval gate is introduced.

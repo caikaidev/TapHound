@@ -2,7 +2,7 @@ import { defaultExclude, defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    exclude: [...defaultExclude, "**/.worktrees/**"],
+    exclude: [...defaultExclude, "**/.worktrees/**", "field-skills/tests/**"],
     // Generation lifecycle tests use many atomic filesystem transitions and
     // exceed Vitest's 5s default on slower local disks while still completing
     // deterministically. Keep a finite suite-wide timeout for real hangs.

@@ -1,13 +1,43 @@
 # Workflow Skills
 
-`taphound init` installs `taphound-case-suite` and `taphound-verify-change`
+## Default Agent-first workflow
+
+`taphound init --agent codex` (or another supported agent) defaults to the
+three Field Skills from `field-skills/`: **tap-check**, **tap-fix**, and
+**taphound-flash**. They also work as three directly copied sibling directories
+without the TapHound CLI. Normal tasks begin from natural language:
+
+- `tap-check` verifies a completed change with requirement/source-backed
+  oracles, impacted regressions, existing related tests, and device evidence.
+- `tap-fix` confirms the reported RED before a minimal fix, replays the
+  identical GREEN oracle, and checks related existing tests and regressions.
+- `taphound-flash` supplies shared Mobile MCP → Appium → ADB execution and
+  a versioned feedback journal.
+
+The **Target / Existing Tests / Regression** gates decide default completion.
+Routine verification requires no Journey, Contract, Project Context or human
+approval step; inconclusive evidence never becomes PASS.
+
+## Optional deterministic Journey/Contract profile
+
+Run `taphound init --agent codex --profile legacy` to install the original
+six Skills. Use Journey/Contract and Baseline for durable strict replay,
+CI, and cross-version conformance when justified by the scenario. Existing
+`taphound verify` and replay assets remain supported, but are not everyday
+prerequisites. The remaining sections describe this **legacy** workflow.
+
+Installation detects incompatible Skills (including the two different
+`taphound-flash` versions) before writing. To migrate, back up old Skill
+directories outside the Agent Skills directory; the installer never
+silently deletes customizations or mixes profiles.
+`taphound init --profile legacy` installs `taphound-case-suite` and `taphound-verify-change`
 (accept and preserve modes) alongside the Journey Generator and Brief Author. These
 packaged Skills direct external agents to use **existing public CLI commands
 only**. Core does not analyze requirements, build/install apps, manage
 multi-Case decisions, or invoke a model. No Workflow reads or writes a
 generation staging bundle.
 
-## Where each Skill fits in an AI coding workflow
+## Legacy: where each Skill fits in an AI coding workflow
 
 AI coding agents change code faster than people can review it. TapHound's
 Skills give each stage of that loop a proportionate check:

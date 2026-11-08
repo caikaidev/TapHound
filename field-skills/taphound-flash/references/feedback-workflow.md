@@ -124,4 +124,10 @@ Before target/regression green gates, run `node "$JOURNAL" oracle --dir "$FB" --
 
 `feedback.zip` is critical-first rather than alphabetical: summary, manifest, timeline, all Gate files and Attempt JSON are retained before logs/screenshots. Consult `zip-manifest.json`; incomplete critical metadata is a packaging failure. For detached async tools, an explicit nonterminal `state`/`exit_code` is inconclusive until a terminal result is observed in a new Attempt.
 
-Custom scenario-results v2 must have concrete measured equals assertions and attached observation artifacts; v1 claimed passes are not accepted as full regression evidence. External scripts still attest to their own measurements; their outputs are not equivalent to the built-in Runner independently evaluating UI conditions.
+Custom `scenario-results.json` v2 requires actual measured equals assertions **and** separate attached JSON observation evidence. An observation must contain a `measurements` object mapping every assertion id to its actual primitive value, for example:
+
+```json
+{"measurements":{"rendered":true,"messageCount":2}}
+```
+
+The assertion's `actual` must equal the corresponding saved measurement; both must equal `expected`. The Gate verifies attachment paths and digests, and refuses missing/mismatched values (`CUSTOM_OBSERVATION_MISMATCH`). It records `verificationSources` as `runner-step` or `external-measurements` with an `external-script` attestation label. V1 string-only passes are refused. **This guards against inconsistent self-reports, not a malicious or logically incorrect custom script**; the underlying observation is still external, not independently evaluated UI truth.

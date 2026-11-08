@@ -10,7 +10,7 @@
 
 **以 Agent 为入口的 Android 改动验收与 Bug 修复工具，输出可复核证据，按需支持 Journey 确定性回放。**
 
-当前 Android 开发版本称为 **TapHound for Android**。TapHound 默认使用 **tap-check** 验收开发改动、使用 **tap-fix** 先复现再修复 Bug；原有高级 Core 继续提供 UI **Journey** 的录制、生成与确定性回放。它面向这样的团队：AI 编码 Agent（Droid、Claude Code、Codex、Cursor 等）写代码的速度已经快过人能审阅的速度。Agent 基于源码与实时设备状态提出测试步骤，TapHound 负责执行、验证与报告——全程确定性，回放链路中不含任何 AI 或视觉猜测——让"完成"意味着在真机上被证明过。
+当前 Android 开发版本称为 **TapHound for Android**。TapHound 默认使用 **tap-check** 验收开发改动、使用 **tap-fix** 先复现再修复 Bug；原有高级 Core 继续提供 UI **Journey** 的录制、生成与确定性回放。它面向这样的团队：AI 编码 Agent（Droid、Claude Code、Codex、Cursor 等）写代码的速度已经快过人能审阅的速度。Agent 基于源码与实时设备状态提出测试步骤，TapHound 记录可执行的测试条件及其运行证据；可选 Journey/Contract Core 不调用模型进行确定性回放，而默认 Field Skills 的业务预期仍由 Agent 提出，必须结合真实需求与执行结果进行核对。
 
 TapHound Journey 是本项目自研的 JSON 协议，拥有独立的 Recorder、Generation、Replay 与断言模型，与 Android CLI 官方 Journey 概念不同且不兼容。
 
@@ -39,6 +39,10 @@ TapHound Core 不调用 AI 模型。外部 Agent 可以分析源码并提出操�
 
 ## 核心能力
 
+- **默认 tap-check / tap-fix** —— 需求验收或真实 RED→GREEN 修复，运行原有相关单测及影响范围回归。
+- **结论与证据绑定** —— 保留预期来源、实际断言、设备/APK 状态、业务 Logcat 与反馈包。
+- **自动预期核对** —— 不逐项要求用户确认；关键预期缺少依据时保留 INCONCLUSIVE。
+- **高级确定性回归** —— Journey/Contract 与 Baseline 按需用于长期严格回放和 CI。
 - **录制** —— 在真机上交互式录制 Journey（`taphound record`）。
 - **验证** —— 确定性回放 Journey 并发布报告（`taphound verify`）；`verify --diff <ref>` 只回放某次 Git 变更影响的 Journey。
 - **生成** —— AI Agent 驱动的 Journey 生成：步骤绑定证据、敏感操作需风险确认，发布前必须通过一次精确回放（`taphound generation ...`）。
@@ -79,7 +83,13 @@ taphound init --agent claude,codex,cursor,droid
 
 然后告诉 Agent“验收这次修改”或者“复现并修复这个 Bug”。反馈位于 `.taphound/feedback/<case-id>/feedback.zip`。此默认流程无需 `.taphound/config.json`。
 
-如果已经安装了旧版六个 Skill，请先备份并移出 Agent 的 Skills 目录。安装器会拒绝混合 Profile，不会静默覆盖不同版本，也不会删除自定义文件。
+切换 Profile 或升级已改动的 Field Skill 时，请先备份并把旧目录移出 Agent 的 Skills 目录。安装器会拒绝混装或覆盖与安装包不一致的 Field 文件；完全一致的安装可重复执行。CLI 不会自动删除自定义文件。
+
+## PASS 代表什么、不代表什么
+
+**PASS 只适用于本次实际执行且有必要证据支持的场景**，不保证整个 App 没有其他回归。Oracle 中的 `confidence: supported` 和来源引用，是 Agent 提供的依据声明，不代表机器已证明需求理解正确。Runner 检验可执行断言；自定义脚本的结果会与另行附加的 JSON 观测值核对，但仍属于外部脚本自报证据，不能冒称独立 UI 验证。关键证据缺失或冲突应为 `INCONCLUSIVE`。
+
+现有自动化与 GitHub CI 主要验证本地/模拟场景，**不能代替 Mobile MCP、Appium 的真实 Android 设备认证**。日志、截图和反馈包可能包含隐私数据，分享前应脱敏。
 
 ## 高级 Journey/Contract（按需）
 

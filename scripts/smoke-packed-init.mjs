@@ -5,7 +5,7 @@
 import { mkdtemp, mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, URL } from "node:url";
 import process from "node:process";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));

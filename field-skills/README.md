@@ -29,9 +29,17 @@ Use `.claude/skills/`, `.cursor/skills/`, or `.factory/skills/` for other suppor
 reload the Agent. If the agent directory already contains the original
 `taphound-verify-change`, `taphound-bug-fix` or other legacy-profile Skills,
 move them **outside** that Skills directory first. The CLI installer fails
-closed on incompatible profiles instead of silently merging two different
-`taphound-flash` implementations. Legacy installation remains available via
+closed on incompatible profiles and rejects existing Field directories whose bytes differ
+from the selected release (including user customizations or older payloads). Exact reinstallation
+is idempotent; to upgrade, back up and move the old directory outside the Skills root. Legacy installation remains available via
 `taphound init --agent codex --profile legacy`. The `tests/` directory and this README are optional and need not be copied into the Agent's skill root.
+
+## Evidence assurance and known limits
+
+- Every supported `oracle-review.json` expectation is Agent-authored. Referencing a requirement or source-code path does **not** prove that the expected behavior actually follows from it. Resolve business conflicts from the task and related code; mark critical ambiguities `uncertain`, not `supported` merely to pass.
+- The built-in Runner checks the actual steps it executes. JUnit/TAP results are checked from machine reports. Custom regression scripts must provide `scenario-results.json` v2 and separately attached JSON with `measurements`; the Gate cross-checks those values and labels them **external-script attestation**, not an independent device observation.
+- `PASS/FIXED` applies only to the executed, evidence-backed scenarios. It does not assert global bug freedom. Source-derived Logcat, UI freshness and matched APK identity add evidence, but are not interchangeable.
+- Synthetic tests and npm package smoke checks are not a certification of real Android, Appium or Mobile MCP compatibility.
 
 ## Invocation
 

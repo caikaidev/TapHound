@@ -10,7 +10,7 @@ English | [简体中文](./README.zh-CN.md)
 
 **Agent-first Android change verification and bug fixing, with auditable evidence and optional deterministic Journey replay.**
 
-TapHound defaults to **tap-check** for post-change acceptance and **tap-fix** for reproduce-first bug fixing. Its optional advanced Core records, generates, and deterministically replays UI **Journeys** for Android apps. The current development release is TapHound for Android. It is built for teams whose AI coding agents (Droid, Claude Code, Codex, Cursor, ...) write code faster than people can review it: the agent proposes test steps from your source code and live device state, and TapHound executes, verifies, and reports — deterministically, with no AI or visual guessing inside the replay loop — so "done" means proven on a device.
+TapHound defaults to **tap-check** for post-change acceptance and **tap-fix** for reproduce-first bug fixing. Its optional advanced Core records, generates, and deterministically replays UI **Journeys** for Android apps. The current development release is TapHound for Android. It is built for teams whose AI coding agents (Droid, Claude Code, Codex, Cursor, ...) write code faster than people can review it: the agent proposes test steps from your source code and live device state, and TapHound records executable checks and their evidence. The optional Journey/Contract Core runs deterministic replay without invoking a model; the default Field Skills still rely on Agent-authored expectations, whose business meaning must be reviewed against actual requirements.
 
 The TapHound Journey is its own JSON protocol with its own recorder, generation, replay, and assertion model — distinct from and incompatible with the Android CLI's Journey concept.
 
@@ -39,6 +39,10 @@ The change type picks the proof: new behavior (with or without UI) must pass an 
 
 ## Capabilities
 
+- **Default tap-check / tap-fix** — validate requested changes or actual bug RED→GREEN, run related existing tests and impact-based regression checks.
+- **Outcome evidence** — link actual checks, versioned expectations, device/APK context, Logcat and a reviewable feedback archive to the decision.
+- **No routine user approval** — source-aware expectation review is automatic, but material unsupported expectations remain INCONCLUSIVE.
+- **Advanced deterministic replay** — opt in to Journeys/Contracts and Baselines for reusable strict checks and CI.
 - **Record** — interactively record a Journey on a real device (`taphound record`).
 - **Verify** — deterministically replay a Journey and publish a report (`taphound verify`); `verify --diff <ref>` replays only the Journeys a Git change affects.
 - **Generate** — AI-agent-driven Journey generation: evidence-bound steps, risk confirmation for sensitive actions, and a final exact replay before a Journey is published (`taphound generation ...`).
@@ -79,7 +83,13 @@ taphound init --agent claude,codex,cursor,droid
 
 Tell the Agent **“验收这次修改”** or **“复现并修复这个 Bug”**. Its result and evidence are saved under `.taphound/feedback/<case-id>/feedback.zip`. No `.taphound/config.json` is required for this default workflow.
 
-If the destination still contains old Skills, back them up **outside** the Skills folder before switching profiles. The installer refuses incompatible profiles rather than silently mixing files. It never deletes customizations.
+Before switching profiles or upgrading a locally edited Field Skill, back up and move the old Skill directory **outside** the Agent Skills folder. The installer refuses incompatible profiles and differing Field payloads without overwriting files. Reinstalling an identical Field payload is safe and repeatable; an upgrade to changed files requires moving the old directory first. The CLI does not automatically delete local customizations.
+
+## What a PASS does—and does not—prove
+
+**PASS applies only to the scenarios actually executed, with required evidence.** It is not proof that all regressions are absent. An Oracle's `confidence: supported` and cited sources are Agent-authored provenance, not machine proof that a requirement was understood correctly. The Agent proposes expectations; the Runner checks executable conditions. A custom script's measured-assertion file is cross-checked against its attached observation JSON, but both are still external-script attestations, not independently observed UI truth. These origins remain distinguishable in Gate evidence. Missing or conflicting essential observations yield `INCONCLUSIVE` rather than an invented green result.
+
+The 62+ local/synthetic tests and GitHub CI do **not** certify real-device Mobile MCP/Appium compatibility. See [Field verification details](./field-skills/README.md) for testing and privacy limitations.
 
 ## Optional advanced Journey/Contract workflow
 

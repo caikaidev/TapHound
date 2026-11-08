@@ -9,6 +9,23 @@ structural UI change) is proven.
 
 > **Outsource mechanics. Own semantics. Verify outcomes.**
 
+## Entry points and durable verification
+
+The default product entry points are `tap-check` and `tap-fix`: an external
+coding Agent derives source-backed expectations, then the Field Skills
+validate the target, actual relevant old tests, and impacted behavior.
+Uncertain evidence or an incorrect oracle does not authorize success.
+
+The original Journey, Contract, Baseline and Knowledge Core is retained
+for optional, persistent deterministic replay and CI. A normal Field
+verification need not create any of these assets. In advanced mode, the
+Core's deterministic outcomes remain authoritative and cannot be
+overridden by Agent judgment.
+
+Eventually device execution, locator and evidence primitives should be
+shared, rather than maintaining two independent implementations. That
+refactor is outside the scope of the Field Skills default-install PR.
+
 | Mechanics (reuse, behind adapters) | Semantics and outcomes (TapHound owns) |
 |---|---|
 | device discovery, install, launch, stop | Project Context and Journey Briefs |

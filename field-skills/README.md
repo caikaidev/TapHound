@@ -1,6 +1,10 @@
 # TapHound Skills v3.6 · Copy Ready
 
-This is a **direct-copy** distribution. No installer, no TapHound CLI, no new npm packages. Copy these **three sibling directories** into the coding Agent's skills directory:
+This is the **default** TapHound workflow. Run `taphound init --agent codex`
+(or another supported Agent) to install the three Field Skills. They also
+remain **direct-copy**: no installer, CLI or extra npm dependency is required
+to run them after copying the three sibling directories into an Agent's
+Skills directory:
 
 ```text
 .agents/skills/                  # Codex (project-scoped)
@@ -21,7 +25,13 @@ This is a **direct-copy** distribution. No installer, no TapHound CLI, no new np
         └── oracle-review.example.json
 ```
 
-Use `.claude/skills/`, `.cursor/skills/`, or `.factory/skills/` for other supported Agents. Overwrite each same-named directory as a whole, then reload the Agent. Remove obsolete `taphound-verify-change` and `taphound-bug-fix` duplicates if installed. The `tests/` directory and this README are optional and need not be copied into the Agent's skill root.
+Use `.claude/skills/`, `.cursor/skills/`, or `.factory/skills/` for other supported Agents. Back up local customizations before replacing same-named directories, then
+reload the Agent. If the agent directory already contains the original
+`taphound-verify-change`, `taphound-bug-fix` or other legacy-profile Skills,
+move them **outside** that Skills directory first. The CLI installer fails
+closed on incompatible profiles instead of silently merging two different
+`taphound-flash` implementations. Legacy installation remains available via
+`taphound init --agent codex --profile legacy`. The `tests/` directory and this README are optional and need not be copied into the Agent's skill root.
 
 ## Invocation
 

@@ -1,4 +1,5 @@
 // Validate the publishable tarball file list without publishing the package.
+import process from "node:process";
 let input = "";
 for await (const chunk of process.stdin) input += chunk;
 const packages = JSON.parse(input);
@@ -20,4 +21,4 @@ for (const required of [
 if ([...entries].some((entry) => entry.startsWith("field-skills/tests/"))) {
   throw new Error("Synthetic Field Skills tests must not ship to npm consumers");
 }
-console.log("npm pack includes the three Field Skills and executable CLI");
+process.stdout.write("npm pack includes the three Field Skills and executable CLI\n");

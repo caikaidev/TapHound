@@ -244,11 +244,13 @@ describe("Field Skills installer integration", () => {
       const names = ["tap-check", "tap-fix", "taphound-flash"];
       const targets = names.map((name) => join(root, ".agents", "skills", name));
       await installer.checkConflicts("field", targets);
-      for (let i = 0; i < targets.length; i++) {
-        await installer.installTo(names[i]!, targets[i]!, "field");
+      for (const name of names) {
+        await installer.installTo(name, join(root, ".agents", "skills", name), "field");
       }
-      expect(await readFile(join(targets[0]!, "SKILL.md"), "utf8")).toContain("3.6-copy-ready");
-      expect(await readFile(join(targets[2]!, "scripts", "feedback.mjs"), "utf8")).toContain("feedback");
+      expect(await readFile(join(root, ".agents", "skills", "tap-check", "SKILL.md"), "utf8"))
+        .toContain("3.6-copy-ready");
+      expect(await readFile(join(root, ".agents", "skills", "taphound-flash", "scripts", "feedback.mjs"), "utf8"))
+        .toContain("feedback");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

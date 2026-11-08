@@ -84,6 +84,10 @@ For AI agents, install the bundled Skills and let the agent drive generation:
 taphound init --agent claude,codex,cursor,droid
 ```
 
+## Opt-in Field Skills (v3.6)
+
+A standalone, **copy-ready** Android Agent workflow is available in [field-skills/](./field-skills/README.md): `tap-check` (acceptance + impact-based regressions), `tap-fix` (reproduce → fix → verify), and a lightweight `taphound-flash` runner with Mobile MCP → Appium → ADB selection, Logcat evidence, and feedback ZIPs. Copy the three sibling directories into your Agent's skills folder. This is an **experimental alternative** to the Journey/Contract workflow: it does not replace TapHound Core or the six Skills installed by `taphound init`.
+
 ## Documentation
 
 - [Journey protocol](https://github.com/caikaidev/TapHound/blob/main/docs/journey-schema.md) · [Configuration reference](https://github.com/caikaidev/TapHound/blob/main/docs/config-schema.md) · [Report schema](https://github.com/caikaidev/TapHound/blob/main/docs/report-schema.md)

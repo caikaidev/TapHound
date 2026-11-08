@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "verificationMode": "full",
+  "packageName": "com.example.app",
+  "steps": [
+    { "action": "tap", "target": { "id": "save" } },
+    { "action": "expect", "target": { "text": "Saved" } }
+  ],
+  "logChecks": [
+    {
+      "id": "request-start",
+      "fromStep": 0,
+      "messageContains": "REPLACE with source-derived request event and correlation",
+      "sourceRef": "REPLACE path/to/actual/logger-call",
+      "orderGroup": "save"
+    },
+    {
+      "id": "save-complete",
+      "fromStep": 0,
+      "messageRegex": "REPLACE with safely escaped source-derived completion event",
+      "sourceRef": "REPLACE path/to/actual/downstream-call",
+      "orderGroup": "save",
+      "timeoutMs": 2500
+    }
+  ]
+}

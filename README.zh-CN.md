@@ -84,6 +84,10 @@ taphound verify --project . --journey .taphound/journeys/search.json
 taphound init --agent claude,codex,cursor,droid
 ```
 
+## 可选轻量 Field Skills（v3.6）
+
+[**field-skills/**](./field-skills/README.md) 提供可直接复制的 Android Agent 工作流：`tap-check`（需求验收与影响范围回归）、`tap-fix`（复现 → 修复 → 重测），以及独立的 `taphound-flash` 执行器（Mobile MCP → Appium → ADB，结合 Logcat 与 Feedback 证据包）。将三个同级目录复制到 Agent 的 Skills 目录即可。这是**实验性可选方案**，不替代 TapHound Core，也不替代 `taphound init` 当前安装的六个 Skill。
+
 ## 文档
 
 - [Journey 协议](https://github.com/caikaidev/TapHound/blob/main/docs/journey-schema.md) · [配置参考](https://github.com/caikaidev/TapHound/blob/main/docs/config-schema.md) · [报告协议](https://github.com/caikaidev/TapHound/blob/main/docs/report-schema.md)

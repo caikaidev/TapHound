@@ -87,8 +87,7 @@ If the destination still contains old Skills, back them up **outside** the Skill
 taphound init --agent codex --profile legacy
 ```
 
-For persistent deterministic replay, you may create `.taphound/config.json` and use the CLI commands below. This is not an everyday acceptance prerequisite.
-Create `.taphound/config.json` in your Android project (full reference: [config-schema](https://github.com/caikaidev/TapHound/blob/main/docs/config-schema.md), complete example: [`examples/.taphound/config.json`](https://github.com/caikaidev/TapHound/blob/main/examples/.taphound/config.json)):
+For persistent deterministic replay (not an everyday acceptance prerequisite), create `.taphound/config.json` in your Android project (full reference: [config-schema](https://github.com/caikaidev/TapHound/blob/main/docs/config-schema.md), complete example: [`examples/.taphound/config.json`](https://github.com/caikaidev/TapHound/blob/main/examples/.taphound/config.json)):
 
 ```json
 {
@@ -104,15 +103,11 @@ taphound record --project . --name "Search flow" --output .taphound/journeys/sea
 taphound verify --project . --journey .taphound/journeys/search.json
 ```
 
-For AI agents, install the bundled Skills and let the agent drive generation:
+To install the **legacy** Journey/Contract agent workflow:
 
 ```bash
-taphound init --agent claude,codex,cursor,droid
+taphound init --agent claude,codex,cursor,droid --profile legacy
 ```
-
-## Default Field Skills (v3.6)
-
-The three copy-ready Skills in [field-skills/](./field-skills/README.md) are the main entry point. Journey/Contract capabilities are optional advanced tools; the original CLI and six legacy Skills remain available via `--profile legacy`.
 
 ## Documentation
 

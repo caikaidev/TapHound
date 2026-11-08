@@ -87,8 +87,7 @@ taphound init --agent claude,codex,cursor,droid
 taphound init --agent codex --profile legacy
 ```
 
-需要持久化的确定性验证时，可使用如下 `.taphound/config.json` 配置与旧 CLI 命令，不属于日常验收前置条件。
-在 Android 项目中创建 `.taphound/config.json`（完整字段参考 [config-schema](https://github.com/caikaidev/TapHound/blob/main/docs/config-schema.md)，完整示例见 [`examples/.taphound/config.json`](https://github.com/caikaidev/TapHound/blob/main/examples/.taphound/config.json)）：
+需要持久化的确定性验证（非日常验收前置条件）时，可在 Android 项目中创建 `.taphound/config.json`（完整字段参考 [config-schema](https://github.com/caikaidev/TapHound/blob/main/docs/config-schema.md)，完整示例见 [`examples/.taphound/config.json`](https://github.com/caikaidev/TapHound/blob/main/examples/.taphound/config.json)）：
 
 ```json
 {
@@ -104,15 +103,11 @@ taphound record --project . --name "Search flow" --output .taphound/journeys/sea
 taphound verify --project . --journey .taphound/journeys/search.json
 ```
 
-面向 AI Agent：安装内置 Skill，由 Agent 驱动生成流程：
+安装**旧版高级** Journey/Contract 工作流：
 
 ```bash
-taphound init --agent claude,codex,cursor,droid
+taphound init --agent claude,codex,cursor,droid --profile legacy
 ```
-
-## 默认 Field Skills（v3.6）
-
-[**field-skills/**](./field-skills/README.md) 的三个 Skill 是主要入口。原 Journey/Contract 保留为可选高级能力，旧六个 Skill 可以通过 `--profile legacy` 安装。
 
 ## 文档
 

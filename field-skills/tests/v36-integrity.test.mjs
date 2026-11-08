@@ -65,9 +65,15 @@ test('custom regression claims must bind actual/expected to separately attached 
  const report={version:2,scenarios:[{id:'B',status:'passed',assertions:[{id:'rendered',operator:'equals',expected:true,actual:true,evidence:'attempts/003/evidence/observed.json'}]}]};
  assert.throws(()=>verifyCustomScenarioReport(report,'003',[]),e=>e.code==='CUSTOM_ASSERTION_UNVERIFIED');
  const attached=[{path:'attempts/003/evidence/observed.json',sha256:'abc'}];
- assert.deepEqual(verifyCustomScenarioReport(report,'003',attached),['B']);
+ const observed={'attempts/003/evidence/observed.json':{measurements:{rendered:true}}};
+ assert.throws(()=>verifyCustomScenarioReport(report,'003',attached),e=>e.code==='CUSTOM_OBSERVATION_MISMATCH');
+ assert.deepEqual(verifyCustomScenarioReport(report,'003',attached,observed),['B']);
  const changed=structuredClone(report);changed.scenarios[0].assertions[0].actual=false;
- assert.throws(()=>verifyCustomScenarioReport(changed,'003',attached),e=>e.code==='CUSTOM_ASSERTION_UNVERIFIED');
+ assert.throws(()=>verifyCustomScenarioReport(changed,'003',attached,observed),e=>e.code==='CUSTOM_ASSERTION_UNVERIFIED');
+ const falseObserved={'attempts/003/evidence/observed.json':{measurements:{rendered:false}}};
+ assert.throws(()=>verifyCustomScenarioReport(report,'003',attached,falseObserved),e=>e.code==='CUSTOM_OBSERVATION_MISMATCH');
+ const missingMeasurement={'attempts/003/evidence/observed.json':{measurements:{unrelated:true}}};
+ assert.throws(()=>verifyCustomScenarioReport(report,'003',attached,missingMeasurement),e=>e.code==='CUSTOM_OBSERVATION_MISMATCH');
  const wrongDevice=structuredClone(report);wrongDevice.scenarios[0].assertions[0].evidence='attempts/004/evidence/observed.json';
  assert.throws(()=>verifyCustomScenarioReport(wrongDevice,'003',attached),e=>e.code==='CUSTOM_ASSERTION_UNVERIFIED');
 });

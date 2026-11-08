@@ -25,6 +25,7 @@ jobs:
       - run: npm run build
       - run: node --test field-skills/tests/*.test.mjs
       - run: npm pack --dry-run --json | node scripts/assert-field-skills-package.mjs
+      - run: node scripts/smoke-packed-init.mjs
       - run: npm run brand:render
       - run: git diff --exit-code -- assets/brand/png
       - run: node dist/cli/main.js --help

@@ -8,17 +8,27 @@ English | [简体中文](./README.zh-CN.md)
 
 > Follow every tap. Catch every regression.
 
-**An AI-Agent-driven CLI for native Android UI testing and state verification.**
+**Agent-first Android change verification and bug fixing, with auditable evidence and optional deterministic Journey replay.**
 
-TapHound records, generates, and deterministically replays UI **Journeys** for native Android apps. The current development release is TapHound for Android. It is built for teams whose AI coding agents (Droid, Claude Code, Codex, Cursor, ...) write code faster than people can review it: the agent proposes test steps from your source code and live device state, and TapHound executes, verifies, and reports — deterministically, with no AI or visual guessing inside the replay loop — so "done" means proven on a device.
+TapHound defaults to **tap-check** for post-change acceptance and **tap-fix** for reproduce-first bug fixing. Its optional advanced Core records, generates, and deterministically replays UI **Journeys** for Android apps. The current development release is TapHound for Android. It is built for teams whose AI coding agents (Droid, Claude Code, Codex, Cursor, ...) write code faster than people can review it: the agent proposes test steps from your source code and live device state, and TapHound executes, verifies, and reports — deterministically, with no AI or visual guessing inside the replay loop — so "done" means proven on a device.
 
 The TapHound Journey is its own JSON protocol with its own recorder, generation, replay, and assertion model — distinct from and incompatible with the Android CLI's Journey concept.
 
 ## How It Works
 
+The default workflow requires **no Journey, Contract, Project Context, or routine user confirmations**. The coding Agent reviews requirements and source, uses shared tools on a bound device, runs related existing tests, checks impacted B…N scenarios, and archives evidence. Device UI backend priority is Mobile MCP → Appium → ADB.
+
+```text
+"Verify this change" → tap-check → Target + Existing Tests + Regression gates
+"Fix this bug"      → tap-fix   → RED → unchanged-oracle GREEN + related regressions
+                                         ↓
+                                  feedback.zip
+```
+
+Use `taphound init --agent codex` or directly copy the three folders from [field-skills/](./field-skills/README.md). The original Journey/Contract CLI and replay Core remain available **on demand** for durable CI and cross-version comparison.
 TapHound Core never invokes AI models. Agents may analyze source and propose actions, but state binding, risk confirmation, device execution, final replay, and assertions are all handled deterministically by TapHound.
 
-TapHound only handles verification. Building and installing the APK are independent prerequisites in the developer/agent loop, which the bundled Skills check at two depths:
+The advanced Journey/Contract Core only handles verification. The default Field Skills can orchestrate Android project build/install through the external coding Agent. The following sequence describes the optional **legacy** workflow:
 
 ```
 classify the change → edit code → build & install → taphound-flash (seconds, smoke) → repeat
@@ -34,7 +44,7 @@ The change type picks the proof: new behavior (with or without UI) must pass an 
 - **Generate** — AI-agent-driven Journey generation: evidence-bound steps, risk confirmation for sensitive actions, and a final exact replay before a Journey is published (`taphound generation ...`).
 - **Trust chain** — Acceptance Contracts, behavior Baselines, and Failure Classification turn a replay into an auditable verdict.
 - **Knowledge** — semantic Anchors and Screens let Journeys survive UI refactors and resource-id renames.
-- **Agent Skills** — six installable Skills (`taphound init`): `taphound-flash` (a standalone adb-only smoke check while coding), `taphound-verify-change` (the done-gate: accept new behavior or preserve existing behavior), `taphound-journey-brief-author` and `taphound-journey-generator` (turn a Case into a verified Journey), `taphound-case-suite` (many Cases, one at a time), and `taphound-bug-fix` (reproduce a reported bug or crash, fix it, and prove the same scenario passes).
+- **Legacy Agent Skills** — six optional Skills (`taphound init --profile legacy`): `taphound-flash` (a standalone adb-only smoke check while coding), `taphound-verify-change` (the done-gate: accept new behavior or preserve existing behavior), `taphound-journey-brief-author` and `taphound-journey-generator` (turn a Case into a verified Journey), `taphound-case-suite` (many Cases, one at a time), and `taphound-bug-fix` (reproduce a reported bug or crash, fix it, and prove the same scenario passes).
 
 ## Requirements
 
@@ -60,8 +70,24 @@ npm run dev:setup   # tests, typecheck, lint, build, npm link
 
 See the [local testing guide](https://github.com/caikaidev/TapHound/blob/main/docs/local-testing.md) for tarball and device validation steps, and [Releasing](https://github.com/caikaidev/TapHound/blob/main/docs/releasing.md) for how versions are published.
 
-## Quick Start
+## Quick Start — Field Skills (default)
 
+```bash
+taphound init --agent claude,codex,cursor,droid
+# Or directly copy field-skills/{tap-check,tap-fix,taphound-flash} into your Agent's Skills directory.
+```
+
+Tell the Agent **“验收这次修改”** or **“复现并修复这个 Bug”**. Its result and evidence are saved under `.taphound/feedback/<case-id>/feedback.zip`. No `.taphound/config.json` is required for this default workflow.
+
+If the destination still contains old Skills, back them up **outside** the Skills folder before switching profiles. The installer refuses incompatible profiles rather than silently mixing files. It never deletes customizations.
+
+## Optional advanced Journey/Contract workflow
+
+```bash
+taphound init --agent codex --profile legacy
+```
+
+For persistent deterministic replay, you may create `.taphound/config.json` and use the CLI commands below. This is not an everyday acceptance prerequisite.
 Create `.taphound/config.json` in your Android project (full reference: [config-schema](https://github.com/caikaidev/TapHound/blob/main/docs/config-schema.md), complete example: [`examples/.taphound/config.json`](https://github.com/caikaidev/TapHound/blob/main/examples/.taphound/config.json)):
 
 ```json
@@ -84,9 +110,9 @@ For AI agents, install the bundled Skills and let the agent drive generation:
 taphound init --agent claude,codex,cursor,droid
 ```
 
-## Opt-in Field Skills (v3.6)
+## Default Field Skills (v3.6)
 
-A standalone, **copy-ready** Android Agent workflow is available in [field-skills/](./field-skills/README.md): `tap-check` (acceptance + impact-based regressions), `tap-fix` (reproduce → fix → verify), and a lightweight `taphound-flash` runner with Mobile MCP → Appium → ADB selection, Logcat evidence, and feedback ZIPs. Copy the three sibling directories into your Agent's skills folder. This is an **experimental alternative** to the Journey/Contract workflow: it does not replace TapHound Core or the six Skills installed by `taphound init`.
+The three copy-ready Skills in [field-skills/](./field-skills/README.md) are the main entry point. Journey/Contract capabilities are optional advanced tools; the original CLI and six legacy Skills remain available via `--profile legacy`.
 
 ## Documentation
 
@@ -99,6 +125,6 @@ A standalone, **copy-ready** Android Agent workflow is available in [field-skill
 ## Current Limitations
 
 - Android only, with a single explicitly selected device.
-- TapHound does not build or install APKs; the target app must already be installed.
+- Advanced Journey/Contract Core does not build or install APKs; the coding Agent using Field Skills may build/install the project.
 - The Recorder is a TapHound-mediated interaction flow; it does not observe arbitrary user touches.
 - Replay, device operations, and assertions are fully deterministic — no AI or visual inference in Core.

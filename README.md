@@ -49,9 +49,9 @@ The change type picks the proof: new behavior (with or without UI) must pass an 
 ## Requirements
 
 - Node.js 22 or newer
-- Android SDK, ADB, and the `android` CLI on PATH
+- Android SDK, ADB, and project-specific build tools on PATH (the `android` CLI is only required for some advanced Journey/Contract backends)
 - An online device or emulator with the target APK already installed
-- On macOS, grant Android CLI the Accessibility and Screen Recording permissions
+- On macOS, grant Android CLI Accessibility and Screen Recording permissions only when using that optional advanced backend
 
 `taphound-flash` alone needs only Node.js 18+ and ADB.
 

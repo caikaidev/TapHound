@@ -10,7 +10,7 @@
 
 **以 Agent 为入口的 Android 改动验收与 Bug 修复工具，输出可复核证据，按需支持 Journey 确定性回放。**
 
-TapHound 默认使用 **tap-check** 验收开发改动、使用 **tap-fix** 先复现再修复 Bug；原有高级 Core 继续提供 UI **Journey** 的录制、生成与确定性回放。它面向这样的团队：AI 编码 Agent（Droid、Claude Code、Codex、Cursor 等）写代码的速度已经快过人能审阅的速度。Agent 基于源码与实时设备状态提出测试步骤，TapHound 负责执行、验证与报告——全程确定性，回放链路中不含任何 AI 或视觉猜测——让"完成"意味着在真机上被证明过。
+当前 Android 开发版本称为 **TapHound for Android**。TapHound 默认使用 **tap-check** 验收开发改动、使用 **tap-fix** 先复现再修复 Bug；原有高级 Core 继续提供 UI **Journey** 的录制、生成与确定性回放。它面向这样的团队：AI 编码 Agent（Droid、Claude Code、Codex、Cursor 等）写代码的速度已经快过人能审阅的速度。Agent 基于源码与实时设备状态提出测试步骤，TapHound 负责执行、验证与报告——全程确定性，回放链路中不含任何 AI 或视觉猜测——让"完成"意味着在真机上被证明过。
 
 TapHound Journey 是本项目自研的 JSON 协议，拥有独立的 Recorder、Generation、Replay 与断言模型，与 Android CLI 官方 Journey 概念不同且不兼容。
 
@@ -49,9 +49,9 @@ TapHound Core 不调用 AI 模型。外部 Agent 可以分析源码并提出操�
 ## 环境要求
 
 - Node.js 22 或更高版本
-- Android SDK、ADB，以及可调用的 `android` CLI
+- Android SDK、ADB 和目标项目的构建工具（高级 Journey/Contract 的部分后端还需要 `android` CLI）
 - 一个在线设备或模拟器，且目标 APK 已安装
-- macOS 上需授予 Android CLI 辅助功能与屏幕录制权限
+- macOS 只有选择使用 Android CLI 高级后端时，才需要授予辅助功能与屏幕录制权限
 
 单独使用 `taphound-flash` 只需要 Node.js 18+ 与 ADB。
 

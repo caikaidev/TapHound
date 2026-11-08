@@ -256,6 +256,28 @@ describe("Field Skills installer integration", () => {
     }
   });
 
+  it("allows identical Field reinstallation but rejects a local edit before replacing it", async () => {
+    const installer = new FileSystemSkillInstaller();
+    const root = await mkdtemp(join(tmpdir(), "taphound-field-reinstall-"));
+    try {
+      const target = join(root, "tap-check");
+      await installer.installTo("tap-check", target, "field");
+      await installer.checkConflicts("field", [target]);
+      await installer.installTo("tap-check", target, "field");
+      const file = join(target, "SKILL.md");
+      const fs = await import("node:fs/promises");
+      await fs.appendFile(file, "\\n# Personal customization\\n");
+      const modified = await readFile(file, "utf8");
+      await expect(installer.checkConflicts("field", [target]))
+        .rejects.toThrow("Move conflicting Skill directories");
+      await expect(installer.installTo("tap-check", target, "field"))
+        .rejects.toThrow("existing payload differs");
+      expect(await readFile(file, "utf8")).toBe(modified);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("rejects installed legacy Skills before writing Field files", async () => {
     const installer = new FileSystemSkillInstaller();
     const root = await mkdtemp(join(tmpdir(), "taphound-profile-conflict-"));

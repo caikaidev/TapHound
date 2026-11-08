@@ -1,4 +1,4 @@
-import { access, cp, mkdir, readdir, readFile, stat } from "node:fs/promises";
+import { access, cp, lstat, mkdir, readdir, readFile, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,6 +31,38 @@ async function installedSkill(path: string): Promise<string | undefined> {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;
+  }
+}
+
+/** A Field Skill reinstall is safe only when the existing payload is byte-identical.
+ * Otherwise require an explicit backup/move to avoid silently overwriting customizations
+ * or leaving removed scripts from previous versions in place.
+ */
+async function samePayloadTree(source: string, destination: string): Promise<boolean> {
+  const [sourceEntries, destinationEntries] = await Promise.all([
+    readdir(source, { withFileTypes: true }),
+    readdir(destination, { withFileTypes: true })
+  ]);
+  if (sourceEntries.length !== destinationEntries.length) return false;
+  const byName = new Map(destinationEntries.map(entry => [entry.name, entry]));
+  for (const entry of sourceEntries) {
+    const oldEntry = byName.get(entry.name);
+    if (oldEntry === undefined || entry.isSymbolicLink() || oldEntry.isSymbolicLink()) return false;
+    const src = join(source, entry.name), dst = join(destination, entry.name);
+    if (entry.isDirectory() && oldEntry.isDirectory()) {
+      if (!await samePayloadTree(src, dst)) return false;
+    } else if (entry.isFile() && oldEntry.isFile()) {
+      if (!(await readFile(src)).equals(await readFile(dst))) return false;
+    } else {
+      return false;
+    }
+  }
+  return true;
+}
+async function hasExistingPath(path: string): Promise<boolean> {
+  try { await lstat(path); return true; } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw e;
   }
 }
 
@@ -78,10 +110,12 @@ export class FileSystemSkillInstaller implements SkillInstallerPort {
         conflicts.push(flashPath);
       }
       if (profile === "field") {
-        for (const name of FIELD_ONLY) {
-          const file = join(root, name, "SKILL.md");
-          const previous = await installedSkill(file);
-          if (previous !== undefined && !FIELD_VERSION.test(previous)) conflicts.push(file);
+        for (const targetDir of targetDirs.filter(dir => dirname(resolve(dir)) === root)) {
+          const target = resolve(targetDir);
+          const source = join(FIELD_SKILLS_DIR, target.split(/[/\\\\]/).at(-1) ?? "");
+          if (await hasExistingPath(target) && !await samePayloadTree(source, target)) {
+            conflicts.push(target + " (different files: move the existing directory aside before reinstalling)");
+          }
         }
       }
     }
@@ -131,6 +165,10 @@ export class FileSystemSkillInstaller implements SkillInstallerPort {
 
     if (resolvedTarget === resolve(payloadPath)) {
       return { targetPath: resolvedTarget, skipped: true };
+    }
+    if (profile === "field" && await hasExistingPath(resolvedTarget) &&
+        !await samePayloadTree(payloadPath, resolvedTarget)) {
+      throw new SkillProfileConflictError(profile, [resolvedTarget + " (existing payload differs)"]);
     }
 
     await mkdir(dirname(resolvedTarget), { recursive: true });

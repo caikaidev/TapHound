@@ -62,6 +62,10 @@ describe("TapHound package metadata", () => {
       "dist",
       "assets/brand/taphound-mark.svg",
       "assets/skills",
+      "field-skills/tap-check",
+      "field-skills/tap-fix",
+      "field-skills/taphound-flash",
+      "field-skills/README.md",
       "scripts/feedback-pack.mjs"
     ]);
     expect(document.scripts?.prepublishOnly)

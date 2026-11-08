@@ -1,6 +1,6 @@
 import { access, cp, lstat, mkdir, readdir, readFile, stat } from "node:fs/promises";
 import { constants } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { SkillProfile } from "../../domain/init.js";
@@ -112,7 +112,7 @@ export class FileSystemSkillInstaller implements SkillInstallerPort {
       if (profile === "field") {
         for (const targetDir of targetDirs.filter(dir => dirname(resolve(dir)) === root)) {
           const target = resolve(targetDir);
-          const source = join(FIELD_SKILLS_DIR, target.split(/[/\\\\]/).at(-1) ?? "");
+          const source = join(FIELD_SKILLS_DIR, basename(target));
           if (await hasExistingPath(target) && !await samePayloadTree(source, target)) {
             conflicts.push(target + " (different files: move the existing directory aside before reinstalling)");
           }

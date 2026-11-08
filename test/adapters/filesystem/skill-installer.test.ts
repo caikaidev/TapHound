@@ -266,7 +266,7 @@ describe("Field Skills installer integration", () => {
       await installer.installTo("tap-check", target, "field");
       const file = join(target, "SKILL.md");
       const fs = await import("node:fs/promises");
-      await fs.appendFile(file, "\\n# Personal customization\\n");
+      await fs.appendFile(file, "\n# Personal customization\n");
       const modified = await readFile(file, "utf8");
       await expect(installer.checkConflicts("field", [target]))
         .rejects.toThrow("Move conflicting Skill directories");

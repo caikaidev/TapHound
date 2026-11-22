@@ -305,7 +305,7 @@ test('impact risks create reviewable timeline records and summary scope',async()
   plan.risks=[{id:'single-chat-no-data',severity:'medium',reason:'Single chat had no historical messages',blocking:false}];
   await writeFile(impact,JSON.stringify(plan));
   assert.equal(invoke(dir,['impact','--dir',home,'--file',impact]).exit,0);
-  const eventRows=(await read(home,'timeline.jsonl')).trim().split('\\n').map(s=>JSON.parse(s));
+  const eventRows=(await read(home,'timeline.jsonl')).trim().split(String.fromCharCode(10)).map(s=>JSON.parse(s));
   assert.ok(eventRows.some(e=>e.type==='risk'&&e.riskId==='single-chat-no-data'&&e.blocking===false));
   assert.match(await read(home,'summary.md'),/Single chat had no historical messages/);
 }));

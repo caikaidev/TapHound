@@ -1,5 +1,7 @@
 # v3.6 Local feedback, regression gates & device identity
 
+**Finished-case evidence is immutable (dev.16).** After a successful `finish`, every mutating command (`event`, `attach`, `impact`, `oracle`, `discover`, `run`, `exec`, `gate` and another `finish`) returns `ALREADY_FINISHED`; even rejected writes do not append to the archived timeline. `status` only reads an already finished case, without rebuilding its summary or ZIP. The final manifest captures Impact/Oracle hashes and gate fingerprints. For late discoveries or new HEAD validation, create a **new case** and note the predecessor in the new task/events; never rewrite an old case. This blocks CLI mutations, not direct filesystem tampering or concurrent writers.
+
 Keep the three Skill directories adjacent. All commands below are run **by the Agent after installing Skills by Copy**, not by the user during installation. Use `node /absolute/path/to/taphound-flash/scripts/feedback.mjs` from the Android project root; no npm dependency or TapHound CLI required.
 
 ## Start a new case before editing/testing
@@ -67,7 +69,7 @@ node "$JOURNAL" exec --dir "$FB" --label unit-red \
   -- ./gradlew :app:testDebugUnitTest --tests '...ReportedBugTest'
 ```
 
-Do not classify compilation errors, missing executables (126/127), device connection failure or unrelated exceptions as the user-reported Bug. The journal records `INFRA_ERROR` for command launch failures and `UNCLASSIFIED_FAILURE` for generic non-zero commands. The **Agent still has to classify actual reproduction**.
+Do not classify compilation errors, missing executables (126/127), device connection failure or unrelated exceptions as the user-reported Bug. The journal records `INFRA_ERROR` for command launch failures, `BUILD_ERROR` when build-tool output identifies a build failure, `ASSERTION_FAILURE` for script-declared assertions (not proof of product fault), and `UNDETERMINED_FAILURE` when evidence cannot establish the domain. Attempts also save `failureDomain`, `classificationBasis` and any runner `failureCode`. Undetermined/inconclusive attempts automatically create a `verification-gap` event; impact risks generate `risk` events and appear in the summary. The **Agent still has to classify actual reproduction**.
 
 ## Validate exact reproduction before fixing
 

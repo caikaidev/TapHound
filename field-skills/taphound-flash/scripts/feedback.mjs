@@ -66,6 +66,11 @@ async function loaded(dir) {
   try { const m = await readJson(join(dir,'manifest.json')); if (m.schemaVersion !== 1) throw fault('INVALID_FEEDBACK','Unsupported manifest'); return m; }
   catch(e) { if (e?.code === 'ENOENT') throw fault('NOT_STARTED','First run: feedback.mjs start --dir PATH --skill NAME --task DESCRIPTION'); throw e; }
 }
+async function requireOpen(dir) {
+  const manifest=await loaded(dir);
+  if(manifest.final)throw fault('ALREADY_FINISHED','Finished case is read-only; create a new linked case for further verification');
+  return manifest;
+}
 async function timeline(dir, data) {
   const handle = await open(join(dir,JSONL),'a',0o600);
   try { await handle.write(JSON.stringify({at:now(),...data})+'\n'); await handle.sync(); }
@@ -246,6 +251,12 @@ async function summary(dir) {
     `- Planned regression scenarios: ${impact?.scenarios?.length??'unknown'}`,
     `- Blocking risks: ${impact?.risks?.filter(r=>r.blocking)?.length??'unknown'}`,
     '',
+    '## Known risks and verification gaps',
+    '',
+    ...(impact?.risks??[]).map(r=>`- Risk ${mdEsc(r.id)} [${mdEsc(r.severity)}${r.blocking?', blocking':''}]: ${mdEsc(r.reason)}`),
+    ...ev.filter(e=>e.type==='verification-gap').map(e=>`- Verification gap: ${mdEsc(e.summary)}`),
+    ...(!impact?.risks?.length&&!ev.some(e=>e.type==='verification-gap')?['- None recorded.']:[]),
+    '',
     '## Events and self-repairs',
     '',
     ...ev.map(e=>`- ${e.at} **${e.type??'event'}**: ${e.summary??e.attempt??''}${e.details?` — ${e.details}`:''}`),
@@ -362,6 +373,27 @@ export function structuredCommandLifecycle(text) {
   if(terminal.includes(normalized)&&reportedExit!==undefined&&reportedExit!==null&&reportedExit!==0)return {complete:true,state:normalized,reportedExitCode:reportedExit,failed:true};
   return terminal.includes(normalized)?{complete:true,state:normalized,reportedExitCode:reportedExit??null}:null;
 }
+/**
+ * Failure domains describe what the evidence says failed, not who caused it.
+ * In particular, a script assertion is not proof of a product defect.
+ */
+export function classifyExecution({type,status,code,spawnError,stderr='',stdout='',runnerFailure,commandLifecycle,requireLogcat=false}) {
+  const known=(classification,failureDomain,classificationBasis,failureCode=null)=>({classification,failureDomain,classificationBasis,failureCode});
+  if(commandLifecycle?.complete===false)return known('ASYNC_NOT_COMPLETED','execution','reported-nonterminal');
+  if(spawnError||code===126||code===127)return known('INFRA_ERROR','infrastructure','command-launch');
+  if(status==='passed')return known('PASS','none','completed-success');
+  if(status==='inconclusive')return known(requireLogcat?'LOGCAT_EVIDENCE_UNAVAILABLE':'INCONCLUSIVE','verification','missing-positive-evidence');
+  if(status==='error')return known('ENVIRONMENT_ERROR',runnerFailure?.code==='APP_CRASHED'?'runtime':'environment','runner-error',runnerFailure?.code??null);
+  if(/TapHound device guard/.test(stderr))return known('DEVICE_GUARD_ERROR','infrastructure','device-guard');
+  if(/syntax error|command not found|declare: -A|No such file or directory/i.test(stderr))return known('SCRIPT_ERROR','test-script','command-stderr');
+  const output=`${stderr}\n${stdout}`;
+  if(type==='command'&&/FAILURE: Build failed with an exception|Execution failed for task|Could not resolve all files|Plugin .* was not found|Compilation failed/i.test(output))
+    return known('BUILD_ERROR','build','build-tool-output');
+  if(type==='command'&&/(?:^|\n)\s*\[failed\]|(?:^|\n)\s*not ok\b/i.test(output))
+    return known('ASSERTION_FAILURE','test-assertion','external-script-output');
+  if(runnerFailure?.code)return known('TEST_RUNNER_FAILURE','test-runner','runner-reported',runnerFailure.code);
+  return known('UNDETERMINED_FAILURE','undetermined','insufficient-evidence');
+}
 async function commandRun(o) {
   const manifest=await loaded(o.dir);if(manifest.final)throw fault('ALREADY_FINISHED','This feedback run has a final status; create another run');
   const type=o.command==='run'?'device':'command';
@@ -469,13 +501,15 @@ async function commandRun(o) {
     await atomicJson(join(o.dir,'manifest.json'),manifest);
     await timeline(o.dir,{type:'device-binding',summary:`Auto-selected only available device: ${runnerResult.device}`});
   }
-  const classification=commandLifecycle?.complete===false?'ASYNC_NOT_COMPLETED':spawnError||code===126||code===127?'INFRA_ERROR':status==='passed'?'PASS':status==='inconclusive'?(o.flags['require-logcat']?'LOGCAT_EVIDENCE_UNAVAILABLE':'INCONCLUSIVE'):status==='error'?'ENVIRONMENT_ERROR':/TapHound device guard/.test(stderr)?'DEVICE_GUARD_ERROR':/syntax error|command not found|declare: -A|No such file or directory/i.test(stderr)?'SCRIPT_ERROR':runnerResult?.failure?'APP_OR_ASSERTION_FAILURE':'UNCLASSIFIED_FAILURE';
+  const {classification,failureDomain,classificationBasis,failureCode}=classifyExecution({type,status,code,spawnError,stderr,stdout,runnerFailure:runnerResult?.failure,commandLifecycle,requireLogcat:!!o.flags['require-logcat']});
   const oracleFilesAfter=type==='command'?await Promise.all(oracle.oracleFiles.filter(x=>x.available).map(async x=>{try{return {path:x.path,sha256:sha(await readFile(x.path))};}catch{return {path:x.path,sha256:null};}})):[];
   const oracleChangedDuringRun=oracleFilesAfter.some(x=>oracle.oracleFiles.find(y=>y.path===x.path)?.sha256!==x.sha256);
   const deviceEvidenceStatus=captureDevice?(preEvidence?.status==='complete'&&postEvidence?.status==='complete'&&logcatResult?.status==='captured'?'complete':'partial'):(type==='device'?'runner-managed':'notRequested');
-  const detail={schemaVersion:3,type,status,device:serial??runnerResult?.device??null,deviceIsolation:isolation,classification,explicitOracleCount:oracle.explicitOracleCount,oracleChangedDuringRun,startedAt,finishedAt:now(),exitCode:code,command:command.map((arg,i)=>i===0?basename(arg):arg),commandSha256,oracleSha256,oracleFiles:oracle.oracleFiles.map(({path,sha256,available})=>({path,sha256,available})),deviceEvidence:deviceEvidenceStatus,apkAgreement:apk.agreement,gitPatch,...(commandLifecycle?{commandLifecycle}:{}),...(planSha256?{planSha256}:{}),...(o.flags.backend?{requestedBackend:o.flags.backend}:{}),backend:runnerResult?.backend??(type==='command'?(o.flags.backend?`${o.flags.backend} (declared)`:'external-command (unverified)'):'unknown'),...(runnerResult?.probes?{probes:runnerResult.probes}:{}),...(runnerResult?.failure?{failure:runnerResult.failure}:{}),...(spawnError?{spawnError}:{})};
+  const detail={schemaVersion:3,type,status,device:serial??runnerResult?.device??null,deviceIsolation:isolation,classification,failureDomain,classificationBasis,failureCode,explicitOracleCount:oracle.explicitOracleCount,oracleChangedDuringRun,startedAt,finishedAt:now(),exitCode:code,command:command.map((arg,i)=>i===0?basename(arg):arg),commandSha256,oracleSha256,oracleFiles:oracle.oracleFiles.map(({path,sha256,available})=>({path,sha256,available})),deviceEvidence:deviceEvidenceStatus,apkAgreement:apk.agreement,gitPatch,...(commandLifecycle?{commandLifecycle}:{}),...(planSha256?{planSha256}:{}),...(o.flags.backend?{requestedBackend:o.flags.backend}:{}),backend:runnerResult?.backend??(type==='command'?(o.flags.backend?`${o.flags.backend} (declared)`:'external-command (unverified)'):'unknown'),...(runnerResult?.probes?{probes:runnerResult.probes}:{}),...(runnerResult?.failure?{failure:runnerResult.failure}:{}),...(spawnError?{spawnError}:{})};
   await writeFile(join(attempt,'attempt.json'),JSON.stringify(detail,null,2)+'\n',{flag:'wx'});
   await timeline(o.dir,{type:'attempt-finished',attempt:number,summary:`${status} (exit ${code})`,...(detail.failure?{details:detail.failure.code??errText(detail.failure)}:{})});
+  if(classification==='UNDETERMINED_FAILURE'||classification==='INCONCLUSIVE'||classification==='LOGCAT_EVIDENCE_UNAVAILABLE')
+    await timeline(o.dir,{type:'verification-gap',attempt:number,summary:`Attempt ${number}: ${classification}; failure cause or required evidence not established`,details:'Inspect saved stdout/stderr and device artifacts before attributing a product defect'});
   await refresh(o.dir);
   return {status,attempt:number,exitCode:code,...(detail.failure?{failure:detail.failure}:{}),evidenceDir:join(attempt,'evidence'),zip:join(o.dir,'feedback.zip')};
 }
@@ -484,6 +518,9 @@ async function recordImpactPlan(o) {
   if(!o.flags.file)throw fault('USAGE','impact requires --file impact-plan.json');
   const result=await saveImpact(o.dir,o.flags.file,await captureGit(process.cwd(),o.dir));
   await timeline(o.dir,{type:'impact-changed',summary:`Impact plan sha256=${result.sha256}; required scenarios=${result.requiredScenarios.join(',')}; required tests=${result.requiredTests.join(',')}`});
+  const plan=await readJson(join(o.dir,'impact','plan.json'));
+  for(const risk of plan.risks??[])
+    await timeline(o.dir,{type:'risk',riskId:risk.id,severity:risk.severity,blocking:risk.blocking,summary:risk.reason});
   await refresh(o.dir);
   return {status:'recorded',...result,zip:join(o.dir,'feedback.zip')};
 }
@@ -532,18 +569,28 @@ async function finish(o) {
     if(!oracle.review.expectations.some(e=>e.scope==='target'&&e.confidence==='supported'))throw fault('ORACLE_UNSUPPORTED','No source-backed supported target expectation');
     await validateCompletion(o.dir,status,await captureGit(process.cwd(),o.dir),attempts,await events(o.dir),m.deviceBinding?.serial);
   }
-  m.final={status,summary:summaryText,finishedAt:now()};await atomicJson(join(o.dir,'manifest.json'),m);
+  const [impact,oracle,gatesAtFinish]=await Promise.all([
+    readJson(join(o.dir,'impact','current.json')).catch(()=>null),
+    readJson(join(o.dir,'oracle','current.json')).catch(()=>null),
+    readGates(o.dir)
+  ]);
+  m.final={status,summary:summaryText,finishedAt:now(),evidenceSnapshot:{
+    impactSha256:impact?.sha256??null,oracleSha256:oracle?.sha256??null,
+    gates:Object.fromEntries(Object.entries(gatesAtFinish).map(([key,g])=>[key,g?{status:g.status,impactSha256:g.impactSha256,oracleSha256:g.oracleSha256??null,codeFingerprint:g.codeFingerprint}:null]))
+  }};
+  await atomicJson(join(o.dir,'manifest.json'),m);
   await timeline(o.dir,{type:'finish',summary:`${status}: ${summaryText}`});await refresh(o.dir);
   return {status,attempts:attempts.length,zip:join(o.dir,'feedback.zip')};
 }
 async function main(){const o=parse(process.argv.slice(2));let result;
   try {
-    switch(o.command){case 'start':result=await start(o);break;case 'event':result=await event(o);break;case 'run':case 'exec':result=await commandRun(o);break;case 'impact':result=await recordImpactPlan(o);break;case 'oracle':result=await recordOracleReview(o);break;case 'discover':result=await recordDiscovery(o);break;case 'gate':result=await recordVerificationGate(o);break;case 'finish':result=await finish(o);break;case 'attach':result=await attach(o);break;case 'status':await loaded(o.dir);await refresh(o.dir);result={status:'ready',dir:o.dir,zip:join(o.dir,'feedback.zip'),index:await readJson(join(o.dir,'index.json'))};break;}
+    if(o.command!=='start'&&o.command!=='status')await requireOpen(o.dir);
+    switch(o.command){case 'start':result=await start(o);break;case 'event':result=await event(o);break;case 'run':case 'exec':result=await commandRun(o);break;case 'impact':result=await recordImpactPlan(o);break;case 'oracle':result=await recordOracleReview(o);break;case 'discover':result=await recordDiscovery(o);break;case 'gate':result=await recordVerificationGate(o);break;case 'finish':result=await finish(o);break;case 'attach':result=await attach(o);break;case 'status':{const m=await loaded(o.dir);if(!m.final)await refresh(o.dir);}result={status:'ready',dir:o.dir,zip:join(o.dir,'feedback.zip'),index:await readJson(join(o.dir,'index.json'))};break;}
   } catch(error){
     // Save even rejected completion claims for independent review: a failed
     // finish must not silently disappear from the user-facing feedback ZIP.
     if(o.command!=='start'&&['finish','gate','impact','oracle','discover','exec','run'].includes(o.command)){
-      try {await loaded(o.dir);await timeline(o.dir,{type:'operation-rejected',command:o.command,summary:`${error.code??'ERROR'}: ${errText(error)}`});await refresh(o.dir);}catch{/* preserve original exception */}
+      try {const m=await loaded(o.dir);if(!m.final){await timeline(o.dir,{type:'operation-rejected',command:o.command,summary:`${error.code??'ERROR'}: ${errText(error)}`});await refresh(o.dir);}}catch{/* preserve original exception */}
     }
     throw error;
   }

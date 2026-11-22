@@ -1,3 +1,18 @@
+## 0.2.0-dev.16 — 2026-11-22
+
+### Fixed
+
+- Freeze finished Field Skills feedback cases. `impact`, `oracle`, `event`, `attach`, `discover`, `gate`, `run`, `exec` and repeat `finish` reject writes after finalization. `status` is read-only for finished cases; rejected commands no longer append events to a finished timeline.
+- Embed Oracle, Impact and gate hashes in the finished verdict's evidence snapshot for audit reference.
+- Record typed failure domains and classification evidence for build failures, script-declared assertions, device/runtime failures, and undetermined failures without guessing product responsibility.
+- Automatically produce `verification-gap` events for undetermined or inconclusive attempts, and `risk` events from impact-plan risks. Show both in the local summary.
+
+### Scope
+
+- Existing archived cases are not rewritten or retroactively certified. A newly changed HEAD still requires fresh gates or a linked delta case.
+- No CI-artifact source attestation or universal Logcat assertion is claimed; local APK digest agreement remains a distinct, narrower check. No new Android device certification is implied.
+- Existing Journey/Contract workflows stay opt-in.
+
 # Changelog
 
 ## 0.2.0-dev.15 — 2026-10-09

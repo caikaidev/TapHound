@@ -245,3 +245,67 @@ test('uncertain target requirement prevents a false PASS Gate without prompting 
   const g=targetGate(dir,home,'001');assert.equal(g.code,'ORACLE_UNRESOLVED');
   assert.equal(invoke(dir,['finish','--dir',home,'--status','INCONCLUSIVE','--summary','Continue independent tests, product behavior unclear']).exit,0);
 }));
+
+test('finished case is byte-for-byte read-only across every mutation and status inspection',async()=>context(async dir=>{
+  const {home,plan,impact}=await prep(dir);
+  assert.equal(invoke(dir,['run','--dir',home,'--plan',plan,'--runner',fake],{TAPHOUND_TEST_STATUS:'passed'}).exit,0);
+  assert.equal(targetGate(dir,home,'001').exit,0);
+  assert.equal(invoke(dir,['finish','--dir',home,'--status','PASS','--summary','All recorded gates passed']).exit,0);
+  const manifest=JSON.parse(await read(home,'manifest.json'));
+  assert.equal(manifest.final.evidenceSnapshot.oracleSha256,(JSON.parse(await read(home,'oracle/current.json'))).sha256);
+  assert.equal(manifest.final.evidenceSnapshot.gates.target.status,'PASS');
+  const files=['manifest.json','timeline.jsonl','summary.md','index.json','feedback.zip','oracle/current.json','oracle/plan.json','impact/current.json','impact/plan.json','gates/target.json'];
+  const before=await Promise.all(files.map(f=>readFile(join(home,f))));
+  const note=join(dir,'new-note.txt');await writeFile(note,'should never be attached');
+  const attemptsBefore=(await readdir(join(home,'attempts'))).length;
+  const calls=[
+    ['impact','--dir',home,'--file',impact],
+    ['oracle','--dir',home,'--file',join(dir,'oracle-review.json')],
+    ['event','--dir',home,'--type','risk','--summary','Later risk'],
+    ['attach','--dir',home,'--file',note],
+    ['discover','--dir',home,'--project',dir,'--source','src/main/UnrelatedFeature.kt'],
+    ['gate','--dir',home,'--gate','target','--status','PASS','--attempt','001','--evidence','attempts/001/attempt.json','--summary','Later gate'],
+    ['run','--dir',home,'--plan',plan,'--runner',fake],
+    ['exec','--dir',home,'--',process.execPath,'-e','process.exit(0)'],
+    ['finish','--dir',home,'--status','FAIL','--summary','Rewrite verdict']
+  ];
+  for(const args of calls){
+    const response=invoke(dir,args);
+    assert.equal(response.code,'ALREADY_FINISHED',JSON.stringify({args,response}));
+  }
+  assert.equal(invoke(dir,['status','--dir',home]).exit,0);
+  assert.equal((await readdir(join(home,'attempts'))).length,attemptsBefore);
+  for(let i=0;i<files.length;i++)assert.deepEqual(await readFile(join(home,files[i])),before[i],files[i]);
+  assert.equal((await readdir(join(home,'attachments'))).length,0);
+}));
+
+test('known build/assertion failures and undetermined failures have distinct evidence categories',async()=>context(async dir=>{
+  const {home}=await prep(dir);
+  const cases=[
+    ['process.stderr.write("FAILURE: Build failed with an exception");process.exit(1)','BUILD_ERROR','build'],
+    ['process.stdout.write("[failed] button missing");process.exit(1)','ASSERTION_FAILURE','test-assertion'],
+    ['process.exit(2)','UNDETERMINED_FAILURE','undetermined']
+  ];
+  for(const [script,expected,domain] of cases){
+    const r=invoke(dir,['exec','--dir',home,'--',process.execPath,'-e',script]);
+    assert.equal(r.exit,1);
+    const attempt=JSON.parse(await read(home,`attempts/${r.attempt}/attempt.json`));
+    assert.equal(attempt.classification,expected);
+    assert.equal(attempt.failureDomain,domain);
+    assert.ok(attempt.classificationBasis);
+  }
+  const timeline=await read(home,'timeline.jsonl');
+  assert.match(timeline,/verification-gap/);
+  assert.match(await read(home,'summary.md'),/UNDETERMINED_FAILURE/);
+}));
+
+test('impact risks create reviewable timeline records and summary scope',async()=>context(async dir=>{
+  const {home,impact}=await prep(dir);
+  const plan=JSON.parse(await readFile(impact,'utf8'));
+  plan.risks=[{id:'single-chat-no-data',severity:'medium',reason:'Single chat had no historical messages',blocking:false}];
+  await writeFile(impact,JSON.stringify(plan));
+  assert.equal(invoke(dir,['impact','--dir',home,'--file',impact]).exit,0);
+  const eventRows=(await read(home,'timeline.jsonl')).trim().split('\\n').map(s=>JSON.parse(s));
+  assert.ok(eventRows.some(e=>e.type==='risk'&&e.riskId==='single-chat-no-data'&&e.blocking===false));
+  assert.match(await read(home,'summary.md'),/Single chat had no historical messages/);
+}));

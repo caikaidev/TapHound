@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "changeIntent": "Example: Hide banner while selecting chat messages",
+  "target": { "id": "multiselect", "expected": "Selection header shows and pinned banner hides; exiting restores original banner state" },
+  "changedSymbols": [{ "symbol": "updateBannerVisibility", "file": "app/src/main/.../ChatScreen.kt", "reason": "Used by normal and selection modes" }],
+  "scenarios": [
+    { "id": "normal-chat", "description": "Pinned banner remains visible in normal chat when a pin exists", "intent": "preserve", "risk": "high", "required": true },
+    { "id": "switch-chat", "description": "Changing chat does not show another conversation's banner", "intent": "preserve", "risk": "high", "required": true }
+  ],
+  "existingTests": [
+    { "id": "banner-unit", "command": "./gradlew :app:testDebugUnitTest --rerun-tasks", "required": true }
+  ],
+  "risks": []
+}

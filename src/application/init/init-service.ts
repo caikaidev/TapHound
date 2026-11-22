@@ -4,6 +4,7 @@ import {
   NoAgentsSelectedError,
   resolveTargetPaths,
   type AgentId,
+  type SkillProfile,
   type InitResult,
   type SkillInstallGroup
 } from "../../domain/init.js";
@@ -18,6 +19,7 @@ export interface InitServiceDeps {
 export interface InitInput {
   agents: readonly AgentId[];
   global: boolean;
+  profile?: SkillProfile;
 }
 
 export class InitService {
@@ -28,7 +30,8 @@ export class InitService {
       throw new NoAgentsSelectedError();
     }
 
-    const skillNames = await this.deps.installer.listSkillNames();
+    const profile = input.profile ?? "field";
+    const skillNames = await this.deps.installer.listSkillNames(profile);
 
     const targets = resolveTargetPaths(
       skillNames,
@@ -38,12 +41,18 @@ export class InitService {
       this.deps.homedir
     );
 
+    await this.deps.installer.checkConflicts?.(
+      profile,
+      targets.map((target) => target.absolutePath)
+    );
+
     const groupMap = new Map<string, SkillInstallGroup>();
 
     for (const target of targets) {
       const result = await this.deps.installer.installTo(
         target.skillName,
-        target.absolutePath
+        target.absolutePath,
+        profile
       );
 
       let group = groupMap.get(target.skillName);

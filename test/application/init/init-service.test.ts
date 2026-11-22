@@ -169,3 +169,23 @@ describe("InitService", () => {
     }
   });
 });
+
+describe("InitService profile routing", () => {
+  it("preflights all destinations and selects Field Skills by default", async () => {
+    const installer = createFakeInstaller();
+    const guard = vi.fn(() => Promise.resolve());
+    installer.checkConflicts = guard;
+    const service = new InitService({ installer, cwd: "/project", homedir: "/home" });
+    await service.install({ agents: ["codex"], global: false });
+    expect(installer.listSkillNames).toHaveBeenCalledWith("field");
+    expect(guard).toHaveBeenCalledWith("field", [
+      "/project/.agents/skills/taphound-journey-generator",
+      "/project/.agents/skills/taphound-journey-brief-author"
+    ]);
+    expect(installer.installTo).toHaveBeenCalledWith(
+      "taphound-journey-generator",
+      "/project/.agents/skills/taphound-journey-generator",
+      "field"
+    );
+  });
+});

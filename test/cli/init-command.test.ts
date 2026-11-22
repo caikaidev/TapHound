@@ -142,7 +142,8 @@ describe("taphound init command", () => {
     expect(test.selectAgentsMock).not.toHaveBeenCalled();
     expect(test.installMock).toHaveBeenCalledWith({
       agents: ["claude", "droid"],
-      global: false
+      global: false,
+      profile: "field"
     });
     expect(parseOutput(test.stdout)).toMatchObject({
       status: "installed",
@@ -162,7 +163,8 @@ describe("taphound init command", () => {
     expect(test.selectAgentsMock).toHaveBeenCalledTimes(1);
     expect(test.installMock).toHaveBeenCalledWith({
       agents: ["claude", "droid"],
-      global: false
+      global: false,
+      profile: "field"
     });
     expect(test.exitCodes).toEqual([0]);
   });
@@ -176,7 +178,8 @@ describe("taphound init command", () => {
 
     expect(test.installMock).toHaveBeenCalledWith({
       agents: ["claude"],
-      global: true
+      global: true,
+      profile: "field"
     });
   });
 
@@ -334,5 +337,28 @@ describe("taphound init command", () => {
       failure: { code: "NO_SKILLS_FOUND" }
     });
     expect(test.exitCodes).toEqual([2]);
+  });
+});
+
+describe("Skill profile selection", () => {
+  it("installs legacy only when explicitly selected", async () => {
+    const test = harness();
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "init", "--agent", "codex", "--profile", "legacy", "--json"
+    ]);
+    expect(test.installMock).toHaveBeenCalledWith({
+      agents: ["codex"], global: false, profile: "legacy"
+    });
+  });
+
+  it("rejects unknown profiles before installation", async () => {
+    const test = harness();
+    await createProgram(test.dependencies).parseAsync([
+      "node", "taphound", "init", "--agent", "codex", "--profile", "unknown", "--json"
+    ]);
+    expect(parseOutput(test.stdout)).toMatchObject({
+      status: "error", failure: { code: "UNKNOWN_SKILL_PROFILE" }
+    });
+    expect(test.installMock).not.toHaveBeenCalled();
   });
 });

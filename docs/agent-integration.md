@@ -1,9 +1,14 @@
 # Agent Integration (V1.0)
 
-The final Coding-Agent interface is deliberately tiny. An agent does not need
-to understand TapHound's internals — it only needs a finish condition:
+The **default** Coding-Agent interface is now `tap-check` / `tap-fix`,
+installed by `taphound init --agent codex` or directly copied from
+`field-skills/`. It ends with three evidence-backed gates (Target, Existing
+Tests, Regression) and a `feedback.zip`; it does not require a Journey or
+Contract, and it never upgrades an uncertain outcome to PASS.
 
-> **TapHound Verdict == PASS**
+The original machine-readable CLI contract described below remains available
+for **optional advanced Journey/Contract** verification. For those selected
+Contracts, the deterministic Verdict is authoritative.
 
 It is designed for Coding Agents (Claude Code, other terminal agents, and CI
 pipelines alike): every response is one machine-readable JSON value, commands
@@ -30,16 +35,16 @@ JSON exitCode == process exit code
 - Non-JSON (human) mode writes summaries to **stdout** and errors to
   **stderr**, and sets the same exit code.
 
-`taphound init --agent <ids>` installs the five bundled Skills from
-`assets/skills/` into each selected agent's Skill directory (see
-[Workflow Skills](workflow-skills.md)); `generation observe`/`step` drive one
+`taphound init --agent <ids>` installs the three default Field Skills from
+`field-skills/`, while `--profile legacy` installs six original Skills from
+`assets/skills/` (see [Workflow Skills](workflow-skills.md)); `generation observe`/`step` drive one
 deterministic generation session. bridge steps use External Flows; an escaped package that
 never returns fails with `PACKAGE_ESCAPE` equivalent codes
 (`BRIDGE_NOT_RETURNED`). The whole surface is exercised by
 `verify --diff` against the project or a worktree, and
 `taphound init` is the recommended first install step for agents.
 
-## The single entry point
+## Optional advanced CLI entry point
 
 ```bash
 # verify everything a Git change affects (minimal verification set)
@@ -118,6 +123,10 @@ can escalate `pass`/`inconclusive` to `needsReview`.
 
 ## Shipped Skills
 
+The default profile installs `tap-check`, `tap-fix`, and `taphound-flash`
+from `field-skills/`. The table below lists the original six
+**legacy-profile** Skills for optional deterministic workflows.
+
 | Skill | Use it to | Device effects |
 |---|---|---|
 | `taphound-flash` | smoke-check the installed app while coding (adb and Node.js only, no TapHound CLI) | launches and drives the app; never evidence |
@@ -128,8 +137,9 @@ can escalate `pass`/`inconclusive` to `needsReview`.
 | `taphound-bug-fix` | fix one reported bug or crash: reproduce it first (stop if it does not reproduce), fix, and prove the same scenario passes | through the Skills it dispatches; reads the crash buffer with `adb logcat -d -b crash` |
 
 `verify --diff`, `failure classify`, and `baseline compare` stay available to
-any orchestration, but only `taphound-verify-change`'s gate decides whether a
-change is done.
+any orchestration, but the default Field workflow completes through Target / Existing Tests /
+Regression gates. The legacy `taphound-verify-change` gate remains authoritative
+only within the legacy Journey/Contract workflow.
 
 ## Repairing generation replay
 

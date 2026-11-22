@@ -9,6 +9,8 @@ export default tseslint.config(
       ".build-tools/**",
       "eslint.config.js",
       "node_modules/**",
+      // The standalone field-skills use Node-native tests and a separate toolchain.
+      "field-skills/**",
       "test/fixtures/bin/**"
     ]
   },

@@ -2,6 +2,21 @@ import { resolve } from "node:path";
 
 import { z } from "zod";
 
+export const SKILL_PROFILES = ["field", "legacy"] as const;
+export type SkillProfile = (typeof SKILL_PROFILES)[number];
+
+export class UnknownSkillProfileError extends Error {
+  public constructor(public readonly profile: string) {
+    super(`Unknown Skill profile: ${profile}; expected field or legacy`);
+    this.name = "UnknownSkillProfileError";
+  }
+}
+
+export function parseSkillProfile(raw: string): SkillProfile {
+  if (raw === "field" || raw === "legacy") return raw;
+  throw new UnknownSkillProfileError(raw);
+}
+
 export const AGENT_IDS = [
   "claude",
   "codex",

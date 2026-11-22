@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "packageName": "com.example.app",
+  "device": "emulator-5554",
+  "scenarioIds": ["normal-chat", "switch-chat"],
+  "scenarioChecks": [{"id":"normal-chat","assertionSteps":[0]},{"id":"switch-chat","assertionSteps":[2]}],
+  "verificationMode": "smoke",
+  "steps": [
+    { "action": "expect", "target": { "id": "pinned_banner" } },
+    { "action": "tap", "target": { "id": "switch_chat" } },
+    { "action": "expect", "target": { "text": "Other conversation" } }
+  ]
+}

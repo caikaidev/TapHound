@@ -2,12 +2,15 @@ import { Command } from "commander";
 
 import {
   SkillPayloadMissingError,
-  NoSkillsFoundError
+  NoSkillsFoundError,
+  SkillProfileConflictError
 } from "../../adapters/filesystem/skill-installer.js";
 import type { InitInput } from "../../application/init/init-service.js";
 import {
   NoAgentsSelectedError,
   UnknownAgentError,
+  UnknownSkillProfileError,
+  parseSkillProfile,
   parseAgentIds,
   type AgentId
 } from "../../domain/init.js";
@@ -20,6 +23,8 @@ import { errorMessage, writeJson, writeLine } from "../output.js";
 type InitFailureCode =
   | "NO_AGENTS_SELECTED"
   | "UNKNOWN_AGENT"
+  | "UNKNOWN_SKILL_PROFILE"
+  | "SKILL_PROFILE_CONFLICT"
   | "SKILL_PAYLOAD_MISSING"
   | "NO_SKILLS_FOUND"
   | "INTERNAL_ERROR";
@@ -27,6 +32,7 @@ type InitFailureCode =
 interface InitOptions {
   global?: boolean | undefined;
   agent?: string | undefined;
+  profile?: string | undefined;
   json?: boolean | undefined;
 }
 
@@ -89,6 +95,7 @@ export function createInitCommand(
   return new Command("init")
     .description("Install TapHound Skills for AI agents")
     .option("--global", "Install to user-level directories instead of project-level")
+    .option("--profile <field|legacy>", "Skill profile (default: field)")
     .option("--agent <ids>", "Comma-separated agent IDs (non-interactive)")
     .option("--json", "Emit one machine-readable JSON value")
     .action(async (options: InitOptions): Promise<void> => {
@@ -154,15 +161,26 @@ export function createInitCommand(
         }
       }
 
-      const input: InitInput = {
-        agents,
-        global: options.global === true
-      };
+      let profile: InitInput["profile"];
+      try {
+        profile = parseSkillProfile(options.profile ?? "field");
+      } catch (error) {
+        if (error instanceof UnknownSkillProfileError) {
+          writeInitFailure(dependencies, options, 2, "UNKNOWN_SKILL_PROFILE", error);
+          return;
+        }
+        throw error;
+      }
+      const input: InitInput = { agents, global: options.global === true, profile };
 
       try {
         const result = await dependencies.init.install(input);
         writeInitSuccess(dependencies, options, result);
       } catch (error) {
+        if (error instanceof SkillProfileConflictError) {
+          writeInitFailure(dependencies, options, 2, "SKILL_PROFILE_CONFLICT", error);
+          return;
+        }
         if (error instanceof SkillPayloadMissingError) {
           writeInitFailure(
             dependencies,

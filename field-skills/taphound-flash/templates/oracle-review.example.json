@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "expectations": [
+    {
+      "id": "ai-summary-preview",
+      "scope": "target",
+      "when": "User selects AI Summary for the current messages",
+      "then": "A draft preview is shown; summary is not sent without an explicit Send action",
+      "confidence": "supported",
+      "sources": [
+        { "kind": "requirement", "ref": "The user's current AI Summary task/acceptance statement" },
+        { "kind": "source-code", "ref": "Relevant actual ViewModel and send handler identified during local inspection" }
+      ]
+    },
+    {
+      "id": "other-chat-route",
+      "scope": "regression",
+      "when": "User returns to a different existing conversation",
+      "then": "The original conversation history and navigation still work",
+      "confidence": "supported",
+      "sources": [
+        { "kind": "existing-test", "ref": "Applicable existing behavior test or real pre-change evidence" }
+      ]
+    }
+  ],
+  "uncertainties": []
+}

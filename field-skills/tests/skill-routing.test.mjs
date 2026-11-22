@@ -27,6 +27,14 @@ describe('copy-ready skill routing',()=>{
     await access(join(root,'taphound-flash','scripts','feedback.mjs'));
     await access(join(root,'taphound-flash','scripts','field-runner.mjs'));
   });
+  it('both business Skills explain frozen final evidence and verification gaps',async()=>{
+    for(const name of ['tap-check','tap-fix']){
+      const doc=await readFile(join(root,name,'SKILL.md'),'utf8');
+      for(const token of ['ALREADY_FINISHED','verification-gap','CI','HEAD','INCONCLUSIVE']){
+        assert.ok(doc.includes(token),`${name}: missing dev.16 evidence rule ${token}`);
+      }
+    }
+  });
   it('feedback CLI accepts both new and legacy names and creates a feedback bundle',async()=>{
     const script=join(root,'taphound-flash','scripts','feedback.mjs');
     const base=await mkdtemp(join(tmpdir(),'tap-skill-routing-'));
